@@ -266,3 +266,61 @@ export const processQuickCommerceReturnRefund = async (
     message: 'Unsupported refund method for return',
   };
 };
+
+const mapReturnRefundStatusToPaymentRefund = (refundStatus = '') => {
+  const normalized = String(refundStatus || '').trim().toLowerCase();
+  if (normalized === 'completed') return 'processed';
+  if (normalized === 'pending' || normalized === 'processing') return 'pending';
+  if (normalized === 'failed') return 'failed';
+  return 'none';
+};
+
+const resolveReturnRefundProcessedAt = (returnDoc) => {
+  const log = Array.isArray(returnDoc?.refundAuditLog) ? returnDoc.refundAuditLog : [];
+  for (let i = log.length - 1; i >= 0; i -= 1) {
+    const entry = log[i];
+    if (entry?.action === 'REFUND_COMPLETED' || entry?.action === 'REFUND_PAYOUT_CONFIRMED') {
+      return entry.at ? new Date(entry.at) : new Date();
+    }
+  }
+  return returnDoc?.updatedAt ? new Date(returnDoc.updatedAt) : new Date();
+};
+
+/** Keep parent QuickOrder.payment.refund aligned with SellerReturn (source of truth). */
+export const syncParentOrderRefundFromReturn = async (order, returnDoc) => {
+  if (!order || !returnDoc) return order;
+
+  const amount = Number(returnDoc.returnRefundAmount || 0);
+  const refundStatus = String(returnDoc.refundStatus || '').trim().toLowerCase();
+  const paymentRefundStatus = mapReturnRefundStatusToPaymentRefund(refundStatus);
+  const method = String(returnDoc.refundMethod || '').trim().toLowerCase();
+  const refundReference = String(returnDoc.refundReference || '').trim();
+  const refundTransactionId = String(returnDoc.refundTransactionId || '').trim();
+
+  if (!order.payment) order.payment = {};
+
+  const refundPayload = {
+    status: paymentRefundStatus,
+    amount,
+    refundId: refundTransactionId || refundReference,
+    requestedMethod: method === 'wallet' ? 'wallet' : 'gateway',
+    requestedAt: returnDoc.createdAt || new Date(),
+    requestedByUser: true,
+    reason: refundReference ? `Return refund ref ${refundReference}` : 'Quick Commerce return refund',
+  };
+
+  if (method === 'wallet') {
+    refundPayload.processedMethod = 'wallet';
+  } else if (method === 'upi' || method === 'bank') {
+    refundPayload.processedMethod = 'gateway';
+  }
+
+  if (paymentRefundStatus === 'processed') {
+    refundPayload.processedAt = resolveReturnRefundProcessedAt(returnDoc);
+  }
+
+  order.payment.refund = refundPayload;
+  order.markModified('payment');
+  await order.save();
+  return order;
+};

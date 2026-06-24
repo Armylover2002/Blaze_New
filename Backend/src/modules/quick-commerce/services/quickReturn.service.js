@@ -14,9 +14,10 @@ import {
   executeReturnCustomerRefund,
   passReturnQualityCheckAndRefund,
 } from './quickReturnFinance.service.js';
-import { tryAutoAssign } from '../../food/orders/services/order-dispatch.service.js';
+import { tryAutoAssign, renotifyExistingReturnPickupOffers } from '../../food/orders/services/order-dispatch.service.js';
+import { FoodDeliveryPartner } from '../../food/delivery/models/deliveryPartner.model.js';
 import { DISPATCH_DOCUMENT_TYPES } from '../utils/dispatchDocument.constants.js';
-import { stampReturnOtps } from '../utils/returnPickup.helpers.js';
+import { stampReturnOtps, applyReturnPickupPricingToDoc } from '../utils/returnPickup.helpers.js';
 import {
   buildPriorReturnedQuantityMap,
   buildReturnItemsWithRefundCalculation,
@@ -41,6 +42,9 @@ import {
   resolveOrderDeliveredAt,
   serializeReturnForCustomer,
   serializeReturnForAdmin,
+  enrichSerializedReturnPricingFromParentOrder,
+  enrichSerializedReturnCustomerFromParentOrder,
+  extractPayoutDetailsFromReturn,
 } from '../utils/return.helpers.js';
 
 const buildOrderIdentityQuery = (rawOrderId) => {
@@ -92,7 +96,6 @@ const resetReturnDocForNewCycle = (
     returnItems,
     pricing,
     returnRefundAmount,
-    returnDeliveryCommission,
     payoutDetails = {},
   },
 ) => {
@@ -102,7 +105,6 @@ const resetReturnDocForNewCycle = (
   returnDoc.returnItems = returnItems;
   returnDoc.pricing = pricing;
   returnDoc.returnRefundAmount = returnRefundAmount;
-  returnDoc.returnDeliveryCommission = returnDeliveryCommission;
   returnDoc.refundMethod = method;
   returnDoc.refundStatus = REFUND_STATUSES.NONE;
   returnDoc.refundTransactionId = '';
@@ -171,14 +173,26 @@ const validateRefundMethodSelection = (refundMethod, { userId, payoutDetails = {
   if (method === 'upi') {
     const upiId = String(payoutDetails?.upiId || '').trim();
     if (!upiId) throw new ValidationError('upiId is required when refundMethod is upi');
+    if (!/^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64}$/.test(upiId)) {
+      throw new ValidationError('Invalid UPI ID format');
+    }
   }
 
   if (method === 'bank') {
     const accountHolderName = String(payoutDetails?.accountHolderName || '').trim();
     const accountNumber = String(payoutDetails?.accountNumber || '').trim();
-    const ifscCode = String(payoutDetails?.ifscCode || '').trim();
+    const ifscCode = String(payoutDetails?.ifscCode || '').trim().toUpperCase();
     if (!accountHolderName || !accountNumber || !ifscCode) {
       throw new ValidationError('bank account details are required when refundMethod is bank');
+    }
+    if (!/^[a-zA-Z\s]{2,50}$/.test(accountHolderName)) {
+      throw new ValidationError('Account holder name must contain only letters and spaces');
+    }
+    if (!/^\d{9,18}$/.test(accountNumber)) {
+      throw new ValidationError('Account number must be 9 to 18 digits');
+    }
+    if (!/^[A-Z]{4}0[A-Z0-9]{6}$/.test(ifscCode)) {
+      throw new ValidationError('Invalid IFSC code format');
     }
   }
 
@@ -290,7 +304,6 @@ export const createQuickCommerceReturnRequest = async ({
   }
 
   const customer = resolveQuickOrderCustomer(order);
-  const returnDeliveryCommission = Number(feeSettings?.returnDeliveryCommission || 0);
   const createdReturns = [];
   let createdNew = false;
 
@@ -338,7 +351,6 @@ export const createQuickCommerceReturnRequest = async ({
         returnItems,
         pricing,
         returnRefundAmount,
-        returnDeliveryCommission,
         payoutDetails,
       });
       await existing.save();
@@ -362,7 +374,6 @@ export const createQuickCommerceReturnRequest = async ({
       pickupImages: Array.isArray(pickupImages) ? pickupImages.slice(0, 8) : [],
       pricing,
       returnRefundAmount,
-      returnDeliveryCommission,
       refundMethod: method,
       refundStatus: REFUND_STATUSES.NONE,
       refundTransactionId: '',
@@ -572,7 +583,7 @@ export const recordSellerReturnDecision = async ({
   if (!returnDoc) throw new NotFoundError('Return request not found');
 
   if (returnDoc.returnStatus !== RETURN_STATUSES.REQUESTED) {
-    return returnDoc;
+    return { returnDoc, pickupDispatch: null };
   }
 
   const nextStatus = decision === 'approve' ? RETURN_STATUSES.APPROVED : RETURN_STATUSES.REJECTED;
@@ -585,6 +596,7 @@ export const recordSellerReturnDecision = async ({
   } else {
     returnDoc.returnRejectedReason = '';
     stampReturnOtps(returnDoc);
+    await applyReturnPickupPricingToDoc(returnDoc);
   }
 
   appendReturnHistory(returnDoc, {
@@ -597,10 +609,181 @@ export const recordSellerReturnDecision = async ({
   });
 
   await returnDoc.save();
-  return returnDoc;
+
+  let pickupDispatch = null;
+  if (decision === 'approve') {
+    void requestSellerReturnPickup({
+      sellerId,
+      orderId,
+      actorId: actorId || sellerId,
+      throwOnFailure: false,
+    }).catch((error) => {
+      logger.warn(
+        `Background return pickup dispatch after approve failed for ${orderId}: ${error?.message || error}`,
+      );
+    });
+
+    const freshReturn = await SellerReturn.findOne({ sellerId, orderId });
+    return {
+      returnDoc: freshReturn || returnDoc,
+      pickupDispatch: {
+        success: true,
+        pending: true,
+        message: 'Return approved — pickup dispatch started',
+        notifiedCount: 0,
+      },
+    };
+  }
+
+  return { returnDoc, pickupDispatch };
 };
 
-export const requestSellerReturnPickup = async ({ sellerId, orderId, actorId = null }) => {
+const isReturnDispatchRetryable = (dispatch = {}) => {
+  if (!dispatch || dispatch.status === 'unassigned') return true;
+  if (dispatch.status === 'assigned' && !dispatch.acceptedAt) return true;
+  return false;
+};
+
+const countOnlineDeliveryPartners = async () =>
+  FoodDeliveryPartner.countDocuments({
+    availabilityStatus: 'online',
+    status: {
+      $in: process.env.NODE_ENV === 'production' ? ['approved'] : ['approved', 'pending'],
+    },
+  });
+
+const buildReturnPickupDispatchAudit = async (dispatchResult, { attempt = 1 } = {}) => {
+  const onlineCount = await countOnlineDeliveryPartners();
+
+  if (!dispatchResult) {
+    return {
+      success: false,
+      notifiedCount: 0,
+      eligibleCount: 0,
+      onlineCount,
+      filteredCount: 0,
+      partnerPoolCount: 0,
+      persistedOfferCount: 0,
+      attempt,
+      reason: 'dispatch_lock_or_skip',
+      bullmqRetryScheduled: false,
+    };
+  }
+
+  const audit = dispatchResult?.dispatchAudit || {};
+  const freshOffers = Number(audit.persistedOfferCount || 0);
+  const notifiedCount = Number(dispatchResult?.notifiedCount || 0);
+  const partnerPoolCount = Number(audit.partnerPoolCount || 0);
+
+  let reason = audit.reason || '';
+  if (!reason) {
+    if (notifiedCount > 0) reason = 'riders_notified';
+    else if (onlineCount === 0) reason = 'no_online_riders';
+    else if (partnerPoolCount === 0) reason = 'no_eligible_riders_nearby';
+    else reason = 'dispatch_failed';
+  }
+
+  return {
+    success: notifiedCount > 0 || freshOffers > 0 || Number(audit.renotifiedCount || 0) > 0,
+    notifiedCount,
+    eligibleCount: Number(audit.eligibleCount || 0),
+    onlineCount,
+    filteredCount: Number(audit.filteredCount ?? partnerPoolCount),
+    partnerPoolCount,
+    geoPartnerPoolCount: Number(audit.geoPartnerPoolCount ?? 0),
+    persistedOfferCount: freshOffers,
+    renotifiedCount: Number(audit.renotifiedCount || 0),
+    socketEmitCount: Number(audit.socketEmitCount || 0),
+    attempt,
+    reason,
+    bullmqRetryScheduled: Boolean(audit.bullmqRetryScheduled),
+  };
+};
+
+const countActiveReturnOffers = (offeredTo = []) =>
+  (Array.isArray(offeredTo) ? offeredTo : []).filter((entry) =>
+    ['offered', 'assigned'].includes(String(entry?.action || 'offered')),
+  ).length;
+
+const executeReturnPickupDispatch = async (returnDoc, { attempt = 1 } = {}) => {
+  const beforeReturn = await SellerReturn.findById(returnDoc._id).select('dispatch').lean();
+  const offeredToBefore = Array.isArray(beforeReturn?.dispatch?.offeredTo)
+    ? beforeReturn.dispatch.offeredTo.length
+    : 0;
+  const activeOffersBefore = countActiveReturnOffers(beforeReturn?.dispatch?.offeredTo);
+
+  await SellerReturn.findByIdAndUpdate(returnDoc._id, {
+    $unset: { 'dispatch.dispatchingAt': '' },
+  });
+
+  let dispatchResult = await tryAutoAssign(String(returnDoc._id), {
+    documentType: DISPATCH_DOCUMENT_TYPES.SELLER_RETURN,
+    attempt,
+  });
+
+  if (!dispatchResult) {
+    logger.warn(
+      `[ReturnDispatch] tryAutoAssign returned null for return ${returnDoc._id} attempt=${attempt} — attempting renotify from existing offers`,
+    );
+    const freshForRenotify = await SellerReturn.findById(returnDoc._id);
+    if (freshForRenotify) {
+      const renotify = await renotifyExistingReturnPickupOffers(freshForRenotify);
+      if (renotify.notifiedCount > 0) {
+        dispatchResult = {
+          notifiedCount: renotify.notifiedCount,
+          dispatchAudit: {
+            reason: 'renotify_existing_offers',
+            eligibleCount: 0,
+            partnerPoolCount: renotify.partnerPoolCount,
+            notifiedCount: renotify.notifiedCount,
+            renotifiedCount: renotify.renotifiedCount,
+            persistedOfferCount: 0,
+            socketEmitCount: renotify.socketEmitCount,
+          },
+        };
+      }
+    }
+  }
+
+  if (!dispatchResult?.notifiedCount && attempt < 3) {
+    dispatchResult = await tryAutoAssign(String(returnDoc._id), {
+      documentType: DISPATCH_DOCUMENT_TYPES.SELLER_RETURN,
+      attempt: 3,
+    });
+  }
+
+  const freshReturn = await SellerReturn.findById(returnDoc._id).lean();
+  const offeredToAfter = Array.isArray(freshReturn?.dispatch?.offeredTo)
+    ? freshReturn.dispatch.offeredTo.length
+    : 0;
+  const activeOffersAfter = countActiveReturnOffers(freshReturn?.dispatch?.offeredTo);
+  const newOffersThisRun = Math.max(0, offeredToAfter - offeredToBefore);
+  const audit = await buildReturnPickupDispatchAudit(dispatchResult, { attempt });
+
+  logger.info(
+    `[ReturnDispatch:summary] returnId=${returnDoc._id} eligibleCount=${audit.eligibleCount} partnerPoolCount=${audit.partnerPoolCount} geoPartnerPoolCount=${audit.geoPartnerPoolCount} notifiedCount=${audit.notifiedCount} renotifiedCount=${audit.renotifiedCount} persistedOfferCount=${audit.persistedOfferCount} socketEmitCount=${audit.socketEmitCount} offeredToBefore=${offeredToBefore} offeredToAfter=${offeredToAfter} activeOffersBefore=${activeOffersBefore} activeOffersAfter=${activeOffersAfter} newOffersThisRun=${newOffersThisRun} dispatch.status=${freshReturn?.dispatch?.status} deliveryPartnerId=${freshReturn?.dispatch?.deliveryPartnerId || 'null'}`,
+  );
+
+  return {
+    ...audit,
+    offeredToCount: activeOffersAfter,
+    totalOfferedToCount: offeredToAfter,
+    activeOffersCount: activeOffersAfter,
+    newOffersThisRun,
+    assignedPartnerId: freshReturn?.dispatch?.deliveryPartnerId
+      ? String(freshReturn.dispatch.deliveryPartnerId)
+      : null,
+    dispatchStatus: freshReturn?.dispatch?.status || 'unassigned',
+    return: freshReturn,
+  };
+};
+
+export const requestSellerReturnPickup = async ({
+  sellerId,
+  orderId,
+  actorId = null,
+  throwOnFailure = true,
+}) => {
   const returnDoc = await SellerReturn.findOne({ sellerId, orderId });
   if (!returnDoc) throw new NotFoundError('Return request not found');
 
@@ -609,11 +792,12 @@ export const requestSellerReturnPickup = async ({ sellerId, orderId, actorId = n
     throw new ValidationError('Return must be approved before requesting pickup');
   }
 
-  if (['accepted', 'assigned'].includes(returnDoc.dispatch?.status)) {
+  if (returnDoc.dispatch?.status === 'accepted') {
     return {
       alreadyRequested: true,
+      success: true,
       return: returnDoc.toObject(),
-      message: 'Return pickup dispatch is already active',
+      message: 'Return pickup has already been accepted by a rider',
     };
   }
 
@@ -621,38 +805,102 @@ export const requestSellerReturnPickup = async ({ sellerId, orderId, actorId = n
     throw new ValidationError('Return pickup has already been completed');
   }
 
+  if (!isReturnDispatchRetryable(returnDoc.dispatch)) {
+    throw new ValidationError('Return pickup dispatch is not in a retryable state');
+  }
+
+  const isRetry =
+    returnDoc.returnStatus === RETURN_STATUSES.PICKUP_ASSIGNED &&
+    isReturnDispatchRetryable(returnDoc.dispatch);
+
+  if (!String(returnDoc.sellerOtp || '').trim()) {
+    stampReturnOtps(returnDoc);
+  }
+
   const previousStatus = returnDoc.returnStatus;
 
-  returnDoc.dispatch = {
-    ...(returnDoc.dispatch?.toObject?.() || returnDoc.dispatch || {}),
-    status: 'unassigned',
-    deliveryPartnerId: null,
-    assignedAt: null,
-    acceptedAt: null,
-    offeredTo: [],
-  };
+  if (!isRetry) {
+    returnDoc.dispatch = {
+      modeAtCreation: returnDoc.dispatch?.modeAtCreation || 'auto',
+      status: 'unassigned',
+      deliveryPartnerId: null,
+      assignedAt: null,
+      acceptedAt: null,
+      completedAt: null,
+      offeredTo: [],
+    };
 
-  appendReturnHistory(returnDoc, {
-    byRole: 'SELLER',
-    byId: actorId || sellerId,
-    action: 'RETURN_PICKUP_REQUESTED',
-    fromStatus: previousStatus,
-    toStatus: RETURN_STATUSES.PICKUP_ASSIGNED,
-    note: 'Seller requested return pickup dispatch',
-  });
+    appendReturnHistory(returnDoc, {
+      byRole: 'SELLER',
+      byId: actorId || sellerId,
+      action: 'RETURN_PICKUP_REQUESTED',
+      fromStatus: previousStatus,
+      toStatus: RETURN_STATUSES.PICKUP_ASSIGNED,
+      note: 'Seller requested return pickup dispatch',
+    });
 
-  returnDoc.returnStatus = RETURN_STATUSES.PICKUP_ASSIGNED;
-  await returnDoc.save();
+    returnDoc.returnStatus = RETURN_STATUSES.PICKUP_ASSIGNED;
+    await returnDoc.save();
+  } else {
+    returnDoc.dispatch.offeredTo = (returnDoc.dispatch?.offeredTo || []).filter((entry) =>
+      ['offered', 'assigned'].includes(String(entry?.action || '')),
+    );
+    if (returnDoc.dispatch.offeredTo.length === 0 && returnDoc.dispatch?.status === 'assigned') {
+      returnDoc.dispatch.status = 'unassigned';
+      returnDoc.dispatch.assignedAt = null;
+    }
+    appendReturnHistory(returnDoc, {
+      byRole: 'SELLER',
+      byId: actorId || sellerId,
+      action: 'RETURN_PICKUP_RETRY',
+      fromStatus: previousStatus,
+      toStatus: RETURN_STATUSES.PICKUP_ASSIGNED,
+      note: 'Seller retried return pickup dispatch',
+    });
+    await returnDoc.save();
+  }
 
-  const dispatchResult = await tryAutoAssign(String(returnDoc._id), {
-    documentType: DISPATCH_DOCUMENT_TYPES.SELLER_RETURN,
-  });
+  const pickupDispatch = await executeReturnPickupDispatch(returnDoc);
+
+  if (!pickupDispatch.success) {
+    const message =
+      pickupDispatch.reason === 'no_online_riders'
+        ? 'No online delivery partners available for return pickup'
+        : pickupDispatch.reason === 'no_eligible_riders_nearby'
+          ? 'No nearby eligible delivery partners found for return pickup'
+          : 'Return pickup dispatch failed — no riders could be notified';
+
+    const failurePayload = {
+      alreadyRequested: false,
+      success: false,
+      ...pickupDispatch,
+      message,
+      dispatchError: message,
+    };
+
+    if (throwOnFailure) {
+      const error = new ValidationError(message);
+      error.statusCode = 422;
+      error.dispatchAudit = pickupDispatch;
+      error.pickupDispatch = failurePayload;
+      throw error;
+    }
+
+    return failurePayload;
+  }
 
   return {
     alreadyRequested: false,
-    return: returnDoc.toObject(),
-    notifiedCount: dispatchResult?.notifiedCount || 0,
-    message: 'Return pickup dispatch started',
+    success: pickupDispatch.success,
+    ...pickupDispatch,
+    message:
+      pickupDispatch.notifiedCount > 0
+        ? `Return pickup dispatch started — ${pickupDispatch.notifiedCount} rider(s) notified`
+        : pickupDispatch.renotifiedCount > 0
+          ? `Return pickup re-notified — ${pickupDispatch.renotifiedCount} rider(s) alerted`
+          : pickupDispatch.activeOffersCount > 0
+            ? `Return pickup has ${pickupDispatch.activeOffersCount} active offer(s) but no riders were notified this attempt`
+            : 'Return pickup dispatch failed — no riders could be notified',
   };
 };
 
@@ -710,10 +958,26 @@ export const getReturnPickupOtpForCustomer = async ({ orderId, userId, sellerId 
   };
 };
 
-const extractPayoutDetailsFromReturn = (returnDoc) => {
-  const history = Array.isArray(returnDoc?.returnHistory) ? returnDoc.returnHistory : [];
-  const requestEntry = history.find((entry) => entry?.action === 'RETURN_REQUESTED');
-  return requestEntry?.metadata?.payoutDetails || {};
+const enrichAdminReturnRows = async (items = []) => {
+  if (!items.length) return [];
+
+  const orderIds = [...new Set(items.map((row) => row.orderId).filter(Boolean))];
+  const parentOrders = orderIds.length
+    ? await QuickOrder.find({ orderId: { $in: orderIds } })
+        .populate('userId', 'name phone email')
+        .select('orderId pricing deliveryAddress customer userId')
+        .lean()
+    : [];
+  const parentOrderMap = new Map(parentOrders.map((row) => [row.orderId, row]));
+
+  return items.map((doc) => {
+    const serialized = serializeReturnForAdmin(doc);
+    const parentOrder = parentOrderMap.get(doc.orderId);
+    if (!parentOrder) return serialized;
+
+    const withCustomer = enrichSerializedReturnCustomerFromParentOrder(serialized, parentOrder);
+    return enrichSerializedReturnPricingFromParentOrder(withCustomer, parentOrder);
+  });
 };
 
 export const listQuickCommerceReturnsForAdmin = async ({
@@ -752,8 +1016,10 @@ export const listQuickCommerceReturnsForAdmin = async ({
     SellerReturn.countDocuments(filter),
   ]);
 
+  const enrichedItems = await enrichAdminReturnRows(items);
+
   return {
-    items: items.map(serializeReturnForAdmin),
+    items: enrichedItems,
     pagination: {
       page: safePage,
       limit: safeLimit,
@@ -777,7 +1043,9 @@ export const getQuickCommerceReturnForAdmin = async (returnId) => {
   }
 
   if (!returnDoc) throw new NotFoundError('Return request not found');
-  return serializeReturnForAdmin(returnDoc);
+
+  const [enriched] = await enrichAdminReturnRows([returnDoc]);
+  return enriched;
 };
 
 export const completeQuickCommerceReturnRefund = async ({

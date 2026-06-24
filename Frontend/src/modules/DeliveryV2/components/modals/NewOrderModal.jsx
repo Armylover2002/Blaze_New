@@ -4,7 +4,7 @@ import { User, MapPin, FastForward, Clock, Phone, ChefHat, ChevronDown } from 'l
 import { ActionSlider } from '@/modules/DeliveryV2/components/ui/ActionSlider';
 import { useDeliveryStore } from '@/modules/DeliveryV2/store/useDeliveryStore';
 import { getHaversineDistance, calculateETA } from '@/modules/DeliveryV2/utils/geo';
-import { formatDeliveryAddressText, isMixedOrder, normalizePickupPoints } from '@/modules/DeliveryV2/utils/orderRouting';
+import { formatDeliveryAddressText, isMixedOrder, normalizePickupPoints, isReturnPickupTrip, getReturnPickupStopLabels } from '@/modules/DeliveryV2/utils/orderRouting';
 
 /**
  * NewOrderModal - Ported to Original 1:1 Theme with Slider Accept.
@@ -65,9 +65,10 @@ export const NewOrderModal = ({ order, onAccept, onReject, onMinimize }) => {
 
   if (!order) return null;
 
-  const isReturnPickup = String(order?.tripType || '').trim() === 'return_pickup' ||
-    String(order?.documentType || '').trim() === 'seller_return';
-  const earnings = order.earnings || order.riderEarning || (order.orderAmount ? order.orderAmount * 0.1 : 0);
+  const isReturnPickup = isReturnPickupTrip(order);
+  const returnLabels = getReturnPickupStopLabels();
+  const dropPoint = order?.dropPoint || null;
+  const earnings = order.earnings || order.riderEarning || order.tripEarning || order.walletEarning || (order.orderAmount ? order.orderAmount * 0.1 : 0);
   const isQuickOrder = String(order?.orderType || order?.serviceType || order?.type || '').trim().toLowerCase() === 'quick';
   const restaurantName =
     order?.dispatchLeg?.sourceName ||
@@ -135,7 +136,7 @@ export const NewOrderModal = ({ order, onAccept, onReject, onMinimize }) => {
         </div>
 
         {/* Header Ribbon (Old Green Style) */}
-        <div className="bg-green-500 p-5 flex justify-between items-center text-white border-b border-green-600/20">
+        <div className="bg-[#FF0000] p-5 flex justify-between items-center text-white border-b border-red-600/20">
           <div>
             <p className="text-white/80 text-[10px] font-bold uppercase tracking-widest mb-0.5">
               {isReturnPickup ? (order.tripLabel || 'Return Pickup') : 'Incoming Request'}
@@ -161,7 +162,7 @@ export const NewOrderModal = ({ order, onAccept, onReject, onMinimize }) => {
         <div className="p-5 pb-8 space-y-6">
           <div className="flex gap-4">
             <div className="flex flex-col items-center gap-1 mt-1.5 py-0.5">
-              <div className="w-4 h-4 rounded-full bg-green-500 border-[3px] border-green-50 shadow-lg shadow-green-500/20" />
+              <div className="w-4 h-4 rounded-full bg-[#FF0000] border-[3px] border-red-50 shadow-lg shadow-red-500/20" />
               <div className={`w-0.5 ${pickupStops.length > 1 ? 'h-24' : 'h-14'} bg-dashed border-l-2 border-gray-100`} />
               <div className="w-4 h-4 rounded-full bg-blue-500 border-[3px] border-blue-50 shadow-lg shadow-blue-500/20" />
             </div>
@@ -169,16 +170,24 @@ export const NewOrderModal = ({ order, onAccept, onReject, onMinimize }) => {
               <div className="space-y-4">
                 {pickupStops.map((pickup, index) => {
                   const isQuickStore = pickup.pickupType === 'quick';
-                  const pickupLabel = isQuickStore ? 'Store Pickup' : 'Restaurant Pickup';
-                  const pickupAccent = isQuickStore ? 'text-red-600' : 'text-green-600';
+                  const pickupLabel = isReturnPickup
+                    ? returnLabels.pickupLabel
+                    : isQuickStore
+                      ? 'Store Pickup'
+                      : 'Restaurant Pickup';
+                  const pickupAccent = 'text-red-600';
                   const pickupAddress = pickup.address || 'Address not available';
+                  const pickupPhone = pickup.phone || order?.customerPhone || order?.userPhone || '';
                   return (
                     <div key={pickup.id || `${pickup.pickupType}-${index}`}>
                       <div className={`flex items-center gap-2 mb-1.5 font-bold text-[9px] uppercase tracking-widest ${pickupAccent}`}>
                         <ChefHat className="w-3.5 h-3.5" />
                         <span>{pickupStops.length > 1 ? `${pickupLabel} ${index + 1}` : pickupLabel}</span>
                       </div>
-                      <p className="text-gray-950 font-bold text-lg leading-tight">{pickup.sourceName || (isQuickStore ? 'Seller store' : 'Restaurant')}</p>
+                      <p className="text-gray-950 font-bold text-lg leading-tight">{pickup.sourceName || (isReturnPickup ? order?.customerName || 'Customer' : isQuickStore ? 'Seller store' : 'Restaurant')}</p>
+                      {pickupPhone ? (
+                        <p className="text-gray-600 text-xs font-semibold">{pickupPhone}</p>
+                      ) : null}
                       <p className="text-gray-500 text-xs font-medium leading-relaxed line-clamp-1">{pickupAddress}</p>
                     </div>
                   );
@@ -187,10 +196,25 @@ export const NewOrderModal = ({ order, onAccept, onReject, onMinimize }) => {
               <div>
                 <div className="flex items-center gap-2 mb-1.5 font-bold text-[9px] uppercase tracking-widest text-blue-600">
                   <MapPin className="w-3.5 h-3.5" />
-                  <span>Customer Drop</span>
+                  <span>{isReturnPickup ? returnLabels.dropLabel : 'Customer Drop'}</span>
                 </div>
-                <p className="text-gray-950 font-bold text-lg leading-tight">Customer Location</p>
-                <p className="text-gray-500 text-xs font-medium line-clamp-1">{customerAddress}</p>
+                <p className="text-gray-950 font-bold text-lg leading-tight">
+                  {isReturnPickup
+                    ? dropPoint?.sourceName || order?.storeName || order?.sellerName || 'Seller'
+                    : 'Customer Location'}
+                </p>
+                {(isReturnPickup ? dropPoint?.phone || order?.storePhone || order?.sellerPhone : order?.customerPhone) ? (
+                  <p className="text-gray-600 text-xs font-semibold">
+                    {isReturnPickup
+                      ? dropPoint?.phone || order?.storePhone || order?.sellerPhone
+                      : order?.customerPhone || order?.userPhone}
+                  </p>
+                ) : null}
+                <p className="text-gray-500 text-xs font-medium line-clamp-1">
+                  {isReturnPickup
+                    ? dropPoint?.address || order?.storeAddress || order?.restaurantAddress || customerAddress
+                    : customerAddress}
+                </p>
                 {mapsLink && (
                   <a
                     href={mapsLink}

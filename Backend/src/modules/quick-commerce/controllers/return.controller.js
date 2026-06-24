@@ -29,7 +29,19 @@ const mapReturnError = (error) => {
   ) {
     return { status: error.statusCode, message: error.message, code: error.code };
   }
-  return { status: 500, message: error?.message || 'Request failed' };
+  const message = String(error?.message || '');
+  if (
+    error?.code === 'MONGO_NOT_CONNECTED' ||
+    /ENOTFOUND|ECONNREFUSED|querySrv/i.test(message)
+  ) {
+    logger.error(`[ReturnAPI] Mongo connectivity error: ${message}`);
+    return {
+      status: 503,
+      message: 'Database temporarily unavailable. Please retry in a few seconds.',
+      code: 'MONGO_UNAVAILABLE',
+    };
+  }
+  return { status: 500, message: message || 'Request failed' };
 };
 
 export const createReturnRequestController = async (req, res) => {

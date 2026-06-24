@@ -2,8 +2,7 @@ import React, { memo, useMemo } from "react";
 import { motion } from "framer-motion";
 import { CheckCircle, Circle, Loader2 } from "lucide-react";
 import {
-  RETURN_TIMELINE_STEPS,
-  resolveReturnTimelineIndex,
+  applyRefundTimelineGuards,
   RETURN_STATUS,
 } from "@/shared/utils/returnStatus";
 
@@ -73,22 +72,20 @@ const StepRow = memo(({ step, stepStatus, index, isLast }) => {
 StepRow.displayName = "ReturnStepRow";
 
 const ReturnProgressTracker = memo(({ returnDoc = {} }) => {
-  const activeIndex = resolveReturnTimelineIndex(returnDoc);
   const status = String(returnDoc?.returnStatus || "");
   const isTerminalBad =
     status === RETURN_STATUS.REJECTED || status === RETURN_STATUS.CANCELLED;
 
-  const stepStatuses = useMemo(() => {
-    if (isTerminalBad) {
-      return RETURN_TIMELINE_STEPS.map(() => "rejected");
-    }
-    return RETURN_TIMELINE_STEPS.map((_, index) => {
-      if (activeIndex < 0) return index === 0 ? "active" : "pending";
-      if (index < activeIndex) return "completed";
-      if (index === activeIndex) return "active";
-      return "pending";
-    });
-  }, [activeIndex, isTerminalBad]);
+  const steps = useMemo(() => {
+    const fromApi = Array.isArray(returnDoc?.timelineSteps) ? returnDoc.timelineSteps : [];
+    return applyRefundTimelineGuards(returnDoc, fromApi);
+  }, [
+    returnDoc?.timelineSteps,
+    returnDoc?.returnStatus,
+    returnDoc?.refundStatus,
+    returnDoc?.qualityCheck?.status,
+    returnDoc?.qualityCheckStatus,
+  ]);
 
   if (isTerminalBad) {
     return (
@@ -103,19 +100,27 @@ const ReturnProgressTracker = memo(({ returnDoc = {} }) => {
     );
   }
 
+  if (!steps.length) {
+    return (
+      <div className="bg-white rounded-3xl p-5 shadow-sm border border-slate-100 text-center text-sm text-slate-500">
+        Return progress is loading...
+      </div>
+    );
+  }
+
   return (
     <div className="bg-white rounded-3xl p-5 shadow-sm border border-slate-100">
       <p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-500 mb-4">
         Return progress
       </p>
       <div className="space-y-4">
-        {RETURN_TIMELINE_STEPS.map((step, index) => (
+        {steps.map((step, index) => (
           <StepRow
-            key={step.id}
+            key={step.id || index}
             step={step}
-            stepStatus={stepStatuses[index]}
+            stepStatus={step.status || "pending"}
             index={index}
-            isLast={index === RETURN_TIMELINE_STEPS.length - 1}
+            isLast={index === steps.length - 1}
           />
         ))}
       </div>

@@ -10,8 +10,6 @@ const DEFAULT_QUICK_FEE_SETTINGS = {
   freeDeliveryThreshold: 0,
   platformFee: 0,
   gstRate: 0,
-  returnDeliveryCommission: 0,
-  returnPickupFee: 0,
   returnWindowHours: 72,
   returnsEnabled: true,
   isActive: true,
@@ -169,9 +167,15 @@ export async function toggleDeliveryCommissionRuleStatus(id, status) {
   return updated;
 }
 
+const sanitizeFeeSettingsForApi = (doc) => {
+  if (!doc) return null;
+  const { returnDeliveryCommission, returnPickupFee, ...rest } = doc;
+  return rest;
+};
+
 export async function getFeeSettings() {
   const doc = await QuickFeeSettings.findOne({ isActive: true }).sort({ createdAt: -1 }).lean();
-  return { feeSettings: doc || null };
+  return { feeSettings: sanitizeFeeSettingsForApi(doc) };
 }
 
 export async function upsertFeeSettings(body) {
@@ -194,16 +198,6 @@ export async function upsertFeeSettings(body) {
     if (body.gstRate === null) $unset.gstRate = 1;
     else if (body.gstRate !== undefined) $set.gstRate = body.gstRate;
 
-    if (body.returnDeliveryCommission === null) $unset.returnDeliveryCommission = 1;
-    else if (body.returnDeliveryCommission !== undefined) {
-      $set.returnDeliveryCommission = body.returnDeliveryCommission;
-    }
-
-    if (body.returnPickupFee === null) $unset.returnPickupFee = 1;
-    else if (body.returnPickupFee !== undefined) {
-      $set.returnPickupFee = body.returnPickupFee;
-    }
-
     if (body.returnWindowHours === null) $unset.returnWindowHours = 1;
     else if (body.returnWindowHours !== undefined) {
       $set.returnWindowHours = body.returnWindowHours;
@@ -216,17 +210,15 @@ export async function upsertFeeSettings(body) {
     const update = {};
     if (Object.keys($set).length) update.$set = $set;
     if (Object.keys($unset).length) update.$unset = $unset;
-    if (!Object.keys(update).length) return existing.toObject();
+    if (!Object.keys(update).length) return sanitizeFeeSettingsForApi(existing.toObject());
 
     const updated = await QuickFeeSettings.findByIdAndUpdate(existing._id, update, { new: true }).lean();
-    return updated;
+    return sanitizeFeeSettingsForApi(updated);
   }
 
   const payload = {
     deliveryFeeRanges: body.deliveryFeeRanges ?? [],
     isActive: body.isActive ?? true,
-    returnDeliveryCommission: body.returnDeliveryCommission ?? 0,
-    returnPickupFee: body.returnPickupFee ?? body.returnDeliveryCommission ?? 0,
     returnWindowHours: body.returnWindowHours ?? 72,
     returnsEnabled: body.returnsEnabled ?? true,
   };
@@ -238,7 +230,7 @@ export async function upsertFeeSettings(body) {
   if (body.gstRate !== undefined && body.gstRate !== null) payload.gstRate = body.gstRate;
 
   const created = await QuickFeeSettings.create(payload);
-  return created.toObject();
+  return sanitizeFeeSettingsForApi(created.toObject());
 }
 
 export async function getActiveFeeSettings() {
@@ -365,18 +357,55 @@ export async function getActiveDeliveryCommissionRules() {
   return deliveryCommissionRulesCache;
 }
 
-export async function getRiderEarning(distanceKm) {
+export async function getRiderEarningBreakdown(distanceKm) {
   const d = Number(distanceKm);
-  if (!Number.isFinite(d) || d < 0) return 0;
+  const distanceRounded = Number.isFinite(d) && d >= 0 ? Math.round(d * 100) / 100 : 0;
+
+  if (!Number.isFinite(d) || d < 0) {
+    return {
+      distanceKm: 0,
+      earning: 0,
+      basePayout: 0,
+      baseKm: 0,
+      extraKm: 0,
+      perKmRate: 0,
+      slabCharges: [],
+    };
+  }
 
   const rules = await getActiveDeliveryCommissionRules();
-  if (!rules.length) return 0;
+  if (!rules.length) {
+    return {
+      distanceKm: distanceRounded,
+      earning: 0,
+      basePayout: 0,
+      baseKm: 0,
+      extraKm: 0,
+      perKmRate: 0,
+      slabCharges: [],
+    };
+  }
 
   const sorted = [...rules].sort((a, b) => (a.minDistance || 0) - (b.minDistance || 0));
   const baseRule = sorted.find((r) => Number(r.minDistance || 0) === 0) || null;
-  if (!baseRule) return 0;
+  if (!baseRule) {
+    return {
+      distanceKm: distanceRounded,
+      earning: 0,
+      basePayout: 0,
+      baseKm: 0,
+      extraKm: 0,
+      perKmRate: 0,
+      slabCharges: [],
+    };
+  }
 
-  let earning = Number(baseRule.basePayout || 0);
+  const basePayout = Number(baseRule.basePayout || 0);
+  const baseKm =
+    baseRule.maxDistance == null ? Number(baseRule.minDistance || 0) : Number(baseRule.maxDistance || 0);
+  const slabCharges = [];
+  let earning = basePayout;
+
   for (const rule of sorted) {
     const perKm = Number(rule.commissionPerKm || 0);
     if (!Number.isFinite(perKm) || perKm <= 0) continue;
@@ -386,10 +415,50 @@ export async function getRiderEarning(distanceKm) {
     const upper = max == null ? d : Math.min(d, max);
     const kmInSlab = Math.max(0, upper - min);
     if (kmInSlab > 0) {
-      earning += kmInSlab * perKm;
+      const charge = kmInSlab * perKm;
+      earning += charge;
+      slabCharges.push({
+        fromKm: min,
+        toKm: max,
+        kmInSlab: Math.round(kmInSlab * 100) / 100,
+        perKm,
+        charge: Math.round(charge * 100) / 100,
+      });
     }
   }
 
-  if (!Number.isFinite(earning) || earning <= 0) return 0;
-  return Math.round(earning);
+  const extraSlab = sorted.find(
+    (rule) => Number(rule.minDistance || 0) > 0 && Number(rule.commissionPerKm || 0) > 0,
+  );
+  const perKmRate = extraSlab ? Number(extraSlab.commissionPerKm || 0) : 0;
+  const baseMax = baseRule.maxDistance == null ? null : Number(baseRule.maxDistance);
+  const extraKm =
+    baseMax != null && d > baseMax ? Math.round((d - baseMax) * 100) / 100 : 0;
+
+  if (!Number.isFinite(earning) || earning <= 0) {
+    return {
+      distanceKm: distanceRounded,
+      earning: 0,
+      basePayout,
+      baseKm,
+      extraKm,
+      perKmRate,
+      slabCharges,
+    };
+  }
+
+  return {
+    distanceKm: distanceRounded,
+    earning: Math.round(earning),
+    basePayout,
+    baseKm,
+    extraKm,
+    perKmRate,
+    slabCharges,
+  };
+}
+
+export async function getRiderEarning(distanceKm) {
+  const breakdown = await getRiderEarningBreakdown(distanceKm);
+  return breakdown.earning;
 }

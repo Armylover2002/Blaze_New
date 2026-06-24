@@ -6,6 +6,7 @@ import { DeliveryBonusTransaction } from '../../admin/models/deliveryBonusTransa
 import { FoodEarningAddon } from '../../admin/models/earningAddon.model.js';
 import { FoodOrder } from '../../orders/models/order.model.js';
 import { SellerReturn } from '../../../quick-commerce/seller/models/sellerReturn.model.js';
+import { resolveReturnPickupCharge } from '../../../quick-commerce/utils/return.helpers.js';
 import { uploadImageBuffer } from '../../../../services/cloudinary.service.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
 import { getDeliveryCashLimitSettings } from '../../admin/services/admin.service.js';
@@ -440,6 +441,66 @@ export const updateDeliveryAvailability = async (userId, payload) => {
 };
 
 // ----- Delivery partner wallet (Pocket / requests page) -----
+const sumReturnPickupEarnings = async (partnerId, range = null) => {
+    const match = {
+        'dispatch.deliveryPartnerId': partnerId,
+        'dispatch.status': 'completed',
+    };
+    if (range) {
+        match['deliveryState.completedAt'] = { $gte: range.start, $lte: range.end };
+    }
+
+    const agg = await SellerReturn.aggregate([
+        { $match: match },
+        {
+            $group: {
+                _id: null,
+                totalEarnings: { $sum: { $ifNull: ['$riderEarning', 0] } },
+                totalTrips: { $sum: 1 },
+            },
+        },
+    ]);
+
+    return {
+        totalEarnings: Number(agg?.[0]?.totalEarnings) || 0,
+        totalTrips: Number(agg?.[0]?.totalTrips) || 0,
+    };
+};
+
+const listReturnPickupWalletTransactions = async (partnerId, limit = 2000) => {
+    const returns = await SellerReturn.find({
+        'dispatch.deliveryPartnerId': partnerId,
+        'dispatch.status': 'completed',
+    })
+        .sort({ 'deliveryState.completedAt': -1, updatedAt: -1 })
+        .select('orderId riderEarning deliveryState dispatch createdAt')
+        .limit(limit)
+        .lean();
+
+    return (returns || []).map((row) => {
+        const completedAt =
+            row?.deliveryState?.completedAt || row?.dispatch?.completedAt || row?.updatedAt || row?.createdAt;
+        const date = completedAt || new Date();
+        return {
+            _id: row._id,
+            type: 'payment',
+            amount: Number(row.riderEarning) || 0,
+            status: 'Completed',
+            date,
+            createdAt: date,
+            orderId: row.orderId || String(row._id),
+            paymentMethod: 'prepaid',
+            metadata: {
+                orderId: row.orderId || String(row._id),
+                returnId: String(row._id),
+                tripType: 'return_pickup',
+                documentType: 'seller_return',
+            },
+            description: `Return pickup earning - ${row.orderId || row._id}`,
+        };
+    });
+};
+
 export const getDeliveryPartnerWallet = async (deliveryPartnerId) => {
     if (!deliveryPartnerId || !mongoose.Types.ObjectId.isValid(deliveryPartnerId)) {
         throw new ValidationError('Delivery partner not found');
@@ -456,7 +517,7 @@ export const getDeliveryPartnerWallet = async (deliveryPartnerId) => {
     const partnerId = new mongoose.Types.ObjectId(deliveryPartnerId);
 
     // Earnings paid to rider through completed deliveries
-    const [earningsAgg, cashAgg] = await Promise.all([
+    const [earningsAgg, cashAgg, returnPickupEarnings] = await Promise.all([
         FoodOrder.aggregate([
             {
                 $match: {
@@ -486,10 +547,13 @@ export const getDeliveryPartnerWallet = async (deliveryPartnerId) => {
                     cashInHand: { $sum: { $ifNull: ['$payment.amountDue', { $ifNull: ['$pricing.total', 0] }] } }
                 }
             }
-        ])
+        ]),
+        sumReturnPickupEarnings(partnerId),
     ]);
 
-    const totalEarned = Number(earningsAgg?.[0]?.totalEarned) || 0;
+    const totalEarned =
+        (Number(earningsAgg?.[0]?.totalEarned) || 0) +
+        (Number(returnPickupEarnings?.totalEarnings) || 0);
     const rawCashInHand = Number(cashAgg?.[0]?.cashInHand) || 0;
 
     // Subtract deposits already made by this partner (admin records deposit → reduces cashInHand)
@@ -518,7 +582,7 @@ export const getDeliveryPartnerWallet = async (deliveryPartnerId) => {
     const totalBonus = bonusAgg?.[0] ? Number(bonusAgg[0].total) : 0;
 
     // Keep transactions list reasonably small (UI only needs recent data for charts)
-    const [paymentTxList, bonusTxList] = await Promise.all([
+    const [paymentTxList, bonusTxList, returnPickupTxList] = await Promise.all([
         FoodOrder.find({
             'dispatch.deliveryPartnerId': partnerId,
             orderStatus: 'delivered',
@@ -531,6 +595,7 @@ export const getDeliveryPartnerWallet = async (deliveryPartnerId) => {
             .sort({ createdAt: -1 })
             .limit(1000)
             .lean(),
+        listReturnPickupWalletTransactions(partnerId, 2000),
     ]);
 
     const paymentTransactions = (paymentTxList || []).map((o) => {
@@ -575,7 +640,7 @@ export const getDeliveryPartnerWallet = async (deliveryPartnerId) => {
         totalCashLimit,
         availableCashLimit,
         deliveryWithdrawalLimit,
-        transactions: [...paymentTransactions, ...bonusTransactions].sort((a, b) => {
+        transactions: [...paymentTransactions, ...returnPickupTxList, ...bonusTransactions].sort((a, b) => {
             const ad = a?.date ? new Date(a.date).getTime() : 0;
             const bd = b?.date ? new Date(b.date).getTime() : 0;
             return bd - ad;
@@ -619,7 +684,7 @@ export const getDeliveryPartnerEarnings = async (deliveryPartnerId, query = {}) 
         match['deliveryState.deliveredAt'] = { $gte: range.start, $lte: range.end };
     }
 
-    const [totalOrders, agg] = await Promise.all([
+    const [totalOrders, agg, returnPickupEarnings] = await Promise.all([
         FoodOrder.countDocuments(match),
         FoodOrder.aggregate([
             { $match: match },
@@ -629,15 +694,18 @@ export const getDeliveryPartnerEarnings = async (deliveryPartnerId, query = {}) 
                     totalEarnings: { $sum: { $ifNull: ['$riderEarning', 0] } }
                 }
             }
-        ])
+        ]),
+        sumReturnPickupEarnings(partnerId, range),
     ]);
 
-    const totalEarnings = Number(agg?.[0]?.totalEarnings) || 0;
+    const totalEarnings =
+        (Number(agg?.[0]?.totalEarnings) || 0) + (Number(returnPickupEarnings?.totalEarnings) || 0);
+    const combinedOrders = totalOrders + (Number(returnPickupEarnings?.totalTrips) || 0);
 
     // Frontend only strongly relies on totalEarnings + totalOrders.
     const summary = {
         totalEarnings,
-        totalOrders,
+        totalOrders: combinedOrders,
         totalHours: 0,
         totalMinutes: 0,
         orderEarning: totalEarnings,
@@ -649,7 +717,7 @@ export const getDeliveryPartnerEarnings = async (deliveryPartnerId, query = {}) 
         summary,
         period,
         date: date.toISOString(),
-        pagination: { page, limit, total: totalOrders }
+        pagination: { page, limit, total: combinedOrders }
     };
 };
 
@@ -762,7 +830,9 @@ const toReturnPickupTripDto = (returnDoc) => {
     const time = dateForUi
         ? new Date(dateForUi).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })
         : '';
-    const earningAmount = Number(returnDoc?.riderEarning || 0);
+    const breakdown = returnDoc?.pickupPricingBreakdown || null;
+    const earningAmount = resolveReturnPickupCharge(returnDoc);
+    const distanceKm = Number(returnDoc?.pickupDistanceKm ?? breakdown?.distanceKm ?? 0);
 
     return {
         id: returnDoc?._id,
@@ -785,6 +855,13 @@ const toReturnPickupTripDto = (returnDoc) => {
         deliveryEarning: earningAmount,
         earningAmount,
         amount: earningAmount,
+        distanceKm,
+        pickupDistanceKm: distanceKm,
+        pickupPricingBreakdown: breakdown,
+        baseFee: Number(breakdown?.basePayout ?? 0),
+        baseKm: Number(breakdown?.baseKm ?? 0),
+        extraKm: Number(breakdown?.extraKm ?? 0),
+        perKmRate: Number(breakdown?.perKmRate ?? 0),
         createdAt: returnDoc?.createdAt,
         deliveredAt: completedAt,
         completedAt,
@@ -876,7 +953,8 @@ export const getDeliveryPocketDetails = async (deliveryPartnerId, query = {}) =>
 
     const partnerId = new mongoose.Types.ObjectId(deliveryPartnerId);
 
-    const orders = await FoodOrder.find({
+    const [orders, returnPickups, bonusTxList] = await Promise.all([
+        FoodOrder.find({
         'dispatch.deliveryPartnerId': partnerId,
         orderStatus: 'delivered',
         $or: [
@@ -890,19 +968,30 @@ export const getDeliveryPocketDetails = async (deliveryPartnerId, query = {}) =>
         .populate({ path: 'restaurantId', select: 'restaurantName' })
         .sort({ 'deliveryState.deliveredAt': -1, deliveredAt: -1, completedAt: -1, updatedAt: -1, createdAt: -1 })
         .limit(limit)
-        .lean();
-
-    const bonusTxList = await DeliveryBonusTransaction.find({
+        .lean(),
+        SellerReturn.find({
+            'dispatch.deliveryPartnerId': partnerId,
+            'dispatch.status': 'completed',
+            'deliveryState.completedAt': { $gte: start, $lte: end },
+        })
+            .sort({ 'deliveryState.completedAt': -1, updatedAt: -1 })
+            .limit(limit)
+            .lean(),
+        DeliveryBonusTransaction.find({
         deliveryPartnerId: partnerId,
         createdAt: { $gte: start, $lte: end }
     })
         .sort({ createdAt: -1 })
         .limit(limit)
-        .lean();
+        .lean(),
+    ]);
 
-    const trips = (orders || []).map(toTripDto);
+    const trips = [...(orders || []).map(toTripDto), ...(returnPickups || []).map(toReturnPickupTripDto)]
+        .sort((a, b) => new Date(b.completedAt || b.deliveredAt || b.createdAt) - new Date(a.completedAt || a.deliveredAt || a.createdAt))
+        .slice(0, limit);
 
-    const paymentTransactions = (orders || []).map((o) => ({
+    const paymentTransactions = [
+        ...(orders || []).map((o) => ({
         _id: o._id,
         type: 'payment',
         amount: Number(o.riderEarning) || 0,
@@ -912,7 +1001,23 @@ export const getDeliveryPocketDetails = async (deliveryPartnerId, query = {}) =>
         orderId: o.orderId || String(o._id),
         metadata: { orderId: o.orderId || String(o._id) },
         description: o?.restaurantId?.restaurantName ? `Order earning - ${o.restaurantId.restaurantName}` : 'Order earning'
-    }));
+    })),
+        ...(returnPickups || []).map((row) => ({
+            _id: row._id,
+            type: 'payment',
+            amount: Number(row.riderEarning) || 0,
+            status: 'Completed',
+            date: row?.deliveryState?.completedAt || row?.dispatch?.completedAt || row?.updatedAt || row?.createdAt,
+            createdAt: row?.deliveryState?.completedAt || row?.dispatch?.completedAt || row?.updatedAt || row?.createdAt,
+            orderId: row.orderId || String(row._id),
+            metadata: {
+                orderId: row.orderId || String(row._id),
+                returnId: String(row._id),
+                tripType: 'return_pickup',
+            },
+            description: `Return pickup earning - ${row.orderId || row._id}`,
+        })),
+    ];
 
     const bonusTransactions = (bonusTxList || []).map((t) => ({
         _id: t._id,

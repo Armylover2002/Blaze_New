@@ -10,7 +10,12 @@ import { logger } from '../../utils/logger.js';
 export const addOrderJob = async (data, options = {}) => {
     const queue = getOrderQueue();
     if (!queue) {
-        logger.warn('BullMQ order queue not available. Job not added.');
+        const action = data?.action || 'unknown';
+        const documentType = data?.documentType || 'forward_order';
+        const targetId = data?.orderMongoId || data?.orderId || '';
+        logger.warn(
+            `[BullMQ] Order queue unavailable — job not added (action=${action}, documentType=${documentType}, targetId=${targetId}). Start Redis and the order worker to enable DISPATCH_TIMEOUT_CHECK retries.`,
+        );
         return null;
     }
     try {

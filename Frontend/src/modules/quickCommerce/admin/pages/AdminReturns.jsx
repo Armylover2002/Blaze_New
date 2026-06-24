@@ -15,7 +15,9 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { downloadCsv } from "../utils/csvExportUtils";
-import { mapReturnStatusLabel } from "@/shared/utils/returnStatus";
+import { mapReturnStatusLabel, resolveReturnLifecycleLabel, formatRefundStatusLabel } from "@/shared/utils/returnStatus";
+import ReturnPickupImageGallery from "@shared/components/returns/ReturnPickupImageGallery";
+import ReturnPayoutDetails from "@shared/components/returns/ReturnPayoutDetails";
 
 const STATUS_TABS = [
   { id: "", label: "All" },
@@ -31,7 +33,9 @@ const AdminReturns = () => {
   const [returns, setReturns] = useState([]);
   const [financeReport, setFinanceReport] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [actionLoading, setActionLoading] = useState("");
+  const [qualityLoading, setQualityLoading] = useState(false);
+  const [refundLoading, setRefundLoading] = useState(false);
+  const [confirmPayoutLoading, setConfirmPayoutLoading] = useState(false);
   const [page, setPage] = useState(1);
   const [pageSize] = useState(25);
   const [total, setTotal] = useState(0);
@@ -40,10 +44,15 @@ const AdminReturns = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [sellerId, setSellerId] = useState("");
   const [selectedReturn, setSelectedReturn] = useState(null);
+  const [modalLoading, setModalLoading] = useState(false);
 
-  const fetchData = useCallback(async (requestedPage = page) => {
+  const totalPages = Math.max(1, Math.ceil(total / pageSize) || 1);
+
+  const anyModalActionLoading = qualityLoading || refundLoading || confirmPayoutLoading;
+
+  const fetchData = useCallback(async (requestedPage = page, { silent = false } = {}) => {
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       const [listRes, reportRes] = await Promise.all([
         adminApi.getReturns({
           page: requestedPage,
@@ -102,19 +111,55 @@ const AdminReturns = () => {
     if (downloaded) toast.success("Returns exported");
   };
 
-  const runAction = async (action, returnId, body = {}) => {
-    setActionLoading(`${action}:${returnId}`);
+  const openReturnModal = async (row) => {
+    const returnId = row.returnId || row.id;
+    setSelectedReturn(row);
+    setModalLoading(true);
     try {
-      if (action === "refund") await adminApi.processReturnRefund(returnId, body);
-      if (action === "quality") await adminApi.passReturnQualityCheck(returnId, body);
-      if (action === "payout") await adminApi.confirmReturnPayout(returnId, body);
-      toast.success("Action completed");
-      await fetchData(page);
-      setSelectedReturn(null);
+      const res = await adminApi.getReturnById(returnId);
+      setSelectedReturn(res?.data?.result || row);
+    } catch (error) {
+      toast.error(error?.response?.data?.message || "Failed to load return details");
+    } finally {
+      setModalLoading(false);
+    }
+  };
+
+  const runAction = async (action, returnId, body = {}) => {
+    const setLoadingForAction =
+      action === "quality"
+        ? setQualityLoading
+        : action === "refund"
+          ? setRefundLoading
+          : action === "payout"
+            ? setConfirmPayoutLoading
+            : setActionLoading;
+
+    setLoadingForAction(true);
+    try {
+      let result;
+      if (action === "refund") {
+        result = await adminApi.processReturnRefund(returnId, body);
+      } else if (action === "quality") {
+        result = await adminApi.passReturnQualityCheck(returnId, body);
+      } else if (action === "payout") {
+        result = await adminApi.confirmReturnPayout(returnId, body);
+      }
+
+      const message =
+        result?.data?.result?.message ||
+        (action === "quality" && result?.data?.result?.refundQueued
+          ? "Quality passed — refund is now pending"
+          : "Action completed");
+      toast.success(message);
+
+      await fetchData(page, { silent: true });
+      const detailRes = await adminApi.getReturnById(returnId);
+      setSelectedReturn(detailRes?.data?.result || null);
     } catch (error) {
       toast.error(error?.response?.data?.message || "Action failed");
     } finally {
-      setActionLoading("");
+      setLoadingForAction(false);
     }
   };
 
@@ -270,18 +315,20 @@ const AdminReturns = () => {
                     <td className="px-4 py-3">{row.customer?.name || "—"}</td>
                     <td className="px-4 py-3">
                       <Badge variant="secondary" className="text-[10px] font-black uppercase">
-                        {mapReturnStatusLabel(row.returnStatus)}
+                        {resolveReturnLifecycleLabel(row)}
                       </Badge>
                     </td>
                     <td className="px-4 py-3 capitalize">
                       {row.refundMethod || "—"}
-                      {row.refundStatus && row.refundStatus !== "none" ? ` / ${row.refundStatus}` : ""}
+                      {row.refundStatus && row.refundStatus !== "none"
+                        ? ` / ${formatRefundStatusLabel(row.refundStatus)}`
+                        : ""}
                     </td>
                     <td className="px-4 py-3 font-bold">₹{Number(row.returnRefundAmount || 0).toFixed(2)}</td>
                     <td className="px-4 py-3">
                       <button
                         type="button"
-                        onClick={() => setSelectedReturn(row)}
+                        onClick={() => openReturnModal(row)}
                         className="text-xs font-bold text-red-600 hover:underline"
                       >
                         Manage
@@ -296,97 +343,250 @@ const AdminReturns = () => {
 
         <div className="p-4 border-t border-slate-100">
           <Pagination
-            currentPage={page}
-            totalItems={total}
+            page={page}
+            totalPages={totalPages}
+            total={total}
             pageSize={pageSize}
             onPageChange={(next) => fetchData(next)}
+            loading={loading}
           />
         </div>
       </Card>
 
       {selectedReturn && (
-        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
-          <div className="w-full max-w-lg bg-white rounded-3xl shadow-2xl overflow-hidden">
-            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-3 sm:p-6 bg-slate-900/40 backdrop-blur-sm">
+          <div className="w-full max-w-3xl xl:max-w-4xl bg-white rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh]">
+            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between shrink-0">
               <div>
-                <h3 className="font-black text-slate-900">Return #{selectedReturn.orderId}</h3>
-                <p className="text-xs text-slate-500">{mapReturnStatusLabel(selectedReturn.returnStatus)}</p>
+                <h3 className="font-black text-slate-900 text-lg">Return #{selectedReturn.orderId}</h3>
+                <p className="text-xs text-slate-500">
+                  {resolveReturnLifecycleLabel(selectedReturn)} · {mapReturnStatusLabel(selectedReturn.returnStatus)}
+                </p>
               </div>
-              <button type="button" onClick={() => setSelectedReturn(null)} className="text-slate-400 hover:text-slate-600">
+              <button type="button" onClick={() => setSelectedReturn(null)} className="text-slate-400 hover:text-slate-600 p-2">
                 ✕
               </button>
             </div>
-            <div className="p-6 space-y-3 text-sm text-slate-700">
-              <p>Refund: ₹{Number(selectedReturn.returnRefundAmount || 0).toFixed(2)} via {selectedReturn.refundMethod}</p>
-              <p>Reason: {selectedReturn.returnReason || "—"}</p>
 
-              {(selectedReturn.pricing || selectedReturn.refundPricing) && (
-                <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4 space-y-1 text-xs">
-                  <p className="font-bold text-slate-800">This return</p>
-                  <p>Item refund: ₹{Number(selectedReturn.pricing?.subtotal ?? selectedReturn.refundPricing?.subtotal ?? 0).toFixed(2)}</p>
-                  <p>Coupon share: -₹{Number(selectedReturn.pricing?.couponShare ?? selectedReturn.refundPricing?.couponShare ?? 0).toFixed(2)}</p>
-                  <p>GST share: +₹{Number(selectedReturn.pricing?.taxShare ?? selectedReturn.refundPricing?.taxShare ?? 0).toFixed(2)}</p>
-                  <p>Pickup fee (seller): ₹{Number(selectedReturn.pricing?.pickupFee ?? selectedReturn.returnDeliveryCommission ?? 0).toFixed(2)}</p>
-                  <p className="font-bold text-slate-900 pt-1">
-                    Final refund: ₹{Number(selectedReturn.pricing?.finalRefundAmount ?? selectedReturn.returnRefundAmount ?? 0).toFixed(2)}
-                  </p>
-
-                  <div className="border-t border-slate-200 pt-2 mt-2 space-y-1">
-                    <p className="font-bold text-slate-800">Cumulative (order)</p>
-                    <p>Total refunded: ₹{Number(selectedReturn.pricing?.totalRefundedAmount ?? 0).toFixed(2)}</p>
-                    <p>Total coupon refunded: ₹{Number(selectedReturn.pricing?.totalCouponRefunded ?? 0).toFixed(2)} / ₹{Number(selectedReturn.pricing?.orderCouponTotal ?? 0).toFixed(2)}</p>
-                    <p>Remaining coupon: ₹{Number(selectedReturn.pricing?.remainingCouponAmount ?? 0).toFixed(2)}</p>
-                    <p>Total GST refunded: ₹{Number(selectedReturn.pricing?.totalTaxRefunded ?? 0).toFixed(2)} / ₹{Number(selectedReturn.pricing?.orderTaxTotal ?? 0).toFixed(2)}</p>
-                    <p>Remaining GST: ₹{Number(selectedReturn.pricing?.remainingTaxAmount ?? 0).toFixed(2)}</p>
-                    <p>Remaining refundable: ₹{Number(selectedReturn.pricing?.remainingRefundableAmount ?? 0).toFixed(2)}</p>
-                  </div>
+            <div className="p-4 sm:p-6 overflow-y-auto flex-1 space-y-4 text-sm text-slate-700">
+              {modalLoading ? (
+                <div className="py-16 flex items-center justify-center">
+                  <Loader2 className="w-8 h-8 animate-spin text-red-500" />
                 </div>
-              )}
-
-              {Array.isArray(selectedReturn.returnItems) && selectedReturn.returnItems.length > 0 && (
-                <div className="rounded-2xl border border-slate-100 overflow-hidden">
-                  <div className="px-4 py-2 bg-slate-50 text-xs font-bold text-slate-600 grid grid-cols-4 gap-2">
-                    <span>Product</span>
-                    <span>Ordered Qty</span>
-                    <span>Returned Qty</span>
-                    <span className="text-right">Final Refund</span>
+              ) : (
+                <>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4 space-y-1">
+                      <p className="text-xs font-bold uppercase tracking-widest text-slate-500">Customer</p>
+                      <p className="font-black text-slate-900">{selectedReturn.customer?.name || "—"}</p>
+                      <p className="text-xs text-slate-600">{selectedReturn.customer?.phone || "—"}</p>
+                      {selectedReturn.customer?.email ? (
+                        <p className="text-xs text-slate-500">{selectedReturn.customer.email}</p>
+                      ) : null}
+                    </div>
+                    <div className="rounded-2xl border border-slate-100 bg-white p-4 space-y-1 text-xs">
+                      <p className="font-bold text-slate-800">Refund status</p>
+                      <p>
+                        Method:{" "}
+                        <span className="font-bold capitalize">{selectedReturn.refundMethod || "—"}</span>
+                      </p>
+                      <p>
+                        Status:{" "}
+                        <span className="font-bold">
+                          {selectedReturn.refundStatusLabel ||
+                            formatRefundStatusLabel(selectedReturn.refundStatus)}
+                        </span>
+                      </p>
+                      <p>
+                        Lifecycle:{" "}
+                        <span className="font-bold">{resolveReturnLifecycleLabel(selectedReturn)}</span>
+                      </p>
+                    </div>
                   </div>
-                  <div className="divide-y divide-slate-100">
-                    {selectedReturn.returnItems.map((item) => (
-                      <div
-                        key={`${item.itemId}-${item.returnedQty ?? item.quantity}`}
-                        className="px-4 py-2 text-xs grid grid-cols-4 gap-2 items-center"
-                      >
-                        <p className="font-semibold text-slate-800">{item.name || item.itemId}</p>
-                        <p className="text-slate-600">{item.orderedQty ?? "—"}</p>
-                        <p className="text-slate-600">{item.returnedQty ?? item.quantity ?? "—"}</p>
-                        <p className="text-slate-800 font-bold text-right">
-                          ₹{Number(item.refundAmount ?? 0).toFixed(2)}
-                        </p>
+
+                  <p>Reason: {selectedReturn.returnReason || "—"}</p>
+
+                  <ReturnPayoutDetails
+                    payoutDetails={selectedReturn.payoutDetails}
+                    refundMethod={selectedReturn.refundMethod}
+                  />
+
+                  {selectedReturn.pickupFeeZeroWarning ? (
+                    <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 flex items-start gap-2">
+                      <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                      <p>
+                        Admin return pickup fee is zero — rider earnings will remain ₹0 until
+                        return pickup fee is configured in billing settings.
+                      </p>
+                    </div>
+                  ) : null}
+
+                  {(selectedReturn.pricing || selectedReturn.refundPricing) && (
+                    <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4 space-y-1 text-xs">
+                      <p className="font-bold text-slate-800">Refund breakdown</p>
+                      <p>
+                        Customer paid: ₹
+                        {Number(
+                          selectedReturn.pricing?.orderPaidTotal ??
+                            selectedReturn.refundPricing?.orderPaidTotal ??
+                            0,
+                        ).toFixed(2)}
+                      </p>
+                      <p>
+                        Item refund: ₹
+                        {Number(
+                          selectedReturn.pricing?.subtotal ??
+                            selectedReturn.refundPricing?.subtotal ??
+                            0,
+                        ).toFixed(2)}
+                      </p>
+                      <p>
+                        GST refund: ₹
+                        {Number(
+                          selectedReturn.pricing?.taxShare ??
+                            selectedReturn.refundPricing?.taxShare ??
+                            0,
+                        ).toFixed(2)}
+                      </p>
+                      <p>
+                        Coupon share: -₹
+                        {Number(
+                          selectedReturn.pricing?.couponShare ??
+                            selectedReturn.refundPricing?.couponShare ??
+                            0,
+                        ).toFixed(2)}
+                      </p>
+                      <p>
+                        Delivery fee retained: ₹
+                        {Number(
+                          selectedReturn.pricing?.deliveryFeeRetained ??
+                            selectedReturn.refundPricing?.deliveryFeeRetained ??
+                            0,
+                        ).toFixed(2)}
+                      </p>
+                      <p>
+                        Platform fee retained: ₹
+                        {Number(
+                          selectedReturn.pricing?.platformFeeRetained ??
+                            selectedReturn.refundPricing?.platformFeeRetained ??
+                            0,
+                        ).toFixed(2)}
+                      </p>
+                      <p>
+                        Return pickup charge (calculated): ₹
+                        {Number(
+                          selectedReturn.calculatedPickupCharge ??
+                            selectedReturn.returnPickupCharge ??
+                            selectedReturn.pricing?.pickupFee ??
+                            selectedReturn.returnDeliveryCommission ??
+                            0,
+                        ).toFixed(2)}
+                      </p>
+                      <p className="font-bold text-slate-900 pt-1">
+                        Final refund: ₹
+                        {Number(
+                          selectedReturn.pricing?.finalRefundAmount ??
+                            selectedReturn.returnRefundAmount ??
+                            0,
+                        ).toFixed(2)}
+                      </p>
+                      <p>
+                        Remaining refundable: ₹
+                        {Number(
+                          selectedReturn.pricing?.remainingRefundableAmount ??
+                            selectedReturn.refundPricing?.remainingRefundableAmount ??
+                            0,
+                        ).toFixed(2)}
+                      </p>
+                    </div>
+                  )}
+
+                  <div className="rounded-2xl border border-slate-100 bg-white p-4 space-y-1 text-xs">
+                    {selectedReturn.refundTransactionId ? (
+                      <p>
+                        Transaction ID:{" "}
+                        <span className="font-mono text-[11px]">{selectedReturn.refundTransactionId}</span>
+                      </p>
+                    ) : null}
+                    {selectedReturn.refundReference ? (
+                      <p>
+                        Reference:{" "}
+                        <span className="font-mono text-[11px]">{selectedReturn.refundReference}</span>
+                      </p>
+                    ) : null}
+                    {selectedReturn.finance ? (
+                      <>
+                        <p className="font-bold text-slate-800 pt-1">Seller finance</p>
+                        <p>Ledger applied: {selectedReturn.finance.sellerLedgerApplied ? "Yes" : "No"}</p>
+                        <p>Refund deduction: ₹{Number((selectedReturn.finance.preSettlementDeducted || 0) + (selectedReturn.finance.postSettlementDebited || 0)).toFixed(2)}</p>
+                        <p>Pickup fee debited: ₹{Number(selectedReturn.finance.pickupFeeDebited || 0).toFixed(2)}</p>
+                        {selectedReturn.finance.settlementMode ? (
+                          <p className="capitalize">Settlement: {selectedReturn.finance.settlementMode.replace(/_/g, " ")}</p>
+                        ) : null}
+                      </>
+                    ) : null}
+                  </div>
+
+                  <ReturnPickupImageGallery entries={selectedReturn.pickupImageEntries} />
+
+                  {Array.isArray(selectedReturn.returnItems) && selectedReturn.returnItems.length > 0 && (
+                    <div className="rounded-2xl border border-slate-100 overflow-hidden">
+                      <div className="px-4 py-2 bg-slate-50 text-xs font-bold text-slate-600 grid grid-cols-4 gap-2">
+                        <span>Product</span>
+                        <span>Ordered Qty</span>
+                        <span>Returned Qty</span>
+                        <span className="text-right">Final Refund</span>
                       </div>
-                    ))}
-                  </div>
-                </div>
+                      <div className="divide-y divide-slate-100">
+                        {selectedReturn.returnItems.map((item) => (
+                          <div
+                            key={`${item.itemId}-${item.returnedQty ?? item.quantity}`}
+                            className="px-4 py-2 text-xs grid grid-cols-4 gap-2 items-center"
+                          >
+                            <p className="font-semibold text-slate-800">{item.name || item.itemId}</p>
+                            <p className="text-slate-600">{item.orderedQty ?? "—"}</p>
+                            <p className="text-slate-600">{item.returnedQty ?? item.quantity ?? "—"}</p>
+                            <p className="text-slate-800 font-bold text-right">
+                              ₹{Number(item.refundAmount ?? 0).toFixed(2)}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
               )}
+            </div>
 
-              <div className="flex flex-wrap gap-2 pt-2">
+            <div className="px-4 sm:px-6 py-4 border-t border-slate-100 bg-white shrink-0">
+              <div className="flex flex-wrap gap-2">
                 {selectedReturn.returnStatus === "returned" && (
                   <button
                     type="button"
-                    disabled={Boolean(actionLoading)}
-                    onClick={() => runAction("quality", selectedReturn.returnId || selectedReturn.id)}
-                    className="px-4 py-2 rounded-xl bg-emerald-600 text-white text-xs font-bold disabled:opacity-60"
+                    disabled={anyModalActionLoading}
+                    onClick={() =>
+                      runAction("quality", selectedReturn.returnId || selectedReturn.id)
+                    }
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-600 text-white text-xs font-bold disabled:opacity-60"
                   >
+                    {qualityLoading ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : null}
                     Quality Pass & Refund
                   </button>
                 )}
                 {selectedReturn.refundStatus === "pending" && (
                   <button
                     type="button"
-                    disabled={Boolean(actionLoading)}
-                    onClick={() => runAction("payout", selectedReturn.returnId || selectedReturn.id)}
-                    className="px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-bold disabled:opacity-60"
+                    disabled={anyModalActionLoading}
+                    onClick={() =>
+                      runAction("payout", selectedReturn.returnId || selectedReturn.id)
+                    }
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-bold disabled:opacity-60"
                   >
+                    {confirmPayoutLoading ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : null}
                     Confirm Payout
                   </button>
                 )}
@@ -396,10 +596,15 @@ const AdminReturns = () => {
                   selectedReturn.refundStatus !== "pending" && (
                   <button
                     type="button"
-                    disabled={Boolean(actionLoading)}
-                    onClick={() => runAction("refund", selectedReturn.returnId || selectedReturn.id)}
-                    className="px-4 py-2 rounded-xl bg-slate-900 text-white text-xs font-bold disabled:opacity-60"
+                    disabled={anyModalActionLoading}
+                    onClick={() =>
+                      runAction("refund", selectedReturn.returnId || selectedReturn.id)
+                    }
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-900 text-white text-xs font-bold disabled:opacity-60"
                   >
+                    {refundLoading ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : null}
                     Process Refund
                   </button>
                 )}

@@ -1,7 +1,7 @@
 import { useDeliveryStore } from '@/modules/DeliveryV2/store/useDeliveryStore';
 import { deliveryAPI } from '@food/api';
 import { toast } from 'sonner';
-import { getPrimaryPickupLocation, normalizeLocationPoint, normalizePickupPoints, isReturnPickupTrip, getDeliveryDocumentId, getReturnDropLocation } from '@/modules/DeliveryV2/utils/orderRouting';
+import { getPrimaryPickupLocation, normalizeLocationPoint, normalizePickupPoints, isReturnPickupTrip, getDeliveryDocumentId, getReturnDropLocation, enrichReturnDeliveryOrder } from '@/modules/DeliveryV2/utils/orderRouting';
 
 /**
  * useOrderManager - Professional hook for real-world trip lifecycle actions.
@@ -71,7 +71,7 @@ export const useOrderManager = () => {
 
         console.log('[OrderManager] Locations Mapped Result:', { resLoc, cusLoc, dropLocation });
 
-        setActiveOrder({
+        setActiveOrder(enrichReturnDeliveryOrder({
           ...fullOrder,
           orderId: isReturnPickupTrip(fullOrder) ? orderId : (fullOrder.orderId || orderId),
           returnId: fullOrder.returnId || (isReturnPickupTrip(fullOrder) ? orderId : undefined),
@@ -81,7 +81,7 @@ export const useOrderManager = () => {
           restaurantLocation: primaryPickupLocation || resLoc,
           customerLocation: cusLoc,
           sellerDropLocation: dropLocation,
-        });
+        }));
 
         updateTripStatus('PICKING_UP');
         // toast.success('Order Accepted! Opening Map...');
@@ -155,6 +155,10 @@ export const useOrderManager = () => {
       );
       
       if (response?.data?.success) {
+        const updatedOrder = enrichReturnDeliveryOrder(
+          response.data.data?.order || response.data?.order || activeOrder,
+        );
+        if (updatedOrder) setActiveOrder(updatedOrder);
         updateTripStatus('PICKED_UP');
         // toast.success('Order Collected! Heading to Drop-off');
       } else {

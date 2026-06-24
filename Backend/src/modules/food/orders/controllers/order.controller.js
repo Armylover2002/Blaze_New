@@ -237,7 +237,7 @@ export async function confirmReachedDropDeliveryController(req, res, next) {
     try {
         const deliveryPartnerId = req.user?.userId;
         const orderId = req.params.orderId;
-        const order = await orderService.confirmReachedDropDelivery(orderId, deliveryPartnerId);
+        const order = await orderService.confirmReachedDropDelivery(orderId, deliveryPartnerId, req.body || {});
         return sendResponse(res, 200, 'Reached drop confirmed', { order });
     } catch (err) {
         next(err);

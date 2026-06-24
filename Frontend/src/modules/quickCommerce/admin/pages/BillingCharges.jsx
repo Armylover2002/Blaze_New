@@ -19,7 +19,6 @@ const initialFeeSettings = {
   freeDeliveryThreshold: '',
   platformFee: '',
   gstRate: '',
-  returnDeliveryCommission: '',
   returnsEnabled: true,
   returnWindowDays: 3,
 };
@@ -119,7 +118,6 @@ export default function BillingCharges() {
         freeDeliveryThreshold: toInputValue(settings.freeDeliveryThreshold),
         platformFee: toInputValue(settings.platformFee),
         gstRate: toInputValue(settings.gstRate),
-        returnDeliveryCommission: toInputValue(settings.returnDeliveryCommission),
         returnsEnabled: settings.returnsEnabled !== false,
         returnWindowDays: hoursToReturnWindowDays(settings.returnWindowHours),
       });
@@ -157,7 +155,6 @@ export default function BillingCharges() {
         freeDeliveryThreshold: toNullableNumber(feeSettings.freeDeliveryThreshold),
         platformFee: toNullableNumber(feeSettings.platformFee),
         gstRate: toNullableNumber(feeSettings.gstRate),
-        returnDeliveryCommission: toNullableNumber(feeSettings.returnDeliveryCommission) ?? 0,
         returnsEnabled: Boolean(feeSettings.returnsEnabled),
         returnWindowHours: returnWindowDaysToHours(feeSettings.returnWindowDays),
         isActive: true,
@@ -171,7 +168,6 @@ export default function BillingCharges() {
           freeDeliveryThreshold: toInputValue(saved.freeDeliveryThreshold),
           platformFee: toInputValue(saved.platformFee),
           gstRate: toInputValue(saved.gstRate),
-          returnDeliveryCommission: toInputValue(saved.returnDeliveryCommission),
           returnsEnabled: saved.returnsEnabled !== false,
           returnWindowDays: hoursToReturnWindowDays(saved.returnWindowHours),
         });
@@ -340,23 +336,6 @@ export default function BillingCharges() {
                 </label>
               ))}
             </div>
-
-            <label className="block max-w-sm space-y-2">
-              <span className="text-sm font-semibold text-slate-700">Return Delivery Commission</span>
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                value={feeSettings.returnDeliveryCommission}
-                onChange={(e) =>
-                  setFeeSettings((prev) => ({
-                    ...prev,
-                    returnDeliveryCommission: e.target.value,
-                  }))
-                }
-                className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-emerald-500"
-              />
-            </label>
 
             <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5 space-y-4">
               <div>

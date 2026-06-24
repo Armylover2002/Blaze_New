@@ -91,19 +91,6 @@ const TIME_SLOTS = [
   { id: "2hours", label: "2 hours", sublabel: "Scheduled" },
 ];
 
-const TIP_AMOUNTS = [
-  { value: 0, label: "No Tip" },
-  { value: 10, label: "₹10" },
-  { value: 20, label: "₹20" },
-  { value: 30, label: "₹30" },
-];
-
-// Mock data outside component (was re-created every render)
-const RECOMMENDED_PRODUCTS = [
-  { id: 101, name: "Uncle Chips", price: 20, image: "https://images.unsplash.com/photo-1566478989037-eec170784d0b?w=200" },
-  { id: 102, name: "Lay's Chips", price: 20, image: "https://images.unsplash.com/photo-1566478989037-eec170784d0b?w=200" },
-  { id: 103, name: "Bread", price: 35, image: "https://images.unsplash.com/photo-1509440159596-0249088772ff?w=200" },
-];
 
 // ─── Pure helpers (unchanged) ─────────────────────────────────────────────────
 
@@ -425,7 +412,6 @@ const CheckoutPage = () => {
   const [selectedPayment, setSelectedPayment] = useState(
     routerLocation.state?.selectedPayment || storedCheckoutState.selectedPayment || "cash",
   );
-  const [selectedTip, setSelectedTip] = useState(Number(storedCheckoutState.selectedTip || 0));
   const [showAllCartItems, setShowAllCartItems] = useState(false);
   const [isPlacingOrder, setIsPlacingOrder] = useState(false);
   const [selectedCoupon, setSelectedCoupon] = useState(storedCheckoutState.selectedCoupon || null);
@@ -455,7 +441,7 @@ const CheckoutPage = () => {
   const [coupons, setCoupons] = useState([]);
   const [manualCode, setManualCode] = useState(storedCheckoutState.manualCode || "");
   const [showShareModal, setShowShareModal] = useState(false);
-  const [customTip, setCustomTip] = useState("");
+  const [recommendedProducts, setRecommendedProducts] = useState([]);
 
   const sharedProfileName = useMemo(
     () => String(userProfile?.name || user?.name || "").trim(),
@@ -1104,6 +1090,23 @@ const CheckoutPage = () => {
 
   useEffect(() => {
     let mounted = true;
+    const fetchRecommendations = async () => {
+      try {
+        const response = await customerApi.getProducts({ limit: 10 });
+        const products = response?.data?.results || response?.data?.result || response?.data?.data || [];
+        if (mounted && Array.isArray(products) && products.length > 0) {
+          setRecommendedProducts(products.slice(0, 5));
+        }
+      } catch (error) {
+        console.error("Failed to fetch recommended products:", error);
+      }
+    };
+    fetchRecommendations();
+    return () => { mounted = false; };
+  }, []);
+
+  useEffect(() => {
+    let mounted = true;
     const firstCartItem = cart[0];
     const sellerId = firstCartItem?.sellerId?._id || firstCartItem?.sellerId || firstCartItem?.seller?._id || firstCartItem?.quickStoreId || firstCartItem?.storeId;
     if (!sellerId || typeof sellerId !== "string" || sellerId === "quick-commerce") {
@@ -1194,17 +1197,17 @@ const CheckoutPage = () => {
   useEffect(() => {
     try {
       if (typeof window === "undefined") return;
-      window.localStorage.setItem(CHECKOUT_STORAGE_KEY, JSON.stringify({ selectedTimeSlot, selectedPayment, selectedTip, selectedCoupon, manualCode, currentAddress, recipientData, savedRecipient, showRecipientForm }));
+      window.localStorage.setItem(CHECKOUT_STORAGE_KEY, JSON.stringify({ selectedTimeSlot, selectedPayment, selectedCoupon, manualCode, currentAddress, recipientData, savedRecipient, showRecipientForm }));
     } catch { /* ignore */ }
-  }, [currentAddress, manualCode, recipientData, savedRecipient, selectedCoupon, selectedPayment, selectedTimeSlot, selectedTip, showRecipientForm]);
+  }, [currentAddress, manualCode, recipientData, savedRecipient, selectedCoupon, selectedPayment, selectedTimeSlot, showRecipientForm]);
 
   useEffect(() => {
     if (cart.length === 0) { setPricingPreview(null); return; }
     setIsPreviewLoading(true);
-    const result = calculateQuickCheckoutPricing({ subtotal: cartTotal, discountAmount, selectedTip, feeSettings: quickBillingSettings, cartItems: cart, categoryFeeMap, distanceKm });
+    const result = calculateQuickCheckoutPricing({ subtotal: cartTotal, discountAmount, selectedTip: 0, feeSettings: quickBillingSettings, cartItems: cart, categoryFeeMap, distanceKm });
     setPricingPreview({ subtotal: cartTotal, ...result });
     setIsPreviewLoading(false);
-  }, [cart, cartTotal, categoryFeeMap, discountAmount, quickBillingSettings, selectedTip, distanceKm]);
+  }, [cart, cartTotal, categoryFeeMap, discountAmount, quickBillingSettings, distanceKm]);
 
   useEffect(() => {
     if (!orderId || !showSuccess) return undefined;
@@ -1381,16 +1384,18 @@ const CheckoutPage = () => {
             )}
 
             {/* Recommendations */}
-            <motion.div className="bg-white dark:bg-card rounded-2xl p-4 shadow-sm border border-slate-100 dark:border-white/5 transition-colors">
-              <h3 className="font-black text-slate-800 text-lg mb-4">You might also like</h3>
-              <div className="flex gap-4 overflow-x-auto pb-4 no-scrollbar -mx-4 px-4 snap-x">
-                {RECOMMENDED_PRODUCTS.map((product) => (
-                  <div key={product.id} className="flex-shrink-0 w-[140px] snap-start">
-                    <ProductCard product={product} compact={true} />
-                  </div>
-                ))}
-              </div>
-            </motion.div>
+            {recommendedProducts.length > 0 && (
+              <motion.div className="bg-white dark:bg-card rounded-2xl p-4 shadow-sm border border-slate-100 dark:border-white/5 transition-colors">
+                <h3 className="font-black text-slate-800 text-lg mb-4">You might also like</h3>
+                <div className="flex gap-4 overflow-x-auto pb-4 no-scrollbar -mx-4 px-4 snap-x">
+                  {recommendedProducts.map((product) => (
+                    <div key={product.id || product._id} className="flex-shrink-0 w-[140px] snap-start">
+                      <ProductCard product={product} compact={true} />
+                    </div>
+                  ))}
+                </div>
+              </motion.div>
+            )}
           </div>
 
           {/* Right Column */}
@@ -1413,29 +1418,6 @@ const CheckoutPage = () => {
                     onApply={handleApplyCoupon}
                   />
                 ))}
-              </div>
-            </motion.div>
-
-            {/* Tip */}
-            <motion.div className="bg-gradient-to-r from-pink-50 to-purple-50 dark:from-slate-800 dark:to-slate-900 rounded-2xl p-4 border border-pink-100 dark:border-white/5">
-              <div className="flex items-center gap-2 mb-3">
-                <Heart size={18} className="text-pink-500 fill-pink-500" />
-                <h3 className="font-black text-slate-800">Tip your delivery partner</h3>
-              </div>
-              <p className="text-xs text-slate-600 mb-3">100% of the tip goes to them</p>
-              <div className="grid grid-cols-4 gap-2 mb-3">
-                {TIP_AMOUNTS.map((tip) => (
-                  <button key={tip.value} onClick={() => { setSelectedTip(tip.value); setCustomTip(""); }}
-                    className={`py-2 rounded-xl border-2 transition-all font-bold text-sm ${selectedTip === tip.value && !customTip ? "border-pink-500 bg-pink-100 text-pink-700" : "border-pink-200 bg-white text-slate-700 hover:border-pink-300"}`}>
-                    {tip.label}
-                  </button>
-                ))}
-              </div>
-              <div className="relative">
-                <input type="number" min="1" placeholder="Enter custom tip amount (₹)" value={customTip}
-                  onChange={(e) => { const val = e.target.value.replace(/[^0-9]/g, ""); setCustomTip(val); setSelectedTip(val ? Number(val) : 0); }}
-                  className="w-full h-10 rounded-xl border-2 border-pink-200 bg-white px-3 text-sm font-bold text-slate-700 placeholder:text-slate-400 focus:outline-none focus:border-pink-400 transition-colors" />
-                {customTip && <button onClick={() => { setCustomTip(""); setSelectedTip(0); }} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"><X size={14} /></button>}
               </div>
             </motion.div>
 
@@ -1488,12 +1470,6 @@ const CheckoutPage = () => {
                   <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} className="flex justify-between items-center px-3 py-2 bg-[#FFF2EB] rounded-xl border border-red-100">
                     <span className="text-[#FF0000] font-black text-xs flex items-center gap-2 uppercase tracking-wider"><Tag size={14} />Coupon Reserved</span>
                     <span className="font-black text-[#FF0000]">-₹{discountAmount}</span>
-                  </motion.div>
-                )}
-                {selectedTip > 0 && (
-                  <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} className="flex justify-between items-center px-3 py-2 bg-pink-50 rounded-xl border border-pink-100">
-                    <span className="text-pink-600 font-bold text-xs flex items-center gap-2"><Heart size={14} className="fill-pink-500" />Delivery Partner Tip</span>
-                    <span className="font-black text-pink-600">+₹{selectedTip}</span>
                   </motion.div>
                 )}
                 <div className="mt-4 pt-6 border-t-2 border-dashed border-slate-100">

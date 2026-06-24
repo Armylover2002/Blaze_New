@@ -34,7 +34,6 @@ const mapBusinessSettings = (raw = {}) => ({
   metaDescription: '',
   metaKeywords: '',
   keywords: [],
-  returnDeliveryCommission: 0,
 });
 
 const buildSettingsPayload = (data = {}) => ({

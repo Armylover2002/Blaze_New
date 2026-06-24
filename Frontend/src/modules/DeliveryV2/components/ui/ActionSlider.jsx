@@ -7,6 +7,7 @@ import { ChevronRight } from 'lucide-react';
  */
 export const ActionSlider = ({ 
   label = "Slide to Confirm", 
+  lockedLabel = "Action Locked",
   onConfirm, 
   disabled = false,
   color = "bg-[#FF0000]",
@@ -57,23 +58,31 @@ export const ActionSlider = ({
     }
   };
 
+  const trackClasses = disabled
+    ? 'bg-red-100 border border-red-200 shadow-none'
+    : `${color} shadow-lg shadow-black/10`;
+
   return (
     <div 
       ref={containerRef}
-      className={`relative w-full h-[68px] rounded-full p-1.5 overflow-hidden transition-all duration-300 ${
-        'bg-gray-950 shadow-lg shadow-black/10'
+      className={`relative w-full rounded-full p-1.5 overflow-hidden transition-all duration-300 ${trackClasses} ${
+        disabled ? 'h-[58px]' : 'h-[62px]'
       }`}
     >
       {/* Background Track */}
-      <div className={`absolute inset-y-0 left-[76px] right-5 flex items-center justify-center text-center font-bold text-[11px] uppercase tracking-[0.14em] leading-none whitespace-nowrap transition-opacity duration-300 ${
-        isSuccess ? 'opacity-0' : disabled ? 'text-white/70' : 'text-white/88'
+      <div className={`absolute inset-y-0 left-[76px] right-5 flex items-center justify-center text-center font-bold text-[11px] uppercase tracking-[0.14em] leading-tight px-2 transition-opacity duration-300 ${
+        isSuccess
+          ? 'opacity-0'
+          : disabled
+            ? 'text-red-700/80'
+            : 'text-white/88'
       }`}>
-        {disabled ? 'Action Locked' : label}
+        {disabled ? lockedLabel : label}
       </div>
 
       {/* Dynamic Progress Fill */}
       <motion.div 
-        className={`absolute inset-0 ${color} rounded-full`}
+        className={`absolute inset-0 bg-black/20 rounded-full`}
         initial={{ width: 0 }}
         animate={{ 
           width: isSuccess ? '100%' : `${progress * 100}%`,
@@ -104,9 +113,14 @@ export const ActionSlider = ({
         onDrag={handleDrag}
         onDragEnd={handleDragEnd}
         animate={controls}
-        className={`relative w-14 h-14 rounded-full flex items-center justify-center z-20 cursor-grab active:cursor-grabbing shadow-xl transition-colors ${
-          disabled ? 'bg-gray-200 text-gray-400' : 
-          isSuccess ? 'bg-white text-[#FF0000]' : 'bg-white text-gray-950'
+        className={`relative rounded-full flex items-center justify-center z-20 shadow-xl transition-colors ${
+          disabled ? 'w-12 h-12' : 'w-14 h-14'
+        } ${
+          disabled
+            ? 'bg-white text-red-300 border border-red-200 cursor-not-allowed'
+            : isSuccess
+              ? 'bg-white text-[#FF0000] cursor-grab active:cursor-grabbing'
+              : 'bg-white text-gray-950 cursor-grab active:cursor-grabbing'
         }`}
       >
         <ChevronRight className={`w-8 h-8 transition-transform duration-300 ${isSuccess ? 'scale-110' : ''}`} />

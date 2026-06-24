@@ -269,6 +269,35 @@ export const HistoryV2 = () => {
                                 <p className="text-sm font-bold text-gray-950">₹{payout.toFixed(2)}</p>
                              </div>
                          </div>
+
+                         {isReturnPickup && (trip.pickupPricingBreakdown || Number(trip.distanceKm || trip.pickupDistanceKm) > 0) && (
+                           <div className="mt-3 pt-3 border-t border-gray-50 grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+                             <div>
+                               <p className="text-[10px] font-medium text-gray-400">Distance</p>
+                               <p className="font-bold text-gray-800">
+                                 {Number(trip.pickupDistanceKm ?? trip.distanceKm ?? trip.pickupPricingBreakdown?.distanceKm ?? 0).toFixed(2)} km
+                               </p>
+                             </div>
+                             <div>
+                               <p className="text-[10px] font-medium text-gray-400">Base Fee</p>
+                               <p className="font-bold text-gray-800">
+                                 ₹{Number(trip.baseFee ?? trip.pickupPricingBreakdown?.basePayout ?? 0).toFixed(2)}
+                               </p>
+                             </div>
+                             <div>
+                               <p className="text-[10px] font-medium text-gray-400">Extra KM</p>
+                               <p className="font-bold text-gray-800">
+                                 {Number(trip.extraKm ?? trip.pickupPricingBreakdown?.extraKm ?? 0).toFixed(2)} km
+                               </p>
+                             </div>
+                             <div>
+                               <p className="text-[10px] font-medium text-gray-400">Per KM</p>
+                               <p className="font-bold text-gray-800">
+                                 ₹{Number(trip.perKmRate ?? trip.pickupPricingBreakdown?.perKmRate ?? 0).toFixed(2)}
+                               </p>
+                             </div>
+                           </div>
+                         )}
                       </div>
                    );
                 })}

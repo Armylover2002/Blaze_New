@@ -532,7 +532,7 @@ const ReturnSellerOtpModal = ({ order, onComplete, onClose }) => {
       >
         <div className="w-12 h-1.5 bg-gray-200 rounded-full mx-auto mb-6" />
         <div className="mb-6">
-          <p className="text-[10px] font-bold uppercase tracking-widest text-amber-600">Return Pickup</p>
+          <p className="text-[10px] font-bold uppercase tracking-widest text-red-600">Return Pickup</p>
           <h2 className="text-xl font-bold text-gray-900">Seller OTP</h2>
           <p className="text-sm text-gray-500 mt-1">Ask the seller for their handover code to complete the return drop.</p>
         </div>
@@ -546,16 +546,17 @@ const ReturnSellerOtpModal = ({ order, onComplete, onClose }) => {
               maxLength={1}
               value={digit}
               onChange={(e) => handleOtpChange(i, e.target.value)}
-              className="w-14 h-16 rounded-2xl border-2 border-gray-200 text-center text-2xl font-black text-gray-900 focus:border-amber-500 outline-none"
+              className="w-14 h-16 rounded-2xl border-2 border-gray-200 text-center text-2xl font-black text-gray-900 focus:border-red-500 outline-none"
             />
           ))}
         </div>
         <ActionSlider
           label="Slide to Complete Return"
+          lockedLabel="Enter seller OTP to unlock"
           successLabel="Completed!"
           disabled={otp.join("").length < 4 || isSubmitting}
           onConfirm={handleComplete}
-          color="bg-amber-500"
+          color="bg-[#FF0000]"
         />
       </motion.div>
     </div>

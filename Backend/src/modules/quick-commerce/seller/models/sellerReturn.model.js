@@ -312,6 +312,9 @@ const sellerReturnSchema = new mongoose.Schema(
       default: [],
     },
     riderEarning: { type: Number, min: 0, default: 0 },
+    calculatedPickupCharge: { type: Number, min: 0, default: 0 },
+    pickupDistanceKm: { type: Number, min: 0, default: 0 },
+    pickupPricingBreakdown: { type: mongoose.Schema.Types.Mixed, default: null },
     sellerInspectionImages: {
       type: [String],
       default: [],

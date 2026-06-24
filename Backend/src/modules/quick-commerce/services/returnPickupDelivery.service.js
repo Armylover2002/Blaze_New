@@ -18,6 +18,7 @@ import {
   buildReturnDeliverySocketPayload,
   loadReturnPickupContext,
   normalizePickupImageEntries,
+  resolveReturnPickupCharge,
   serializeReturnForDelivery,
   verifyReturnOtp,
 } from '../utils/returnPickup.helpers.js';
@@ -25,6 +26,13 @@ import {
 const COMPLETED_RETURN_DISPATCH = 'completed';
 
 const toPartnerId = (value) => new mongoose.Types.ObjectId(value);
+
+const isPartnerOfferedForReturn = (returnDoc, deliveryPartnerId) =>
+  (returnDoc?.dispatch?.offeredTo || []).some(
+    (entry) =>
+      String(entry?.partnerId) === String(deliveryPartnerId) &&
+      ['offered', 'assigned'].includes(String(entry?.action || '')),
+  );
 
 const loadReturnForPartner = async (returnId, { selectOtp = false } = {}) => {
   const id = String(returnId || '').trim();
@@ -159,11 +167,34 @@ const verifyReturnOtpAndPersist = async (returnDoc, options) => {
 };
 
 const creditReturnPickupRiderEarning = async (returnDoc, deliveryPartnerId) => {
-  const amount = Number(returnDoc?.riderEarning || 0);
+  const context = await loadReturnPickupContext(returnDoc);
+  const amount = resolveReturnPickupCharge({
+    ...(returnDoc?.toObject?.() || returnDoc),
+    calculatedPickupCharge: context.calculatedPickupCharge || returnDoc.calculatedPickupCharge,
+    riderEarning: context.riderEarning || returnDoc.riderEarning,
+  });
+
+  if (context.pickupDistanceKm >= 0) {
+    returnDoc.pickupDistanceKm = context.pickupDistanceKm;
+  }
+  if (context.pickupPricingBreakdown) {
+    returnDoc.pickupPricingBreakdown = context.pickupPricingBreakdown;
+  }
+  if (context.calculatedPickupCharge > 0) {
+    returnDoc.calculatedPickupCharge = context.calculatedPickupCharge;
+  }
+  if (amount > 0) {
+    returnDoc.riderEarning = amount;
+    await returnDoc.save();
+  }
   if (!amount || amount <= 0) return;
+
+  const breakdown = returnDoc.pickupPricingBreakdown || null;
+  const distanceKm = Number(returnDoc.pickupDistanceKm || breakdown?.distanceKm || 0);
 
   const partnerId = toPartnerId(deliveryPartnerId);
   const returnId = String(returnDoc._id);
+  const resolvedBreakdown = returnDoc?.pickupPricingBreakdown || breakdown;
 
   const existing = await Transaction.findOne({
     entityType: 'deliveryBoy',
@@ -187,6 +218,9 @@ const creditReturnPickupRiderEarning = async (returnDoc, deliveryPartnerId) => {
       orderId: returnDoc.orderId,
       tripType: 'return_pickup',
       documentType: DISPATCH_DOCUMENT_TYPES.SELLER_RETURN,
+      calculatedPickupCharge: amount,
+      pickupDistanceKm: Number(returnDoc?.pickupDistanceKm || distanceKm),
+      pickupPricingBreakdown: resolvedBreakdown,
     },
   });
 
@@ -215,15 +249,20 @@ export const listAvailableReturnPickups = async (deliveryPartnerId, query = {}) 
   const partnerObjectId = toPartnerId(deliveryPartnerId);
 
   const returns = await SellerReturn.find({
+    returnStatus: {
+      $in: [RETURN_STATUSES.APPROVED, RETURN_STATUSES.PICKUP_ASSIGNED, RETURN_STATUSES.IN_TRANSIT],
+    },
+    'dispatch.status': { $in: ['unassigned', 'assigned', 'accepted'] },
     $or: [
+      { 'dispatch.status': { $in: ['unassigned', 'assigned'] } },
+      { 'dispatch.deliveryPartnerId': partnerObjectId },
       {
-        'dispatch.status': 'unassigned',
-        returnStatus: { $in: [RETURN_STATUSES.APPROVED, RETURN_STATUSES.PICKUP_ASSIGNED] },
-      },
-      {
-        'dispatch.deliveryPartnerId': partnerObjectId,
-        'dispatch.status': { $in: ['assigned', 'accepted'] },
-        returnStatus: { $in: [RETURN_STATUSES.PICKUP_ASSIGNED, RETURN_STATUSES.IN_TRANSIT] },
+        'dispatch.offeredTo': {
+          $elemMatch: {
+            partnerId: partnerObjectId,
+            action: { $in: ['offered', 'assigned'] },
+          },
+        },
       },
     ],
   })
@@ -232,13 +271,10 @@ export const listAvailableReturnPickups = async (deliveryPartnerId, query = {}) 
 
   const docs = [];
   for (const row of returns) {
-    const offered =
-      row?.dispatch?.status === 'unassigned' &&
-      (row?.dispatch?.offeredTo || []).some(
-        (entry) => String(entry?.partnerId) === String(deliveryPartnerId) && entry?.action === 'offered',
-      );
     const assigned = String(row?.dispatch?.deliveryPartnerId || '') === String(deliveryPartnerId);
-    if (!offered && !assigned && row?.dispatch?.status === 'unassigned') continue;
+    const offered = isPartnerOfferedForReturn(row, deliveryPartnerId);
+
+    if (!offered && !assigned) continue;
 
     const context = await loadReturnPickupContext(row);
     const view = await buildReturnDeliverySocketPayload(row, context);
@@ -269,7 +305,6 @@ export const acceptReturnPickupDelivery = async (returnId, deliveryPartnerId, bo
       $or: [
         { 'dispatch.deliveryPartnerId': partnerId },
         {
-          'dispatch.status': 'unassigned',
           'dispatch.offeredTo': {
             $elemMatch: {
               partnerId,
@@ -298,11 +333,29 @@ export const acceptReturnPickupDelivery = async (returnId, deliveryPartnerId, bo
     if (existing?.dispatch?.status === 'accepted') {
       if (isReturnAssignedToPartner(existing, deliveryPartnerId)) {
         const context = await loadReturnPickupContext(existing);
+        if (!Number(existing.riderEarning || 0) && Number(context?.riderEarning || 0) > 0) {
+          existing.riderEarning = context.riderEarning;
+          await existing.save();
+        }
         return await serializeReturnForDelivery(existing, context);
       }
       throw new ForbiddenError('Return pickup already accepted by another rider');
     }
     throw new ValidationError('Return pickup is not available for assignment');
+  }
+
+  const acceptContext = await loadReturnPickupContext(returnDoc);
+  if (!Number(returnDoc.riderEarning || 0) && Number(acceptContext?.riderEarning || 0) > 0) {
+    returnDoc.riderEarning = acceptContext.riderEarning;
+  }
+  if (acceptContext?.pickupDistanceKm >= 0) {
+    returnDoc.pickupDistanceKm = acceptContext.pickupDistanceKm;
+  }
+  if (acceptContext?.pickupPricingBreakdown) {
+    returnDoc.pickupPricingBreakdown = acceptContext.pickupPricingBreakdown;
+  }
+  if (acceptContext?.calculatedPickupCharge > 0) {
+    returnDoc.calculatedPickupCharge = acceptContext.calculatedPickupCharge;
   }
 
   appendReturnHistory(returnDoc, {
@@ -325,7 +378,10 @@ export const acceptReturnPickupDelivery = async (returnId, deliveryPartnerId, bo
 
 export const rejectReturnPickupDelivery = async (returnId, deliveryPartnerId) => {
   const returnDoc = await loadReturnForPartner(returnId);
-  if (!isReturnAssignedToPartner(returnDoc, deliveryPartnerId) && returnDoc.dispatch?.status !== 'unassigned') {
+  const isAssigned = isReturnAssignedToPartner(returnDoc, deliveryPartnerId);
+  const isOffered = isPartnerOfferedForReturn(returnDoc, deliveryPartnerId);
+
+  if (!isAssigned && !isOffered) {
     throw new ForbiddenError('Not your return pickup');
   }
 
@@ -419,6 +475,10 @@ export const confirmPickupReturn = async (returnId, deliveryPartnerId, body = {}
     pickedUpAt: new Date(),
   };
 
+  returnDoc.markModified('deliveryState');
+  returnDoc.markModified('pickupImageEntries');
+  returnDoc.markModified('pickupImages');
+
   appendReturnHistory(returnDoc, {
     byRole: 'DELIVERY_PARTNER',
     byId: deliveryPartnerId,
@@ -449,6 +509,8 @@ export const confirmReachedDropReturn = async (returnId, deliveryPartnerId) => {
     reachedDropAt: returnDoc.deliveryState?.reachedDropAt || new Date(),
   };
 
+  returnDoc.markModified('deliveryState');
+
   appendReturnHistory(returnDoc, {
     byRole: 'DELIVERY_PARTNER',
     byId: deliveryPartnerId,
@@ -471,7 +533,18 @@ export const completeReturnPickup = async (returnId, deliveryPartnerId, body = {
     return await serializeReturnForDelivery(returnDoc);
   }
 
-  if (String(returnDoc.deliveryState?.status || '').trim() !== 'picked_up') {
+  const deliveryStatus = String(returnDoc.deliveryState?.status || '').trim();
+  const deliveryPhase = String(returnDoc.deliveryState?.currentPhase || '').trim();
+  const hasPickupHistory = (returnDoc.returnHistory || []).some(
+    (entry) => entry?.action === 'RETURN_PICKED_UP',
+  );
+  const pickupConfirmed =
+    ['picked_up', 'reached_drop'].includes(deliveryStatus) ||
+    ['en_route_to_delivery', 'at_drop'].includes(deliveryPhase) ||
+    Boolean(returnDoc.deliveryState?.pickedUpAt) ||
+    hasPickupHistory;
+
+  if (!pickupConfirmed) {
     throw new ValidationError('Customer pickup must be confirmed before completing return pickup');
   }
 

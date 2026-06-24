@@ -36,7 +36,6 @@ const DEFAULT_SETTINGS = {
   metaDescription: "",
   metaKeywords: "",
   keywords: [],
-  returnDeliveryCommission: 0,
   deliveryPricingMode: "distance_based",
   pricingMode: "distance_based",
   customerBaseDeliveryFee: 30,

@@ -161,9 +161,15 @@ export async function enforceCashLimitForAllOnlinePartners() {
 
 export async function listNearbyOnlineDeliveryPartners(
   sourceId,
-  { maxKm = 15, limit = 25, sourceType = "food" } = {},
+  { maxKm = 15, limit = 25, sourceType = "food", auditLabel = "" } = {},
 ) {
-  if (!sourceId) return { partners: [], source: null };
+  if (!sourceId) {
+    const fallback = await listAllOnlinePartnersFallback({ limit });
+    if (auditLabel) {
+      await auditPartnerElimination(fallback.partners, { label: auditLabel, maxKm });
+    }
+    return fallback;
+  }
   const sId = (sourceId?._id || sourceId).toString();
 
   let source = null;
@@ -188,22 +194,11 @@ export async function listNearbyOnlineDeliveryPartners(
   }
 
   if (!source?.location?.coordinates?.length) {
-    const partners = await FoodDeliveryPartner.find({
-      status: "approved",
-      availabilityStatus: "online",
-    })
-      .select("_id status name")
-      .limit(Math.max(1, limit))
-      .lean();
-
-    const rawPartners = partners.map((p) => ({ partnerId: p._id, distanceKm: null }));
-    // Apply cash-limit & subscription eligibility check — same as all other dispatch paths
-    const eligiblePartners = await filterEligiblePartners(rawPartners);
-    logger.info(`[Dispatch] No-coords fallback: ${rawPartners.length} online → ${eligiblePartners.length} eligible after cash-limit filter`);
-    return {
-      source,
-      partners: eligiblePartners,
-    };
+    const fallback = await listAllOnlinePartnersFallback({ limit });
+    if (auditLabel) {
+      await auditPartnerElimination(fallback.partners, { label: auditLabel, maxKm });
+    }
+    return { ...fallback, source };
   }
 
   const [rLng, rLat] = source.location.coordinates;
@@ -268,17 +263,24 @@ export async function listNearbyOnlineDeliveryPartners(
       : picked;
 
   const eligible = await filterEligiblePartners(final);
+  if (auditLabel) {
+    await auditPartnerElimination(eligible, {
+      label: auditLabel,
+      maxKm,
+      origin: { lat: rLat, lng: rLng },
+    });
+  }
   return { source, partners: eligible };
 }
 
 export async function listNearbyOnlineDeliveryPartnersByCoords(
   coords,
-  { maxKm = 15, limit = 25 } = {},
+  { maxKm = 15, limit = 25, auditLabel = "" } = {},
 ) {
   const lat = Number(coords?.lat);
   const lng = Number(coords?.lng);
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-    return listNearbyOnlineDeliveryPartners(null, { maxKm, limit, sourceType: "quick" });
+    return listNearbyOnlineDeliveryPartners(null, { maxKm, limit, sourceType: "quick", auditLabel });
   }
 
   const pseudoSource = {
@@ -314,6 +316,9 @@ export async function listNearbyOnlineDeliveryPartnersByCoords(
   const final =
     config.env === "production" ? picked.filter((p) => p.status === "approved") : picked;
   const eligible = await filterEligiblePartners(final.length ? final : picked);
+  if (auditLabel) {
+    await auditPartnerElimination(eligible, { label: auditLabel, maxKm, origin: { lat, lng } });
+  }
   return { source: pseudoSource, partners: eligible };
 }
 
@@ -325,8 +330,130 @@ const buildDispatchJobPayload = (documentType, documentMongoId, attempt) => ({
   attempt,
 });
 
+/** Mongo match: rider has not accepted yet (null is stored explicitly on SellerReturn). */
+const dispatchNotAcceptedClause = {
+  $or: [{ "dispatch.acceptedAt": { $exists: false } }, { "dispatch.acceptedAt": null }],
+};
+
+const dispatchRetryableStatusClause = {
+  $or: [
+    { "dispatch.status": "unassigned" },
+    {
+      "dispatch.status": "assigned",
+      ...dispatchNotAcceptedClause,
+    },
+  ],
+};
+
+const listAllOnlinePartnersFallback = async ({ limit = 25 } = {}) => {
+  const allowedStatuses =
+    process.env.NODE_ENV === "production" ? ["approved"] : ["approved", "pending"];
+  const partners = await FoodDeliveryPartner.find({
+    status: { $in: allowedStatuses },
+    availabilityStatus: "online",
+  })
+    .select("_id status name lastLat lastLng lastLocationAt")
+    .limit(Math.max(1, limit))
+    .lean();
+
+  const rawPartners = partners.map((p) => ({ partnerId: p._id, distanceKm: null, status: p.status }));
+  const eligiblePartners = await filterEligiblePartners(rawPartners);
+  logger.info(
+    `[Dispatch] Online fallback pool: ${rawPartners.length} online → ${eligiblePartners.length} eligible after filters`,
+  );
+  return { source: null, partners: eligiblePartners };
+};
+
+const auditPartnerElimination = async (partners, { label = "dispatch", maxKm = 15, origin = null } = {}) => {
+  if (!partners?.length) {
+    logger.warn(`[DispatchAudit:${label}] No online delivery partners in database`);
+    return;
+  }
+
+  const allowedStatuses =
+    process.env.NODE_ENV === "production" ? ["approved"] : ["approved", "pending"];
+  const STALE_GPS_MS = 10 * 60 * 1000;
+  const eligibleIds = new Set((partners || []).map((p) => String(p.partnerId)));
+
+  const allOnline = await FoodDeliveryPartner.find({ availabilityStatus: "online" })
+    .select("_id status name lastLat lastLng lastLocationAt availabilityStatus")
+    .lean();
+
+  logger.info(
+    `[DispatchAudit:${label}] Auditing ${allOnline.length} online partner(s); eligible shortlist=${eligibleIds.size}; maxKm=${maxKm}`,
+  );
+
+  for (const p of allOnline) {
+    const partnerId = String(p._id);
+    const row = {
+      partnerId,
+      name: p.name || "",
+      online: p.availabilityStatus === "online",
+      accountStatus: p.status,
+      lastLat: p.lastLat,
+      lastLng: p.lastLng,
+      lastLocationAt: p.lastLocationAt,
+      finalEligible: eligibleIds.has(partnerId),
+    };
+
+    let reason = null;
+    if (!allowedStatuses.includes(p.status)) {
+      reason = `accountStatus=${p.status}`;
+    } else if (p.lastLat == null || p.lastLng == null) {
+      reason = "missing_gps";
+    } else if (!p.lastLocationAt || Date.now() - new Date(p.lastLocationAt).getTime() > STALE_GPS_MS) {
+      reason = "stale_gps";
+    } else if (origin?.lat != null && origin?.lng != null) {
+      const d = haversineKm(origin.lat, origin.lng, p.lastLat, p.lastLng);
+      row.distanceKm = Number.isFinite(d) ? Number(d.toFixed(2)) : null;
+      row.radiusKm = maxKm;
+      if (!Number.isFinite(d) || d > maxKm) {
+        reason = `distance=${row.distanceKm ?? "n/a"}km > ${maxKm}km`;
+      }
+    }
+
+    if (!reason && !row.finalEligible) {
+      reason = "filtered_by_cash_limit_or_wallet";
+    }
+
+    if (reason) {
+      row.finalEligible = false;
+      logger.warn(`[DispatchAudit:${label}] Rider ${partnerId} REJECTED: ${reason}`, row);
+    } else {
+      logger.info(`[DispatchAudit:${label}] Rider ${partnerId} ELIGIBLE`, row);
+    }
+  }
+};
+
+const ACTIVE_OFFER_ACTIONS = new Set(["offered", "assigned"]);
+
+const getActiveOfferedPartnerIds = (offeredTo = []) =>
+  (Array.isArray(offeredTo) ? offeredTo : [])
+    .filter((entry) => ACTIVE_OFFER_ACTIONS.has(String(entry?.action || "offered")))
+    .map((entry) => String(entry?.partnerId || ""))
+    .filter(Boolean);
+
+const loadOnlinePartnersByIds = async (partnerIds = []) => {
+  const uniqueIds = [...new Set(partnerIds.map((id) => String(id)).filter(Boolean))];
+  if (!uniqueIds.length) return [];
+
+  const allowedStatuses =
+    process.env.NODE_ENV === "production" ? ["approved"] : ["approved", "pending"];
+  const rows = await FoodDeliveryPartner.find({
+    _id: { $in: uniqueIds },
+    availabilityStatus: "online",
+    status: { $in: allowedStatuses },
+  })
+    .select("_id status name lastLat lastLng lastLocationAt availabilityStatus")
+    .lean();
+
+  const raw = rows.map((p) => ({ partnerId: p._id, distanceKm: null, status: p.status }));
+  return filterEligiblePartners(raw);
+};
+
 const emitDispatchOffer = (io, roomName, payload, soundMeta = {}) => {
   if (!io || !roomName) return;
+  logDispatchRoomEmit(io, roomName, payload, "new_order,new_order_available");
   io.to(roomName).emit("new_order", payload);
   io.to(roomName).emit("new_order_available", payload);
   io.to(roomName).emit("play_notification_sound", {
@@ -336,6 +463,57 @@ const emitDispatchOffer = (io, roomName, payload, soundMeta = {}) => {
     tripType: payload.tripType,
     returnId: payload.returnId,
   });
+};
+
+const logDispatchRoomEmit = (io, roomName, payload, eventName) => {
+  const partnerId = String(roomName).replace(/^delivery:/, "");
+  const roomSize = io?.sockets?.adapter?.rooms?.get(roomName)?.size ?? 0;
+  logger.info(
+    `[DispatchSocket] emit partnerId=${partnerId} room=${roomName} roomSize=${roomSize} event=${eventName} documentType=${payload?.documentType} tripType=${payload?.tripType} orderId=${payload?.orderId || payload?.orderMongoId}`,
+  );
+};
+
+export const renotifyExistingReturnPickupOffers = async (returnDoc, { context = null } = {}) => {
+  const activeIds = getActiveOfferedPartnerIds(returnDoc?.dispatch?.offeredTo);
+  if (!activeIds.length) {
+    logger.warn(
+      `[ReturnDispatch] renotifyExistingReturnPickupOffers: no active offers on return ${returnDoc?._id}`,
+    );
+    return { notifiedCount: 0, socketEmitCount: 0, partnerPoolCount: 0, partnerIds: [] };
+  }
+
+  const partners = await loadOnlinePartnersByIds(activeIds);
+  if (!partners.length) {
+    logger.warn(
+      `[ReturnDispatch] renotifyExistingReturnPickupOffers: ${activeIds.length} active offer(s) but 0 online eligible partners`,
+    );
+    return { notifiedCount: 0, socketEmitCount: 0, partnerPoolCount: 0, partnerIds: activeIds };
+  }
+
+  const ctx = context || (await loadReturnPickupContext(returnDoc));
+  const payload = await buildReturnDeliverySocketPayload(returnDoc, ctx);
+  const io = getIO();
+  let socketEmitCount = 0;
+
+  for (const p of partners) {
+    const roomName = rooms.delivery(p.partnerId);
+    if (io) {
+      emitDispatchOffer(io, roomName, { ...payload, pickupDistanceKm: p.distanceKm });
+      socketEmitCount += 1;
+    }
+  }
+
+  logger.info(
+    `[ReturnDispatch] renotifyExistingReturnPickupOffers returnId=${returnDoc?._id} activeOffers=${activeIds.length} partnerPool=${partners.length} socketEmitCount=${socketEmitCount}`,
+  );
+
+  return {
+    notifiedCount: partners.length,
+    socketEmitCount,
+    partnerPoolCount: partners.length,
+    renotifiedCount: partners.length,
+    partnerIds: partners.map((p) => String(p.partnerId)),
+  };
 };
 
 async function runDispatchHunt({
@@ -359,7 +537,19 @@ async function runDispatchHunt({
 
   const isPhase2 = attempt >= 3;
   const isPhase3 = attempt >= 6;
-  const { partners, source } = await resolvePartners(maxKm);
+  let { partners, source } = await resolvePartners(maxKm);
+  const geoPartnerPoolCount = partners?.length || 0;
+
+  if (!partners?.length && offeredIds.length) {
+    partners = await loadOnlinePartnersByIds(offeredIds);
+    logger.info(
+      `[DispatchHunt] ${documentType} ${documentMongoId} geoPool=0 — hydrated ${partners.length} partner(s) from ${offeredIds.length} prior active offer(s)`,
+    );
+  }
+
+  logger.info(
+    `[DispatchHunt] ${documentType} ${documentMongoId} attempt=${attempt} geoPartnerPool=${geoPartnerPoolCount} partnerPool=${partners?.length || 0} maxKm=${maxKm} priorOfferedIds=${offeredIds.length}`,
+  );
 
   if (isPhase3) {
     logger.error(
@@ -379,23 +569,68 @@ async function runDispatchHunt({
   const eligible = partners.filter((p) => !offeredIds.includes(p.partnerId.toString()));
   const io = getIO();
   const payload = await buildPayload(source);
+  let socketEmitCount = 0;
 
   if (!eligible.length) {
     logger.info(
       `tryAutoAssign: No NEW eligible partners in ${maxKm}km for ${documentType} ${documentMongoId}.`,
     );
-    if (io && partners.length > 0) {
-      for (const p of partners) {
+
+    const newOffers = partners.filter((p) => !offeredIds.includes(p.partnerId.toString()));
+    const notifyTargets = newOffers.length ? newOffers : partners;
+
+    if (io && notifyTargets.length > 0) {
+      for (const p of notifyTargets) {
         emitDispatchOffer(io, rooms.delivery(p.partnerId), {
           ...payload,
           pickupDistanceKm: p.distanceKm,
         });
+        socketEmitCount += 1;
       }
     }
-    await addOrderJob(buildDispatchJobPayload(documentType, documentMongoId, attempt + 1), {
+
+    if (newOffers.length > 0) {
+      const offeredToEntries = newOffers.map((p) => ({
+        partnerId: p.partnerId,
+        at: new Date(),
+        action: "offered",
+      }));
+      await persistOffers(offeredToEntries);
+    }
+
+    const retryJob = await addOrderJob(buildDispatchJobPayload(documentType, documentMongoId, attempt + 1), {
       delay: 30000,
     });
-    return { notifiedCount: 0, payload };
+    if (!retryJob) {
+      logger.warn(
+        `[Dispatch] BullMQ unavailable — DISPATCH_TIMEOUT_CHECK not scheduled for ${documentType} ${documentMongoId}. Configure Redis/BullMQ worker for automatic retries.`,
+      );
+    }
+
+    const dispatchAudit = {
+      reason:
+        partners.length === 0
+          ? "no_online_riders"
+          : newOffers.length === 0
+            ? "all_nearby_riders_already_offered"
+            : "reoffered_existing_pool",
+      eligibleCount: 0,
+      partnerPoolCount: partners.length,
+      geoPartnerPoolCount,
+      notifiedCount: notifyTargets.length,
+      renotifiedCount: newOffers.length === 0 ? notifyTargets.length : 0,
+      persistedOfferCount: newOffers.length,
+      socketEmitCount,
+      maxKm,
+      attempt,
+      bullmqRetryScheduled: Boolean(retryJob),
+    };
+
+    logger.info(
+      `[DispatchHunt:summary] ${documentType} ${documentMongoId} eligiblePartners=0 partnerPool=${partners.length} persistedOffers=${newOffers.length} socketEmitCount=${socketEmitCount} notifiedCount=${notifyTargets.length} reason=${dispatchAudit.reason}`,
+    );
+
+    return { notifiedCount: notifyTargets.length, payload, dispatchAudit };
   }
 
   if (isPhase2) {
@@ -404,6 +639,7 @@ async function runDispatchHunt({
         ...payload,
         pickupDistanceKm: p.distanceKm,
       });
+      socketEmitCount += 1;
     }
   } else {
     const p = eligible[0];
@@ -411,6 +647,7 @@ async function runDispatchHunt({
       ...payload,
       pickupDistanceKm: p.distanceKm,
     });
+    socketEmitCount += 1;
     try {
       await notifyOwnerSafely(
         { ownerType: "DELIVERY_PARTNER", ownerId: p.partnerId },
@@ -437,11 +674,33 @@ async function runDispatchHunt({
   }));
   await persistOffers(offeredToEntries);
 
-  await addOrderJob(buildDispatchJobPayload(documentType, documentMongoId, attempt + 1), {
+  const retryJob = await addOrderJob(buildDispatchJobPayload(documentType, documentMongoId, attempt + 1), {
     delay: 60000,
   });
+  if (!retryJob) {
+    logger.warn(
+      `[Dispatch] BullMQ unavailable — DISPATCH_TIMEOUT_CHECK not scheduled for ${documentType} ${documentMongoId}. Configure Redis/BullMQ worker for automatic retries.`,
+    );
+  }
 
-  return { notifiedCount: eligible.length, payload };
+  const dispatchAudit = {
+    reason: "offers_persisted",
+    eligibleCount: eligible.length,
+    partnerPoolCount: partners.length,
+    geoPartnerPoolCount,
+    notifiedCount: isPhase2 ? eligible.length : 1,
+    persistedOfferCount: eligible.length,
+    socketEmitCount,
+    maxKm,
+    attempt,
+    bullmqRetryScheduled: Boolean(retryJob),
+  };
+
+  logger.info(
+    `[DispatchHunt:summary] ${documentType} ${documentMongoId} eligiblePartners=${eligible.length} partnerPool=${partners.length} persistedOffers=${eligible.length} socketEmitCount=${socketEmitCount} notifiedCount=${dispatchAudit.notifiedCount} reason=${dispatchAudit.reason}`,
+  );
+
+  return { notifiedCount: dispatchAudit.notifiedCount, payload, dispatchAudit };
 }
 
 async function tryAutoAssignForwardOrder(orderId, options = {}) {
@@ -509,19 +768,13 @@ async function tryAutoAssignForwardOrder(orderId, options = {}) {
 async function tryAutoAssignSellerReturn(returnId, options = {}) {
   const attempt = options.attempt || 1;
   const lockTimeout = 55000;
+  const returnObjectId = new mongoose.Types.ObjectId(returnId);
 
   const returnDoc = await SellerReturn.findOneAndUpdate(
     {
-      _id: new mongoose.Types.ObjectId(returnId),
+      _id: returnObjectId,
       returnStatus: { $in: ["return_approved", "return_pickup_assigned"] },
-      $or: [
-        { "dispatch.status": "unassigned" },
-        {
-          "dispatch.status": "assigned",
-          "dispatch.acceptedAt": { $exists: false },
-          "dispatch.assignedAt": { $lt: new Date(Date.now() - lockTimeout) },
-        },
-      ],
+      ...dispatchRetryableStatusClause,
       "dispatch.dispatchingAt": { $exists: false },
     },
     { $set: { "dispatch.dispatchingAt": new Date() } },
@@ -529,7 +782,28 @@ async function tryAutoAssignSellerReturn(returnId, options = {}) {
   );
 
   if (!returnDoc) {
-    logger.info(`tryAutoAssign seller_return: Skip for ${returnId}`);
+    const staleLockCleared = await SellerReturn.findOneAndUpdate(
+      {
+        _id: returnObjectId,
+        returnStatus: { $in: ["return_approved", "return_pickup_assigned"] },
+        "dispatch.dispatchingAt": { $lt: new Date(Date.now() - lockTimeout) },
+      },
+      { $unset: { "dispatch.dispatchingAt": "" } },
+      { new: true },
+    );
+
+    if (staleLockCleared && !options._retriedStaleLock) {
+      logger.warn(`tryAutoAssign seller_return: Released stale dispatch lock for ${returnId}`);
+      return tryAutoAssignSellerReturn(returnId, { ...options, _retriedStaleLock: true });
+    }
+
+    logger.warn(`tryAutoAssign seller_return: Skip for ${returnId} (lock active or dispatch not retryable)`);
+    const snapshot = await SellerReturn.findById(returnObjectId)
+      .select("returnStatus dispatch")
+      .lean();
+    if (snapshot) {
+      logger.warn(`[DispatchAudit:seller_return_skip] returnStatus=${snapshot.returnStatus} dispatchStatus=${snapshot.dispatch?.status} acceptedAt=${snapshot.dispatch?.acceptedAt} dispatchingAt=${snapshot.dispatch?.dispatchingAt} offeredTo=${snapshot.dispatch?.offeredTo?.length || 0}`);
+    }
     return null;
   }
 
@@ -541,7 +815,7 @@ async function tryAutoAssignSellerReturn(returnId, options = {}) {
     }
     await returnDoc.save();
 
-    const offeredIds = (returnDoc.dispatch?.offeredTo || []).map((o) => o.partnerId.toString());
+    const offeredIds = getActiveOfferedPartnerIds(returnDoc.dispatch?.offeredTo);
 
     const result = await runDispatchHunt({
       documentType: DISPATCH_DOCUMENT_TYPES.SELLER_RETURN,
@@ -551,29 +825,64 @@ async function tryAutoAssignSellerReturn(returnId, options = {}) {
       alertLabel: "Return pickup",
       buildPayload: async () => buildReturnDeliverySocketPayload(returnDoc, context),
       resolvePartners: (maxKm) => {
+        const auditLabel = `seller_return:${returnDoc._id}`;
         if (context.customerCoords) {
           return listNearbyOnlineDeliveryPartnersByCoords(context.customerCoords, {
             maxKm,
             limit: 15,
+            auditLabel,
           });
         }
         return listNearbyOnlineDeliveryPartners(returnDoc.sellerId, {
           maxKm,
           limit: 15,
           sourceType: "quick",
+          auditLabel,
         });
       },
       persistOffers: async (offeredToEntries) => {
         const fresh = await SellerReturn.findById(returnDoc._id);
         if (!fresh) return;
-        fresh.dispatch.status = "unassigned";
-        fresh.dispatch.deliveryPartnerId = null;
+        if (!Array.isArray(fresh.dispatch?.offeredTo)) {
+          fresh.dispatch.offeredTo = [];
+        }
+        if (offeredToEntries.length > 0) {
+          fresh.dispatch.status = "assigned";
+          fresh.dispatch.assignedAt = fresh.dispatch.assignedAt || new Date();
+        }
         fresh.dispatch.offeredTo.push(...offeredToEntries);
+        fresh.markModified("dispatch");
         await fresh.save();
+        logger.info(
+          `[ReturnDispatch] persistOffers returnId=${fresh._id} status=${fresh.dispatch.status} offeredTo=${fresh.dispatch.offeredTo.length} newOffers=${offeredToEntries.length}`,
+        );
       },
     });
 
-    return { ...returnDoc.toObject(), notifiedCount: result.notifiedCount };
+    const onlineCount = await FoodDeliveryPartner.countDocuments({
+      availabilityStatus: "online",
+      status: {
+        $in: process.env.NODE_ENV === "production" ? ["approved"] : ["approved", "pending"],
+      },
+    });
+
+    const dispatchAudit = {
+      ...(result.dispatchAudit || {}),
+      onlineCount,
+      filteredCount: result.dispatchAudit?.partnerPoolCount ?? 0,
+    };
+
+    const freshAfterHunt = await SellerReturn.findById(returnDoc._id).select("dispatch.offeredTo").lean();
+    const offeredToAfter = Array.isArray(freshAfterHunt?.dispatch?.offeredTo)
+      ? freshAfterHunt.dispatch.offeredTo.length
+      : 0;
+
+    return {
+      ...returnDoc.toObject(),
+      notifiedCount: result.notifiedCount,
+      dispatchAudit,
+      offeredToCount: offeredToAfter,
+    };
   } finally {
     await SellerReturn.findByIdAndUpdate(returnId, { $unset: { "dispatch.dispatchingAt": "" } });
   }

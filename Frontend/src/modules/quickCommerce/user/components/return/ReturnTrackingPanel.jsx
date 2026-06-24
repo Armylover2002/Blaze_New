@@ -6,7 +6,7 @@ import { motion } from "framer-motion";
 import ReturnProgressTracker from "./ReturnProgressTracker";
 import ReturnPickupOtpDisplay from "./ReturnPickupOtpDisplay";
 import { customerApi } from "../../services/customerApi";
-import { mapReturnStatusLabel, RETURN_STATUS } from "@/shared/utils/returnStatus";
+import { mapReturnStatusLabel, RETURN_STATUS, formatRefundStatusLabel } from "@/shared/utils/returnStatus";
 import { Truck } from "lucide-react";
 
 const ACTIVE_RETURN_STATUSES = new Set([
@@ -35,7 +35,7 @@ const ReturnTrackingPanel = ({ orderId, order, onRefresh }) => {
     else setRefreshing(true);
     try {
       const res = await customerApi.getReturnStatus(orderId, { forceRefresh: true });
-      const payload = res?.data?.result || res?.data?.data || {};
+      const payload = res?.data?.data || res?.data?.result || {};
       const items = Array.isArray(payload?.returns) ? payload.returns : [];
       setReturns(items);
       onRefresh?.(items, payload);
@@ -164,9 +164,12 @@ const ReturnTrackingPanel = ({ orderId, order, onRefresh }) => {
                     <p className="text-xs text-amber-700 mt-1">
                       Your return pickup rider is en route. Share the pickup OTP when they arrive.
                     </p>
-                    {ret.dispatch?.deliveryPartnerId && (
+                    {ret.dispatch?.acceptedAt ||
+                    ['assigned', 'accepted', 'completed'].includes(
+                      String(ret.dispatch?.status || '').toLowerCase(),
+                    ) ? (
                       <p className="text-xs text-amber-800 font-semibold mt-2">Rider assigned</p>
-                    )}
+                    ) : null}
                   </div>
                 </div>
               )}
@@ -182,7 +185,10 @@ const ReturnTrackingPanel = ({ orderId, order, onRefresh }) => {
                 </p>
                 {ret.refundStatus && ret.refundStatus !== "none" && (
                   <p>
-                    Refund status: <span className="font-bold capitalize">{ret.refundStatus}</span>
+                    Refund status:{" "}
+                    <span className="font-bold">
+                      {ret.refundStatusLabel || formatRefundStatusLabel(ret.refundStatus)}
+                    </span>
                   </p>
                 )}
               </div>

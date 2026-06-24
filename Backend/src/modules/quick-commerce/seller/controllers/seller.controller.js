@@ -21,7 +21,7 @@ import { SellerProduct } from "../models/sellerProduct.model.js";
 import { QuickCategory } from "../../models/category.model.js";
 import { SellerReturn } from "../models/sellerReturn.model.js";
 import { recordSellerReturnDecision, requestSellerReturnPickup } from "../../services/quickReturn.service.js";
-import { serializeReturnForSeller } from "../../utils/return.helpers.js";
+import { serializeReturnForSeller, mergeSellerReturnOrderContext } from "../../utils/return.helpers.js";
 import { getSellerWithdrawableBalance } from "../../services/sellerLedger.service.js";
 import { SellerStockAdjustment } from "../models/sellerStockAdjustment.model.js";
 import { SellerTransaction } from "../models/sellerTransaction.model.js";
@@ -2362,15 +2362,71 @@ export const resendSellerOrderDispatchController = async (req, res) => {
   }
 };
 
+const enrichSellerReturnsWithOrderContext = async (returnDocs = [], sellerId) => {
+  if (!returnDocs.length) return [];
+
+  const orderIds = [...new Set(returnDocs.map((doc) => doc.orderId).filter(Boolean))];
+  const partnerIds = [
+    ...new Set(
+      returnDocs
+        .map((doc) => doc.dispatch?.deliveryPartnerId)
+        .filter((id) => id && mongoose.isValidObjectId(String(id))),
+    ),
+  ];
+
+  const [sellerOrders, parentOrders, deliveryPartners] = await Promise.all([
+    SellerOrder.find({ sellerId, orderId: { $in: orderIds } })
+      .select("orderId address customer")
+      .lean(),
+    QuickOrder.find({ orderId: { $in: orderIds } })
+      .select("orderId deliveryAddress")
+      .lean(),
+    partnerIds.length
+      ? FoodDeliveryPartner.find({ _id: { $in: partnerIds } })
+          .select("name phone")
+          .lean()
+      : Promise.resolve([]),
+  ]);
+
+  const sellerOrderMap = new Map(sellerOrders.map((row) => [row.orderId, row]));
+  const parentOrderMap = new Map(parentOrders.map((row) => [row.orderId, row]));
+  const partnerMap = new Map(deliveryPartners.map((row) => [String(row._id), row]));
+
+  return returnDocs.map((doc) => {
+    const serialized = serializeReturnForSeller(doc);
+    const sellerOrder = sellerOrderMap.get(doc.orderId);
+    const parentOrder = parentOrderMap.get(doc.orderId);
+    const partner = partnerMap.get(String(doc.dispatch?.deliveryPartnerId || ""));
+
+    return {
+      ...mergeSellerReturnOrderContext(serialized, {
+        sellerOrder,
+        deliveryAddress: parentOrder?.deliveryAddress,
+      }),
+      deliveryPartner: partner
+        ? {
+            id: String(partner._id),
+            name: partner.name || "Delivery Partner",
+            phone: partner.phone || "",
+          }
+        : null,
+    };
+  });
+};
+
 export const getSellerReturnsController = async (req, res) => {
   try {
-    const items = await SellerReturn.find({ sellerId: sellerScope(req) })
+    const sellerId = sellerScope(req);
+    const items = await SellerReturn.find({ sellerId })
+      .select('+sellerOtp')
       .sort({ returnRequestedAt: -1 })
       .lean();
 
+    const enriched = await enrichSellerReturnsWithOrderContext(items, sellerId);
+
     return res.json({
       success: true,
-      result: { items: items.map(serializeReturnForSeller) },
+      result: { items: enriched },
     });
   } catch (error) {
     return sendError(res, 500, error.message || "Failed to load returns");
@@ -2380,7 +2436,7 @@ export const getSellerReturnsController = async (req, res) => {
 export const approveSellerReturnController = async (req, res) => {
   try {
     const sellerId = sellerScope(req);
-    const returnDoc = await recordSellerReturnDecision({
+    const { returnDoc, pickupDispatch } = await recordSellerReturnDecision({
       sellerId,
       orderId: req.params.orderId,
       decision: "approve",
@@ -2397,7 +2453,28 @@ export const approveSellerReturnController = async (req, res) => {
       .select("+sellerOtp")
       .lean();
 
-    return res.json({ success: true, result: serializeReturnForSeller(populated) });
+    const [enriched] = await enrichSellerReturnsWithOrderContext([populated], sellerId);
+
+    if (pickupDispatch && pickupDispatch.success === false) {
+      return res.status(422).json({
+        success: false,
+        message:
+          pickupDispatch.message ||
+          'Return approved but pickup dispatch failed — no nearby delivery partner found',
+        result: {
+          ...enriched,
+          pickupDispatch,
+        },
+      });
+    }
+
+    return res.json({
+      success: true,
+      result: {
+        ...enriched,
+        pickupDispatch,
+      },
+    });
   } catch (error) {
     const status = error?.statusCode || 500;
     return sendError(res, status, error.message || "Failed to approve return");
@@ -2407,7 +2484,7 @@ export const approveSellerReturnController = async (req, res) => {
 export const rejectSellerReturnController = async (req, res) => {
   try {
     const sellerId = sellerScope(req);
-    const returnDoc = await recordSellerReturnDecision({
+    const { returnDoc } = await recordSellerReturnDecision({
       sellerId,
       orderId: req.params.orderId,
       decision: "reject",
@@ -2420,10 +2497,11 @@ export const rejectSellerReturnController = async (req, res) => {
       return sendError(res, 404, "Return request not found");
     }
 
-    return res.json({
-      success: true,
-      result: serializeReturnForSeller(returnDoc.toObject()),
-    });
+    const [enriched] = await enrichSellerReturnsWithOrderContext(
+      [returnDoc.toObject()],
+      sellerId,
+    );
+    return res.json({ success: true, result: enriched });
   } catch (error) {
     const status = error?.statusCode || 500;
     return sendError(res, status, error.message || "Failed to reject return");
@@ -2445,7 +2523,12 @@ export const requestSellerReturnPickupController = async (req, res) => {
     });
   } catch (error) {
     const status = error?.statusCode || 500;
-    return sendError(res, status, error.message || "Failed to request return pickup");
+    return res.status(status).json({
+      success: false,
+      message: error.message || 'Failed to request return pickup',
+      ...(error?.dispatchAudit ? { dispatchAudit: error.dispatchAudit } : {}),
+      ...(error?.pickupDispatch ? { pickupDispatch: error.pickupDispatch } : {}),
+    });
   }
 };
 

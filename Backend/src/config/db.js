@@ -3,23 +3,40 @@ import dns from 'dns';
 import { config } from './env.js';
 import { logger } from '../utils/logger.js';
 
+// Apply public DNS before any MongoDB SRV lookup (including pool reconnects).
+try {
+    dns.setServers(['8.8.8.8', '1.1.1.1']);
+} catch (dnsErr) {
+    logger.warn(`Failed to set DNS servers: ${dnsErr.message}`);
+}
+
+const MONGO_CONNECT_OPTIONS = {
+    family: 4,
+    serverSelectionTimeoutMS: 15000,
+    connectTimeoutMS: 15000,
+    heartbeatFrequencyMS: 10000,
+    maxPoolSize: 15,
+    minPoolSize: 2,
+    autoIndex: false,
+    readPreference: 'primary',
+    retryWrites: true,
+    retryReads: true,
+};
+
+/** Reuse the single mongoose connection — never create a parallel MongoClient here. */
+export const assertMongoConnected = () => {
+    const state = mongoose.connection.readyState;
+    if (state !== 1) {
+        const error = new Error(`MongoDB not connected (readyState=${state})`);
+        error.code = 'MONGO_NOT_CONNECTED';
+        throw error;
+    }
+    return mongoose.connection;
+};
+
 export const connectDB = async () => {
     try {
-        // Set DNS servers to public DNS (Google & Cloudflare) to avoid local DNS/SRV resolution failures
-        try {
-            dns.setServers(['8.8.8.8', '1.1.1.1']);
-        } catch (dnsErr) {
-            logger.warn(`Failed to set DNS servers: ${dnsErr.message}`);
-        }
-
-        const conn = await mongoose.connect(config.mongodbUri, {
-            family: 4,                    // Force IPv4
-            serverSelectionTimeoutMS: 15000,
-            connectTimeoutMS: 15000,
-            maxPoolSize: 15,              // Limit active connections (default 100 is too heavy for Render free tier)
-            minPoolSize: 2,               // Keep minimum connections alive to avoid cold-start latency
-            autoIndex: false              // 🚀 CRITICAL PERF: Prevent Mongoose from building indexes on every boot
-        });
+        const conn = await mongoose.connect(config.mongodbUri, MONGO_CONNECT_OPTIONS);
         logger.info(`MongoDB connected: ${conn.connection.host}`);
 
         // Programmatically inspect and drop legacy non-sparse index to prevent duplicate null key errors

@@ -3,13 +3,54 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { 
   ChefHat, MapPin, Phone, 
   ChevronDown, ChevronUp, Package, 
-  Navigation, CheckCircle2, Camera, Loader2, Image as ImageIcon
+  Navigation, CheckCircle2, Camera, Loader2, Image as ImageIcon,
+  RotateCcw, UserRound
 } from 'lucide-react';
 import { ActionSlider } from '@/modules/DeliveryV2/components/ui/ActionSlider';
 import { uploadAPI } from '@food/api';
 import { toast } from 'sonner';
 import { openCamera } from "@food/utils/imageUploadUtils";
-import { isMixedOrder, isReturnPickupTrip, normalizePickupPoints } from '@/modules/DeliveryV2/utils/orderRouting';
+import { isMixedOrder, isReturnPickupTrip, normalizePickupPoints, getReturnPickupStopLabels } from '@/modules/DeliveryV2/utils/orderRouting';
+
+const RETURN_OTP_LENGTH = 4;
+
+const ReturnCustomerOtpInput = ({ otp, onChange }) => {
+  const inputRefs = useRef([]);
+
+  const handleOtpChange = (index, value) => {
+    if (value && !/^\d+$/.test(value)) return;
+    const next = [...otp];
+    next[index] = value.substring(value.length - 1);
+    onChange(next);
+    if (value && index < RETURN_OTP_LENGTH - 1) {
+      inputRefs.current[index + 1]?.focus();
+    }
+  };
+
+  const handleKeyDown = (index, event) => {
+    if (event.key === 'Backspace' && !otp[index] && index > 0) {
+      inputRefs.current[index - 1]?.focus();
+    }
+  };
+
+  return (
+    <div className="flex justify-center gap-2.5">
+      {otp.map((digit, index) => (
+        <input
+          key={index}
+          ref={(el) => { inputRefs.current[index] = el; }}
+          type="text"
+          inputMode="numeric"
+          maxLength={1}
+          value={digit}
+          onChange={(e) => handleOtpChange(index, e.target.value)}
+          onKeyDown={(e) => handleKeyDown(index, e)}
+          className="w-11 h-12 rounded-xl border-2 border-red-200 bg-white text-center text-xl font-black text-gray-900 focus:border-red-500 outline-none shadow-sm"
+        />
+      ))}
+    </div>
+  );
+};
 
 /**
  * PickupActionModal - Unified White/Green Theme with Slider Actions.
@@ -29,12 +70,15 @@ export const PickupActionModal = ({
   const [isUploadingBill, setIsUploadingBill] = useState(false);
   const [billImageUploaded, setBillImageUploaded] = useState(false);
   const [billImageUrl, setBillImageUrl] = useState(null);
-  const [customerOtp, setCustomerOtp] = useState('');
+  const [customerOtpDigits, setCustomerOtpDigits] = useState(['', '', '', '']);
   const cameraInputRef = useRef(null);
+
+  const customerOtp = customerOtpDigits.join('');
 
   if (!order) return null;
 
   const isReturnPickup = isReturnPickupTrip(order);
+  const returnLabels = getReturnPickupStopLabels();
 
   const handleBillImageSelect = async (file) => {
     if (!file) return;
@@ -113,40 +157,57 @@ export const PickupActionModal = ({
   const primaryPhone = primaryStop?.phone || restaurantPhone;
   const primaryDestinationLabel = isReturnPickup ? 'Customer' : primaryPickupType === 'quick' ? 'Store' : 'Restaurant';
   const canConfirmPickup = isReturnPickup
-    ? billImageUploaded && String(customerOtp || '').trim().length >= 4
+    ? billImageUploaded && customerOtp.length >= RETURN_OTP_LENGTH
     : billImageUploaded;
 
+  const returnPickupLockedLabel = !billImageUploaded && customerOtp.length < RETURN_OTP_LENGTH
+    ? 'Upload photo & enter OTP'
+    : !billImageUploaded
+      ? 'Upload return item photo'
+      : 'Enter customer OTP';
+
+  const compactReturnReached = isReturnPickup && isAtPickup;
+  const showPickupStops = !compactReturnReached;
+
   return (
-    <div className="absolute inset-x-0 bottom-0 z-[110] p-0 sm:p-2 sm:mb-2 flex items-end justify-center">
+    <div className="absolute inset-x-0 bottom-0 z-[110] p-0 sm:p-2 sm:mb-2 flex items-end justify-center max-h-full">
       {/* Background Dim */}
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
-        className="absolute inset-0 bg-black/40 -z-10"
+        className="fixed inset-x-0 top-0 bottom-0 bg-black/40 -z-10"
       />
 
       <motion.div 
         initial={{ y: '100%' }}
         animate={{ y: 0 }}
-        className="w-full max-w-lg bg-white rounded-t-[2rem] shadow-[0_-15px_40px_rgba(0,0,0,0.2)] p-4 pb-8"
+        className={`w-full max-w-lg bg-white shadow-[0_-15px_40px_rgba(0,0,0,0.2)] overflow-y-auto overscroll-y-contain ${
+          compactReturnReached
+            ? 'rounded-t-[1.25rem] p-3 pb-4 max-h-[min(72vh,560px)]'
+            : 'rounded-t-[2rem] p-4 pb-8 max-h-[min(82vh,680px)]'
+        }`}
       >
         {/* Handle / Minimize */}
-        <div className="w-full flex justify-center pb-4 pt-1">
+        <div className={`w-full flex justify-center ${compactReturnReached ? 'pb-2 pt-0' : 'pb-4 pt-1'}`}>
           <button onClick={onMinimize} className="p-1 hover:bg-gray-100 active:scale-95 transition-all rounded-full flex flex-col items-center">
-             <ChevronDown className="w-6 h-6 text-gray-400 stroke-[3]" />
+             <ChevronDown className="w-5 h-5 text-gray-400 stroke-[3]" />
           </button>
         </div>
 
         {/* Restaurant Header */}
-        <div className="flex items-start justify-between mb-4 pb-3 border-b border-gray-50">
-          <div className="flex gap-4">
-            <div className="w-14 h-14 bg-white rounded-2xl flex items-center justify-center shadow-lg shadow-black/5 overflow-hidden border border-gray-100">
-              <img src={restaurantLogo} alt="Logo" className="w-full h-full object-cover" />
-            </div>
-            <div>
-              <h3 className="text-gray-950 text-xl font-bold">{primaryName}</h3>
+        <div className={`flex items-start justify-between border-b border-gray-50 ${
+          compactReturnReached ? 'mb-3 pb-2' : 'mb-4 pb-3'
+        }`}>
+          <div className="flex gap-3 min-w-0 flex-1">
+            {!compactReturnReached && (
+              <div className="w-14 h-14 bg-white rounded-2xl flex items-center justify-center shadow-lg shadow-black/5 overflow-hidden border border-gray-100 shrink-0">
+                <img src={restaurantLogo} alt="Logo" className="w-full h-full object-cover" />
+              </div>
+            )}
+            <div className="min-w-0">
+              <h3 className={`text-gray-950 font-bold truncate ${compactReturnReached ? 'text-lg' : 'text-xl'}`}>{primaryName}</h3>
               {isReturnPickup && (
-                <div className="mt-2 inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-amber-700">
+                <div className="mt-1 inline-flex items-center rounded-full border border-red-200 bg-red-50 px-2.5 py-0.5 text-[9px] font-bold uppercase tracking-widest text-red-700">
                   Return Pickup
                 </div>
               )}
@@ -167,31 +228,44 @@ export const PickupActionModal = ({
             </div>
           </div>
 
-          <div className="flex gap-2">
+          <div className="flex gap-2 shrink-0">
             {primaryPhone && (
               <button
                 onClick={() => window.location.href = `tel:${primaryPhone}`}
-                className="w-10 h-10 rounded-full bg-green-50 flex items-center justify-center text-green-600 border border-green-100"
+                className={`w-9 h-9 rounded-full flex items-center justify-center border ${
+                  isReturnPickup
+                    ? 'bg-red-50 text-red-600 border-red-100'
+                    : 'bg-green-50 text-green-600 border-green-100'
+                }`}
               >
-                <Phone className="w-5 h-5" />
+                <Phone className="w-4 h-4" />
               </button>
             )}
             <button 
               onClick={() => window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(primaryAddress)}`, '_blank')}
-              className="w-10 h-10 rounded-full bg-gray-900 flex items-center justify-center text-white shadow-lg"
+              className={`w-9 h-9 rounded-full flex items-center justify-center text-white shadow-lg ${
+                isReturnPickup ? 'bg-red-600' : 'bg-gray-900'
+              }`}
             >
-              <Navigation className="w-5 h-5" />
+              <Navigation className="w-4 h-4" />
             </button>
           </div>
         </div>
 
+        {showPickupStops && (
         <div className="mb-4 space-y-2">
           {pickupStops.map((pickup, index) => {
             const isQuickStore = pickup.pickupType === 'quick';
-            const label = isQuickStore ? 'Store Pickup' : 'Restaurant Pickup';
-            const accentClasses = isQuickStore
-              ? 'text-red-600 bg-red-50 border-red-100'
-              : 'text-green-600 bg-green-50 border-green-100';
+            const label = isReturnPickup
+              ? returnLabels.pickupLabel
+              : isQuickStore
+                ? 'Store Pickup'
+                : 'Restaurant Pickup';
+            const accentClasses = isReturnPickup
+              ? 'text-red-700 bg-red-50 border-red-200'
+              : isQuickStore
+                ? 'text-red-600 bg-red-50 border-red-100'
+                : 'text-green-600 bg-green-50 border-green-100';
 
             return (
               <div
@@ -202,15 +276,19 @@ export const PickupActionModal = ({
                   <MapPin className="w-3.5 h-3.5" />
                   <span>{pickupStops.length > 1 ? `${label} ${index + 1}` : label}</span>
                 </div>
-                <p className="mt-3 text-base font-bold text-gray-950">{pickup.sourceName || (isQuickStore ? 'Seller store' : 'Restaurant')}</p>
-                <p className="mt-1 text-sm font-medium leading-relaxed text-gray-500">{pickup.address || 'Address not available'}</p>
+                <p className="mt-3 text-base font-bold text-gray-950">{pickup.sourceName || primaryName}</p>
+                {(pickup.phone || primaryPhone) ? (
+                  <p className="mt-1 text-sm font-semibold text-gray-700">{pickup.phone || primaryPhone}</p>
+                ) : null}
+                <p className="mt-1 text-sm font-medium leading-relaxed text-gray-500">{pickup.address || primaryAddress || 'Address not available'}</p>
               </div>
             );
           })}
         </div>
+        )}
 
         {/* Action Sliders */}
-        <div className="space-y-4">
+        <div className={compactReturnReached ? 'space-y-3' : 'space-y-4'}>
           {!isAtPickup ? (
             <div>
               <p className={`text-center text-[10px] font-bold uppercase tracking-widest mb-3 transition-colors ${
@@ -221,6 +299,7 @@ export const PickupActionModal = ({
               <ActionSlider 
                 key="action-reach"
                 label="Slide to Reach" 
+                lockedLabel={isReturnPickup ? 'Get closer to customer' : 'Get closer to pickup point'}
                 successLabel="Reached!"
                 disabled={!isWithinRange}
                 onConfirm={onReachedPickup}
@@ -228,75 +307,131 @@ export const PickupActionModal = ({
               />
             </div>
           ) : (
-            <div className="space-y-4">
-              {isReturnPickup && (
-                <div className="rounded-2xl border border-amber-100 bg-amber-50/70 p-4">
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-amber-700 mb-2">
-                    Customer OTP
-                  </p>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    maxLength={6}
-                    value={customerOtp}
-                    onChange={(e) => setCustomerOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                    placeholder="Enter customer OTP"
-                    className="w-full rounded-xl border border-amber-200 bg-white px-4 py-3 text-lg font-black tracking-[0.3em] text-center text-gray-900"
+            <div className="space-y-3">
+              {isReturnPickup ? (
+                <div className="rounded-xl border border-red-200 bg-red-50/60 p-3 space-y-3">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-xl bg-red-600 text-white flex items-center justify-center shrink-0">
+                      <RotateCcw className="w-4 h-4" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-[9px] font-bold uppercase tracking-widest text-red-600">
+                        Return Pickup Verification
+                      </p>
+                      <p className="text-xs font-semibold text-gray-700 leading-snug">
+                        Ask customer for 4-digit handover code
+                      </p>
+                    </div>
+                  </div>
+
+                  <ReturnCustomerOtpInput
+                    otp={customerOtpDigits}
+                    onChange={setCustomerOtpDigits}
                   />
+
+                  <div className="flex items-center justify-center gap-3 text-[9px] font-bold uppercase tracking-widest">
+                    <span className={billImageUploaded ? 'text-green-600' : 'text-gray-400'}>
+                      {billImageUploaded ? '✓' : '○'} Photo
+                    </span>
+                    <span className={customerOtp.length >= RETURN_OTP_LENGTH ? 'text-green-600' : 'text-gray-400'}>
+                      {customerOtp.length >= RETURN_OTP_LENGTH ? '✓' : '○'} OTP
+                    </span>
+                  </div>
+
+                  <div className="flex justify-center items-center gap-2 w-full">
+                    {!billImageUploaded && !isUploadingBill && (
+                      <>
+                        <button
+                          onClick={handleTakeCameraPhoto}
+                          className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-red-600 text-white font-bold text-[10px] uppercase tracking-widest active:scale-95 transition-all"
+                        >
+                          <Camera className="w-4 h-4" />
+                          <span>Camera</span>
+                        </button>
+                        <button
+                          onClick={handlePickFromGallery}
+                          className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-white text-red-600 border border-red-200 font-bold text-[10px] uppercase tracking-widest active:scale-95 transition-all"
+                        >
+                          <ImageIcon className="w-4 h-4" />
+                          <span>Gallery</span>
+                        </button>
+                      </>
+                    )}
+                    {isUploadingBill && (
+                      <div className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-gray-50 text-gray-400 font-bold text-[10px] uppercase tracking-widest">
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span>Uploading...</span>
+                      </div>
+                    )}
+                    {billImageUploaded && (
+                      <div className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-green-100 text-green-700 font-bold text-[10px] uppercase tracking-widest">
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        <span>Photo Uploaded</span>
+                      </div>
+                    )}
+                    <input
+                      ref={cameraInputRef}
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => handleBillImageSelect(e.target.files[0])}
+                      className="hidden"
+                    />
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div className="flex justify-center items-center gap-3 w-full">
+                    {!billImageUploaded && !isUploadingBill && (
+                      <>
+                        <button
+                          onClick={handleTakeCameraPhoto}
+                          className="flex-1 flex items-center justify-center gap-2 py-4 rounded-2xl bg-gray-900 text-white font-bold text-xs uppercase tracking-widest shadow-lg active:scale-95 transition-all"
+                        >
+                          <Camera className="w-5 h-5" />
+                          <span>Camera</span>
+                        </button>
+                        <button
+                          onClick={handlePickFromGallery}
+                          className="flex-1 flex items-center justify-center gap-2 py-4 rounded-2xl bg-red-50 text-red-600 border border-red-100 font-bold text-xs uppercase tracking-widest active:scale-95 transition-all"
+                        >
+                          <ImageIcon className="w-5 h-5" />
+                          <span>Gallery</span>
+                        </button>
+                      </>
+                    )}
+                    {isUploadingBill && (
+                      <div className="w-full flex items-center justify-center gap-2 py-4 rounded-2xl bg-gray-50 text-gray-400 font-bold text-xs uppercase tracking-widest">
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Uploading...</span>
+                      </div>
+                    )}
+                    {billImageUploaded && (
+                      <div className="w-full flex items-center justify-center gap-2 py-4 rounded-2xl bg-green-100 text-green-700 font-bold text-xs uppercase tracking-widest">
+                        <CheckCircle2 className="w-4 h-4" />
+                        <span>Bill Uploaded</span>
+                      </div>
+                    )}
+                    <input
+                      ref={cameraInputRef}
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => handleBillImageSelect(e.target.files[0])}
+                      className="hidden"
+                    />
+                  </div>
                 </div>
               )}
-              <div className="flex justify-center items-center gap-3 w-full">
-                 {!billImageUploaded && !isUploadingBill && (
-                   <>
-                      <button
-                        onClick={handleTakeCameraPhoto}
-                        className="flex-1 flex items-center justify-center gap-2 py-4 rounded-2xl bg-gray-900 text-white font-bold text-xs uppercase tracking-widest shadow-lg active:scale-95 transition-all"
-                      >
-                        <Camera className="w-5 h-5" />
-                        <span>Camera</span>
-                      </button>
-                      <button
-                        onClick={handlePickFromGallery}
-                        className="flex-1 flex items-center justify-center gap-2 py-4 rounded-2xl bg-red-50 text-red-600 border border-red-100 font-bold text-xs uppercase tracking-widest active:scale-95 transition-all"
-                      >
-                        <ImageIcon className="w-5 h-5" />
-                        <span>Gallery</span>
-                      </button>
-                   </>
-                 )}
-
-                 {isUploadingBill && (
-                    <div className="w-full flex items-center justify-center gap-2 py-4 rounded-2xl bg-gray-50 text-gray-400 font-bold text-xs uppercase tracking-widest">
-                       <Loader2 className="w-4 h-4 animate-spin" />
-                       <span>Uploading...</span>
-                    </div>
-                 )}
-
-                 {billImageUploaded && (
-                    <div className="w-full flex items-center justify-center gap-2 py-4 rounded-2xl bg-green-100 text-green-700 font-bold text-xs uppercase tracking-widest">
-                       <CheckCircle2 className="w-4 h-4" />
-                       <span>{isReturnPickup ? 'Photo Uploaded' : 'Bill Uploaded'}</span>
-                    </div>
-                 )}
-
-                 <input
-                   ref={cameraInputRef}
-                   type="file"
-                   accept="image/*"
-                   onChange={(e) => handleBillImageSelect(e.target.files[0])}
-                   className="hidden"
-                 />
-              </div>
 
               <div>
-                <p className={`text-center text-[10px] font-bold uppercase tracking-widest mb-3 ${canConfirmPickup ? 'text-green-600' : 'text-gray-400'}`}>
+                <p className={`text-center text-[9px] font-bold uppercase tracking-widest mb-2 ${canConfirmPickup ? 'text-green-600' : isReturnPickup ? 'text-red-500' : 'text-gray-400'}`}>
                   {isReturnPickup
-                    ? (canConfirmPickup ? 'Swipe to confirm customer pickup' : 'Upload photo and enter customer OTP')
+                    ? (canConfirmPickup ? 'Swipe to confirm pickup' : 'Complete photo + OTP to unlock')
                     : (billImageUploaded ? "Check the restaurant logo - Swipe to pick up" : "Capture bill to unlock swipe")}
                 </p>
                 <ActionSlider 
                   key="action-pickup"
                   label={isReturnPickup ? "Slide to Confirm Pickup" : "Slide to Pick Up"}
+                  lockedLabel={isReturnPickup ? returnPickupLockedLabel : 'Upload bill to unlock'}
                   successLabel="Picked Up!"
                   disabled={!canConfirmPickup}
                   onConfirm={() => onPickedUp(billImageUrl, {
@@ -312,11 +447,19 @@ export const PickupActionModal = ({
 
           {/* Delivery Instructions (User Note) */}
           {order?.note && (
-            <div className="bg-red-50 border border-red-100 rounded-xl p-3 flex gap-3 items-start">
-              <ChefHat className="w-5 h-5 text-red-500 mt-0.5 shrink-0" />
-              <div>
-                <p className="text-[10px] font-bold text-red-600 uppercase tracking-widest mb-1.5">User Instructions</p>
-                <p className="text-sm font-bold text-gray-800 leading-snug">"{order.note}"</p>
+            <div className={`bg-red-50 border border-red-100 rounded-xl flex gap-2.5 items-start ${
+              compactReturnReached ? 'p-2.5' : 'p-3'
+            }`}>
+              {isReturnPickup ? (
+                <UserRound className="w-4 h-4 text-red-500 mt-0.5 shrink-0" />
+              ) : (
+                <ChefHat className="w-5 h-5 text-red-500 mt-0.5 shrink-0" />
+              )}
+              <div className="min-w-0">
+                <p className="text-[9px] font-bold text-red-600 uppercase tracking-widest mb-1">
+                  {isReturnPickup ? 'Return Reason' : 'User Instructions'}
+                </p>
+                <p className={`font-bold text-gray-800 leading-snug ${compactReturnReached ? 'text-xs' : 'text-sm'}`}>"{order.note}"</p>
               </div>
             </div>
           )}
@@ -324,10 +467,12 @@ export const PickupActionModal = ({
           {/* Collapsible Order Summary */}
           <button 
             onClick={() => setShowItems(!showItems)}
-            className="w-full flex items-center justify-between p-3 bg-gray-50 rounded-xl hover:bg-gray-100 transition-colors"
+            className={`w-full flex items-center justify-between bg-gray-50 rounded-xl hover:bg-gray-100 transition-colors ${
+              compactReturnReached ? 'p-2.5' : 'p-3'
+            }`}
           >
-            <div className="flex items-center gap-3 text-gray-900 font-bold text-xs uppercase tracking-widest">
-              <Package className="w-5 h-5 text-gray-400" />
+            <div className="flex items-center gap-2 text-gray-900 font-bold text-[10px] uppercase tracking-widest">
+              <Package className="w-4 h-4 text-gray-400" />
               <span>Order Details ({items.length || 0})</span>
             </div>
             {showItems ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
@@ -338,7 +483,9 @@ export const PickupActionModal = ({
               {items.map((item, idx) => (
                 <div key={idx} className="flex justify-between items-center p-3 border-b border-gray-50 last:border-0">
                   <span className="text-gray-700 text-sm font-bold">{item.name || 'Item Name'}</span>
-                  <span className="text-green-600 font-bold bg-green-50 px-2.5 py-1 rounded-lg text-xs">x{item.quantity || 1}</span>
+                  <span className={`font-bold px-2.5 py-1 rounded-lg text-xs ${
+                    isReturnPickup ? 'text-red-600 bg-red-50' : 'text-green-600 bg-green-50'
+                  }`}>x{item.quantity || 1}</span>
                 </div>
               ))}
             </div>

@@ -1,15 +1,20 @@
 import mongoose from 'mongoose';
 import { ValidationError } from '../../../core/auth/errors.js';
+import { logger } from '../../../utils/logger.js';
+import { haversineKm } from '../../food/orders/services/order.helpers.js';
 import { QuickOrder } from '../models/order.model.js';
 import { Seller } from '../seller/models/seller.model.js';
-import { getActiveFeeSettings } from '../admin/services/billing.service.js';
+import { getRiderEarningBreakdown } from '../admin/services/billing.service.js';
+import { getSellerLocation, getOrderAddressPoint } from '../services/quickOrder.service.js';
 import {
   RETURN_OTP_MAX_ATTEMPTS,
   RETURN_OTP_TTL_MS,
   RETURN_TRIP_TYPE,
   DISPATCH_DOCUMENT_TYPES,
 } from '../utils/dispatchDocument.constants.js';
-import { generateReturnOtp } from './return.helpers.js';
+import { generateReturnOtp, resolveReturnPickupCharge } from './return.helpers.js';
+
+export { resolveReturnPickupCharge };
 
 const num = (value) => Number(value || 0);
 
@@ -60,18 +65,73 @@ export const verifyReturnOtp = ({
   return true;
 };
 
-const resolveCoords = (locationLike) => {
-  if (!locationLike) return null;
-  if (Array.isArray(locationLike?.coordinates) && locationLike.coordinates.length >= 2) {
-    return { lng: Number(locationLike.coordinates[0]), lat: Number(locationLike.coordinates[1]) };
-  }
-  const lat = Number(locationLike?.lat ?? locationLike?.latitude);
-  const lng = Number(locationLike?.lng ?? locationLike?.longitude);
-  if (Number.isFinite(lat) && Number.isFinite(lng)) return { lat, lng };
-  return null;
+/** Persist sub-km distances with 3dp (same raw haversine as order placement). */
+const normalizeStoredPickupDistanceKm = (rawKm) => {
+  const d = Number(rawKm);
+  if (!Number.isFinite(d) || d <= 0) return 0;
+  return Math.round(d * 1000) / 1000;
 };
 
-export const loadReturnPickupContext = async (returnDoc) => {
+const resolveReturnPickupCoords = (parentOrder, seller) => ({
+  customerCoords: parentOrder ? getOrderAddressPoint(parentOrder) : null,
+  sellerCoords: seller ? getSellerLocation(seller) : null,
+});
+
+export const computePickupDistanceKm = (customerCoords, sellerCoords) => {
+  if (!customerCoords || !sellerCoords) return 0;
+  const raw = haversineKm(
+    customerCoords.lat,
+    customerCoords.lng,
+    sellerCoords.lat,
+    sellerCoords.lng,
+  );
+  return normalizeStoredPickupDistanceKm(raw);
+};
+
+export const computeReturnPickupPricing = async ({ customerCoords, sellerCoords } = {}) => {
+  if (!customerCoords || !sellerCoords) {
+    return {
+      pickupDistanceKm: 0,
+      distanceKm: 0,
+      calculatedPickupCharge: 0,
+      riderEarning: 0,
+      pickupPricingBreakdown: null,
+    };
+  }
+
+  const rawDistanceKm = haversineKm(
+    customerCoords.lat,
+    customerCoords.lng,
+    sellerCoords.lat,
+    sellerCoords.lng,
+  );
+  const pickupDistanceKm = normalizeStoredPickupDistanceKm(rawDistanceKm);
+  const breakdown = await getRiderEarningBreakdown(rawDistanceKm);
+  const pickupPricingBreakdown = breakdown
+    ? { ...breakdown, distanceKm: pickupDistanceKm }
+    : null;
+
+  return {
+    pickupDistanceKm,
+    distanceKm: pickupDistanceKm,
+    calculatedPickupCharge: breakdown.earning,
+    riderEarning: breakdown.earning,
+    pickupPricingBreakdown,
+  };
+};
+
+export const applyReturnPickupPricingToDoc = async (returnDoc) => {
+  if (!returnDoc) return returnDoc;
+
+  const ctx = await loadReturnPickupContext(returnDoc, { forceRecalculate: true });
+  returnDoc.pickupDistanceKm = ctx.pickupDistanceKm;
+  returnDoc.calculatedPickupCharge = ctx.calculatedPickupCharge;
+  returnDoc.pickupPricingBreakdown = ctx.pickupPricingBreakdown;
+  returnDoc.riderEarning = ctx.riderEarning;
+  return returnDoc;
+};
+
+export const loadReturnPickupContext = async (returnDoc, { forceRecalculate = false } = {}) => {
   const parentOrder = returnDoc?.parentOrderId
     ? await QuickOrder.findById(returnDoc.parentOrderId).lean()
     : await QuickOrder.findOne({
@@ -80,25 +140,66 @@ export const loadReturnPickupContext = async (returnDoc) => {
       }).lean();
 
   const seller = await Seller.findById(returnDoc.sellerId).lean();
-  const customerCoords = resolveCoords(parentOrder?.deliveryAddress?.location);
-  const sellerCoords = resolveCoords(seller?.location);
+  const { customerCoords, sellerCoords } = resolveReturnPickupCoords(parentOrder, seller);
+  const computedDistanceKm = computePickupDistanceKm(customerCoords, sellerCoords);
 
-  const feeSettings = await getActiveFeeSettings();
-  const riderEarning = Math.max(
-    0,
-    num(returnDoc?.returnDeliveryCommission) ||
-      num(feeSettings?.returnPickupFee) ||
-      num(feeSettings?.returnDeliveryCommission),
-  );
+  const storedCharge = num(returnDoc?.calculatedPickupCharge);
+  const storedRider = num(returnDoc?.riderEarning);
+  const legacyCharge = num(returnDoc?.returnDeliveryCommission);
 
-  return { parentOrder, seller, customerCoords, sellerCoords, riderEarning };
+  if (!forceRecalculate && (storedCharge > 0 || storedRider > 0 || legacyCharge > 0)) {
+    const charge = resolveReturnPickupCharge(returnDoc);
+    const pickupDistanceKm =
+      computedDistanceKm > 0 ? computedDistanceKm : num(returnDoc?.pickupDistanceKm);
+    const storedBreakdown = returnDoc?.pickupPricingBreakdown || null;
+    const pickupPricingBreakdown = storedBreakdown
+      ? { ...storedBreakdown, distanceKm: pickupDistanceKm }
+      : null;
+
+    return {
+      parentOrder,
+      seller,
+      customerCoords,
+      sellerCoords,
+      pickupDistanceKm,
+      calculatedPickupCharge: storedCharge || charge,
+      riderEarning: charge,
+      pickupPricingBreakdown,
+    };
+  }
+
+  const pricing = await computeReturnPickupPricing({ customerCoords, sellerCoords });
+  if (pricing.calculatedPickupCharge <= 0 && legacyCharge > 0) {
+    pricing.riderEarning = legacyCharge;
+    pricing.calculatedPickupCharge = 0;
+  }
+
+  if (pricing.riderEarning <= 0 && !legacyCharge) {
+    logger.warn(
+      `[ReturnPickup] Delivery commission rules produced zero earning for return ${returnDoc?._id || returnDoc?.orderId || 'unknown'} — configure distance slabs in Billing.`,
+    );
+  }
+
+  return {
+    parentOrder,
+    seller,
+    customerCoords,
+    sellerCoords,
+    ...pricing,
+  };
 };
 
 export const buildReturnDeliverySocketPayload = async (returnDoc, context = null) => {
   const ctx = context || (await loadReturnPickupContext(returnDoc));
-  const { parentOrder, seller, customerCoords, sellerCoords, riderEarning } = ctx;
+  const { parentOrder, seller, customerCoords, sellerCoords } = ctx;
 
   const customerAddress = parentOrder?.deliveryAddress || {};
+  const resolvedCustomerName =
+    returnDoc?.customer?.name && returnDoc.customer.name !== 'Customer'
+      ? returnDoc.customer.name
+      : customerAddress?.name || parentOrder?.userName || 'Customer';
+  const resolvedCustomerPhone =
+    returnDoc?.customer?.phone || customerAddress?.phone || parentOrder?.userPhone || '';
   const customerAddressText = [
     customerAddress.formattedAddress,
     customerAddress.street || customerAddress.address,
@@ -117,14 +218,22 @@ export const buildReturnDeliverySocketPayload = async (returnDoc, context = null
     .filter(Boolean)
     .join(', ');
 
+  const storeName = seller?.shopName || seller?.name || 'Seller store';
+  const sellerName = seller?.name || seller?.shopName || 'Seller';
+  const sellerPhone = seller?.phone || '';
+  const resolvedCharge = resolveReturnPickupCharge(returnDoc?.toObject?.() || returnDoc);
+  const resolvedRiderEarning = Math.max(resolvedCharge, num(ctx.riderEarning));
+  const breakdown = ctx.pickupPricingBreakdown || returnDoc?.pickupPricingBreakdown || null;
+  const pickupDistanceKm = num(ctx.pickupDistanceKm ?? returnDoc?.pickupDistanceKm);
+
   const returnId = String(returnDoc._id);
   const pickupPoint = {
     legId: `return-pickup:${returnId}`,
     pickupType: 'quick',
     sourceId: String(returnDoc.userId || ''),
-    sourceName: returnDoc?.customer?.name || 'Customer',
+    sourceName: resolvedCustomerName,
     address: customerAddressText,
-    phone: returnDoc?.customer?.phone || '',
+    phone: resolvedCustomerPhone,
     location: customerCoords
       ? {
           coordinates: [customerCoords.lng, customerCoords.lat],
@@ -139,9 +248,9 @@ export const buildReturnDeliverySocketPayload = async (returnDoc, context = null
     legId: `return-drop:${returnId}`,
     pickupType: 'quick',
     sourceId: String(returnDoc.sellerId || ''),
-    sourceName: seller?.shopName || seller?.name || 'Seller',
+    sourceName: storeName,
     address: sellerAddressText,
-    phone: seller?.phone || '',
+    phone: sellerPhone,
     location: sellerCoords
       ? {
           coordinates: [sellerCoords.lng, sellerCoords.lat],
@@ -171,9 +280,23 @@ export const buildReturnDeliverySocketPayload = async (returnDoc, context = null
     pricing: { subtotal: num(returnDoc.returnRefundAmount), total: num(returnDoc.returnRefundAmount) },
     total: num(returnDoc.returnRefundAmount),
     paymentMethod: 'prepaid',
-    restaurantName: seller?.shopName || seller?.name || 'Seller store',
+    restaurantName: storeName,
     restaurantAddress: sellerAddressText,
-    restaurantPhone: seller?.phone || '',
+    restaurantPhone: sellerPhone,
+    storeName,
+    storeAddress: sellerAddressText,
+    storePhone: sellerPhone,
+    sellerName,
+    sellerPhone,
+    seller: seller
+      ? {
+          _id: String(seller._id || ''),
+          name: sellerName,
+          shopName: storeName,
+          phone: sellerPhone,
+          location: seller.location || {},
+        }
+      : undefined,
     restaurantLocation: sellerCoords
       ? {
           latitude: sellerCoords.lat,
@@ -185,17 +308,25 @@ export const buildReturnDeliverySocketPayload = async (returnDoc, context = null
     deliveryAddress: customerAddress,
     customerAddress: customerAddressText,
     customerLocation: customerCoords,
-    customerName: returnDoc?.customer?.name || 'Customer',
-    customerPhone: returnDoc?.customer?.phone || '',
-    userName: returnDoc?.customer?.name || 'Customer',
-    userPhone: returnDoc?.customer?.phone || '',
+    customerName: resolvedCustomerName,
+    customerPhone: resolvedCustomerPhone,
+    userName: resolvedCustomerName,
+    userPhone: resolvedCustomerPhone,
     pickupPoints: [pickupPoint],
     dropPoint,
     dispatchLeg: pickupPoint,
     dispatch: returnDoc.dispatch || {},
-    riderEarning,
-    earnings: riderEarning,
-    deliveryFee: 0,
+    riderEarning: resolvedRiderEarning,
+    earnings: resolvedRiderEarning,
+    calculatedPickupCharge: num(returnDoc?.calculatedPickupCharge) || resolvedRiderEarning,
+    returnPickupFee: resolvedRiderEarning,
+    tripEarning: resolvedRiderEarning,
+    walletEarning: resolvedRiderEarning,
+    deliveryFee: resolvedRiderEarning,
+    pickupDistanceKm,
+    distanceKm: pickupDistanceKm,
+    pickupPricingBreakdown: breakdown,
+    deliveryState: returnDoc.deliveryState || {},
     note: returnDoc.returnReason || '',
     createdAt: returnDoc.createdAt,
     updatedAt: returnDoc.updatedAt,

@@ -69,6 +69,7 @@ export const normalizeLocationPoint = (value) => {
 };
 
 export const normalizePickupPoints = (order) => {
+  const isReturn = isReturnPickupTrip(order);
   const raw = Array.isArray(order?.pickupPoints) ? order.pickupPoints : [];
   const explicitOrderType = String(
     order?.orderType || order?.serviceType || order?.type || "",
@@ -78,12 +79,16 @@ export const normalizePickupPoints = (order) => {
   const normalized = raw
     .map((point, index) => {
       const location = normalizeLocationPoint(point?.location);
-      if (!location) return null;
+      if (!location && !isReturn) return null;
       const pickupType = point?.pickupType === "quick" ? "quick" : "food";
       const sourceName = String(
         point?.sourceName ||
           point?.name ||
-          (pickupType === "quick" ? "Seller store" : "Restaurant"),
+          (isReturn
+            ? order?.customerName || order?.userName || "Customer"
+            : pickupType === "quick"
+              ? "Seller store"
+              : "Restaurant"),
       ).trim();
       const address = String(
         point?.address ||
@@ -97,8 +102,14 @@ export const normalizePickupPoints = (order) => {
         pickupType,
         sourceId: String(point?.sourceId || ""),
         sourceName,
-        address: address || "",
-        phone: String(point?.phone || point?.contactPhone || "").trim(),
+        address: address || order?.customerAddress || "",
+        phone: String(
+          point?.phone ||
+            point?.contactPhone ||
+            order?.customerPhone ||
+            order?.userPhone ||
+            "",
+        ).trim(),
         location,
       };
     })
@@ -203,6 +214,43 @@ export const getPrimaryPickupLocation = (order) => {
 export const isReturnPickupTrip = (order) =>
   String(order?.tripType || "").trim() === "return_pickup" ||
   String(order?.documentType || "").trim() === "seller_return";
+
+export const getReturnPickupStopLabels = () => ({
+  pickupLabel: "Pickup From Customer",
+  dropLabel: "Drop To Seller",
+});
+
+export const enrichReturnDeliveryOrder = (order = {}) => {
+  if (!isReturnPickupTrip(order)) return order;
+
+  const dropPoint = order?.dropPoint || null;
+  return {
+    ...order,
+    tripType: order.tripType || "return_pickup",
+    documentType: order.documentType || "seller_return",
+    returnId: order.returnId || order.orderMongoId || order._id || order.id,
+    customerName: order.customerName || order.userName || order.pickupPoints?.[0]?.sourceName || "Customer",
+    customerPhone: order.customerPhone || order.userPhone || order.pickupPoints?.[0]?.phone || "",
+    storeName: order.storeName || dropPoint?.sourceName || order.restaurantName || order.sellerName || "Seller",
+    storePhone: order.storePhone || dropPoint?.phone || order.sellerPhone || order.restaurantPhone || "",
+    storeAddress: order.storeAddress || dropPoint?.address || order.restaurantAddress || "",
+    sellerName: order.sellerName || dropPoint?.sourceName || order.storeName || order.restaurantName || "Seller",
+    sellerPhone: order.sellerPhone || dropPoint?.phone || order.storePhone || order.restaurantPhone || "",
+    riderEarning:
+      order.riderEarning ||
+      order.earnings ||
+      order.tripEarning ||
+      order.walletEarning ||
+      0,
+    earnings:
+      order.earnings ||
+      order.riderEarning ||
+      order.tripEarning ||
+      order.walletEarning ||
+      0,
+    dropPoint,
+  };
+};
 
 export const getReturnDropLocation = (order) => {
   const drop = order?.dropPoint;

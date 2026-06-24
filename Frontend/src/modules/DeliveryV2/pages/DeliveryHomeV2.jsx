@@ -12,7 +12,7 @@ import LiveMap from '@/modules/DeliveryV2/components/map/LiveMap';
 import { NewOrderModal } from '@/modules/DeliveryV2/components/modals/NewOrderModal';
 import { PickupActionModal } from '@/modules/DeliveryV2/components/modals/PickupActionModal';
 import { DeliveryVerificationModal } from '@/modules/DeliveryV2/components/modals/DeliveryVerificationModal';
-import { isReturnPickupTrip } from '@/modules/DeliveryV2/utils/orderRouting';
+import { isReturnPickupTrip, getReturnPickupStopLabels, enrichReturnDeliveryOrder } from '@/modules/DeliveryV2/utils/orderRouting';
 import { OrderSummaryModal } from '@/modules/DeliveryV2/components/modals/OrderSummaryModal';
 import ActionSlider from '@/modules/DeliveryV2/components/ui/ActionSlider';
 
@@ -507,27 +507,36 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
           const cusLoc = getLoc(serverData.deliveryAddress, ['latitude', 'lat'], ['longitude', 'lng']) || 
                          getLoc(serverData, ['customer_lat', 'customerLat', 'latitude'], ['customer_lng', 'customerLng', 'longitude']);
 
-          const syncedOrder = {
+          const syncedOrder = enrichReturnDeliveryOrder({
             ...serverData,
             pickupPoints: normalizePickupPoints(serverData),
             restaurantLocation: getPrimaryPickupLocation(serverData) || resLoc,
-            customerLocation: cusLoc
-          };
+            customerLocation: cusLoc,
+          });
 
           setActiveOrder(syncedOrder);
-          
-          const backendStatus = serverData.deliveryStatus || serverData.orderState?.status || serverData.orderStatus || serverData.status;
-          const currentPhase = serverData.deliveryState?.currentPhase;
 
-          if (['delivered', 'completed', 'DELIVERED'].includes(backendStatus)) {
+          const returnTrip = isReturnPickupTrip(syncedOrder);
+          const backendStatus =
+            syncedOrder.deliveryState?.status ||
+            syncedOrder.deliveryStatus ||
+            syncedOrder.orderState?.status ||
+            syncedOrder.orderStatus ||
+            syncedOrder.status;
+          const currentPhase = syncedOrder.deliveryState?.currentPhase;
+
+          if (['delivered', 'completed', 'DELIVERED', 'returned', 'refund_completed'].includes(String(backendStatus || '').toLowerCase())) {
             updateTripStatus('COMPLETED');
-          } else if (currentPhase === 'at_drop' || ['reached_drop', 'REACHED_DROP'].includes(backendStatus)) {
+          } else if (currentPhase === 'at_drop' || ['reached_drop', 'REACHED_DROP'].includes(String(backendStatus || ''))) {
             updateTripStatus('REACHED_DROP');
-          } else if (['picked_up', 'PICKED_UP', 'delivering'].includes(backendStatus)) {
+          } else if (
+            ['picked_up', 'PICKED_UP', 'delivering'].includes(String(backendStatus || '')) ||
+            currentPhase === 'en_route_to_delivery'
+          ) {
             updateTripStatus('PICKED_UP');
-          } else if (currentPhase === 'at_pickup' || ['reached_pickup', 'REACHED_PICKUP'].includes(backendStatus)) {
-            updateTripStatus('REACHED_PICKUP');
-          } else if (['confirmed', 'preparing', 'ready_for_pickup'].includes(backendStatus)) {
+          } else if (currentPhase === 'at_pickup' || ['reached_pickup', 'REACHED_PICKUP', 'accepted'].includes(String(backendStatus || ''))) {
+            updateTripStatus(returnTrip && backendStatus === 'accepted' ? 'PICKING_UP' : 'REACHED_PICKUP');
+          } else if (['confirmed', 'preparing', 'ready_for_pickup', 'return_in_transit', 'return_pickup_assigned'].includes(String(backendStatus || ''))) {
             updateTripStatus('PICKING_UP');
           }
         } else {
@@ -668,7 +677,7 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
 
   useEffect(() => {
     if (!newOrder) return;
-    setIncomingOrder({
+    setIncomingOrder(enrichReturnDeliveryOrder({
       ...newOrder,
       pickupPoints: normalizePickupPoints(newOrder),
       customerLocation:
@@ -679,7 +688,7 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
         newOrder.deliveryAddress,
         newOrder.customerAddress || newOrder.customer_address || '',
       ),
-    });
+    }));
   }, [newOrder]);
 
   useEffect(() => {
@@ -704,11 +713,11 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
           null;
 
         if (!cancelled && currentPayload && (currentPayload._id || currentPayload.orderId)) {
-          setActiveOrder({
+          setActiveOrder(enrichReturnDeliveryOrder({
             ...currentPayload,
             pickupPoints: normalizePickupPoints(currentPayload),
             restaurantLocation: getPrimaryPickupLocation(currentPayload) || currentPayload.restaurantLocation,
-          });
+          }));
           return;
         }
 
@@ -1160,7 +1169,24 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
                                />
                             </div>
                             <div>
-                               <h3 className="text-gray-950 text-2xl font-bold uppercase">Handover Drop</h3>
+                               <h3 className="text-gray-950 text-2xl font-bold uppercase">
+                                 {isReturnPickupTrip(activeOrder) ? getReturnPickupStopLabels().dropLabel : 'Handover Drop'}
+                               </h3>
+                               {isReturnPickupTrip(activeOrder) && (
+                                 <>
+                                   <p className="text-sm font-bold text-gray-900 mt-2">
+                                     {activeOrder?.dropPoint?.sourceName || activeOrder?.storeName || activeOrder?.sellerName || 'Seller'}
+                                   </p>
+                                   {(activeOrder?.dropPoint?.phone || activeOrder?.storePhone || activeOrder?.sellerPhone) && (
+                                     <p className="text-xs font-semibold text-gray-600">
+                                       {activeOrder?.dropPoint?.phone || activeOrder?.storePhone || activeOrder?.sellerPhone}
+                                     </p>
+                                   )}
+                                   <p className="text-xs font-medium text-gray-500 mt-1 line-clamp-2">
+                                     {activeOrder?.dropPoint?.address || activeOrder?.storeAddress || activeOrder?.restaurantAddress || 'Seller address'}
+                                   </p>
+                                 </>
+                               )}
                                <p className={`text-[10px] font-bold uppercase tracking-[0.2em] mt-1.5 ${isWithinRange ? 'text-green-600' : 'text-red-500'}`}>
                                  {isWithinRange ? 'Ready - Swipe to Arrive √' : `${(distanceToTarget / 1000).toFixed(1)} km • ${eta || '--'} min Arrival`}
                                </p>

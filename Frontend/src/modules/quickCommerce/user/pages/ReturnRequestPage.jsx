@@ -102,13 +102,31 @@ const ReturnRequestPage = () => {
       toast.error("Please provide a return reason (min 3 characters)");
       return;
     }
-    if (refundMethod === "upi" && !payoutDetails.upiId.trim()) {
-      toast.error("UPI ID is required for UPI refund");
-      return;
+    if (refundMethod === "upi") {
+      if (!payoutDetails.upiId.trim()) {
+        toast.error("UPI ID is required for UPI refund");
+        return;
+      }
+      if (!/^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64}$/.test(payoutDetails.upiId.trim())) {
+        toast.error("Invalid UPI ID format");
+        return;
+      }
     }
     if (refundMethod === "bank") {
       if (!payoutDetails.accountHolderName.trim() || !payoutDetails.accountNumber.trim() || !payoutDetails.ifscCode.trim()) {
         toast.error("Complete bank details are required");
+        return;
+      }
+      if (!/^[a-zA-Z\s]{2,50}$/.test(payoutDetails.accountHolderName.trim())) {
+        toast.error("Account holder name must contain only letters and spaces");
+        return;
+      }
+      if (!/^\d{9,18}$/.test(payoutDetails.accountNumber.trim())) {
+        toast.error("Account number must be 9 to 18 digits");
+        return;
+      }
+      if (!/^[A-Z]{4}0[A-Z0-9]{6}$/.test(payoutDetails.ifscCode.trim().toUpperCase())) {
+        toast.error("Invalid IFSC code format");
         return;
       }
     }
@@ -273,7 +291,8 @@ const ReturnRequestPage = () => {
               type="text"
               placeholder="UPI ID (e.g. name@upi)"
               value={payoutDetails.upiId}
-              onChange={(e) => setPayoutDetails((p) => ({ ...p, upiId: e.target.value }))}
+              maxLength={100}
+              onChange={(e) => setPayoutDetails((p) => ({ ...p, upiId: e.target.value.replace(/\s/g, "") }))}
               className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm"
             />
           )}
@@ -284,8 +303,9 @@ const ReturnRequestPage = () => {
                 type="text"
                 placeholder="Account holder name"
                 value={payoutDetails.accountHolderName}
+                maxLength={50}
                 onChange={(e) =>
-                  setPayoutDetails((p) => ({ ...p, accountHolderName: e.target.value }))
+                  setPayoutDetails((p) => ({ ...p, accountHolderName: e.target.value.replace(/[^a-zA-Z\s]/g, "") }))
                 }
                 className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm"
               />
@@ -293,8 +313,9 @@ const ReturnRequestPage = () => {
                 type="text"
                 placeholder="Account number"
                 value={payoutDetails.accountNumber}
+                maxLength={18}
                 onChange={(e) =>
-                  setPayoutDetails((p) => ({ ...p, accountNumber: e.target.value }))
+                  setPayoutDetails((p) => ({ ...p, accountNumber: e.target.value.replace(/\D/g, "") }))
                 }
                 className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm"
               />
@@ -302,7 +323,8 @@ const ReturnRequestPage = () => {
                 type="text"
                 placeholder="IFSC code"
                 value={payoutDetails.ifscCode}
-                onChange={(e) => setPayoutDetails((p) => ({ ...p, ifscCode: e.target.value }))}
+                maxLength={11}
+                onChange={(e) => setPayoutDetails((p) => ({ ...p, ifscCode: e.target.value.replace(/[^a-zA-Z0-9]/g, "").toUpperCase() }))}
                 className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm"
               />
             </div>
