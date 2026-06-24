@@ -1,0 +1,268 @@
+import { logger } from '../../../utils/logger.js';
+import { refundWalletBalance } from '../../food/user/services/userWallet.service.js';
+import { initiateRazorpayRefund } from '../../food/orders/helpers/razorpay.helper.js';
+
+const ONLINE_METHODS = new Set(['razorpay', 'razorpay_qr', 'online']);
+
+const getRefundableAmount = (order) => {
+  const total = Number(order?.pricing?.total ?? order?.total ?? 0);
+  return Number.isFinite(total) ? Math.max(0, total) : 0;
+};
+
+const isPaidPrepaidOrder = (order) => {
+  const method = String(order?.payment?.method || '').trim().toLowerCase();
+  const status = String(order?.payment?.status || '').trim().toLowerCase();
+  if (status !== 'paid') return false;
+  return method === 'wallet' || ONLINE_METHODS.has(method);
+};
+
+const buildRefundMessage = ({ cancelledBy, refundResult, refundTo }) => {
+  if (!refundResult?.processed) {
+    if (refundResult?.reason === 'not_prepaid') {
+      return 'Order cancelled successfully.';
+    }
+    return 'Order cancelled. Refund could not be processed automatically — our team will follow up shortly.';
+  }
+
+  if (refundResult.method === 'wallet') {
+    return 'Order cancelled. Refund has been credited to your wallet.';
+  }
+
+  if (cancelledBy === 'seller') {
+    return 'Order cancelled by the store. Refund will be returned to your original payment method within 5-7 business days.';
+  }
+
+  if (refundTo === 'wallet') {
+    return 'Order cancelled. Refund has been credited to your wallet.';
+  }
+
+  return 'Order cancelled. Refund will be returned to your original payment method within 5-7 business days.';
+};
+
+export const processQuickOrderRefund = async (
+  order,
+  { refundTo = 'gateway', cancelledBy = 'user', reason = '' } = {},
+) => {
+  const existingRefund = order?.payment?.refund;
+  if (existingRefund?.status === 'processed' || order?.payment?.status === 'refunded') {
+    return {
+      processed: true,
+      alreadyProcessed: true,
+      method: existingRefund?.processedMethod || 'gateway',
+      message: buildRefundMessage({
+        cancelledBy,
+        refundTo,
+        refundResult: { processed: true, method: existingRefund?.processedMethod || 'gateway' },
+      }),
+    };
+  }
+
+  const amount = getRefundableAmount(order);
+  if (!isPaidPrepaidOrder(order) || amount <= 0) {
+    return { processed: false, reason: 'not_prepaid', message: buildRefundMessage({ cancelledBy, refundResult: { reason: 'not_prepaid' } }) };
+  }
+
+  const paymentMethod = String(order.payment?.method || '').trim().toLowerCase();
+  const normalizedRefundTo =
+    cancelledBy === 'seller'
+      ? 'gateway'
+      : refundTo === 'wallet' || refundTo === 'gateway'
+        ? refundTo
+        : 'gateway';
+  const targetMethod = paymentMethod === 'wallet' ? 'wallet' : normalizedRefundTo;
+  const processedAt = new Date();
+
+  if (targetMethod === 'wallet') {
+    if (!order.userId) {
+      logger.warn(`Quick wallet refund skipped for order ${order.orderId}: missing userId`);
+      return {
+        processed: false,
+        reason: 'missing_user',
+        message: 'Order cancelled. Wallet refund requires a logged-in account.',
+      };
+    }
+
+    await refundWalletBalance(order.userId, amount, 'Quick order refund', {
+      orderId: String(order.orderId || ''),
+      source: 'quick_order_cancel',
+      cancelledBy,
+    });
+
+    order.payment.status = 'refunded';
+    order.payment.refund = {
+      status: 'processed',
+      amount,
+      refundId: `wallet_refund_${Date.now()}`,
+      requestedMethod: normalizedRefundTo,
+      processedMethod: 'wallet',
+      requestedAt: processedAt,
+      requestedByUser: cancelledBy === 'user',
+      cancelledBy,
+      reason,
+      processedAt,
+    };
+
+    return {
+      processed: true,
+      method: 'wallet',
+      amount,
+      message: buildRefundMessage({
+        cancelledBy,
+        refundTo: normalizedRefundTo,
+        refundResult: { processed: true, method: 'wallet' },
+      }),
+    };
+  }
+
+  const paymentId = order.payment?.razorpay?.paymentId;
+  if (!paymentId) {
+    order.payment.refund = {
+      status: 'failed',
+      amount,
+      requestedMethod: normalizedRefundTo,
+      processedMethod: 'gateway',
+      cancelledBy,
+      reason,
+    };
+    return {
+      processed: false,
+      reason: 'missing_payment_id',
+      message: 'Order cancelled. Refund could not be processed automatically — our team will follow up shortly.',
+    };
+  }
+
+  const refundResult = await initiateRazorpayRefund(paymentId, amount);
+  if (refundResult.success) {
+    order.payment.status = 'refunded';
+    order.payment.refund = {
+      status: 'processed',
+      amount,
+      refundId: refundResult.refundId || '',
+      requestedMethod: normalizedRefundTo,
+      processedMethod: 'gateway',
+      requestedAt: processedAt,
+      requestedByUser: cancelledBy === 'user',
+      cancelledBy,
+      reason,
+      processedAt,
+    };
+
+    return {
+      processed: true,
+      method: 'gateway',
+      amount,
+      refundId: refundResult.refundId,
+      message: buildRefundMessage({
+        cancelledBy,
+        refundTo: normalizedRefundTo,
+        refundResult: { processed: true, method: 'gateway' },
+      }),
+    };
+  }
+
+  order.payment.refund = {
+    status: 'failed',
+    amount,
+    requestedMethod: normalizedRefundTo,
+    processedMethod: 'gateway',
+    cancelledBy,
+    reason,
+  };
+
+  logger.error(`Quick Razorpay refund failed for ${order.orderId}: ${refundResult.error || 'unknown error'}`);
+
+  return {
+    processed: false,
+    reason: 'razorpay_failed',
+    error: refundResult.error,
+    message: 'Order cancelled. Refund could not be processed automatically — our team will follow up shortly.',
+  };
+};
+
+const buildReturnRefundTransactionId = (returnDoc, suffix = '') => {
+  const returnId = String(returnDoc?._id || 'return');
+  const safeSuffix = String(suffix || 'refund').trim().toLowerCase() || 'refund';
+  return `qc_return_${returnId}_${safeSuffix}`;
+};
+
+export const processQuickCommerceReturnRefund = async (
+  returnDoc,
+  order,
+  { payoutDetails = {} } = {},
+) => {
+  if (!returnDoc) {
+    return { processed: false, reason: 'missing_return', message: 'Return record is required' };
+  }
+
+  if (returnDoc.refundStatus === 'completed' && returnDoc.refundTransactionId) {
+    return {
+      processed: true,
+      alreadyProcessed: true,
+      method: returnDoc.refundMethod,
+      amount: Number(returnDoc.returnRefundAmount || 0),
+      refundTransactionId: returnDoc.refundTransactionId,
+      message: 'Refund already completed for this return',
+    };
+  }
+
+  const amount = Number(returnDoc.returnRefundAmount || 0);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return { processed: false, reason: 'zero_amount', message: 'Return refund amount must be greater than zero' };
+  }
+
+  const method = String(returnDoc.refundMethod || '').trim().toLowerCase();
+  const userId = returnDoc.userId || order?.userId;
+
+  if (method === 'wallet') {
+    if (!userId) {
+      return {
+        processed: false,
+        reason: 'missing_user',
+        message: 'Wallet refund requires a logged-in customer account',
+      };
+    }
+
+    const refundTransactionId = buildReturnRefundTransactionId(returnDoc, 'wallet');
+    const walletResult = await refundWalletBalance(userId, amount, 'Quick Commerce return refund', {
+      orderId: String(returnDoc.orderId || order?.orderId || ''),
+      returnId: String(returnDoc._id || ''),
+      source: 'quick_commerce_return',
+      refundMethod: 'wallet',
+      refundTransactionId,
+      refundReference: returnDoc.refundReference || '',
+    });
+
+    return {
+      processed: true,
+      alreadyProcessed: Boolean(walletResult?.alreadyProcessed),
+      method: 'wallet',
+      amount,
+      refundTransactionId,
+      message: walletResult?.alreadyProcessed
+        ? 'Return refund was already credited to wallet'
+        : 'Return refund credited to wallet',
+    };
+  }
+
+  if (method === 'upi' || method === 'bank') {
+    const refundTransactionId = buildReturnRefundTransactionId(returnDoc, method);
+    return {
+      processed: false,
+      pending: true,
+      method,
+      amount,
+      refundTransactionId,
+      payoutDetails,
+      message:
+        method === 'upi'
+          ? 'UPI return refund queued for admin payout'
+          : 'Bank return refund queued for admin payout',
+    };
+  }
+
+  return {
+    processed: false,
+    reason: 'unsupported_method',
+    message: 'Unsupported refund method for return',
+  };
+};

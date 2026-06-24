@@ -1,0 +1,415 @@
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import Card from "@shared/components/ui/Card";
+import Badge from "@shared/components/ui/Badge";
+import Pagination from "@shared/components/ui/Pagination";
+import { adminApi } from "../services/adminApi";
+import { toast } from "sonner";
+import {
+  Loader2,
+  RefreshCw,
+  Download,
+  Search,
+  Package,
+  AlertTriangle,
+  Wallet,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
+import { downloadCsv } from "../utils/csvExportUtils";
+import { mapReturnStatusLabel } from "@/shared/utils/returnStatus";
+
+const STATUS_TABS = [
+  { id: "", label: "All" },
+  { id: "return_requested", label: "Pending" },
+  { id: "return_approved", label: "Approved" },
+  { id: "return_pickup_assigned", label: "Pickup" },
+  { id: "returned", label: "Quality" },
+  { id: "refund_completed", label: "Completed" },
+  { id: "return_rejected", label: "Rejected" },
+];
+
+const AdminReturns = () => {
+  const [returns, setReturns] = useState([]);
+  const [financeReport, setFinanceReport] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [actionLoading, setActionLoading] = useState("");
+  const [page, setPage] = useState(1);
+  const [pageSize] = useState(25);
+  const [total, setTotal] = useState(0);
+  const [statusFilter, setStatusFilter] = useState("");
+  const [refundMethodFilter, setRefundMethodFilter] = useState("all");
+  const [searchTerm, setSearchTerm] = useState("");
+  const [sellerId, setSellerId] = useState("");
+  const [selectedReturn, setSelectedReturn] = useState(null);
+
+  const fetchData = useCallback(async (requestedPage = page) => {
+    try {
+      setLoading(true);
+      const [listRes, reportRes] = await Promise.all([
+        adminApi.getReturns({
+          page: requestedPage,
+          limit: pageSize,
+          status: statusFilter || undefined,
+          search: searchTerm.trim() || undefined,
+          sellerId: sellerId.trim() || undefined,
+        }),
+        adminApi.getReturnFinanceReport(),
+      ]);
+
+      const payload = listRes?.data?.result || {};
+      const items = Array.isArray(payload.items) ? payload.items : [];
+      setReturns(items);
+      setTotal(payload?.pagination?.total ?? items.length);
+      setPage(payload?.pagination?.page ?? requestedPage);
+      setFinanceReport(reportRes?.data?.result || null);
+    } catch (error) {
+      toast.error(error?.response?.data?.message || "Failed to load returns");
+    } finally {
+      setLoading(false);
+    }
+  }, [page, pageSize, searchTerm, sellerId, statusFilter]);
+
+  useEffect(() => {
+    void fetchData(1);
+  }, [statusFilter, sellerId]);
+
+  const filteredReturns = useMemo(() => {
+    if (refundMethodFilter === "all") return returns;
+    return returns.filter(
+      (row) => String(row.refundMethod || "").toLowerCase() === refundMethodFilter,
+    );
+  }, [returns, refundMethodFilter]);
+
+  const handleExport = () => {
+    if (!filteredReturns.length) {
+      toast.error("No returns to export");
+      return;
+    }
+    const rows = [
+      ["Order ID", "Return ID", "Status", "Refund Method", "Refund Status", "Amount", "Customer", "Seller ID", "Requested At"],
+      ...filteredReturns.map((row) => [
+        row.orderId,
+        row.returnId || row.id,
+        row.returnStatus,
+        row.refundMethod,
+        row.refundStatus,
+        row.returnRefundAmount,
+        row.customer?.name || "",
+        row.sellerId,
+        row.returnRequestedAt,
+      ]),
+    ];
+    const downloaded = downloadCsv(rows, `returns-${new Date().toISOString().split("T")[0]}.csv`);
+    if (downloaded) toast.success("Returns exported");
+  };
+
+  const runAction = async (action, returnId, body = {}) => {
+    setActionLoading(`${action}:${returnId}`);
+    try {
+      if (action === "refund") await adminApi.processReturnRefund(returnId, body);
+      if (action === "quality") await adminApi.passReturnQualityCheck(returnId, body);
+      if (action === "payout") await adminApi.confirmReturnPayout(returnId, body);
+      toast.success("Action completed");
+      await fetchData(page);
+      setSelectedReturn(null);
+    } catch (error) {
+      toast.error(error?.response?.data?.message || "Action failed");
+    } finally {
+      setActionLoading("");
+    }
+  };
+
+  const negativeCount = financeReport?.negativeBalanceSellers?.length || 0;
+  const pendingRecoveries = financeReport?.pendingRecoveries?.length || 0;
+  const pendingPayouts = financeReport?.pendingPayouts?.length || 0;
+
+  return (
+    <div className="space-y-6 pb-16">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-black text-slate-900 flex items-center gap-2">
+            <Package className="w-7 h-7 text-red-500" />
+            Returns Dashboard
+          </h1>
+          <p className="text-slate-600 text-sm mt-1">Manage return pickups, quality checks, and refunds.</p>
+        </div>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => fetchData(page)}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-slate-200 text-sm font-bold text-slate-600 bg-white hover:bg-slate-50"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+            Refresh
+          </button>
+          <button
+            type="button"
+            onClick={handleExport}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-slate-200 text-sm font-bold text-slate-600 bg-white hover:bg-slate-50"
+          >
+            <Download className="w-4 h-4" />
+            Export CSV
+          </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <Card className="p-4 border-none shadow-sm ring-1 ring-slate-100">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-rose-100 flex items-center justify-center">
+              <AlertTriangle className="w-5 h-5 text-rose-600" />
+            </div>
+            <div>
+              <p className="text-xs font-bold uppercase tracking-widest text-slate-500">Negative seller balance</p>
+              <p className="text-2xl font-black text-slate-900">{negativeCount}</p>
+            </div>
+          </div>
+        </Card>
+        <Card className="p-4 border-none shadow-sm ring-1 ring-slate-100">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center">
+              <Wallet className="w-5 h-5 text-amber-600" />
+            </div>
+            <div>
+              <p className="text-xs font-bold uppercase tracking-widest text-slate-500">Pending recoveries</p>
+              <p className="text-2xl font-black text-slate-900">{pendingRecoveries}</p>
+            </div>
+          </div>
+        </Card>
+        <Card className="p-4 border-none shadow-sm ring-1 ring-slate-100">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-emerald-100 flex items-center justify-center">
+              <Package className="w-5 h-5 text-emerald-600" />
+            </div>
+            <div>
+              <p className="text-xs font-bold uppercase tracking-widest text-slate-500">Pending payouts</p>
+              <p className="text-2xl font-black text-slate-900">{pendingPayouts}</p>
+            </div>
+          </div>
+        </Card>
+      </div>
+
+      <Card className="border-none shadow-xl ring-1 ring-slate-100 overflow-hidden">
+        <div className="p-4 border-b border-slate-100 bg-slate-50/50 space-y-3">
+          <div className="flex flex-col lg:flex-row gap-3">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <input
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && fetchData(1)}
+                placeholder="Search order, customer..."
+                className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 text-sm"
+              />
+            </div>
+            <input
+              value={sellerId}
+              onChange={(e) => setSellerId(e.target.value)}
+              placeholder="Seller ID"
+              className="lg:w-48 px-4 py-2.5 rounded-xl border border-slate-200 text-sm"
+            />
+            <select
+              value={refundMethodFilter}
+              onChange={(e) => setRefundMethodFilter(e.target.value)}
+              className="lg:w-40 px-4 py-2.5 rounded-xl border border-slate-200 text-sm"
+            >
+              <option value="all">All refund methods</option>
+              <option value="wallet">Wallet</option>
+              <option value="upi">UPI</option>
+              <option value="bank">Bank</option>
+            </select>
+            <button
+              type="button"
+              onClick={() => fetchData(1)}
+              className="px-4 py-2.5 rounded-xl bg-slate-900 text-white text-sm font-bold"
+            >
+              Apply
+            </button>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {STATUS_TABS.map((tab) => (
+              <button
+                key={tab.id || "all"}
+                type="button"
+                onClick={() => setStatusFilter(tab.id)}
+                className={cn(
+                  "px-3 py-1.5 rounded-full text-xs font-bold border",
+                  statusFilter === tab.id
+                    ? "bg-red-500 text-white border-red-500"
+                    : "bg-white text-slate-600 border-slate-200",
+                )}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {loading ? (
+          <div className="min-h-[280px] flex items-center justify-center">
+            <Loader2 className="w-8 h-8 animate-spin text-red-500" />
+          </div>
+        ) : filteredReturns.length === 0 ? (
+          <div className="py-16 text-center text-slate-500 text-sm font-medium">No returns found</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 text-left text-xs uppercase tracking-widest text-slate-500">
+                <tr>
+                  <th className="px-4 py-3">Order</th>
+                  <th className="px-4 py-3">Customer</th>
+                  <th className="px-4 py-3">Status</th>
+                  <th className="px-4 py-3">Refund</th>
+                  <th className="px-4 py-3">Amount</th>
+                  <th className="px-4 py-3">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredReturns.map((row) => (
+                  <tr key={row.returnId || row.id} className="border-t border-slate-100 hover:bg-slate-50/50">
+                    <td className="px-4 py-3 font-bold text-slate-900">#{row.orderId}</td>
+                    <td className="px-4 py-3">{row.customer?.name || "—"}</td>
+                    <td className="px-4 py-3">
+                      <Badge variant="secondary" className="text-[10px] font-black uppercase">
+                        {mapReturnStatusLabel(row.returnStatus)}
+                      </Badge>
+                    </td>
+                    <td className="px-4 py-3 capitalize">
+                      {row.refundMethod || "—"}
+                      {row.refundStatus && row.refundStatus !== "none" ? ` / ${row.refundStatus}` : ""}
+                    </td>
+                    <td className="px-4 py-3 font-bold">₹{Number(row.returnRefundAmount || 0).toFixed(2)}</td>
+                    <td className="px-4 py-3">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedReturn(row)}
+                        className="text-xs font-bold text-red-600 hover:underline"
+                      >
+                        Manage
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        <div className="p-4 border-t border-slate-100">
+          <Pagination
+            currentPage={page}
+            totalItems={total}
+            pageSize={pageSize}
+            onPageChange={(next) => fetchData(next)}
+          />
+        </div>
+      </Card>
+
+      {selectedReturn && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
+          <div className="w-full max-w-lg bg-white rounded-3xl shadow-2xl overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+              <div>
+                <h3 className="font-black text-slate-900">Return #{selectedReturn.orderId}</h3>
+                <p className="text-xs text-slate-500">{mapReturnStatusLabel(selectedReturn.returnStatus)}</p>
+              </div>
+              <button type="button" onClick={() => setSelectedReturn(null)} className="text-slate-400 hover:text-slate-600">
+                ✕
+              </button>
+            </div>
+            <div className="p-6 space-y-3 text-sm text-slate-700">
+              <p>Refund: ₹{Number(selectedReturn.returnRefundAmount || 0).toFixed(2)} via {selectedReturn.refundMethod}</p>
+              <p>Reason: {selectedReturn.returnReason || "—"}</p>
+
+              {(selectedReturn.pricing || selectedReturn.refundPricing) && (
+                <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4 space-y-1 text-xs">
+                  <p className="font-bold text-slate-800">This return</p>
+                  <p>Item refund: ₹{Number(selectedReturn.pricing?.subtotal ?? selectedReturn.refundPricing?.subtotal ?? 0).toFixed(2)}</p>
+                  <p>Coupon share: -₹{Number(selectedReturn.pricing?.couponShare ?? selectedReturn.refundPricing?.couponShare ?? 0).toFixed(2)}</p>
+                  <p>GST share: +₹{Number(selectedReturn.pricing?.taxShare ?? selectedReturn.refundPricing?.taxShare ?? 0).toFixed(2)}</p>
+                  <p>Pickup fee (seller): ₹{Number(selectedReturn.pricing?.pickupFee ?? selectedReturn.returnDeliveryCommission ?? 0).toFixed(2)}</p>
+                  <p className="font-bold text-slate-900 pt-1">
+                    Final refund: ₹{Number(selectedReturn.pricing?.finalRefundAmount ?? selectedReturn.returnRefundAmount ?? 0).toFixed(2)}
+                  </p>
+
+                  <div className="border-t border-slate-200 pt-2 mt-2 space-y-1">
+                    <p className="font-bold text-slate-800">Cumulative (order)</p>
+                    <p>Total refunded: ₹{Number(selectedReturn.pricing?.totalRefundedAmount ?? 0).toFixed(2)}</p>
+                    <p>Total coupon refunded: ₹{Number(selectedReturn.pricing?.totalCouponRefunded ?? 0).toFixed(2)} / ₹{Number(selectedReturn.pricing?.orderCouponTotal ?? 0).toFixed(2)}</p>
+                    <p>Remaining coupon: ₹{Number(selectedReturn.pricing?.remainingCouponAmount ?? 0).toFixed(2)}</p>
+                    <p>Total GST refunded: ₹{Number(selectedReturn.pricing?.totalTaxRefunded ?? 0).toFixed(2)} / ₹{Number(selectedReturn.pricing?.orderTaxTotal ?? 0).toFixed(2)}</p>
+                    <p>Remaining GST: ₹{Number(selectedReturn.pricing?.remainingTaxAmount ?? 0).toFixed(2)}</p>
+                    <p>Remaining refundable: ₹{Number(selectedReturn.pricing?.remainingRefundableAmount ?? 0).toFixed(2)}</p>
+                  </div>
+                </div>
+              )}
+
+              {Array.isArray(selectedReturn.returnItems) && selectedReturn.returnItems.length > 0 && (
+                <div className="rounded-2xl border border-slate-100 overflow-hidden">
+                  <div className="px-4 py-2 bg-slate-50 text-xs font-bold text-slate-600 grid grid-cols-4 gap-2">
+                    <span>Product</span>
+                    <span>Ordered Qty</span>
+                    <span>Returned Qty</span>
+                    <span className="text-right">Final Refund</span>
+                  </div>
+                  <div className="divide-y divide-slate-100">
+                    {selectedReturn.returnItems.map((item) => (
+                      <div
+                        key={`${item.itemId}-${item.returnedQty ?? item.quantity}`}
+                        className="px-4 py-2 text-xs grid grid-cols-4 gap-2 items-center"
+                      >
+                        <p className="font-semibold text-slate-800">{item.name || item.itemId}</p>
+                        <p className="text-slate-600">{item.orderedQty ?? "—"}</p>
+                        <p className="text-slate-600">{item.returnedQty ?? item.quantity ?? "—"}</p>
+                        <p className="text-slate-800 font-bold text-right">
+                          ₹{Number(item.refundAmount ?? 0).toFixed(2)}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex flex-wrap gap-2 pt-2">
+                {selectedReturn.returnStatus === "returned" && (
+                  <button
+                    type="button"
+                    disabled={Boolean(actionLoading)}
+                    onClick={() => runAction("quality", selectedReturn.returnId || selectedReturn.id)}
+                    className="px-4 py-2 rounded-xl bg-emerald-600 text-white text-xs font-bold disabled:opacity-60"
+                  >
+                    Quality Pass & Refund
+                  </button>
+                )}
+                {selectedReturn.refundStatus === "pending" && (
+                  <button
+                    type="button"
+                    disabled={Boolean(actionLoading)}
+                    onClick={() => runAction("payout", selectedReturn.returnId || selectedReturn.id)}
+                    className="px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-bold disabled:opacity-60"
+                  >
+                    Confirm Payout
+                  </button>
+                )}
+                {selectedReturn.returnStatus === "returned" &&
+                  String(selectedReturn.refundMethod || "").toLowerCase() !== "wallet" &&
+                  selectedReturn.refundStatus !== "completed" &&
+                  selectedReturn.refundStatus !== "pending" && (
+                  <button
+                    type="button"
+                    disabled={Boolean(actionLoading)}
+                    onClick={() => runAction("refund", selectedReturn.returnId || selectedReturn.id)}
+                    className="px-4 py-2 rounded-xl bg-slate-900 text-white text-xs font-bold disabled:opacity-60"
+                  >
+                    Process Refund
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default AdminReturns;
