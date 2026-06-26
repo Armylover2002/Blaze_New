@@ -28,6 +28,8 @@ import {
   Lock,
   Unlock,
   Star,
+  Package,
+  Utensils,
 } from "lucide-react";
 import { toast } from "sonner";
 import BottomNavOrders from "@food/components/restaurant/BottomNavOrders";
@@ -38,6 +40,7 @@ import { useRestaurantNotifications } from "@food/hooks/useRestaurantNotificatio
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import ResendNotificationButton from "@food/components/restaurant/ResendNotificationButton";
+import { ActionSlider } from "@/modules/DeliveryV2/components/ui/ActionSlider";
 const debugLog = (...args) => { };
 const debugWarn = (...args) => { };
 const debugError = (...args) => { };
@@ -2246,52 +2249,52 @@ export default function OrdersMain() {
         {showNewOrderPopup && (
           <>
             <motion.div
-              className="fixed inset-0 z-[60] bg-black/60 flex items-center justify-center p-4"
+              className="fixed inset-0 z-[200] bg-black/60 flex items-end sm:items-center justify-center p-0 sm:p-4"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}>
               <motion.div
-                className="w-[95%] max-w-md max-h-[calc(100vh-2rem)] bg-white rounded-[2rem] shadow-2xl overflow-hidden p-1 flex flex-col"
-                initial={{ scale: 0.9, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                exit={{ scale: 0.9, opacity: 0 }}
-                transition={{ type: "spring", damping: 25, stiffness: 300 }}
+                className="w-full max-w-lg max-h-[90vh] bg-white rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-[0_-20px_60px_rgba(0,0,0,0.5)] overflow-hidden flex flex-col"
+                initial={{ y: "100%" }}
+                animate={{ y: 0 }}
+                exit={{ y: "100%" }}
+                transition={{ type: "spring", damping: 25, stiffness: 200 }}
                 onClick={(e) => e.stopPropagation()}>
-                {/* Header */}
-                <div className="px-4 py-3 bg-white border-b border-gray-200 flex items-center justify-between">
-                  <div className="flex-1">
-                    <h3 className="text-base font-bold text-gray-900">
+                {/* Header Ribbon */}
+                <div className="bg-[#FF0000] px-5 py-4 flex justify-between items-center text-white border-b border-red-600/20">
+                  <div>
+                    <p className="text-white/90 text-[10px] font-bold uppercase tracking-widest mb-0.5">
+                      Incoming Order
+                    </p>
+                    <h3 className="text-xl font-bold text-white tracking-tight">
                       {currentPopupOrder?.orderId || "#Order"}
                     </h3>
-                    <p className="text-xs text-gray-500 mt-0.5">
-                      {currentPopupOrder?.restaurantName || "Restaurant"}
-                    </p>
                   </div>
                   <div className="flex items-center gap-2">
                     <button
                       onClick={handlePrint}
-                      className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                      className="p-2 hover:bg-white/20 active:scale-95 rounded-full transition-all"
                       aria-label="Print">
-                      <Printer className="w-5 h-5 text-gray-700" />
+                      <Printer className="w-5 h-5 text-white" />
                     </button>
                     <button
                       onClick={toggleMute}
-                      className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                      className="p-2 hover:bg-white/20 active:scale-95 rounded-full transition-all"
                       aria-label={isMuted ? "Unmute" : "Mute"}>
                       {isMuted ? (
-                        <VolumeX className="w-5 h-5 text-gray-700" />
+                        <VolumeX className="w-5 h-5 text-white" />
                       ) : (
-                        <Volume2 className="w-5 h-5 text-gray-700" />
+                        <Volume2 className="w-5 h-5 text-white" />
                       )}
                     </button>
                   </div>
                 </div>
 
                 {/* Content */}
-                <div className="px-4 pt-4 pb-4 flex-1 overflow-y-auto min-h-0">
+                <div className="px-4 pt-4 pb-3 flex-1 overflow-y-auto min-h-0 bg-gray-50 space-y-3">
                   {/* Scheduled Indicator */}
                   {currentPopupOrder?.scheduledAt && (
-                    <div className="mb-4 bg-green-50 border border-green-200 rounded-lg p-3 flex items-center gap-3">
+                    <div className="bg-green-50 border border-green-200 rounded-xl p-3 flex items-center gap-3 shadow-sm">
                       <div className="w-8 h-8 rounded-full bg-green-100 flex items-center justify-center shrink-0">
                         <Calendar className="w-4 h-4 text-green-600" />
                       </div>
@@ -2299,7 +2302,7 @@ export default function OrdersMain() {
                         <p className="text-[10px] font-bold text-[#FF0000] uppercase tracking-wider">
                           Scheduled Order
                         </p>
-                        <p className="text-sm font-semibold text-[#FF0000] mt-0.5">
+                        <p className="text-sm font-bold text-[#FF0000]">
                           For{" "}
                           {new Date(
                             currentPopupOrder.scheduledAt,
@@ -2315,57 +2318,44 @@ export default function OrdersMain() {
                     </div>
                   )}
 
-                  {/* Customer info */}
-                  <div className="mb-4">
-                    <h4 className="text-sm font-semibold text-gray-900">
-                      {popupPrimaryItem?.name || "New Order"}
-                    </h4>
-                    <p className="text-xs text-gray-500 mt-1">
-                      {currentPopupOrder?.createdAt
-                        ? new Date(
-                          currentPopupOrder.createdAt,
-                        ).toLocaleString("en-GB", {
-                          day: "numeric",
-                          month: "short",
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })
-                        : "Just now"}
-                    </p>
-                  </div>
-
-                  {/* Details Accordion */}
-                  <div className="mb-4">
-                    <button
-                      onClick={() => setIsDetailsExpanded(!isDetailsExpanded)}
-                      className="w-full flex items-center justify-between py-2 border-b border-gray-200">
-                      <div className="flex items-center gap-2">
-                        <svg
-                          className="w-5 h-5 text-gray-700"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24">
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-                          />
-                        </svg>
-                        <span className="text-sm font-semibold text-gray-900">
-                          Details
-                        </span>
-                        <span className="text-xs text-gray-500">
+                  {/* Customer info & Details */}
+                  <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+                    <div className="p-3 border-b border-gray-100 flex justify-between items-center">
+                      <div>
+                        <h4 className="text-base font-bold text-gray-900 tracking-tight">
+                          {popupPrimaryItem?.name || "New Order"}
+                        </h4>
+                        <p className="text-[11px] text-gray-500 mt-0.5">
+                          {currentPopupOrder?.createdAt
+                            ? new Date(
+                              currentPopupOrder.createdAt,
+                            ).toLocaleString("en-GB", {
+                              day: "numeric",
+                              month: "short",
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })
+                            : "Just now"}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <span className="block text-xs font-medium text-gray-500">
                           {popupVisibleItems.length || 0} item
-                          {popupVisibleItems.length !== 1
-                            ? "s"
-                            : ""}
+                          {popupVisibleItems.length !== 1 ? "s" : ""}
                         </span>
                       </div>
+                    </div>
+
+                    <button
+                      onClick={() => setIsDetailsExpanded(!isDetailsExpanded)}
+                      className="w-full flex items-center justify-center py-2 bg-gray-50/50 hover:bg-gray-50 transition-colors">
+                      <span className="text-xs font-semibold text-gray-600 mr-1">
+                        {isDetailsExpanded ? "Hide Details" : "View Details"}
+                      </span>
                       {isDetailsExpanded ? (
-                        <ChevronUp className="w-4 h-4 text-gray-600" />
+                        <ChevronUp className="w-3.5 h-3.5 text-gray-500" />
                       ) : (
-                        <ChevronDown className="w-4 h-4 text-gray-600" />
+                        <ChevronDown className="w-3.5 h-3.5 text-gray-500" />
                       )}
                     </button>
 
@@ -2376,21 +2366,21 @@ export default function OrdersMain() {
                           animate={{ height: "auto", opacity: 1 }}
                           exit={{ height: 0, opacity: 0 }}
                           transition={{ duration: 0.2 }}
-                          className="overflow-hidden">
-                          <div className="py-3 space-y-3">
+                          className="overflow-hidden bg-gray-50/30">
+                          <div className="px-3 py-3 space-y-2 border-t border-gray-100">
                             {popupVisibleItems.length > 0 ? popupVisibleItems.map(
                               (item, index) => (
                                 <div
                                   key={index}
-                                  className="flex items-start gap-3">
+                                  className="flex items-start gap-2">
                                   <div
-                                    className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${item.isVeg ? "bg-green-500" : "bg-red-500"}`}></div>
+                                    className={`w-2.5 h-2.5 rounded-full mt-1 shrink-0 ${item.isVeg ? "bg-green-500" : "bg-red-500"}`}></div>
                                   <div className="flex-1">
                                     <div className="flex items-start justify-between">
-                                      <p className="text-sm font-medium text-gray-900">
-                                        {item.quantity} x {item.name}
+                                      <p className="text-xs font-semibold text-gray-900 leading-snug">
+                                        {item.quantity} × {item.name}
                                       </p>
-                                      <p className="text-xs text-gray-600 ml-2">
+                                      <p className="text-xs font-bold text-gray-900 ml-2 shrink-0">
                                         ₹{item.price * item.quantity}
                                       </p>
                                     </div>
@@ -2398,7 +2388,7 @@ export default function OrdersMain() {
                                 </div>
                               ),
                             ) : (
-                              <p className="text-sm text-gray-500">No items</p>
+                              <p className="text-xs text-gray-500 text-center">No items</p>
                             )}
                           </div>
                         </motion.div>
@@ -2406,164 +2396,79 @@ export default function OrdersMain() {
                     </AnimatePresence>
                   </div>
 
-                  {/* Cutlery preference */}
-                  <div
-                    className={`mb-4 flex items-center gap-2 rounded-lg p-3 ${(popupOrder || newOrder)?.sendCutlery === false
-                      ? "bg-red-50"
-                      : "bg-gray-50"
-                      }`}>
-                    <svg
-                      className={`h-5 w-5 ${(popupOrder || newOrder)?.sendCutlery === false
-                        ? "text-red-600"
-                        : "text-gray-600"
-                        }`}
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24">
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"
-                      />
-                    </svg>
-                    <span
-                      className={`text-sm font-medium ${(popupOrder || newOrder)?.sendCutlery === false
-                        ? "text-red-700"
-                        : "text-gray-700"
-                        }`}>
-                      {(popupOrder || newOrder)?.sendCutlery === false
-                        ? "Don't send cutlery"
-                        : "Send cutlery"}
-                    </span>
-                  </div>
-
-                  {/* Total bill */}
-                  <div className="mb-4 flex items-center justify-between py-3 border-y border-gray-200">
-                    <div className="flex items-center gap-2">
-                      <svg
-                        className="w-5 h-5 text-gray-700"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24">
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16l3.5-2 3.5 2 3.5-2 3.5 2z"
-                        />
-                      </svg>
-                      <span className="text-sm font-semibold text-gray-900">
-                        Total bill
-                      </span>
-                    </div>
-                    <span className="text-base font-bold text-gray-900">
-                      ₹{getPopupOrderTotal(popupOrder || newOrder)}
-                    </span>
-                  </div>
-
-                  {/* Payment method: treat cash/cod (any case) as COD */}
-                  {(() => {
-                    const raw =
-                      (popupOrder || newOrder)?.paymentMethod ||
-                      (popupOrder || newOrder)?.payment?.method;
-                    const m =
-                      raw != null ? String(raw).toLowerCase().trim() : "";
-                    const isCod = m === "cash" || m === "cod";
-                    return (
-                      <div className="mb-4 flex items-center justify-between py-2">
-                        <span className="text-sm font-medium text-gray-700">
-                          Payment
-                        </span>
-                        <span
-                          className={`text-sm font-semibold ${isCod ? "text-amber-600" : "text-green-600"}`}>
-                          {isCod ? "Cash on Delivery" : "Online"}
+                  {/* Order Summary & Settings Card */}
+                  <div className="bg-white rounded-xl border border-gray-100 shadow-sm">
+                    {/* Cutlery preference & Payment */}
+                    <div className="flex items-center justify-between p-3 border-b border-gray-100">
+                      <div className="flex items-center gap-2">
+                        <Utensils className={`w-4 h-4 ${(popupOrder || newOrder)?.sendCutlery === false ? "text-red-500" : "text-gray-400"}`} />
+                        <span className={`text-[11px] font-bold uppercase tracking-wider ${(popupOrder || newOrder)?.sendCutlery === false ? "text-red-600" : "text-gray-600"}`}>
+                          {(popupOrder || newOrder)?.sendCutlery === false ? "No Cutlery" : "Send Cutlery"}
                         </span>
                       </div>
-                    );
-                  })()}
+                      {(() => {
+                        const raw = (popupOrder || newOrder)?.paymentMethod || (popupOrder || newOrder)?.payment?.method;
+                        const m = raw != null ? String(raw).toLowerCase().trim() : "";
+                        const isCod = m === "cash" || m === "cod";
+                        return (
+                          <span className={`px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded border ${isCod ? "bg-amber-50 text-amber-600 border-amber-200" : "bg-green-50 text-green-600 border-green-200"}`}>
+                            {isCod ? "COD" : "Paid"}
+                          </span>
+                        );
+                      })()}
+                    </div>
 
-                  {/* Preparation time */}
-                  <div className="mb-4">
-                    <div className="flex items-center justify-between mb-3">
-                      <span className="text-sm font-medium text-gray-700">
-                        Preparation time
-                      </span>
+                    {/* Prep Time Row */}
+                    <div className="flex items-center justify-between p-3 border-b border-gray-100">
                       <div className="flex items-center gap-2">
+                        <Clock className="w-4 h-4 text-gray-400" />
+                        <span className="text-sm font-semibold text-gray-700">Prep Time</span>
+                      </div>
+                      <div className="flex items-center gap-2 bg-gray-50 p-1 rounded-lg border border-gray-100">
                         <button
                           onClick={() => setPrepTime(Math.max(1, prepTime - 1))}
-                          className="p-1.5 bg-gray-100 hover:bg-gray-200 rounded-full transition-colors">
-                          <Minus className="w-4 h-4 text-gray-700" />
+                          className="w-7 h-7 flex items-center justify-center bg-white hover:bg-gray-100 rounded shadow-sm transition-colors active:scale-95">
+                          <Minus className="w-3.5 h-3.5 text-gray-700" />
                         </button>
-                        <span className="text-base font-semibold text-gray-900 min-w-[60px] text-center">
-                          {prepTime} mins
+                        <span className="text-sm font-bold text-gray-900 w-8 text-center">
+                          {prepTime}m
                         </span>
                         <button
                           onClick={() => setPrepTime(prepTime + 1)}
-                          className="p-1.5 bg-gray-100 hover:bg-gray-200 rounded-full transition-colors">
-                          <Plus className="w-4 h-4 text-gray-700" />
+                          className="w-7 h-7 flex items-center justify-center bg-white hover:bg-gray-100 rounded shadow-sm transition-colors active:scale-95">
+                          <Plus className="w-3.5 h-3.5 text-gray-700" />
                         </button>
                       </div>
+                    </div>
+
+                    {/* Total bill */}
+                    <div className="flex items-center justify-between p-3 bg-gray-50/50 rounded-b-xl">
+                      <span className="text-sm font-bold text-gray-900">
+                        Total Bill
+                      </span>
+                      <span className="text-lg font-black text-gray-900">
+                        ₹{getPopupOrderTotal(popupOrder || newOrder)}
+                      </span>
                     </div>
                   </div>
                 </div>
 
-                <div className="px-4 pb-4 pt-3 border-t border-gray-200 bg-white">
+                <div className="p-4 border-t border-gray-100 bg-white">
                   <div className="space-y-3">
-                    <div
-                      ref={acceptSliderRef}
-                      className="relative h-14 rounded-2xl bg-gray-900 overflow-hidden select-none touch-pan-y">
-                      <motion.div
-                        className="absolute inset-y-0 left-0 bg-[#FF0000]"
-                        initial={{ width: "100%" }}
-                        animate={{ width: `${(countdown / 240) * 100}%` }}
-                        transition={{ duration: 1, ease: "linear" }}
-                      />
-                      <div className="absolute inset-0 flex items-center justify-center px-16">
-                        <span className="relative z-10 text-sm font-semibold text-white text-center">
-                          {isAcceptingOrder
-                            ? "Accepting order..."
-                            : `Slide to accept (${formatTime(countdown)})`}
-                        </span>
-                      </div>
-                      <motion.button
-                        type="button"
-                        className="absolute left-2 top-1/2 z-20 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-xl bg-white text-gray-900 shadow-md disabled:cursor-not-allowed"
-                        style={{
-                          x: (() => {
-                            const sliderWidth =
-                              acceptSliderRef.current?.offsetWidth || 320;
-                            const handleWidth = 40;
-                            const maxTravel = Math.max(
-                              sliderWidth - handleWidth - 16,
-                              0,
-                            );
-                            return acceptSwipeProgress * maxTravel;
-                          })(),
-                        }}
-                        onMouseDown={(e) => handleAcceptSwipeStart(e.clientX)}
-                        onTouchStart={(e) =>
-                          handleAcceptSwipeStart(e.touches[0].clientX)
-                        }
-                        onMouseMove={(e) => {
-                          if (acceptSwipeActiveRef.current)
-                            handleAcceptSwipeMove(e.clientX);
-                        }}
-                        onTouchMove={(e) =>
-                          handleAcceptSwipeMove(e.touches[0].clientX)
-                        }
-                        onMouseUp={handleAcceptSwipeEnd}
-                        onTouchEnd={handleAcceptSwipeEnd}
-                        onTouchCancel={handleAcceptSwipeEnd}
-                        disabled={isAcceptingOrder}>
-                        <span className="text-lg font-bold">›</span>
-                      </motion.button>
-                    </div>
+                    <ActionSlider
+                      label={isAcceptingOrder ? "Accepting..." : `Slide to accept (${formatTime(countdown)})`}
+                      lockedLabel="Accepting..."
+                      onConfirm={handleAcceptOrder}
+                      disabled={isAcceptingOrder}
+                      color="bg-[#FF0000]"
+                      successLabel="Accepted ✓"
+                      timeProgress={(countdown / 240) * 100}
+                    />
 
                     <button
                       onClick={handleRejectClick}
                       disabled={isAcceptingOrder}
-                      className="w-full bg-white border-2 border-red-500 text-red-600 py-3 rounded-lg font-semibold text-sm hover:bg-red-50 transition-colors disabled:opacity-60">
+                      className="w-full py-3 bg-white border border-[#FF0000]/20 text-[#FF0000] rounded-xl font-bold text-sm hover:bg-red-50 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed">
                       Reject Order
                     </button>
                   </div>
@@ -2969,143 +2874,125 @@ const OrderCard = memo(function OrderCard({
     .replace(/\b\w/g, (c) => c.toUpperCase());
 
   return (
-    <div className="w-full bg-white rounded-2xl p-4 mb-3 border border-gray-200 hover:border-gray-400 transition-colors relative">
-      {/* Cancel button - only show for preparing orders */}
-      {isPreparing && onCancel && (
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            onCancel({ orderId, mongoId, customerName });
-          }}
-          className="absolute top-2 right-2 p-1.5 rounded-full bg-red-100 text-red-600 hover:bg-red-200 transition-colors z-10"
-          title="Cancel Order">
-          <X className="w-4 h-4" />
-        </button>
-      )}
-      <div
-        onClick={() =>
-          onSelect?.({
-            orderId,
-            mongoId,
-            status,
-            customerName,
-            type,
-            tableOrToken,
-            timePlaced,
-            eta,
-            itemsSummary,
-            paymentMethod,
-            deliveryPartnerId,
-            dispatchStatus,
-          })
-        }
-        className="w-full text-left flex gap-3 items-stretch cursor-pointer">
+    <div className="w-full bg-white rounded-xl p-3 mb-3 border border-gray-100 shadow-sm hover:shadow-md transition-shadow relative flex flex-col gap-2.5 cursor-pointer group"
+      onClick={() =>
+        onSelect?.({
+          orderId,
+          mongoId,
+          status,
+          customerName,
+          type,
+          tableOrToken,
+          timePlaced,
+          eta,
+          itemsSummary,
+          paymentMethod,
+          deliveryPartnerId,
+          dispatchStatus,
+        })
+      }>
+      
+      {/* Top Row: Order ID & Status */}
+      <div className="flex justify-between items-center pb-2 border-b border-gray-50">
+        <span className="text-sm font-black text-gray-900 tracking-tight truncate mr-2">
+          #{orderId}
+        </span>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[9px] font-bold uppercase tracking-wider ${isReady ? "bg-green-50 text-green-700" : "bg-gray-100 text-gray-700"}`}>
+             <span className={`w-1.5 h-1.5 rounded-full ${isReady ? "bg-green-500" : "bg-gray-500"}`} />
+             {statusLabel}
+          </span>
+          {isPreparing && onCancel && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onCancel({ orderId, mongoId, customerName });
+              }}
+              className="p-1 text-red-500 bg-red-50 hover:bg-red-100 hover:text-red-600 rounded-md transition-colors"
+              title="Cancel Order">
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Middle Row: Content */}
+      <div className="flex gap-3">
         {/* Photo */}
-        <div className="h-20 w-20 rounded-xl overflow-hidden bg-gray-100 flex items-center justify-center flex-shrink-0 my-auto">
+        <div className="w-12 h-12 rounded-lg overflow-hidden bg-gray-50 border border-gray-100 flex-shrink-0">
           {photoUrl ? (
             <img
               src={photoUrl}
               alt={photoAlt}
-              className="h-full w-full object-cover"
+              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
               loading="lazy"
             />
           ) : (
-            <div className="h-full w-full bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center px-2">
-              <span className="text-[11px] font-medium text-gray-500 text-center leading-tight">
+            <div className="w-full h-full bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center p-1">
+              <span className="text-[9px] font-medium text-gray-400 text-center leading-tight truncate w-full">
                 {photoAlt}
               </span>
             </div>
           )}
         </div>
 
-        {/* Content */}
-        <div className="flex-1 flex flex-col justify-between min-h-[80px]">
-          {/* Top row */}
-          <div className="flex items-start justify-between gap-2">
-            <div>
-              <p className="text-sm font-semibold text-black leading-tight">
-                Order #{orderId}
-              </p>
-              <p className="text-[11px] text-gray-500 mt-1">{customerName}</p>
-            </div>
+        {/* Details */}
+        <div className="flex-1 flex flex-col justify-center min-w-0">
+          <p className="text-sm font-bold text-gray-900 leading-tight truncate">{customerName}</p>
+          <p className="text-xs text-gray-600 mt-0.5 truncate">{itemsSummary}</p>
+          <p className="text-[9px] font-semibold text-gray-400 mt-1 uppercase tracking-widest truncate">
+            {type}{tableOrToken ? ` • ${tableOrToken}` : ""} • {timePlaced}
+          </p>
+        </div>
+      </div>
 
-            <div className="flex flex-col items-end gap-1">
+      {/* Bottom Row: Actions & Assignment */}
+      <div className="flex items-center justify-between pt-2">
+        <div className="flex flex-wrap items-center gap-1.5 flex-1 pr-2">
+          {(isPreparing || isReady || normalizedStatus === "confirmed") && (
+            <>
               <span
-                className={`inline-flex items-start gap-1 px-2 py-1 rounded-full text-[11px] font-medium border text-right whitespace-normal break-words max-w-[140px] leading-tight ${isReady
-                  ? "border-green-500 text-green-600"
-                  : "border-gray-800 text-gray-900"
+                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider ${deliveryPartnerId
+                  ? "bg-gray-50 text-gray-500 border border-gray-200"
+                  : "bg-red-50 text-red-600 border border-red-200"
                   }`}>
                 <span
-                  className={`h-1.5 w-1.5 rounded-full ${isReady ? "bg-green-500" : "bg-gray-800"
+                  className={`w-1.5 h-1.5 rounded-full ${deliveryPartnerId ? "bg-gray-400" : "bg-red-500 animate-pulse"
                     }`}
                 />
-                {statusLabel}
+                {deliveryPartnerId ? "Assigned" : "Not Assigned"}
               </span>
-              <span className="text-[11px] text-gray-500 text-right whitespace-normal break-words max-w-[120px] leading-tight">
-                {timePlaced}
-              </span>
-            </div>
-          </div>
+              {dispatchStatus !== "accepted" && (
+                <ResendNotificationButton
+                  orderId={orderId}
+                  mongoId={mongoId}
+                  onSuccess={() => {}}
+                />
+              )}
+            </>
+          )}
+        </div>
 
-          {/* Middle row */}
-          <div className="mt-2">
-            <p className="text-xs text-gray-600 line-clamp-1">{itemsSummary}</p>
-          </div>
-
-          {/* Bottom row */}
-          <div className="mt-2 flex items-end justify-between gap-2">
-            <div className="flex flex-col gap-1">
-              <p className="text-[11px] text-gray-500">
-                {type}
-                {tableOrToken ? ` • ${tableOrToken}` : ""}
-              </p>
-              {/* Delivery Assignment Status - Only show for active orders */}
-              {(isPreparing || isReady || normalizedStatus === "confirmed") && (
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  <span
-                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium ${deliveryPartnerId
-                      ? "bg-[#FF0000]/10 text-[#FF0000] border border-[#FF0000]/30"
-                      : "bg-red-100 text-red-700 border border-red-300"
-                      }`}>
-                    <span
-                      className={`h-1.5 w-1.5 rounded-full ${deliveryPartnerId ? "bg-[#FF0000]" : "bg-red-500"
-                        }`}
-                    />
-                    {deliveryPartnerId ? "Assigned" : "Not Assigned"}
-                  </span>
-                  {dispatchStatus !== "accepted" && (
-                    <ResendNotificationButton
-                      orderId={orderId}
-                      mongoId={mongoId}
-                      onSuccess={onSelect}
-                    />
-                  )}
-                </div>
-              )}
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {!isReady && eta && (
+            <div className="flex flex-col items-end mr-1">
+              <span className="text-[8px] font-bold text-gray-400 uppercase tracking-widest leading-none">ETA</span>
+              <span className="text-xs font-black text-gray-900 leading-none mt-0.5">{eta}</span>
             </div>
-            <div className="flex items-center gap-2">
-              {isPreparing && onMarkReady && (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onMarkReady({ orderId, mongoId, customerName });
-                  }}
-                  disabled={isMarkingReady}
-                  className="px-2.5 py-1 rounded-lg text-[11px] font-semibold border border-[#FF0000] text-[#FF0000] bg-[#FF0000]/5 hover:bg-[#FF0000]/10 disabled:opacity-60 disabled:cursor-not-allowed transition-colors">
-                  {isMarkingReady ? "Marking..." : "Mark Ready"}
-                </button>
-              )}
-              {/* Hide ETA for ready orders */}
-              {!isReady && eta && (
-                <div className="flex items-baseline gap-1">
-                  <span className="text-[11px] text-gray-500">ETA</span>
-                  <span className="text-xs font-medium text-black">{eta}</span>
-                </div>
-              )}
-            </div>
-          </div>
+          )}
+          {isPreparing && onMarkReady && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onMarkReady({ orderId, mongoId, customerName });
+              }}
+              disabled={isMarkingReady}
+              className="px-3 py-1.5 rounded-lg text-xs font-bold text-white bg-[#FF0000] hover:bg-red-600 active:scale-95 disabled:opacity-60 disabled:cursor-not-allowed transition-all shadow-sm">
+              {isMarkingReady ? "Marking..." : "Mark Ready"}
+            </button>
+          )}
         </div>
       </div>
     </div>

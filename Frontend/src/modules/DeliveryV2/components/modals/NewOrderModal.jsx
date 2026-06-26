@@ -255,6 +255,7 @@ export const NewOrderModal = ({ order, onAccept, onReject, onMinimize }) => {
               onConfirm={() => onAccept(order)}
               color="bg-[#FF0000]"
               successLabel="Order Accepted ✓"
+              timeProgress={(timeLeft / 30) * 100}
             />
 
             <button
