@@ -119,7 +119,7 @@ const OtpModal = ({ order, onVerified, onClose }) => {
   const isAlreadyVerified = order?.deliveryVerification?.dropOtp?.verified;
 
   return (
-    <div className="absolute inset-x-0 bottom-0 z-120 p-0 sm:p-4 h-full flex items-end justify-center pointer-events-none">
+    <div className="absolute inset-x-0 bottom-0 z-120 p-0 h-full flex items-end justify-center pointer-events-none">
       <Backdrop onClose={onClose} />
       <motion.div
         initial={{ y: "100%" }}
@@ -306,7 +306,7 @@ const PaymentModal = ({ order, otpString, onComplete, onClose }) => {
 
   return (
     <>
-      <div className="absolute inset-x-0 bottom-0 z-120 p-0 sm:p-4 h-full flex items-end justify-center pointer-events-none">
+      <div className="absolute inset-x-0 bottom-0 z-120 p-0 h-full flex items-end justify-center pointer-events-none">
         <Backdrop onClose={onClose} />
         <motion.div
           initial={{ y: "100%" }}
@@ -522,7 +522,7 @@ const ReturnSellerOtpModal = ({ order, onComplete, onClose }) => {
   };
 
   return (
-    <div className="absolute inset-x-0 bottom-0 z-120 p-0 sm:p-4 h-full flex items-end justify-center pointer-events-none">
+    <div className="absolute inset-x-0 bottom-0 z-120 p-0 h-full flex items-end justify-center pointer-events-none">
       <Backdrop onClose={onClose} />
       <motion.div
         initial={{ y: "100%" }}
@@ -622,7 +622,7 @@ const ForwardDeliveryVerificationModal = ({ order, onComplete, onClose }) => {
         />
       )}
       {step === "complete" && (
-        <div className="absolute inset-x-0 bottom-0 z-120 p-0 sm:p-4 h-full flex items-end justify-center pointer-events-none">
+        <div className="absolute inset-x-0 bottom-0 z-120 p-0 h-full flex items-end justify-center pointer-events-none">
           <Backdrop onClose={onClose || (() => { })} />
           <motion.div
             key="complete-modal"

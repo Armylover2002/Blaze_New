@@ -170,7 +170,7 @@ export const PickupActionModal = ({
   const showPickupStops = !compactReturnReached;
 
   return (
-    <div className="absolute inset-x-0 bottom-0 z-[110] p-0 sm:p-2 sm:mb-2 flex items-end justify-center max-h-full">
+    <div className="absolute inset-x-0 bottom-0 z-[110] p-0 flex items-end justify-center max-h-full">
       {/* Background Dim */}
       <motion.div
         initial={{ opacity: 0 }}

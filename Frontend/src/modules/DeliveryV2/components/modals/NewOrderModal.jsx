@@ -18,12 +18,14 @@ export const NewOrderModal = ({ order, onAccept, onReject, onMinimize }) => {
   const mixedOrder = isMixedOrder(order);
 
   useEffect(() => {
-    if (timeLeft <= 0) {
-      onReject();
-      return;
-    }
     const timer = setInterval(() => setTimeLeft((t) => t - 1), 1000);
     return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    if (timeLeft <= 0) {
+      onReject();
+    }
   }, [timeLeft, onReject]);
 
   const { distanceKm, etaMins } = useMemo(() => {
@@ -120,7 +122,7 @@ export const NewOrderModal = ({ order, onAccept, onReject, onMinimize }) => {
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="absolute inset-x-0 bottom-0 h-full z-150 bg-black/60 flex items-end justify-center p-0"
+      className="fixed inset-0 z-[300] bg-black/60 flex items-end justify-center p-0"
     >
       <motion.div
         initial={{ y: '100%' }}
