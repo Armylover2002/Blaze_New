@@ -1882,66 +1882,6 @@ export default function Inventory() {
       <div
         ref={contentContainerRef}
         className="flex-1 overflow-y-auto px-4 pb-32"
-        onTouchStart={handleTouchStart}
-        onTouchMove={handleTouchMove}
-        onTouchEnd={handleTouchEnd}
-        onMouseDown={(e) => {
-          const target = e.target
-          // Don't handle swipe if starting on topbar or horizontal filter chips
-          if (tabBarRef.current?.contains(target) || filterChipsRef.current?.contains(target)) return
-
-          mouseStartX.current = e.clientX
-          mouseEndX.current = e.clientX
-          isMouseDown.current = true
-          isSwiping.current = false
-        }}
-        onMouseMove={(e) => {
-          if (isMouseDown.current) {
-            if (!isSwiping.current) {
-              const deltaX = Math.abs(e.clientX - mouseStartX.current)
-              if (deltaX > 10) {
-                isSwiping.current = true
-              }
-            }
-            if (isSwiping.current) {
-              mouseEndX.current = e.clientX
-            }
-          }
-        }}
-        onMouseUp={() => {
-          if (isMouseDown.current && isSwiping.current) {
-            const swipeDistance = mouseStartX.current - mouseEndX.current
-            const minSwipeDistance = 50
-
-            if (Math.abs(swipeDistance) > minSwipeDistance && !isTransitioning) {
-              const currentIndex = inventoryTabs.findIndex(tab => tab === activeTab)
-              let newIndex = currentIndex
-
-              if (swipeDistance > 0 && currentIndex < inventoryTabs.length - 1) {
-                newIndex = currentIndex + 1
-              } else if (swipeDistance < 0 && currentIndex > 0) {
-                newIndex = currentIndex - 1
-              }
-
-              if (newIndex !== currentIndex) {
-                setIsTransitioning(true)
-                setTimeout(() => {
-                  setActiveTab(inventoryTabs[newIndex])
-                  setTimeout(() => setIsTransitioning(false), 300)
-                }, 50)
-              }
-            }
-          }
-
-          isMouseDown.current = false
-          isSwiping.current = false
-          mouseStartX.current = 0
-          mouseEndX.current = 0
-        }}
-        onMouseLeave={() => {
-          isMouseDown.current = false
-          isSwiping.current = false
-        }}
       >
         {/* Search and Filter */}
         <div className="sticky top-0 z-30 -mx-4 px-4 pb-4 bg-[#f3f5f8]/95 backdrop-blur supports-[backdrop-filter]:bg-[#f3f5f8]/80">
