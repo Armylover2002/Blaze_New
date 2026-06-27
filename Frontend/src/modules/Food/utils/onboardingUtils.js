@@ -187,6 +187,11 @@ export const isRestaurantOnboardingComplete = (restaurant) => {
     return false
   }
 
+  // In-progress onboarding is not complete
+  if (restaurant?.status === "onboarding") {
+    return false
+  }
+
   // Approved restaurants should never be forced into onboarding again.
   if (restaurant?.status === "approved") {
     return true

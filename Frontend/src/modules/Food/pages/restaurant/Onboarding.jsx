@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { useNavigate, useSearchParams } from "react-router-dom"
+import { useNavigate, useSearchParams, useLocation } from "react-router-dom"
 import { Input } from "@food/components/ui/input"
 import { Button } from "@food/components/ui/button"
 import { Label } from "@food/components/ui/label"
@@ -22,7 +22,7 @@ import { determineStepToShow } from "@food/utils/onboardingUtils"
 import { toast } from "sonner"
 import { useCompanyName } from "@food/hooks/useCompanyName"
 import { getGoogleMapsApiKey } from "@food/utils/googleMapsApiKey"
-import { clearModuleAuth, clearAuthData } from "@food/utils/auth"
+import { clearModuleAuth, clearAuthData, getRestaurantPendingPhone } from "@food/utils/auth"
 import { ImageSourcePicker } from "@food/components/ImageSourcePicker"
 import { convertBase64ToFile, isFlutterBridgeAvailable, openCamera } from "@food/utils/imageUploadUtils"
 const debugLog = (...args) => { }
@@ -85,7 +85,102 @@ const isUploadableFile = (value) => {
   )
 }
 
+const getImageAssetUrl = (value) => {
+  if (!value) return ""
+  if (typeof value === "string" && value.startsWith("http")) return value
+  if (value?.url && typeof value.url === "string") return value.url
+  return ""
+}
+
+const hasValidImageAsset = (value) => isUploadableFile(value) || Boolean(getImageAssetUrl(value))
+
+const hasValidMenuImageAsset = (value) => hasValidImageAsset(value)
+
+const pickNonEmpty = (...values) => {
+  for (const value of values) {
+    if (value === null || value === undefined) continue
+    if (typeof value === "string" && !value.trim()) continue
+    return value
+  }
+  return ""
+}
+
 const normalizePhoneDigits = (value) => String(value || "").replace(/\D/g, "").slice(-15)
+
+const getDisplayPhone = (value) => normalizePhoneDigits(value).slice(-10)
+
+const buildOnboardingStepFormData = (stepNum, { step1, step2, step3 }) => {
+  const formData = new FormData()
+  formData.append("ownerPhone", normalizePhoneDigits(step1.ownerPhone))
+
+  if (stepNum === 1) {
+    formData.append("restaurantName", step1.restaurantName || "")
+    formData.append(
+      "pureVegRestaurant",
+      step1.pureVegRestaurant === true ? "true" : "false",
+    )
+    formData.append("ownerName", step1.ownerName || "")
+    formData.append("ownerEmail", (step1.ownerEmail || "").trim())
+    formData.append("primaryContactNumber", normalizePhoneDigits(step1.primaryContactNumber))
+    formData.append("zoneId", step1.zoneId || "")
+    formData.append("addressLine1", step1.location?.addressLine1 || "")
+    formData.append("addressLine2", step1.location?.addressLine2 || "")
+    formData.append("area", step1.location?.area || "")
+    formData.append("city", step1.location?.city || "")
+    formData.append("state", step1.location?.state || "")
+    formData.append("pincode", step1.location?.pincode || "")
+    formData.append("landmark", step1.location?.landmark || "")
+    formData.append("formattedAddress", step1.location?.formattedAddress || "")
+    formData.append("latitude", String(step1.location?.latitude || ""))
+    formData.append("longitude", String(step1.location?.longitude || ""))
+    formData.append("ref", step1.ref || "")
+  }
+
+  if (stepNum === 2) {
+    formData.append("cuisines", (step2.cuisines || []).join(","))
+    formData.append("openingTime", normalizeTimeValue(step2.openingTime) || "")
+    formData.append("closingTime", normalizeTimeValue(step2.closingTime) || "")
+    formData.append("openDays", (step2.openDays || []).join(","))
+
+    const menuFiles = (step2.menuImages || []).filter((f) => isUploadableFile(f))
+    menuFiles.forEach((file) => formData.append("menuImages", file))
+
+    if (isUploadableFile(step2.profileImage)) {
+      formData.append("profileImage", step2.profileImage)
+    }
+  }
+
+  if (stepNum === 3) {
+    formData.append("panNumber", step3.panNumber || "")
+    formData.append("nameOnPan", step3.nameOnPan || "")
+    if (isUploadableFile(step3.panImage)) {
+      formData.append("panImage", step3.panImage)
+    }
+
+    formData.append("gstRegistered", step3.gstRegistered ? "true" : "false")
+    if (step3.gstRegistered) {
+      formData.append("gstNumber", step3.gstNumber || "")
+      formData.append("gstLegalName", step3.gstLegalName || "")
+      formData.append("gstAddress", step3.gstAddress || "")
+      if (isUploadableFile(step3.gstImage)) {
+        formData.append("gstImage", step3.gstImage)
+      }
+    }
+
+    formData.append("fssaiNumber", step3.fssaiNumber || "")
+    formData.append("fssaiExpiry", step3.fssaiExpiry || "")
+    if (isUploadableFile(step3.fssaiImage)) {
+      formData.append("fssaiImage", step3.fssaiImage)
+    }
+
+    formData.append("accountNumber", step3.accountNumber || "")
+    formData.append("ifscCode", (step3.ifscCode || "").toUpperCase())
+    formData.append("accountHolderName", step3.accountHolderName || "")
+    formData.append("accountType", step3.accountType || "")
+  }
+
+  return formData
+}
 
 const fileToDataUrl = (file) =>
   new Promise((resolve, reject) => {
@@ -238,9 +333,22 @@ const restoreDraftImage = async (value, fallbackPrefix) => {
 
 const getVerifiedPhoneFromStoredRestaurant = () => {
   try {
-    const pending = localStorage.getItem("restaurant_pendingPhone")
+    const pending = getRestaurantPendingPhone() || localStorage.getItem("restaurant_pendingPhone")
     if (pending && pending.trim()) {
-      return pending.trim()
+      return getDisplayPhone(pending.trim())
+    }
+
+    const authDataRaw = sessionStorage.getItem("restaurantAuthData")
+    if (authDataRaw) {
+      const authData = JSON.parse(authDataRaw)
+      if (authData?.phone?.trim()) {
+        return getDisplayPhone(authData.phone.trim())
+      }
+    }
+
+    const loginPhone = sessionStorage.getItem("restaurantLoginPhone")
+    if (loginPhone && loginPhone.trim()) {
+      return getDisplayPhone(loginPhone.trim())
     }
 
     const storedUser = localStorage.getItem("restaurant_user")
@@ -258,10 +366,18 @@ const getVerifiedPhoneFromStoredRestaurant = () => {
       user?.restaurant?.phone,
     ]
     const phone = candidates.find((value) => typeof value === "string" && value.trim())
-    return phone ? phone.trim() : ""
+    return phone ? getDisplayPhone(phone.trim()) : ""
   } catch {
     return ""
   }
+}
+
+const resolveVerifiedOwnerPhone = (...candidates) => {
+  for (const value of candidates) {
+    const display = getDisplayPhone(value)
+    if (display) return display
+  }
+  return ""
 }
 
 const normalizeAccountTypeValue = (value) => {
@@ -302,7 +418,12 @@ const saveOnboardingToLocalStorage = async (step1, step2, step3, step4, currentS
     }
 
     const dataToSave = {
-      step1,
+      step1: {
+        ...step1,
+        ownerPhone:
+          resolveVerifiedOwnerPhone(step1.ownerPhone, getVerifiedPhoneFromStoredRestaurant()) ||
+          step1.ownerPhone,
+      },
       step2: serializableStep2,
       step3: serializableStep3,
       step4: step4 || {},
@@ -541,6 +662,7 @@ function TimeSelector({ label, value, onChange }) {
 export default function RestaurantOnboarding() {
   const companyName = useCompanyName()
   const navigate = useNavigate()
+  const location = useLocation()
   const [searchParams, setSearchParams] = useSearchParams()
   const [step, setStep] = useState(1)
   const [loading, setLoading] = useState(false)
@@ -591,34 +713,45 @@ export default function RestaurantOnboarding() {
     }
   }
 
-  const [verifiedPhoneNumber, setVerifiedPhoneNumber] = useState("")
+  const [verifiedPhoneNumber, setVerifiedPhoneNumber] = useState(() =>
+    resolveVerifiedOwnerPhone(
+      location.state?.verifiedPhone,
+      getVerifiedPhoneFromStoredRestaurant(),
+    ),
+  )
   const [keyboardInset, setKeyboardInset] = useState(0)
-  const [isEditing, setIsEditing] = useState(false)
+  const [isEditing, setIsEditing] = useState(true)
   const [isFssaiCalendarOpen, setIsFssaiCalendarOpen] = useState(false)
   const [zones, setZones] = useState([])
   const [zonesLoading, setZonesLoading] = useState(false)
 
-  const [step1, setStep1] = useState({
-    restaurantName: "",
-    pureVegRestaurant: null,
-    ownerName: "",
-    ownerEmail: "",
-    ownerPhone: "",
-    primaryContactNumber: "",
-    zoneId: "",
-    ref: "",
-    location: {
-      formattedAddress: "",
-      addressLine1: "",
-      addressLine2: "",
-      area: "",
-      city: "",
-      state: "",
-      pincode: "",
-      landmark: "",
-      latitude: "",
-      longitude: "",
-    },
+  const [step1, setStep1] = useState(() => {
+    const verified = resolveVerifiedOwnerPhone(
+      location.state?.verifiedPhone,
+      getVerifiedPhoneFromStoredRestaurant(),
+    )
+    return {
+      restaurantName: "",
+      pureVegRestaurant: null,
+      ownerName: "",
+      ownerEmail: "",
+      ownerPhone: verified,
+      primaryContactNumber: verified,
+      zoneId: "",
+      ref: "",
+      location: {
+        formattedAddress: "",
+        addressLine1: "",
+        addressLine2: "",
+        area: "",
+        city: "",
+        state: "",
+        pincode: "",
+        landmark: "",
+        latitude: "",
+        longitude: "",
+      },
+    }
   })
 
   const [step2, setStep2] = useState({
@@ -662,6 +795,7 @@ export default function RestaurantOnboarding() {
   // Track whether user picked from Places suggestion (has lat/lng) or typed manually
   const [locationPickedFromSuggestion, setLocationPickedFromSuggestion] = useState(false)
   const hasRestoredDraftStepRef = useRef(false)
+  const onboardingDraftRef = useRef(null)
   const menuImagesInputRef = useRef(null)
   const profileImageInputRef = useRef(null)
   const panImageInputRef = useRef(null)
@@ -767,7 +901,13 @@ export default function RestaurantOnboarding() {
 
   // Load from localStorage/server on mount and check URL parameter
   useEffect(() => {
-    setVerifiedPhoneNumber(getVerifiedPhoneFromStoredRestaurant())
+    const navigationVerifiedPhone = resolveVerifiedOwnerPhone(
+      location.state?.verifiedPhone,
+      getVerifiedPhoneFromStoredRestaurant(),
+    )
+    if (navigationVerifiedPhone) {
+      setVerifiedPhoneNumber(navigationVerifiedPhone)
+    }
 
     const initOnboardingData = async () => {
       try {
@@ -793,7 +933,26 @@ export default function RestaurantOnboarding() {
           }
         }
 
-        const verifiedPhone = getVerifiedPhoneFromStoredRestaurant()
+        const verifiedPhone = resolveVerifiedOwnerPhone(
+          location.state?.verifiedPhone,
+          getVerifiedPhoneFromStoredRestaurant(),
+        )
+
+        // Fetch server-side draft for in-progress onboarding (resume after tab close)
+        if (!serverData && !isReonboard && verifiedPhone) {
+          try {
+            const draftRes = await restaurantAPI.getOnboardingDraft(verifiedPhone)
+            const draftData = draftRes?.data?.data?.restaurant || draftRes?.data?.restaurant
+            if (draftData?.status === "onboarding") {
+              serverData = draftData
+              onboardingDraftRef.current = draftData
+            }
+          } catch (draftErr) {
+            if (draftErr?.response?.status !== 404) {
+              debugError("Error fetching onboarding draft:", draftErr)
+            }
+          }
+        }
 
         // 1. Initial Default State
         let initialStep1 = {
@@ -856,14 +1015,16 @@ export default function RestaurantOnboarding() {
 
         // 2. Overlay Server Data
         if (serverData) {
-          setIsEditing(serverData.status === "rejected" || serverData.status === "pending")
+          onboardingDraftRef.current = serverData
+          setIsEditing(serverData.status === "rejected" || serverData.status === "pending" || serverData.status === "onboarding")
 
           if (serverData.status === "rejected") {
             setIsReonboardBypass(true)
             setTimeout(() => {
               toast.error(`Previous application rejected: ${serverData.rejectionReason || 'Please update your details'}`)
             }, 500)
-          } else {
+          } else if (serverData.status !== "onboarding") {
+            // Pending/approved profiles — not a fresh onboarding payment flow
             setIsReonboardBypass(true)
           }
 
@@ -932,14 +1093,48 @@ export default function RestaurantOnboarding() {
         const localData = loadOnboardingFromLocalStorage()
         if (localData) {
           if (localData.step1) {
+            const serverStep1 = { ...initialStep1 }
             initialStep1 = {
-              ...initialStep1,
+              ...serverStep1,
               ...localData.step1,
-              zoneId: normalizeZoneIdValue(localData.step1.zoneId) || initialStep1.zoneId,
+              restaurantName: pickNonEmpty(localData.step1.restaurantName, serverStep1.restaurantName),
+              pureVegRestaurant:
+                typeof localData.step1.pureVegRestaurant === "boolean"
+                  ? localData.step1.pureVegRestaurant
+                  : serverStep1.pureVegRestaurant,
+              ownerName: pickNonEmpty(localData.step1.ownerName, serverStep1.ownerName),
+              ownerEmail: pickNonEmpty(localData.step1.ownerEmail, serverStep1.ownerEmail),
+              ownerPhone:
+                resolveVerifiedOwnerPhone(localData.step1.ownerPhone, serverStep1.ownerPhone) ||
+                serverStep1.ownerPhone,
+              primaryContactNumber: pickNonEmpty(
+                localData.step1.primaryContactNumber,
+                serverStep1.primaryContactNumber,
+              ),
+              zoneId: normalizeZoneIdValue(localData.step1.zoneId) || serverStep1.zoneId,
               location: {
-                ...initialStep1.location,
+                ...serverStep1.location,
                 ...(localData.step1.location || {}),
-              }
+                formattedAddress: pickNonEmpty(
+                  localData.step1.location?.formattedAddress,
+                  serverStep1.location?.formattedAddress,
+                ),
+                addressLine1: pickNonEmpty(
+                  localData.step1.location?.addressLine1,
+                  serverStep1.location?.addressLine1,
+                ),
+                addressLine2: pickNonEmpty(
+                  localData.step1.location?.addressLine2,
+                  serverStep1.location?.addressLine2,
+                ),
+                area: pickNonEmpty(localData.step1.location?.area, serverStep1.location?.area),
+                city: pickNonEmpty(localData.step1.location?.city, serverStep1.location?.city),
+                state: pickNonEmpty(localData.step1.location?.state, serverStep1.location?.state),
+                pincode: pickNonEmpty(localData.step1.location?.pincode, serverStep1.location?.pincode),
+                landmark: pickNonEmpty(localData.step1.location?.landmark, serverStep1.location?.landmark),
+                latitude: pickNonEmpty(localData.step1.location?.latitude, serverStep1.location?.latitude),
+                longitude: pickNonEmpty(localData.step1.location?.longitude, serverStep1.location?.longitude),
+              },
             }
           }
           if (localData.step2) {
@@ -956,10 +1151,13 @@ export default function RestaurantOnboarding() {
             )
             const cachedProfileImage = onboardingFileCache.step2.profileImage || null
 
+            const localMenuImages = [...filteredMenuImages, ...cachedMenuImages]
+            const serverMenuImages = (initialStep2.menuImages || []).filter(hasValidMenuImageAsset)
+
             initialStep2 = {
               ...initialStep2,
               ...localData.step2,
-              menuImages: [...filteredMenuImages, ...cachedMenuImages],
+              menuImages: localMenuImages.length > 0 ? localMenuImages : serverMenuImages,
               profileImage: cachedProfileImage || restoredProfileImage || initialStep2.profileImage,
               openingTime: normalizeTimeValue(localData.step2.openingTime) || initialStep2.openingTime,
               closingTime: normalizeTimeValue(localData.step2.closingTime) || initialStep2.closingTime,
@@ -969,15 +1167,40 @@ export default function RestaurantOnboarding() {
             const restoredPanImage = await restoreDraftImage(localData.step3.panImage, "pan-image")
             const restoredGstImage = await restoreDraftImage(localData.step3.gstImage, "gst-image")
             const restoredFssaiImage = await restoreDraftImage(localData.step3.fssaiImage, "fssai-image")
+            const serverStep3 = { ...initialStep3 }
 
             initialStep3 = {
-              ...initialStep3,
+              ...serverStep3,
               ...localData.step3,
-              panImage: onboardingFileCache.step3.panImage || restoredPanImage || initialStep3.panImage,
-              gstImage: onboardingFileCache.step3.gstImage || restoredGstImage || initialStep3.gstImage,
-              fssaiImage: onboardingFileCache.step3.fssaiImage || restoredFssaiImage || initialStep3.fssaiImage,
-              ifscCode: (localData.step3.ifscCode || initialStep3.ifscCode || "").toUpperCase(),
-              accountType: normalizeAccountTypeValue(localData.step3.accountType || initialStep3.accountType),
+              panNumber: pickNonEmpty(localData.step3.panNumber, serverStep3.panNumber),
+              nameOnPan: pickNonEmpty(localData.step3.nameOnPan, serverStep3.nameOnPan),
+              gstNumber: pickNonEmpty(localData.step3.gstNumber, serverStep3.gstNumber),
+              gstLegalName: pickNonEmpty(localData.step3.gstLegalName, serverStep3.gstLegalName),
+              gstAddress: pickNonEmpty(localData.step3.gstAddress, serverStep3.gstAddress),
+              fssaiNumber: pickNonEmpty(localData.step3.fssaiNumber, serverStep3.fssaiNumber),
+              fssaiExpiry: pickNonEmpty(localData.step3.fssaiExpiry, serverStep3.fssaiExpiry),
+              accountNumber: pickNonEmpty(localData.step3.accountNumber, serverStep3.accountNumber),
+              confirmAccountNumber: pickNonEmpty(
+                localData.step3.confirmAccountNumber,
+                serverStep3.confirmAccountNumber,
+                serverStep3.accountNumber,
+              ),
+              accountHolderName: pickNonEmpty(
+                localData.step3.accountHolderName,
+                serverStep3.accountHolderName,
+              ),
+              accountType: normalizeAccountTypeValue(
+                pickNonEmpty(localData.step3.accountType, serverStep3.accountType),
+              ),
+              gstRegistered:
+                typeof localData.step3.gstRegistered === "boolean"
+                  ? localData.step3.gstRegistered
+                  : serverStep3.gstRegistered,
+              panImage: onboardingFileCache.step3.panImage || restoredPanImage || serverStep3.panImage,
+              gstImage: onboardingFileCache.step3.gstImage || restoredGstImage || serverStep3.gstImage,
+              fssaiImage:
+                onboardingFileCache.step3.fssaiImage || restoredFssaiImage || serverStep3.fssaiImage,
+              ifscCode: (pickNonEmpty(localData.step3.ifscCode, serverStep3.ifscCode) || "").toUpperCase(),
             }
           }
           if (localData.step4) {
@@ -986,6 +1209,16 @@ export default function RestaurantOnboarding() {
               ...localData.step4,
             }
           }
+        }
+
+        const finalVerifiedPhone = resolveVerifiedOwnerPhone(
+          verifiedPhone,
+          initialStep1.ownerPhone,
+          serverData?.ownerPhone,
+        )
+        if (finalVerifiedPhone) {
+          initialStep1.ownerPhone = finalVerifiedPhone
+          setVerifiedPhoneNumber(finalVerifiedPhone)
         }
 
         // Apply initialized values to React state
@@ -1008,7 +1241,10 @@ export default function RestaurantOnboarding() {
             stepToShow = localData.currentStep
             hasRestoredDraftStepRef.current = true
           } else if (serverData) {
-            if (serverData.status === "approved" || serverData.status === "pending") {
+            if (serverData.status === "onboarding") {
+              stepToShow = Math.min(Math.max(Number(serverData.onboardingStep) || 2, 1), 4)
+              hasRestoredDraftStepRef.current = true
+            } else if (serverData.status === "approved" || serverData.status === "pending") {
               stepToShow = 1
             } else {
               const combinedData = {
@@ -1079,10 +1315,10 @@ export default function RestaurantOnboarding() {
 
   useEffect(() => {
     if (!verifiedPhoneNumber) return
-    setStep1((prev) => ({
-      ...prev,
-      ownerPhone: verifiedPhoneNumber,
-    }))
+    setStep1((prev) => {
+      if (prev.ownerPhone === verifiedPhoneNumber) return prev
+      return { ...prev, ownerPhone: verifiedPhoneNumber }
+    })
   }, [verifiedPhoneNumber])
 
   useEffect(() => {
@@ -1393,6 +1629,75 @@ export default function RestaurantOnboarding() {
 
 
 
+  const requiresOnboardingFee =
+    Boolean(feeConfig?.isActive && Number(feeConfig?.price) > 0 && !isReonboardBypass)
+
+  const getMergedStepsForSubmit = () => {
+    const draft = onboardingDraftRef.current
+    const draftLocation = draft?.location || {}
+
+    const mergedStep1 = {
+      ...step1,
+      restaurantName: pickNonEmpty(step1.restaurantName, draft?.restaurantName, draft?.name),
+      pureVegRestaurant:
+        typeof step1.pureVegRestaurant === "boolean"
+          ? step1.pureVegRestaurant
+          : (typeof draft?.pureVegRestaurant === "boolean" ? draft.pureVegRestaurant : false),
+      ownerName: pickNonEmpty(step1.ownerName, draft?.ownerName),
+      ownerEmail: pickNonEmpty(step1.ownerEmail, draft?.ownerEmail),
+      ownerPhone: pickNonEmpty(step1.ownerPhone, draft?.ownerPhone, verifiedPhoneNumber),
+      primaryContactNumber: pickNonEmpty(step1.primaryContactNumber, draft?.primaryContactNumber),
+      zoneId: pickNonEmpty(normalizeZoneIdValue(step1.zoneId), normalizeZoneIdValue(draft?.zoneId)),
+      location: {
+        ...step1.location,
+        formattedAddress: pickNonEmpty(step1.location?.formattedAddress, draftLocation.formattedAddress),
+        addressLine1: pickNonEmpty(step1.location?.addressLine1, draftLocation.addressLine1),
+        addressLine2: pickNonEmpty(step1.location?.addressLine2, draftLocation.addressLine2),
+        area: pickNonEmpty(step1.location?.area, draftLocation.area),
+        city: pickNonEmpty(step1.location?.city, draftLocation.city),
+        state: pickNonEmpty(step1.location?.state, draftLocation.state),
+        pincode: pickNonEmpty(step1.location?.pincode, draftLocation.pincode),
+        landmark: pickNonEmpty(step1.location?.landmark, draftLocation.landmark),
+        latitude: pickNonEmpty(step1.location?.latitude, draftLocation.latitude),
+        longitude: pickNonEmpty(step1.location?.longitude, draftLocation.longitude),
+      },
+    }
+
+    const mergedStep2 = {
+      ...step2,
+      cuisines: (step2.cuisines?.length ? step2.cuisines : draft?.cuisines) || [],
+      openingTime: pickNonEmpty(step2.openingTime, draft?.openingTime),
+      closingTime: pickNonEmpty(step2.closingTime, draft?.closingTime),
+      openDays: (step2.openDays?.length ? step2.openDays : draft?.openDays) || [],
+      menuImages: (step2.menuImages?.length ? step2.menuImages : draft?.menuImages) || [],
+      profileImage: step2.profileImage || draft?.profileImage || null,
+    }
+
+    const mergedStep3 = {
+      ...step3,
+      panNumber: pickNonEmpty(step3.panNumber, draft?.panNumber),
+      nameOnPan: pickNonEmpty(step3.nameOnPan, draft?.nameOnPan),
+      panImage: step3.panImage || draft?.panImage || null,
+      gstRegistered: typeof step3.gstRegistered === "boolean" ? step3.gstRegistered : !!draft?.gstRegistered,
+      gstNumber: pickNonEmpty(step3.gstNumber, draft?.gstNumber),
+      gstLegalName: pickNonEmpty(step3.gstLegalName, draft?.gstLegalName),
+      gstAddress: pickNonEmpty(step3.gstAddress, draft?.gstAddress),
+      gstImage: step3.gstImage || draft?.gstImage || null,
+      fssaiNumber: pickNonEmpty(step3.fssaiNumber, draft?.fssaiNumber),
+      fssaiExpiry: pickNonEmpty(
+        step3.fssaiExpiry,
+        draft?.fssaiExpiry ? String(draft.fssaiExpiry).split("T")[0] : "",
+      ),
+      fssaiImage: step3.fssaiImage || draft?.fssaiImage || null,
+      accountNumber: pickNonEmpty(step3.accountNumber, draft?.accountNumber),
+      ifscCode: pickNonEmpty(step3.ifscCode, draft?.ifscCode),
+      accountHolderName: pickNonEmpty(step3.accountHolderName, draft?.accountHolderName),
+      accountType: normalizeAccountTypeValue(pickNonEmpty(step3.accountType, draft?.accountType)),
+    }
+
+    return { mergedStep1, mergedStep2, mergedStep3 }
+  }
+
   const handleNext = async () => {
     setError("")
 
@@ -1520,88 +1825,116 @@ export default function RestaurantOnboarding() {
     setSaving(true)
     try {
       if (step === 1) {
+        const formData = buildOnboardingStepFormData(1, { step1, step2, step3 })
+        await restaurantAPI.saveOnboardingStep(1, formData)
         goToStep(2)
         window.scrollTo({ top: 0, behavior: "instant" })
       } else if (step === 2) {
+        const formData = buildOnboardingStepFormData(2, { step1, step2, step3 })
+        await restaurantAPI.saveOnboardingStep(2, formData)
         goToStep(3)
         window.scrollTo({ top: 0, behavior: "instant" })
       } else if (step === 3) {
+        const formData = buildOnboardingStepFormData(3, { step1, step2, step3 })
+        await restaurantAPI.saveOnboardingStep(3, formData)
         goToStep(4)
         window.scrollTo({ top: 0, behavior: "instant" })
       } else if (step === 4) {
+        const { mergedStep1, mergedStep2, mergedStep3 } = getMergedStepsForSubmit()
+
+        if (!mergedStep1.restaurantName?.trim()) {
+          throw new Error("Restaurant name is required")
+        }
+
         // Final submit: create restaurant in DB using backend multipart endpoint.
         const formData = new FormData()
 
         // Step 1
-        formData.append("restaurantName", step1.restaurantName || "")
+        formData.append("restaurantName", mergedStep1.restaurantName || "")
         formData.append(
           "pureVegRestaurant",
-          step1.pureVegRestaurant === true ? "true" : "false",
+          mergedStep1.pureVegRestaurant === true ? "true" : "false",
         )
-        formData.append("ownerName", step1.ownerName || "")
-        formData.append("ownerEmail", (step1.ownerEmail || "").trim())
-        formData.append("ownerPhone", normalizePhoneDigits(step1.ownerPhone))
-        formData.append("primaryContactNumber", normalizePhoneDigits(step1.primaryContactNumber))
-        formData.append("zoneId", step1.zoneId || "")
-        formData.append("addressLine1", step1.location?.addressLine1 || "")
-        formData.append("addressLine2", step1.location?.addressLine2 || "")
-        formData.append("area", step1.location?.area || "")
-        formData.append("city", step1.location?.city || "")
-        formData.append("state", step1.location?.state || "")
-        formData.append("pincode", step1.location?.pincode || "")
-        formData.append("landmark", step1.location?.landmark || "")
-        formData.append("formattedAddress", step1.location?.formattedAddress || "")
-        formData.append("latitude", String(step1.location?.latitude || ""))
-        formData.append("longitude", String(step1.location?.longitude || ""))
-        formData.append("ref", step1.ref || "")
+        formData.append("ownerName", mergedStep1.ownerName || "")
+        formData.append("ownerEmail", (mergedStep1.ownerEmail || "").trim())
+        formData.append("ownerPhone", normalizePhoneDigits(mergedStep1.ownerPhone))
+        formData.append("primaryContactNumber", normalizePhoneDigits(mergedStep1.primaryContactNumber))
+        formData.append("zoneId", mergedStep1.zoneId || "")
+        formData.append("addressLine1", mergedStep1.location?.addressLine1 || "")
+        formData.append("addressLine2", mergedStep1.location?.addressLine2 || "")
+        formData.append("area", mergedStep1.location?.area || "")
+        formData.append("city", mergedStep1.location?.city || "")
+        formData.append("state", mergedStep1.location?.state || "")
+        formData.append("pincode", mergedStep1.location?.pincode || "")
+        formData.append("landmark", mergedStep1.location?.landmark || "")
+        formData.append("formattedAddress", mergedStep1.location?.formattedAddress || "")
+        formData.append("latitude", String(mergedStep1.location?.latitude || ""))
+        formData.append("longitude", String(mergedStep1.location?.longitude || ""))
+        formData.append("ref", mergedStep1.ref || "")
 
         // Step 2
-        formData.append("cuisines", (step2.cuisines || []).join(","))
-        formData.append("openingTime", normalizeTimeValue(step2.openingTime) || "")
-        formData.append("closingTime", normalizeTimeValue(step2.closingTime) || "")
-        formData.append("openDays", (step2.openDays || []).join(","))
+        formData.append("cuisines", (mergedStep2.cuisines || []).join(","))
+        formData.append("openingTime", normalizeTimeValue(mergedStep2.openingTime) || "")
+        formData.append("closingTime", normalizeTimeValue(mergedStep2.closingTime) || "")
+        formData.append("openDays", (mergedStep2.openDays || []).join(","))
 
-        const menuFiles = (step2.menuImages || []).filter((f) => isUploadableFile(f))
-        if (menuFiles.length === 0) {
+        const menuFiles = (mergedStep2.menuImages || []).filter((f) => isUploadableFile(f))
+        const hasExistingMenuImages = (mergedStep2.menuImages || []).some(hasValidMenuImageAsset)
+        if (menuFiles.length === 0 && !hasExistingMenuImages) {
           throw new Error("At least one menu image must be uploaded")
         }
         menuFiles.forEach((file) => formData.append("menuImages", file))
 
-        if (!isUploadableFile(step2.profileImage)) {
+        if (isUploadableFile(mergedStep2.profileImage)) {
+          formData.append("profileImage", mergedStep2.profileImage)
+        } else if (!hasValidImageAsset(mergedStep2.profileImage)) {
           throw new Error("Restaurant profile image is required")
         }
-        formData.append("profileImage", step2.profileImage)
 
         // Step 3
-        formData.append("panNumber", step3.panNumber || "")
-        formData.append("nameOnPan", step3.nameOnPan || "")
-        if (!isUploadableFile(step3.panImage)) {
+        formData.append("panNumber", mergedStep3.panNumber || "")
+        formData.append("nameOnPan", mergedStep3.nameOnPan || "")
+        if (isUploadableFile(mergedStep3.panImage)) {
+          formData.append("panImage", mergedStep3.panImage)
+        } else if (!hasValidImageAsset(mergedStep3.panImage)) {
           throw new Error("PAN image is required")
         }
-        formData.append("panImage", step3.panImage)
 
-        formData.append("gstRegistered", step3.gstRegistered ? "true" : "false")
-        if (step3.gstRegistered) {
-          formData.append("gstNumber", step3.gstNumber || "")
-          formData.append("gstLegalName", step3.gstLegalName || "")
-          formData.append("gstAddress", step3.gstAddress || "")
-          if (!isUploadableFile(step3.gstImage)) {
+        formData.append("gstRegistered", mergedStep3.gstRegistered ? "true" : "false")
+        if (mergedStep3.gstRegistered) {
+          formData.append("gstNumber", mergedStep3.gstNumber || "")
+          formData.append("gstLegalName", mergedStep3.gstLegalName || "")
+          formData.append("gstAddress", mergedStep3.gstAddress || "")
+          if (isUploadableFile(mergedStep3.gstImage)) {
+            formData.append("gstImage", mergedStep3.gstImage)
+          } else if (!hasValidImageAsset(mergedStep3.gstImage)) {
             throw new Error("GST image is required when GST registered")
           }
-          formData.append("gstImage", step3.gstImage)
         }
 
-        formData.append("fssaiNumber", step3.fssaiNumber || "")
-        formData.append("fssaiExpiry", step3.fssaiExpiry || "")
-        if (!isUploadableFile(step3.fssaiImage)) {
+        formData.append("fssaiNumber", mergedStep3.fssaiNumber || "")
+        formData.append("fssaiExpiry", mergedStep3.fssaiExpiry || "")
+        if (isUploadableFile(mergedStep3.fssaiImage)) {
+          formData.append("fssaiImage", mergedStep3.fssaiImage)
+        } else if (!hasValidImageAsset(mergedStep3.fssaiImage)) {
           throw new Error("FSSAI image is required")
         }
-        formData.append("fssaiImage", step3.fssaiImage)
 
-        formData.append("accountNumber", step3.accountNumber || "")
-        formData.append("ifscCode", (step3.ifscCode || "").toUpperCase())
-        formData.append("accountHolderName", step3.accountHolderName || "")
-        formData.append("accountType", step3.accountType || "")
+        const usesExistingAssets =
+          (menuFiles.length === 0 && hasExistingMenuImages) ||
+          (!isUploadableFile(mergedStep2.profileImage) && hasValidImageAsset(mergedStep2.profileImage)) ||
+          (!isUploadableFile(mergedStep3.panImage) && hasValidImageAsset(mergedStep3.panImage)) ||
+          (!isUploadableFile(mergedStep3.fssaiImage) && hasValidImageAsset(mergedStep3.fssaiImage)) ||
+          (mergedStep3.gstRegistered && !isUploadableFile(mergedStep3.gstImage) && hasValidImageAsset(mergedStep3.gstImage))
+
+        if (usesExistingAssets || onboardingDraftRef.current?.status === "onboarding") {
+          formData.append("finalizeOnboarding", "true")
+        }
+
+        formData.append("accountNumber", mergedStep3.accountNumber || "")
+        formData.append("ifscCode", (mergedStep3.ifscCode || "").toUpperCase())
+        formData.append("accountHolderName", mergedStep3.accountHolderName || "")
+        formData.append("accountType", mergedStep3.accountType || "")
 
         // Step 4
         formData.append("estimatedDeliveryTime", step4.estimatedDeliveryTime || "")
@@ -1609,12 +1942,12 @@ export default function RestaurantOnboarding() {
         formData.append("offer", step4.offer || "")
 
         // Check if onboarding fee config exists, is active, and is greater than 0
-        if (feeConfig && !isReonboardBypass && feeConfig.isActive && feeConfig.price > 0) {
+        if (requiresOnboardingFee) {
           const orderRes = await onboardingFeeAPI.createOrder({
             role: "RESTAURANT",
-            name: step1.ownerName || step1.restaurantName,
-            phone: normalizePhoneDigits(step1.ownerPhone),
-            email: step1.ownerEmail || ""
+            name: mergedStep1.ownerName || mergedStep1.restaurantName,
+            phone: normalizePhoneDigits(mergedStep1.ownerPhone),
+            email: mergedStep1.ownerEmail || ""
           });
           const orderData = orderRes?.data?.data || orderRes?.data;
 
@@ -1634,14 +1967,14 @@ export default function RestaurantOnboarding() {
             clearOnboardingFromLocalStorage();
             clearOnboardingFileCache();
             try {
-              localStorage.setItem("restaurant_pendingPhone", normalizePhoneDigits(step1.ownerPhone));
+              localStorage.setItem("restaurant_pendingPhone", normalizePhoneDigits(mergedStep1.ownerPhone));
             } catch { }
 
             toast.success("Registration submitted. Awaiting admin approval.", { duration: 4000 });
             navigate("/food/restaurant/pending-verification", {
               replace: true,
               state: {
-                phone: normalizePhoneDigits(step1.ownerPhone),
+                phone: normalizePhoneDigits(mergedStep1.ownerPhone),
               },
             });
           } else {
@@ -1653,11 +1986,11 @@ export default function RestaurantOnboarding() {
               currency: orderData.currency || "INR",
               order_id: orderData.orderId,
               name: "Onboarding Fee Payment",
-              description: `Onboarding fee for ${step1.restaurantName}`,
+              description: `Onboarding fee for ${mergedStep1.restaurantName}`,
               prefill: {
-                name: step1.ownerName || "",
-                email: step1.ownerEmail || "",
-                contact: normalizePhoneDigits(step1.ownerPhone)
+                name: mergedStep1.ownerName || "",
+                email: mergedStep1.ownerEmail || "",
+                contact: normalizePhoneDigits(mergedStep1.ownerPhone)
               },
               handler: async (response) => {
                 try {
@@ -1672,14 +2005,14 @@ export default function RestaurantOnboarding() {
                   clearOnboardingFromLocalStorage();
                   clearOnboardingFileCache();
                   try {
-                    localStorage.setItem("restaurant_pendingPhone", normalizePhoneDigits(step1.ownerPhone));
+                    localStorage.setItem("restaurant_pendingPhone", normalizePhoneDigits(mergedStep1.ownerPhone));
                   } catch { }
 
                   toast.success("Registration submitted. Awaiting admin approval.", { duration: 4000 });
                   navigate("/food/restaurant/pending-verification", {
                     replace: true,
                     state: {
-                      phone: normalizePhoneDigits(step1.ownerPhone),
+                      phone: normalizePhoneDigits(mergedStep1.ownerPhone),
                     },
                   });
                 } catch (err) {
@@ -1713,14 +2046,14 @@ export default function RestaurantOnboarding() {
           clearOnboardingFromLocalStorage();
           clearOnboardingFileCache();
           try {
-            localStorage.setItem("restaurant_pendingPhone", normalizePhoneDigits(step1.ownerPhone));
+            localStorage.setItem("restaurant_pendingPhone", normalizePhoneDigits(mergedStep1.ownerPhone));
           } catch { }
 
           toast.success("Registration submitted. Awaiting admin approval.", { duration: 4000 });
           navigate("/food/restaurant/pending-verification", {
             replace: true,
             state: {
-              phone: normalizePhoneDigits(step1.ownerPhone),
+              phone: normalizePhoneDigits(mergedStep1.ownerPhone),
             },
           });
         }
@@ -1732,6 +2065,7 @@ export default function RestaurantOnboarding() {
         err?.message ||
         "Failed to save onboarding data"
       setError(msg)
+      toast.error(msg)
     } finally {
       setSaving(false)
     }
@@ -1840,27 +2174,18 @@ export default function RestaurantOnboarding() {
             <Label className="text-xs text-gray-700">Phone number*</Label>
             <Input
               type="tel"
-              value={step1.ownerPhone || ""}
-              onChange={(e) => {
-                const val = e.target.value.replace(/\D/g, "").slice(0, 12)
-                setStep1({ ...step1, ownerPhone: val })
-              }}
-              onKeyDown={(e) => {
-                const allowed = ["Backspace", "Delete", "ArrowLeft", "ArrowRight", "Tab", "Enter"]
-                if (!allowed.includes(e.key) && !/^\d$/.test(e.key)) e.preventDefault()
-                if (/^\d$/.test(e.key) && (step1.ownerPhone || "").length >= 12) e.preventDefault()
-              }}
-              onPaste={(e) => {
-                e.preventDefault()
-                const pasted = e.clipboardData.getData("text").replace(/\D/g, "").slice(0, 12)
-                setStep1({ ...step1, ownerPhone: pasted })
-              }}
-              maxLength={12}
+              value={step1.ownerPhone || verifiedPhoneNumber || ""}
               readOnly={Boolean(verifiedPhoneNumber)}
-              className="mt-1 bg-white text-sm text-black placeholder-black"
-              placeholder="Owner phone number (10-12 digits)"
-              disabled={!isEditing}
+              maxLength={10}
+              className="mt-1 bg-gray-50 text-sm text-black placeholder-black cursor-not-allowed"
+              placeholder="Owner phone number"
+              disabled={Boolean(verifiedPhoneNumber)}
             />
+            {verifiedPhoneNumber ? (
+              <p className="text-[11px] text-gray-500 mt-1">
+                This is your OTP-verified number and cannot be changed.
+              </p>
+            ) : null}
           </div>
         </div>
       </section>
@@ -2055,12 +2380,12 @@ export default function RestaurantOnboarding() {
 
   // Initialize Google Places Autocomplete for Step 1 location search.
   useEffect(() => {
-    if (step !== 1) return
+    if (step !== 1 || loading || !isEditing) return
 
     let cancelled = false
 
     const init = async () => {
-      // Wait for the ref to be attached (up to 3s for slower mobile devices)
+      // Wait for the ref to be attached after loading finishes
       for (let i = 0; i < 60; i++) {
         if (locationSearchInputRef.current) break
         await new Promise((r) => setTimeout(r, 50))
@@ -2129,7 +2454,12 @@ export default function RestaurantOnboarding() {
 
       const ok = await loadMaps()
       if (!ok || cancelled || !locationSearchInputRef.current) return
-      if (placesAutocompleteRef.current) return
+
+      // Clean up any previous instance before re-attaching
+      if (placesAutocompleteRef.current) {
+        window.google?.maps?.event?.clearInstanceListeners?.(placesAutocompleteRef.current)
+        placesAutocompleteRef.current = null
+      }
 
       placesAutocompleteRef.current = new window.google.maps.places.Autocomplete(
         locationSearchInputRef.current,
@@ -2197,9 +2527,12 @@ export default function RestaurantOnboarding() {
 
     return () => {
       cancelled = true
+      if (placesAutocompleteRef.current) {
+        window.google?.maps?.event?.clearInstanceListeners?.(placesAutocompleteRef.current)
+      }
       placesAutocompleteRef.current = null
     }
-  }, [step])
+  }, [step, loading, isEditing, zones])
 
   // Load zones for onboarding dropdown (public endpoint).
   useEffect(() => {
@@ -2927,16 +3260,35 @@ export default function RestaurantOnboarding() {
             Optional. Leave this blank if you do not want to highlight an offer.
           </p>
         </div>
-
-        {feeConfig && !isReonboardBypass && feeConfig.isActive && feeConfig.price > 0 && (
-          <div className="bg-red-50 border border-red-200 rounded-md p-4 space-y-2 mt-4">
-            <h3 className="text-sm font-semibold text-red-800">Required Onboarding Fee</h3>
-            <p className="text-xs text-red-700">
-              An onboarding fee of <span className="font-bold">₹{feeConfig.price}</span> is required to submit your registration. You will be redirected to payment on clicking "Finish".
-            </p>
-          </div>
-        )}
       </section>
+
+      {fetchingFees && !feeConfig && (
+        <section className="bg-white border border-gray-200 p-4 sm:p-6 rounded-md">
+          <p className="text-sm text-gray-600">Loading onboarding fee details...</p>
+        </section>
+      )}
+
+      {requiresOnboardingFee && (
+        <section className="bg-amber-50 border border-amber-200 p-4 sm:p-6 rounded-md space-y-3">
+          <h2 className="text-lg font-semibold text-amber-900">Onboarding fee</h2>
+          <p className="text-sm text-amber-800">
+            Admin has set a one-time onboarding fee for restaurant registration. Payment is required before your application can be submitted for approval.
+          </p>
+          <div className="rounded-md bg-white border border-amber-100 p-4 flex items-center justify-between gap-4">
+            <div>
+              <p className="text-xs text-gray-500 uppercase tracking-wide font-semibold">Amount payable</p>
+              <p className="text-2xl font-bold text-gray-900">₹{Number(feeConfig.price).toLocaleString("en-IN")}</p>
+            </div>
+            <div className="text-right">
+              <p className="text-xs text-gray-500">Payment method</p>
+              <p className="text-sm font-medium text-gray-800">Secure online payment</p>
+            </div>
+          </div>
+          <p className="text-xs text-amber-700">
+            When you click <span className="font-semibold">Finish</span>, you will be redirected to complete this payment. Your registration will be submitted only after successful payment.
+          </p>
+        </section>
+      )}
     </div>
   )
 
@@ -3055,7 +3407,15 @@ export default function RestaurantOnboarding() {
               disabled={saving || (step === 4 && !isEditing)}
               className={`text-sm bg-black text-white px-6 ${(step === 4 && !isEditing) ? "opacity-50 cursor-not-allowed" : ""}`}
             >
-              {step === 4 ? (saving ? "Saving..." : "Finish") : saving ? "Saving..." : "Continue"}
+              {step === 4
+                ? saving
+                  ? "Saving..."
+                  : requiresOnboardingFee
+                    ? `Pay ₹${Number(feeConfig.price).toLocaleString("en-IN")} & Finish`
+                    : "Finish"
+                : saving
+                  ? "Saving..."
+                  : "Continue"}
             </Button>
           </div>
         </footer>

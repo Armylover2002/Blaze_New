@@ -404,6 +404,20 @@ export const verifyRestaurantOtpAndLogin = async (phone, otp, fcmToken, platform
     };
   }
 
+  // In-progress onboarding — allow resume from saved step
+  if (restaurant.status === "onboarding") {
+    const { getOnboardingDraftByPhone } = await import(
+      "../../modules/food/restaurant/services/restaurant.service.js"
+    );
+    const draft = await getOnboardingDraftByPhone(phone);
+    return {
+      needsRegistration: true,
+      phone,
+      resumeStep: draft?.onboardingStep || restaurant.onboardingStep || 2,
+      restaurant: draft,
+    };
+  }
+
   // Update FCM token if provided
   if (fcmToken) {
     let isModified = false;

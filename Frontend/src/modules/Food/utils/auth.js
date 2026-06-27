@@ -240,7 +240,8 @@ export function setRestaurantPendingPhone(phone) {
     localStorage.removeItem("restaurant_pendingPhone");
     return;
   }
-  localStorage.setItem("restaurant_pendingPhone", phone);
+  const digits = String(phone).replace(/\D/g, "").slice(-10);
+  localStorage.setItem("restaurant_pendingPhone", digits || String(phone).trim());
 }
 
 export function getRestaurantPendingPhone() {

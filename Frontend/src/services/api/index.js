@@ -1507,6 +1507,21 @@ export const restaurantAPI = {
     }
     return apiClient.post("/food/restaurant/register", formData);
   },
+  /** Save an onboarding step incrementally (multipart FormData). */
+  saveOnboardingStep: (step, formData) => {
+    if (!step || !formData || !(formData instanceof FormData)) {
+      return Promise.reject(new Error("Step and FormData are required"));
+    }
+    return apiClient.post(`/food/restaurant/onboarding/step/${step}`, formData);
+  },
+  /** Fetch in-progress onboarding draft by verified phone. */
+  getOnboardingDraft: (phone) => {
+    if (!phone) return Promise.reject(new Error("Phone is required"));
+    const digits = String(phone).replace(/\D/g, "").slice(-15);
+    return apiClient.get("/food/restaurant/onboarding/draft", {
+      params: { phone: digits },
+    });
+  },
   /** Public: list approved restaurants for user app */
   getRestaurants: (params = {}, config = {}) =>
     getPublicRestaurantsOnce(params, config),
