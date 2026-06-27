@@ -11,7 +11,8 @@ export const ActionSlider = ({
   onConfirm, 
   disabled = false,
   color = "bg-[#FF0000]",
-  successLabel = "Confirmed ✓"
+  successLabel = "Confirmed ✓",
+  timeProgress = null
 }) => {
   const [progress, setProgress] = useState(0);
   const [isSuccess, setIsSuccess] = useState(false);
@@ -30,7 +31,7 @@ export const ActionSlider = ({
     if (disabled || isSuccess) return;
     
     const containerWidth = containerRef.current?.offsetWidth || 300;
-    const handleWidth = 56; // w-14
+    const handleWidth = 48; // w-12
     const totalPath = containerWidth - handleWidth - 12; // p-1.5 = 6px each side
     
     const currentProgress = Math.min(1, Math.max(0, (info.point.x - containerRef.current.getBoundingClientRect().left) / totalPath));
@@ -59,30 +60,44 @@ export const ActionSlider = ({
   };
 
   const trackClasses = disabled
-    ? 'bg-red-100 border border-red-200 shadow-none'
-    : `${color} shadow-lg shadow-black/10`;
+    ? 'bg-red-50 border border-red-200 shadow-none'
+    : timeProgress !== null
+      ? 'bg-gray-900 shadow-inner'
+      : `${color} shadow-lg shadow-black/10`;
 
   return (
     <div 
       ref={containerRef}
-      className={`relative w-full rounded-full p-1.5 overflow-hidden transition-all duration-300 ${trackClasses} ${
-        disabled ? 'h-[58px]' : 'h-[62px]'
+      className={`relative w-full rounded-full p-1.5 overflow-hidden flex items-center transition-all duration-300 ${trackClasses} ${
+        disabled ? 'h-[58px]' : 'h-[60px]'
       }`}
     >
-      {/* Background Track */}
-      <div className={`absolute inset-y-0 left-[76px] right-5 flex items-center justify-center text-center font-bold text-[11px] uppercase tracking-[0.14em] leading-tight px-2 transition-opacity duration-300 ${
+      {/* Time Progress Background */}
+      {timeProgress !== null && !isSuccess && !disabled && (
+        <motion.div
+          className={`absolute inset-y-0 left-0 ${color} rounded-full`}
+          initial={{ width: `${timeProgress}%` }}
+          animate={{ width: `${timeProgress}%` }}
+          transition={{ duration: 1, ease: "linear" }}
+        />
+      )}
+
+      {/* Background Track Text */}
+      <div className={`absolute inset-y-0 left-[68px] right-5 flex items-center justify-center text-center font-bold text-[11px] uppercase tracking-[0.14em] leading-tight px-2 transition-opacity duration-300 ${
         isSuccess
           ? 'opacity-0'
           : disabled
-            ? 'text-red-700/80'
-            : 'text-white/88'
+            ? 'text-red-700/80 z-10'
+            : timeProgress !== null 
+              ? 'text-white drop-shadow-md z-10'
+              : 'text-white/88 z-10'
       }`}>
         {disabled ? lockedLabel : label}
       </div>
 
-      {/* Dynamic Progress Fill */}
+      {/* Dynamic Progress Fill for Swipe */}
       <motion.div 
-        className={`absolute inset-0 bg-black/20 rounded-full`}
+        className={`absolute inset-0 bg-black/20 rounded-full z-10`}
         initial={{ width: 0 }}
         animate={{ 
           width: isSuccess ? '100%' : `${progress * 100}%`,
@@ -98,7 +113,7 @@ export const ActionSlider = ({
             initial={{ opacity: 0, scale: 0.8 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0 }}
-            className="absolute inset-y-0 left-[76px] right-5 flex items-center justify-center text-center text-white font-bold text-sm uppercase tracking-[0.14em] leading-none z-30"
+            className="absolute inset-y-0 left-[68px] right-5 flex items-center justify-center text-center text-white font-bold text-sm uppercase tracking-[0.14em] leading-none z-30"
           >
             {successLabel}
           </motion.div>
@@ -108,13 +123,13 @@ export const ActionSlider = ({
       {/* The Handle */}
       <motion.div
         drag={disabled || isSuccess ? false : "x"}
-        dragConstraints={{ left: 0, right: containerRef.current?.offsetWidth ? containerRef.current.offsetWidth - 68 : 250 }}
+        dragConstraints={{ left: 0, right: containerRef.current?.offsetWidth ? containerRef.current.offsetWidth - 60 : 250 }}
         dragElastic={0.1}
         onDrag={handleDrag}
         onDragEnd={handleDragEnd}
         animate={controls}
         className={`relative rounded-full flex items-center justify-center z-20 shadow-xl transition-colors ${
-          disabled ? 'w-12 h-12' : 'w-14 h-14'
+          disabled ? 'w-10 h-10' : 'w-12 h-12'
         } ${
           disabled
             ? 'bg-white text-red-300 border border-red-200 cursor-not-allowed'
@@ -123,7 +138,7 @@ export const ActionSlider = ({
               : 'bg-white text-gray-950 cursor-grab active:cursor-grabbing'
         }`}
       >
-        <ChevronRight className={`w-8 h-8 transition-transform duration-300 ${isSuccess ? 'scale-110' : ''}`} />
+        <ChevronRight className={`w-6 h-6 transition-transform duration-300 ${isSuccess ? 'scale-110' : ''}`} />
       </motion.div>
     </div>
   );

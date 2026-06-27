@@ -1118,25 +1118,30 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
 
       {/* OVERLAYS (Persistent if active) - Outside flex container to avoid clipping and z-index issues */}
       {(currentTab === 'feed' || activeOrder) && (
-        <AnimatePresence>
-          {!isModalMinimized && (
-            <motion.div
+        <>
+          <AnimatePresence>
+            {!isModalMinimized && incomingOrder && (
+              <NewOrderModal 
+                key="new-order-modal"
+                order={incomingOrder} 
+                onAccept={(o) => { acceptOrder(o); setIncomingOrder(null); clearNewOrder(); }}
+                onReject={() => { setIncomingOrder(null); clearNewOrder(); }}
+                onMinimize={() => setIsModalMinimized(true)}
+              />
+            )}
+          </AnimatePresence>
+
+          <AnimatePresence>
+            {!isModalMinimized && (
+              <motion.div
               key="modal-container"
               initial={{ y: '100%' }}
               animate={{ y: 0 }}
               exit={{ y: '100%' }}
               transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-              className="fixed inset-x-0 top-0 bottom-[92px] z-[300] pointer-events-none flex items-end"
+              className="fixed inset-x-0 top-0 bottom-0 z-[300] pointer-events-none flex items-end"
             >
               <div className="w-full pointer-events-auto relative">
-                {incomingOrder && (
-                  <NewOrderModal 
-                    order={incomingOrder} 
-                    onAccept={(o) => { acceptOrder(o); setIncomingOrder(null); clearNewOrder(); }}
-                    onReject={() => { setIncomingOrder(null); clearNewOrder(); }}
-                    onMinimize={() => setIsModalMinimized(true)}
-                  />
-                )}
                 {(tripStatus === 'PICKING_UP' || tripStatus === 'REACHED_PICKUP') && (
                   <PickupActionModal 
                     order={activeOrder} 
@@ -1150,9 +1155,9 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
                   />
                 )}
                 {(tripStatus === 'PICKED_UP' || tripStatus === 'REACHED_DROP') && (
-                  <div className="absolute bottom-4 inset-x-0 z-[120] px-4">
+                  <div className="absolute bottom-0 inset-x-0 z-[120] px-0">
                     {tripStatus === 'PICKED_UP' ? (
-                      <div className="bg-white rounded-[3rem] p-8 shadow-[0_-20px_80px_rgba(0,0,0,0.4)] border border-gray-100 flex flex-col items-center">
+                      <div className="bg-white rounded-t-[3rem] p-8 shadow-[0_-20px_80px_rgba(0,0,0,0.4)] border-t border-gray-100 flex flex-col items-center w-full max-w-lg mx-auto">
                         {/* Handle / Minimize */}
                         <div className="w-full flex justify-center pb-4 pt-0 -mt-2">
                           <button onClick={() => setIsModalMinimized(true)} className="p-1 hover:bg-gray-100 active:scale-95 transition-all rounded-full flex flex-col items-center">
@@ -1209,12 +1214,14 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
                         <ActionSlider label="Slide to Arrive" successLabel="Arrived ✓" disabled={!isWithinRange} onConfirm={reachDrop} color="bg-[#FF0000]" />
                       </div>
                     ) : (
-                      <button 
-                        onClick={() => setShowVerification(true)} 
-                        className="w-full bg-green-500 hover:bg-green-600 text-white shadow-xl shadow-green-500/30 rounded-2xl py-5 font-bold text-sm tracking-[0.2em] transform transition-all active:scale-95 flex items-center justify-center gap-3"
-                      >
-                        <CheckCircle2 className="w-6 h-6" /> VERIFY & COMPLETE
-                      </button>
+                      <div className="px-4 pb-[92px] w-full max-w-lg mx-auto">
+                        <button 
+                          onClick={() => setShowVerification(true)} 
+                          className="w-full bg-green-500 hover:bg-green-600 text-white shadow-xl shadow-green-500/30 rounded-2xl py-5 font-bold text-sm tracking-[0.2em] transform transition-all active:scale-95 flex items-center justify-center gap-3"
+                        >
+                          <CheckCircle2 className="w-6 h-6" /> VERIFY & COMPLETE
+                        </button>
+                      </div>
                     )}
                   </div>
                 )}
@@ -1234,6 +1241,7 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
             </motion.div>
           )}
         </AnimatePresence>
+        </>
       )}
 
       {/* ─── MODALS RESTORED FROM OLD UI ─── */}

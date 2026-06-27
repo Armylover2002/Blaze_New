@@ -62,9 +62,9 @@ import {
 import fssaiLogo from "@food/assets/fssai.png"
 import { RestaurantDetailSkeleton } from "@food/components/ui/loading-skeletons"
 
-const debugLog = (...args) => {}
-const debugWarn = (...args) => {}
-const debugError = (...args) => {}
+const debugLog = (...args) => { }
+const debugWarn = (...args) => { }
+const debugError = (...args) => { }
 
 
 
@@ -241,36 +241,36 @@ function RestaurantDetailsContent() {
               // Fallback without zoneId so missing live location never blocks this page.
               debugLog('? Direct lookup failed, trying search by name...')
 
-                const searchVariants = zoneId
-                  ? [{ limit: 100, zoneId: zoneId, _ts: Date.now() }, { limit: 100, _ts: Date.now() }]
-                  : [{ limit: 100, _ts: Date.now() }]
+              const searchVariants = zoneId
+                ? [{ limit: 100, zoneId: zoneId, _ts: Date.now() }, { limit: 100, _ts: Date.now() }]
+                : [{ limit: 100, _ts: Date.now() }]
 
-                for (const searchParams of searchVariants) {
-                  try {
-                    const searchResponse = await restaurantAPI.getRestaurants(searchParams, { noCache: true })
-                    const restaurants = searchResponse?.data?.data?.restaurants || searchResponse?.data?.data || []
+              for (const searchParams of searchVariants) {
+                try {
+                  const searchResponse = await restaurantAPI.getRestaurants(searchParams, { noCache: true })
+                  const restaurants = searchResponse?.data?.data?.restaurants || searchResponse?.data?.data || []
 
-                    // Try to find by slug match or name match
-                    const restaurantName = slug.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
-                    const matchingRestaurant = restaurants.find(r =>
-                      r.slug === slug ||
-                      r.name?.toLowerCase().replace(/\s+/g, '-') === slug.toLowerCase() ||
-                      r.name?.toLowerCase() === restaurantName.toLowerCase()
-                    )
+                  // Try to find by slug match or name match
+                  const restaurantName = slug.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
+                  const matchingRestaurant = restaurants.find(r =>
+                    r.slug === slug ||
+                    r.name?.toLowerCase().replace(/\s+/g, '-') === slug.toLowerCase() ||
+                    r.name?.toLowerCase() === restaurantName.toLowerCase()
+                  )
 
-                    if (matchingRestaurant) {
-                      // Get full restaurant details by ID
-                      const fullResponse = await restaurantAPI.getRestaurantById(matchingRestaurant._id || matchingRestaurant.restaurantId)
-                      if (fullResponse.data && fullResponse.data.success && fullResponse.data.data) {
-                        apiRestaurant = fullResponse.data.data
-                        debugLog('? Found restaurant in restaurant API by name search:', apiRestaurant)
-                        break
-                      }
+                  if (matchingRestaurant) {
+                    // Get full restaurant details by ID
+                    const fullResponse = await restaurantAPI.getRestaurantById(matchingRestaurant._id || matchingRestaurant.restaurantId)
+                    if (fullResponse.data && fullResponse.data.success && fullResponse.data.data) {
+                      apiRestaurant = fullResponse.data.data
+                      debugLog('? Found restaurant in restaurant API by name search:', apiRestaurant)
+                      break
                     }
-                  } catch (searchError) {
-                    debugWarn('? Search fallback failed for params:', searchParams, searchError?.message)
                   }
+                } catch (searchError) {
+                  debugWarn('? Search fallback failed for params:', searchParams, searchError?.message)
                 }
+              }
             }
           } catch (restaurantError) {
             debugError('? Restaurant not found in restaurant API either:', restaurantError)
@@ -750,28 +750,28 @@ function RestaurantDetailsContent() {
                   return Object.values(value).filter((entry) => entry && typeof entry === "object")
                 }
                 const normalizeItem = (item = {}) => {
-                   const isRecommended = item.isRecommended === true || item.isRecommended === 1 || String(item.isRecommended) === "true"
-                   const isSpicy = item.isSpicy === true || item.isSpicy === 1 || String(item.isSpicy) === "true"
-                   let foodType = item.foodType || "Non-Veg"
-                   if (typeof foodType === 'string') {
-                     if (foodType.toLowerCase() === 'veg') foodType = 'Veg'
-                     else if (foodType.toLowerCase() === 'non-veg' || foodType.toLowerCase() === 'nonveg') foodType = 'Non-Veg'
-                   }
-                   return {
-                     ...item,
-                      id: String(item.id || item._id || `${Date.now()}-${Math.random()}`),
-                      name: item.name || "Unnamed Item",
-                      foodType,
-                      price: getFoodDisplayPrice(item),
-                      otherPrice: item.otherPrice || 0,
-                      variants: getFoodVariants(item),
-                      variations: getFoodVariants(item),
-                      isAvailable: item.isAvailable !== false,
-                      isRecommended,
-                      isSpicy,
-                     description: typeof item.description === "string" ? item.description : "",
-                   }
-                 }
+                  const isRecommended = item.isRecommended === true || item.isRecommended === 1 || String(item.isRecommended) === "true"
+                  const isSpicy = item.isSpicy === true || item.isSpicy === 1 || String(item.isSpicy) === "true"
+                  let foodType = item.foodType || "Non-Veg"
+                  if (typeof foodType === 'string') {
+                    if (foodType.toLowerCase() === 'veg') foodType = 'Veg'
+                    else if (foodType.toLowerCase() === 'non-veg' || foodType.toLowerCase() === 'nonveg') foodType = 'Non-Veg'
+                  }
+                  return {
+                    ...item,
+                    id: String(item.id || item._id || `${Date.now()}-${Math.random()}`),
+                    name: item.name || "Unnamed Item",
+                    foodType,
+                    price: getFoodDisplayPrice(item),
+                    otherPrice: item.otherPrice || 0,
+                    variants: getFoodVariants(item),
+                    variations: getFoodVariants(item),
+                    isAvailable: item.isAvailable !== false,
+                    isRecommended,
+                    isSpicy,
+                    description: typeof item.description === "string" ? item.description : "",
+                  }
+                }
                 const menuSections = toArray(rawSections).map((section, sectionIndex) => ({
                   ...section,
                   id: String(section.id || section._id || `section-${sectionIndex}`),
@@ -846,11 +846,11 @@ function RestaurantDetailsContent() {
                   })
                   const matchedItem = allItemsInMenu.find(item => String(item.id || item._id || "").trim() === targetDishId)
                   if (matchedItem) {
-                    searchedDishSection = { 
-                      name: "Result for your search", 
-                      items: [matchedItem], 
+                    searchedDishSection = {
+                      name: "Result for your search",
+                      items: [matchedItem],
                       subsections: [],
-                      isSearchResult: true 
+                      isSearchResult: true
                     }
                   }
                 }
@@ -2055,84 +2055,79 @@ function RestaurantDetailsContent() {
       </div>
 
       {/* Main Content Card - "Same to Same" Redesign */}
-      <div className="bg-[#F8F9FA] dark:bg-[#0a0a0a] -mt-4 relative z-10 px-4 pt-0 min-h-[50vh]">
+      <div className="bg-[#F8F9FA] dark:bg-[#0a0a0a] mt-0 relative z-10 px-4 pt-4 min-h-[50vh]">
         <div className="max-w-7xl mx-auto space-y-4">
           {/* Info Card */}
           <div className="bg-white dark:bg-[#1a1a1a] rounded-[28px] shadow-[0_10px_40px_rgb(0,0,0,0.04)] border border-gray-100 dark:border-gray-800 p-5 space-y-4">
             {/* Top Row: Name & Rating */}
             <div className="flex justify-between items-start">
-            <div className="flex-1">
-              <div className="flex items-center gap-2 mb-1">
-                <h1 className="text-2xl font-bold text-gray-900 dark:text-white tracking-tight">
-                  {restaurant?.name || "Unknown Restaurant"}
-                </h1>
-                <Info className="h-5 w-5 text-gray-400 cursor-pointer" />
+              <div className="flex-1">
+                <div className="flex items-center gap-2 mb-1">
+                  <h1 className="text-2xl font-bold text-gray-900 dark:text-white tracking-tight">
+                    {restaurant?.name || "Unknown Restaurant"}
+                  </h1>
+                </div>
+                <div className="flex items-center gap-2 text-sm font-medium text-gray-600 dark:text-gray-400">
+                  <Utensils className="h-4 w-4" />
+                  <span>{restaurant?.topCategory || restaurant?.cuisine || "Multi-cuisine"}</span>
+                </div>
               </div>
-              <div className="flex items-center gap-2 text-sm font-medium text-gray-600 dark:text-gray-400">
-                <Utensils className="h-4 w-4" />
-                <span>{restaurant?.topCategory || restaurant?.cuisine || "Multi-cuisine"}</span>
+
+              <div className="flex flex-col items-end gap-1">
+                <div className="bg-[#FF0000] text-white px-2 py-1 rounded-lg flex items-center gap-1 font-bold text-sm shadow-sm">
+                  <Star className="h-3.5 w-3.5 fill-white" />
+                  <span>{restaurant?.rating || 4.5}</span>
+                </div>
+                <span className="text-[11px] font-medium text-gray-400">
+                  {(restaurant.reviews || 0).toLocaleString()}+ ratings
+                </span>
               </div>
             </div>
 
-            <div className="flex flex-col items-end gap-1">
-              <div className="bg-[#FF0000] text-white px-2 py-1 rounded-lg flex items-center gap-1 font-bold text-sm shadow-sm">
-                <Star className="h-3.5 w-3.5 fill-white" />
-                <span>{restaurant?.rating || 4.5}</span>
-              </div>
-              <span className="text-[11px] font-medium text-gray-400">
-                {(restaurant.reviews || 0).toLocaleString()}+ ratings
-              </span>
-            </div>
-          </div>
-
-          {/* Middle Row: Location & Open Status */}
-          <div className="flex items-center justify-between gap-4">
-            <div 
-              className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300 cursor-pointer flex-1 min-w-0"
-              onClick={() => setShowLocationSheet(true)}
-            >
-              <div className="flex items-center gap-2 truncate">
-                <MapPin className="h-4 w-4 text-gray-400 flex-shrink-0" />
-                <span className="truncate">
+            {/* Middle Row: Location */}
+            <div className="flex items-start gap-4">
+              <div className="flex items-start gap-2 text-sm font-medium text-gray-700 dark:text-gray-300 flex-1">
+                <MapPin className="h-4 w-4 text-gray-400 flex-shrink-0 mt-0.5" />
+                <span className="leading-snug">
                   {restaurant?.distance || "1.2 km"} | {restaurant?.location || "Location"}
                 </span>
-                <ChevronDown className="h-4 w-4 text-gray-400 flex-shrink-0" />
               </div>
             </div>
 
-            <div className="flex-shrink-0">
-               <Badge className={`${isRestaurantOffline ? "bg-rose-100 text-rose-600 border-rose-200" : "bg-[#FF0000] text-white border-transparent"} px-4 py-2 rounded-2xl text-xs font-bold shadow-sm whitespace-nowrap`}>
-                 {isRestaurantOffline ? "Offline" : "Open now"}
-               </Badge>
+            {/* Bottom Row: Delivery Time & Open Status */}
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300">
+                <Clock className="h-4 w-4 text-gray-400" />
+                <span>{restaurant?.deliveryTime || "25-30 mins"}</span>
+              </div>
+
+              <div className="flex-shrink-0">
+                <Badge className={`${isRestaurantOffline ? "bg-rose-100 text-rose-600 border-rose-200" : "bg-[#FF0000] text-white border-transparent"} px-4 py-2 rounded-2xl text-xs font-bold shadow-sm whitespace-nowrap`}>
+                  {isRestaurantOffline ? "Offline" : "Open now"}
+                </Badge>
+              </div>
             </div>
           </div>
 
-          {/* Bottom Row: Delivery Time */}
-          <div className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300">
-            <Clock className="h-4 w-4 text-gray-400" />
-            <span>{restaurant?.deliveryTime || "25-30 mins"}</span>
-          </div>
-        </div>
-
-        {/* Offer Card */}
-        <div className="max-w-7xl mx-auto mt-4 bg-white dark:bg-[#1a1a1a] rounded-[24px] shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-gray-100 dark:border-gray-800 p-4 relative overflow-hidden">
-           <div className="flex items-center justify-between gap-4">
-             <div className="flex items-center gap-4">
+          {/* Offer Card */}
+          <div className="max-w-7xl mx-auto mt-4 bg-white dark:bg-[#1a1a1a] rounded-[24px] shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-gray-100 dark:border-gray-800 p-4 relative overflow-hidden">
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-4">
                 <div className="h-12 w-12 rounded-full bg-red-50 flex items-center justify-center flex-shrink-0">
                   <Percent className="h-6 w-6 text-[#FF0000]" />
                 </div>
                 <div>
-                   <h3 className="text-sm font-bold text-gray-900 dark:text-white uppercase tracking-tight">
-                     {highlightOffers[highlightIndex] || "Special Offer"}
-                   </h3>
-                   <p className="text-[11px] font-medium text-gray-400">
-                     Tap to view all offers
-                   </p>
+                  <h3 className="text-sm font-bold text-gray-900 dark:text-white uppercase tracking-tight">
+                    {highlightOffers[highlightIndex] || "Special Offer"}
+                  </h3>
+                  <p className="text-[11px] font-medium text-gray-400">
+                    Tap to view all offers
+                  </p>
                 </div>
-             </div>
+              </div>
 
-             {/* Redundant rating on offer card (as per screenshot) */}
-             <div className="flex flex-col items-end gap-1 opacity-60 scale-90 origin-right">
+              {/* Redundant rating on offer card (as per screenshot) */}
+              <div className="flex flex-col items-end gap-1 opacity-60 scale-90 origin-right">
                 <div className="bg-[#FF0000] text-white px-2 py-0.5 rounded-lg flex items-center gap-1 font-bold text-xs">
                   <Star className="h-3 w-3 fill-white" />
                   <span>{restaurant?.rating || 4.5}</span>
@@ -2140,26 +2135,26 @@ function RestaurantDetailsContent() {
                 <span className="text-[10px] font-medium text-gray-400 whitespace-nowrap">
                   {(restaurant.reviews || 0).toLocaleString()}+ ratings
                 </span>
-             </div>
-           </div>
+              </div>
+            </div>
 
-           {/* Pagination Dots */}
-           <div className="flex items-center gap-1 mt-3 px-1">
+            {/* Pagination Dots */}
+            <div className="flex items-center gap-1 mt-3 px-1">
               {highlightOffers.slice(0, 2).map((_, i) => (
-                <div 
-                  key={i} 
-                  className={`h-1.5 w-1.5 rounded-full transition-colors ${i === highlightIndex % 2 ? 'bg-[#FF0000]' : 'bg-gray-200'}`} 
+                <div
+                  key={i}
+                  className={`h-1.5 w-1.5 rounded-full transition-colors ${i === highlightIndex % 2 ? 'bg-[#FF0000]' : 'bg-gray-200'}`}
                 />
               ))}
-           </div>
-        </div>
-
-        {isRestaurantOffline && (
-          <div className="max-w-7xl mx-auto mt-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-2 text-xs font-semibold text-rose-700">
-            This restaurant is currently offline. Orders are unavailable.
+            </div>
           </div>
-        )}
-          
+
+          {isRestaurantOffline && (
+            <div className="max-w-7xl mx-auto mt-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-2 text-xs font-semibold text-rose-700">
+              This restaurant is currently offline. Orders are unavailable.
+            </div>
+          )}
+
           {/* Filter/Category Buttons */}
           <div className="border-y border-gray-200 dark:border-gray-800 py-3 -mx-4 px-4 overflow-x-auto scrollbar-hide">
             <div className="max-w-7xl mx-auto flex flex-col gap-2 w-max px-4">
@@ -2197,24 +2192,26 @@ function RestaurantDetailsContent() {
                     <X className="h-3 w-3 text-gray-600" />
                   )}
                 </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className={`flex items-center gap-1.5 whitespace-nowrap border-gray-300 bg-white rounded-full ${filters.vegNonVeg === "non-veg" ? "border-amber-700 bg-amber-50" : ""
-                    }`}
-                  onClick={() =>
-                    setFilters((prev) => ({
-                      ...prev,
-                      vegNonVeg: prev.vegNonVeg === "non-veg" ? null : "non-veg",
-                    }))
-                  }
-                >
-                  <div className="h-3 w-3 rounded-full bg-amber-700" />
-                  Non-veg
-                  {filters.vegNonVeg === "non-veg" && (
-                    <X className="h-3 w-3 text-gray-600" />
-                  )}
-                </Button>
+                {(vegMode !== "pure" && vegMode !== "all" && vegMode !== true) && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className={`flex items-center gap-1.5 whitespace-nowrap border-gray-300 bg-white rounded-full ${filters.vegNonVeg === "non-veg" ? "border-amber-700 bg-amber-50" : ""
+                      }`}
+                    onClick={() =>
+                      setFilters((prev) => ({
+                        ...prev,
+                        vegNonVeg: prev.vegNonVeg === "non-veg" ? null : "non-veg",
+                      }))
+                    }
+                  >
+                    <div className="h-3 w-3 rounded-full bg-amber-700" />
+                    Non-veg
+                    {filters.vegNonVeg === "non-veg" && (
+                      <X className="h-3 w-3 text-gray-600" />
+                    )}
+                  </Button>
+                )}
               </div>
 
               {menuCategories.length > 0 && (
@@ -2222,11 +2219,10 @@ function RestaurantDetailsContent() {
                   <button
                     type="button"
                     onClick={() => setSelectedMenuCategory("all")}
-                    className={`flex items-center gap-2 whitespace-nowrap rounded-full border px-3 py-1.5 text-sm font-semibold transition-colors ${
-                      selectedMenuCategory === "all"
+                    className={`flex items-center gap-2 whitespace-nowrap rounded-full border px-3 py-1.5 text-sm font-semibold transition-colors ${selectedMenuCategory === "all"
                         ? "border-[#FF0000] bg-red-50 text-[#FF0000]"
                         : "border-gray-300 bg-white text-gray-700"
-                    }`}
+                      }`}
                   >
                     All
                   </button>
@@ -2235,11 +2231,10 @@ function RestaurantDetailsContent() {
                       key={category.id}
                       type="button"
                       onClick={() => setSelectedMenuCategory(category.id)}
-                      className={`flex items-center gap-2 whitespace-nowrap rounded-full border px-3 py-1.5 text-sm font-semibold transition-colors ${
-                        selectedMenuCategory === category.id
+                      className={`flex items-center gap-2 whitespace-nowrap rounded-full border px-3 py-1.5 text-sm font-semibold transition-colors ${selectedMenuCategory === category.id
                           ? "border-[#FF0000] bg-red-50 text-[#FF0000]"
                           : "border-gray-300 bg-white text-gray-700"
-                      }`}
+                        }`}
                     >
                       {category.image ? (
                         <img
@@ -2428,62 +2423,62 @@ function RestaurantDetailsContent() {
                                 </div>
                               )}
 
-                               <div className="flex flex-col mt-1">
-                                 <div className="flex flex-col gap-1">
-                                   <div className="flex items-center gap-2">
-                                     <p className="font-bold text-gray-900 dark:text-white text-base">
-                                       {RUPEE_SYMBOL}{Math.round(getFoodDisplayPrice(item))}
-                                     </p>
-                                     {/* Preparation Time - Show if available */}
-                                     {item.preparationTime && String(item.preparationTime).trim() && (
-                                       <div className="flex items-center gap-1.5 text-xs font-medium text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded-full">
-                                         <Clock size={12} className="text-gray-500" />
-                                         <span>{String(item.preparationTime).trim()}</span>
-                                       </div>
-                                     )}
-                                   </div>
-                                   
-                                   {(() => {
-                                     const variants = getFoodVariants(item);
-                                     const price = getFoodDisplayPrice(item);
-                                     
-                                     let otherPrice = Number(item.otherPrice) || 0;
-                                     if (variants.length > 0) {
-                                       const validOtherPrices = variants
-                                         .map(v => Number(v.otherPrice) || 0)
-                                         .filter(p => p > 0);
-                                       
-                                       if (validOtherPrices.length > 0) {
-                                         otherPrice = Math.min(...validOtherPrices);
-                                       }
-                                     }
-                                     
-                                     if (otherPrice > 0 && otherPrice > price) {
-                                       const savingsAmount = otherPrice - price;
-                                       const discountPercent = Math.round((savingsAmount / otherPrice) * 100);
-                                       return (
-                                         <div className="flex items-center gap-2">
-                                           <span className="text-[10px] font-semibold text-gray-500 bg-gray-50 px-1.5 py-0.5 rounded border border-gray-100">
-                                             Other: {RUPEE_SYMBOL}{Math.round(otherPrice)}
-                                           </span>
-                                           <div className="flex items-center gap-1 bg-green-50 px-1.5 py-0.5 rounded border border-green-100">
-                                             <span className="text-[10px] font-bold text-green-700">
-                                               SAVE {RUPEE_SYMBOL}{Math.round(savingsAmount)}
-                                             </span>
-                                             <span className="text-[9px] font-medium text-green-600 opacity-80">
-                                               ({discountPercent}%)
-                                             </span>
-                                           </div>
-                                         </div>
-                                       );
-                                     }
-                                     return null;
-                                   })()}
-                                 </div>
-                                 {hasFoodVariants(item) && (
-                                   <p className="text-[10px] text-gray-500 font-medium mt-0.5">Customisable</p>
-                                 )}
-                               </div>
+                              <div className="flex flex-col mt-1">
+                                <div className="flex flex-col gap-1">
+                                  <div className="flex items-center gap-2">
+                                    <p className="font-bold text-gray-900 dark:text-white text-base">
+                                      {RUPEE_SYMBOL}{Math.round(getFoodDisplayPrice(item))}
+                                    </p>
+                                    {/* Preparation Time - Show if available */}
+                                    {item.preparationTime && String(item.preparationTime).trim() && (
+                                      <div className="flex items-center gap-1.5 text-xs font-medium text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded-full">
+                                        <Clock size={12} className="text-gray-500" />
+                                        <span>{String(item.preparationTime).trim()}</span>
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  {(() => {
+                                    const variants = getFoodVariants(item);
+                                    const price = getFoodDisplayPrice(item);
+
+                                    let otherPrice = Number(item.otherPrice) || 0;
+                                    if (variants.length > 0) {
+                                      const validOtherPrices = variants
+                                        .map(v => Number(v.otherPrice) || 0)
+                                        .filter(p => p > 0);
+
+                                      if (validOtherPrices.length > 0) {
+                                        otherPrice = Math.min(...validOtherPrices);
+                                      }
+                                    }
+
+                                    if (otherPrice > 0 && otherPrice > price) {
+                                      const savingsAmount = otherPrice - price;
+                                      const discountPercent = Math.round((savingsAmount / otherPrice) * 100);
+                                      return (
+                                        <div className="flex items-center gap-2">
+                                          <span className="text-[10px] font-semibold text-gray-500 bg-gray-50 px-1.5 py-0.5 rounded border border-gray-100">
+                                            Other: {RUPEE_SYMBOL}{Math.round(otherPrice)}
+                                          </span>
+                                          <div className="flex items-center gap-1 bg-green-50 px-1.5 py-0.5 rounded border border-green-100">
+                                            <span className="text-[10px] font-bold text-green-700">
+                                              SAVE {RUPEE_SYMBOL}{Math.round(savingsAmount)}
+                                            </span>
+                                            <span className="text-[9px] font-medium text-green-600 opacity-80">
+                                              ({discountPercent}%)
+                                            </span>
+                                          </div>
+                                        </div>
+                                      );
+                                    }
+                                    return null;
+                                  })()}
+                                </div>
+                                {hasFoodVariants(item) && (
+                                  <p className="text-[10px] text-gray-500 font-medium mt-0.5">Customisable</p>
+                                )}
+                              </div>
 
                               {/* Description - Show if available */}
                               {item.description && (
@@ -2709,22 +2704,22 @@ function RestaurantDetailsContent() {
                                                 </div>
                                               )}
                                             </div>
-                                            
+
                                             {(() => {
                                               const variants = getFoodVariants(item);
                                               const price = getFoodDisplayPrice(item);
-                                              
+
                                               let otherPrice = Number(item.otherPrice) || 0;
                                               if (variants.length > 0) {
                                                 const validOtherPrices = variants
                                                   .map(v => Number(v.otherPrice) || 0)
                                                   .filter(p => p > 0);
-                                                
+
                                                 if (validOtherPrices.length > 0) {
                                                   otherPrice = Math.min(...validOtherPrices);
                                                 }
                                               }
-                                              
+
                                               if (otherPrice > 0 && otherPrice > price) {
                                                 const savingsAmount = otherPrice - price;
                                                 const discountPercent = Math.round((savingsAmount / otherPrice) * 100);
@@ -3104,21 +3099,24 @@ function RestaurantDetailsContent() {
                           <div className="h-4 w-4 rounded-full bg-green-600 dark:bg-green-500" />
                           <span className="font-medium">Veg</span>
                         </button>
-                        <button
-                          onClick={() =>
-                            setFilters((prev) => ({
-                              ...prev,
-                              vegNonVeg: prev.vegNonVeg === "non-veg" ? null : "non-veg",
-                            }))
-                          }
-                          className={`flex items-center gap-2 px-4 py-2.5 rounded-lg border-2 transition-all flex-1 ${filters.vegNonVeg === "non-veg"
-                            ? "border-amber-700 dark:border-amber-600 bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400"
-                            : "border-gray-200 dark:border-gray-700 bg-white dark:bg-[#2a2a2a] text-gray-700 dark:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600"
-                            }`}
-                        >
-                          <div className="h-4 w-4 rounded-full bg-amber-700 dark:bg-amber-600" />
-                          <span className="font-medium">Non-veg</span>
-                        </button>
+                        {(vegMode !== "pure" && vegMode !== "all" && vegMode !== true) && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setFilters((prev) => ({
+                                ...prev,
+                                vegNonVeg: prev.vegNonVeg === "non-veg" ? null : "non-veg",
+                              }))
+                            }
+                            className={`flex items-center gap-2 px-4 py-2.5 rounded-lg border-2 transition-all flex-1 ${filters.vegNonVeg === "non-veg"
+                                ? "border-amber-700 dark:border-amber-600 bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400"
+                                : "border-gray-200 dark:border-gray-700 bg-white dark:bg-[#2a2a2a] text-gray-700 dark:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600"
+                              }`}
+                          >
+                            <div className="h-4 w-4 rounded-full bg-amber-700 dark:bg-amber-600" />
+                            <span className="font-medium">Non-veg</span>
+                          </button>
+                        )}
                       </div>
                     </div>
 
@@ -3454,7 +3452,7 @@ function RestaurantDetailsContent() {
                       if (selectedItem.image && !allImages.includes(selectedItem.image)) {
                         allImages.unshift(selectedItem.image);
                       }
-                      
+
                       if (allImages.length === 0) {
                         return (
                           <div className="w-full h-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center">
@@ -3462,7 +3460,7 @@ function RestaurantDetailsContent() {
                           </div>
                         )
                       }
-                      
+
                       return (
                         <div className="relative w-full h-full">
                           <AnimatePresence mode="wait">
@@ -3477,7 +3475,7 @@ function RestaurantDetailsContent() {
                               transition={{ duration: 0.2 }}
                             />
                           </AnimatePresence>
-                          
+
                           {/* Navigation Chevrons */}
                           {allImages.length > 1 && (
                             <>
@@ -3501,14 +3499,14 @@ function RestaurantDetailsContent() {
                               >
                                 <ChevronRight className="w-4 h-4 text-gray-900 dark:text-white" />
                               </button>
-                              
+
                               {/* Slide Counter Overlay */}
                               <div className="absolute top-4 left-4 bg-black/60 backdrop-blur-sm px-2.5 py-1 rounded-full z-10">
                                 <span className="text-white text-[10px] font-semibold">
                                   {selectedItemImageIndex + 1} / {allImages.length}
                                 </span>
                               </div>
-                              
+
                               {/* Indicators at the bottom */}
                               <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-1.5 z-10">
                                 {allImages.map((_, idx) => (
@@ -3519,9 +3517,8 @@ function RestaurantDetailsContent() {
                                       e.stopPropagation();
                                       setSelectedItemImageIndex(idx);
                                     }}
-                                    className={`w-1.5 h-1.5 rounded-full transition-all duration-300 ${
-                                      idx === selectedItemImageIndex ? "bg-white scale-125" : "bg-white/50"
-                                    }`}
+                                    className={`w-1.5 h-1.5 rounded-full transition-all duration-300 ${idx === selectedItemImageIndex ? "bg-white scale-125" : "bg-white/50"
+                                      }`}
                                   />
                                 ))}
                               </div>
@@ -3600,11 +3597,10 @@ function RestaurantDetailsContent() {
                               key={variant.id}
                               type="button"
                               onClick={() => setSelectedVariantId(variant.id)}
-                              className={`rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${
-                                String(selectedVariantId || "") === String(variant.id)
+                              className={`rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${String(selectedVariantId || "") === String(variant.id)
                                   ? "border-red-500 bg-red-50 text-red-600 dark:border-red-400 dark:bg-red-900/30 dark:text-red-200"
                                   : "border-gray-200 bg-white text-gray-700 dark:border-gray-700 dark:bg-[#2a2a2a] dark:text-gray-300"
-                              }`}
+                                }`}
                             >
                               {variant.name} · {RUPEE_SYMBOL}{Math.round(variant.price)}
                             </button>
