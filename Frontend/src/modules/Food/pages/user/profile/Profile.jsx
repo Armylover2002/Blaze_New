@@ -28,6 +28,8 @@ import {
   Truck,
   ChefHat,
   Loader2,
+  Package,
+  Shield,
 } from "lucide-react";
 
 import AnimatedPage from "@food/components/user/AnimatedPage";
@@ -418,15 +420,25 @@ export default function Profile() {
   const isQuickProfile =
     routerLocation.pathname.startsWith("/quick") ||
     (isSharedProfile && profileSource === "quick");
+  const isPorterProfile =
+    routerLocation.pathname.startsWith("/porter") ||
+    (isSharedProfile && profileSource === "porter");
   const sharedSourceQuery = profileSource ? `?from=${profileSource}` : "";
-  const backPath = isQuickProfile ? "/quick" : "/food/user";
-  const walletPath = isQuickProfile ? "/quick/wallet" : "/food/user/wallet";
-  const couponPath = isSharedProfile
+  const backPath = isPorterProfile ? "/porter" : isQuickProfile ? "/quick" : "/food/user";
+  const walletPath = isPorterProfile
+    ? "/food/user/wallet?from=porter"
+    : isQuickProfile
+      ? "/quick/wallet"
+      : "/food/user/wallet";
+  const couponPath = isPorterProfile
+    ? "/porter/promo"
+    : isSharedProfile
     ? `/profile/coupons${sharedSourceQuery}`
     : isQuickProfile
       ? "/quick/offers"
       : "/user/profile/coupons";
   const cartPath = isQuickProfile ? "/quick/cart" : "/cart";
+  const showCartLink = !isPorterProfile;
   const profileEditPath = isSharedProfile
     ? `/profile/edit${sharedSourceQuery}`
     : isQuickProfile
@@ -973,7 +985,7 @@ export default function Profile() {
                       <Tag className="h-5 w-5 text-gray-700 dark:text-gray-300" />
                     </motion.div>
                     <span className="text-base font-medium text-gray-900 dark:text-white">
-                      {isQuickProfile ? "Offers & coupons" : "Your coupons"}
+                      {isPorterProfile ? "Delivery offers" : isQuickProfile ? "Offers & coupons" : "Your coupons"}
                     </span>
                   </div>
                   <motion.div
@@ -986,6 +998,7 @@ export default function Profile() {
             </motion.div>
           </Link>
 
+          {showCartLink && (
           <Link to={cartPath} className="block">
             <motion.div
               whileHover={{ x: 4, scale: 1.01 }}
@@ -1012,6 +1025,7 @@ export default function Profile() {
               </Card>
             </motion.div>
           </Link>
+          )}
 
           <Link to="/user/profile/refer-earn" className="block">
             <motion.div
@@ -1270,6 +1284,143 @@ export default function Profile() {
             </Link>
           </div>
         </div>
+
+        {/* Porter (Parcel Logistics) Section */}
+        <div className="mb-3">
+          <div className="flex items-center gap-2 mb-2 px-1">
+            <div className="w-1 h-4 bg-[#FF0000] rounded"></div>
+            <h3 className="text-base font-semibold text-gray-900 dark:text-white">
+              Porter
+            </h3>
+          </div>
+          <div className="space-y-2">
+            <Link to="/porter/shipments" className="block">
+              <motion.div whileHover={{ x: 4, scale: 1.01 }} transition={{ duration: 0.2, type: "spring", stiffness: 300 }}>
+                <Card className="bg-white dark:bg-[#1a1a1a] py-0 rounded-xl shadow-sm border-0 dark:border-gray-800 cursor-pointer">
+                  <CardContent className="p-4 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <motion.div className="bg-gray-100 dark:bg-gray-800 rounded-full p-2" whileHover={{ rotate: 15, scale: 1.1 }} transition={{ duration: 0.3 }}>
+                        <Package className="h-5 w-5 text-gray-700 dark:text-gray-300" />
+                      </motion.div>
+                      <span className="text-base font-medium text-gray-900 dark:text-white">My shipments</span>
+                    </div>
+                    <motion.div whileHover={{ x: 4 }} transition={{ duration: 0.2 }}>
+                      <ChevronRight className="h-5 w-5 text-gray-400 dark:text-gray-500" />
+                    </motion.div>
+                  </CardContent>
+                </Card>
+              </motion.div>
+            </Link>
+
+            <motion.div
+              whileHover={{ x: 4, scale: 1.01 }}
+              transition={{ duration: 0.2, type: "spring", stiffness: 300 }}>
+              <Card
+                className="bg-white dark:bg-[#1a1a1a] py-0 rounded-xl shadow-sm border-0 dark:border-gray-800 cursor-pointer"
+                onClick={handleAddressesClick}>
+                <CardContent className="p-4 flex items-center justify-between">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <motion.div
+                      className="bg-gray-100 dark:bg-gray-800 rounded-full p-2"
+                      whileHover={{ rotate: 15, scale: 1.1 }}
+                      transition={{ duration: 0.3 }}>
+                      <MapPin className="h-5 w-5 text-gray-700 dark:text-gray-300" />
+                    </motion.div>
+                    <div className="min-w-0">
+                      <p className="text-base font-medium text-gray-900 dark:text-white">
+                        Saved addresses
+                      </p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                        {savedAddressSummary}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-medium px-2 py-1 rounded bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300">
+                      {addresses?.length || 0}
+                    </span>
+                    <motion.div whileHover={{ x: 4 }} transition={{ duration: 0.2 }}>
+                      <ChevronRight className="h-5 w-5 text-gray-400 dark:text-gray-500" />
+                    </motion.div>
+                  </div>
+                </CardContent>
+              </Card>
+            </motion.div>
+
+            <Link to="/porter/schedule" className="block">
+              <motion.div whileHover={{ x: 4, scale: 1.01 }} transition={{ duration: 0.2, type: "spring", stiffness: 300 }}>
+                <Card className="bg-white dark:bg-[#1a1a1a] py-0 rounded-xl shadow-sm border-0 dark:border-gray-800 cursor-pointer">
+                  <CardContent className="p-4 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <motion.div className="bg-gray-100 dark:bg-gray-800 rounded-full p-2" whileHover={{ rotate: 15, scale: 1.1 }} transition={{ duration: 0.3 }}>
+                        <Calendar className="h-5 w-5 text-gray-700 dark:text-gray-300" />
+                      </motion.div>
+                      <span className="text-base font-medium text-gray-900 dark:text-white">Schedule pickup</span>
+                    </div>
+                    <motion.div whileHover={{ x: 4 }} transition={{ duration: 0.2 }}>
+                      <ChevronRight className="h-5 w-5 text-gray-400 dark:text-gray-500" />
+                    </motion.div>
+                  </CardContent>
+                </Card>
+              </motion.div>
+            </Link>
+
+            <Link to="/porter/promo" className="block">
+              <motion.div whileHover={{ x: 4, scale: 1.01 }} transition={{ duration: 0.2, type: "spring", stiffness: 300 }}>
+                <Card className="bg-white dark:bg-[#1a1a1a] py-0 rounded-xl shadow-sm border-0 dark:border-gray-800 cursor-pointer">
+                  <CardContent className="p-4 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <motion.div className="bg-gray-100 dark:bg-gray-800 rounded-full p-2" whileHover={{ rotate: 15, scale: 1.1 }} transition={{ duration: 0.3 }}>
+                        <Percent className="h-5 w-5 text-gray-700 dark:text-gray-300" />
+                      </motion.div>
+                      <span className="text-base font-medium text-gray-900 dark:text-white">Delivery offers</span>
+                    </div>
+                    <motion.div whileHover={{ x: 4 }} transition={{ duration: 0.2 }}>
+                      <ChevronRight className="h-5 w-5 text-gray-400 dark:text-gray-500" />
+                    </motion.div>
+                  </CardContent>
+                </Card>
+              </motion.div>
+            </Link>
+
+            <Link to="/porter/sos" className="block">
+              <motion.div whileHover={{ x: 4, scale: 1.01 }} transition={{ duration: 0.2, type: "spring", stiffness: 300 }}>
+                <Card className="bg-white dark:bg-[#1a1a1a] py-0 rounded-xl shadow-sm border-0 dark:border-gray-800 cursor-pointer">
+                  <CardContent className="p-4 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <motion.div className="bg-gray-100 dark:bg-gray-800 rounded-full p-2" whileHover={{ rotate: 15, scale: 1.1 }} transition={{ duration: 0.3 }}>
+                        <Shield className="h-5 w-5 text-gray-700 dark:text-gray-300" />
+                      </motion.div>
+                      <span className="text-base font-medium text-gray-900 dark:text-white">Safety & SOS</span>
+                    </div>
+                    <motion.div whileHover={{ x: 4 }} transition={{ duration: 0.2 }}>
+                      <ChevronRight className="h-5 w-5 text-gray-400 dark:text-gray-500" />
+                    </motion.div>
+                  </CardContent>
+                </Card>
+              </motion.div>
+            </Link>
+
+            <Link to="/porter/emergency-contacts" className="block">
+              <motion.div whileHover={{ x: 4, scale: 1.01 }} transition={{ duration: 0.2, type: "spring", stiffness: 300 }}>
+                <Card className="bg-white dark:bg-[#1a1a1a] py-0 rounded-xl shadow-sm border-0 dark:border-gray-800 cursor-pointer">
+                  <CardContent className="p-4 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <motion.div className="bg-gray-100 dark:bg-gray-800 rounded-full p-2" whileHover={{ rotate: 15, scale: 1.1 }} transition={{ duration: 0.3 }}>
+                        <Truck className="h-5 w-5 text-gray-700 dark:text-gray-300" />
+                      </motion.div>
+                      <span className="text-base font-medium text-gray-900 dark:text-white">Emergency contacts</span>
+                    </div>
+                    <motion.div whileHover={{ x: 4 }} transition={{ duration: 0.2 }}>
+                      <ChevronRight className="h-5 w-5 text-gray-400 dark:text-gray-500" />
+                    </motion.div>
+                  </CardContent>
+                </Card>
+              </motion.div>
+            </Link>
+          </div>
+        </div>
+
         {/* Quick Commerce Section */}
         <div className="mb-3">
           <div className="flex items-center gap-2 mb-2 px-1">

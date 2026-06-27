@@ -12,6 +12,7 @@ const AdminHome = lazy(() => import("@food/pages/admin/AdminHome"));
 const PointOfSale = lazy(() => import("@food/pages/admin/PointOfSale"));
 const AdminProfile = lazy(() => import("@/modules/common/admin/pages/AdminProfile"));
 const AdminSettings = lazy(() => import("@food/pages/admin/AdminSettings"));
+const PorterAdminRoutes = lazy(() => import("@/modules/porter/admin/routes/index"));
 const NewRefundRequests = lazy(() => import("@food/pages/admin/refunds/NewRefundRequests"));
 const FoodApproval = lazy(() => import("@food/pages/admin/restaurant/FoodApproval"));
 const OrdersPage = lazy(() => import("@food/pages/admin/orders/OrdersPage"));
@@ -219,7 +220,8 @@ export default function AdminRouter() {
           {/* Quick Commerce Admin Routes */}
           <Route path="quick-commerce/*" element={<QuickCommerceAdminRoutes />} />
 
-
+          {/* Porter Admin Routes */}
+          <Route path="porter/*" element={<PorterAdminRoutes />} />
 
 
 

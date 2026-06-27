@@ -1,0 +1,38 @@
+
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  
+  <defs>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="12" stdDeviation="15" flood-opacity="0.25"/>
+    </filter>
+    <filter id="softShadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-opacity="0.15"/>
+    </filter>
+  </defs>
+
+  
+  <g filter="url(#shadow)">
+    <!-- Cab -->
+    <rect x="156" y="40" width="200" height="150" rx="20" fill="#facc15" />
+    <path d="M166 90 L346 90 L326 140 L186 140 Z" fill="#1e293b" />
+    <rect x="186" y="140" width="140" height="40" fill="#eab308" />
+    <!-- Base -->
+    <rect x="136" y="190" width="240" height="260" rx="10" fill="#334155" />
+    <!-- Outriggers -->
+    <rect x="96" y="220" width="320" height="20" fill="#1e293b" />
+    <rect x="96" y="400" width="320" height="20" fill="#1e293b" />
+    <circle cx="96" cy="230" r="16" fill="#facc15" />
+    <circle cx="416" cy="230" r="16" fill="#facc15" />
+    <circle cx="96" cy="410" r="16" fill="#facc15" />
+    <circle cx="416" cy="410" r="16" fill="#facc15" />
+    <!-- Turret / Boom Base -->
+    <circle cx="256" cy="320" r="60" fill="#facc15" />
+    <!-- Boom -->
+    <rect x="236" y="60" width="40" height="260" fill="#ca8a04" />
+    <!-- Boom details -->
+    <rect x="246" y="80" width="20" height="220" fill="#0f172a" opacity="0.5" />
+    <!-- Hook block -->
+    <rect x="236" y="40" width="40" height="30" rx="5" fill="#1e293b" />
+  </g>
+
+</svg>

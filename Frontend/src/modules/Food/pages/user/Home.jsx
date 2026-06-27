@@ -99,6 +99,7 @@ import { WishlistProvider as QuickWishlistProvider } from "../../../quickCommerc
 import { CartAnimationProvider as QuickCartAnimationProvider } from "../../../quickCommerce/user/context/CartAnimationContext";
 import { CartProvider as QuickCartProvider } from "../../../quickCommerce/user/context/CartContext";
 import { prefetchQuickHomeBootstrap } from "../../../quickCommerce/user/services/customerApi";
+import { PorterProvider } from "../../../porter/user/context/BookingContext";
 import PromoRow from "@food/components/user/home/PromoRow";
 import { optimizeCloudinaryUrl } from "../../../../shared/utils/cloudinaryUtils";
 import VegModePopups from "@food/components/user/VegModePopups";
@@ -117,6 +118,7 @@ const ExploreMoreSection = lazy(() => import("@food/components/user/home/Explore
 const MiniCart = lazy(() => import("@food/components/user/MiniCart"));
 const OrderTrackingCard = lazy(() => import("@food/components/user/OrderTrackingCard"));
 const QuickCommerceHomePage = lazy(() => import("../../../quickCommerce/user/pages/Home"));
+const PorterHomePage = lazy(() => import("../../../porter/user/pages/Home"));
 
 // Animated placeholder for search - moved outside component to prevent recreation
 const placeholders = [
@@ -270,8 +272,12 @@ export default function Home() {
 
   // Sync activeTab with URL
   useEffect(() => {
-    const isQuick = routerLocation.pathname.endsWith("/quick");
-    const targetTab = isQuick ? "quick" : "food";
+    const path = routerLocation.pathname;
+    const targetTab = path.endsWith("/quick")
+      ? "quick"
+      : path === "/porter" || path.endsWith("/porter")
+      ? "porter"
+      : "food";
     if (activeTab !== targetTab) setActiveTab(targetTab);
   }, [routerLocation.pathname]);
 
@@ -279,6 +285,7 @@ export default function Home() {
   const handleTabChange = (tab) => {
     startTransition(() => setActiveTab(tab));
     if (tab === "quick") navigate("/quick");
+    else if (tab === "porter") navigate("/porter");
     else navigate("/food/user");
   };
 
@@ -428,7 +435,7 @@ export default function Home() {
               />
             </Suspense>
           </motion.div>
-        ) : (
+        ) : activeTab === "quick" ? (
           <motion.div
             key="quick-content"
             initial={{ opacity: 0 }}
@@ -452,6 +459,21 @@ export default function Home() {
                 </QuickWishlistProvider>
               </QuickCartProvider>
             </QuickLocationProvider>
+          </motion.div>
+        ) : (
+          <motion.div
+            key="porter-content"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.16, ease: "easeOut" }}
+            className="bg-transparent"
+          >
+            <PorterProvider>
+              <Suspense fallback={<div className="h-screen w-full bg-[#FAF7F2] dark:bg-[#0a0a0a]" />}>
+                <PorterHomePage embedded />
+              </Suspense>
+            </PorterProvider>
           </motion.div>
         )}
       </AnimatePresence>

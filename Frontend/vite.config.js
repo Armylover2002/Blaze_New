@@ -25,6 +25,7 @@ export default defineConfig({
       '@shared': sharedSrc,
       '@core': coreSrc,
       '@quickCommerce': path.resolve(__dirname, './src/modules/quickCommerce'),
+      '@porter': path.resolve(__dirname, './src/modules/porter'),
       '@delivery': path.resolve(__dirname, './src/modules/DeliveryV2'),
 
       '@common': path.resolve(__dirname, './src/modules/common'),

@@ -1,0 +1,14 @@
+export const MOCK_ZONES = [
+  { id: "ZN-001", name: "Andheri East", city: "Mumbai", pincode: "400069", status: "active", orders: 342, drivers: 28, vehicles: 45, coverageKm: 12, polygon: "6-point polygon", description: "Covers Andheri East industrial and residential areas." },
+  { id: "ZN-002", name: "Bandra West", city: "Mumbai", pincode: "400050", status: "active", orders: 289, drivers: 22, vehicles: 38, coverageKm: 8, polygon: "5-point polygon", description: "Premium zone with high demand during peak hours." },
+  { id: "ZN-003", name: "Powai", city: "Mumbai", pincode: "400076", status: "active", orders: 198, drivers: 18, vehicles: 30, coverageKm: 10, polygon: "7-point polygon", description: "Corporate hub and residential township coverage." },
+  { id: "ZN-004", name: "Thane West", city: "Thane", pincode: "400601", status: "active", orders: 256, drivers: 24, vehicles: 42, coverageKm: 15, polygon: "8-point polygon", description: "Extended suburban logistics corridor." },
+  { id: "ZN-005", name: "Borivali", city: "Mumbai", pincode: "400092", status: "active", orders: 175, drivers: 16, vehicles: 28, coverageKm: 11, polygon: "6-point polygon", description: "Western suburb pickup and delivery zone." },
+  { id: "ZN-006", name: "Dadar", city: "Mumbai", pincode: "400014", status: "active", orders: 310, drivers: 26, vehicles: 40, coverageKm: 7, polygon: "5-point polygon", description: "Central Mumbai high-density zone." },
+  { id: "ZN-007", name: "Vashi", city: "Navi Mumbai", pincode: "400703", status: "active", orders: 220, drivers: 20, vehicles: 35, coverageKm: 9, polygon: "6-point polygon", description: "Navi Mumbai commercial and residential hub." },
+  { id: "ZN-008", name: "Chembur", city: "Mumbai", pincode: "400071", status: "inactive", orders: 98, drivers: 8, vehicles: 12, coverageKm: 8, polygon: "4-point polygon", description: "Temporarily paused for zone boundary review." },
+  { id: "ZN-009", name: "Malad", city: "Mumbai", pincode: "400064", status: "active", orders: 188, drivers: 15, vehicles: 26, coverageKm: 10, polygon: "6-point polygon", description: "Western suburb mixed commercial zone." },
+  { id: "ZN-010", name: "Goregaon", city: "Mumbai", pincode: "400063", status: "active", orders: 205, drivers: 17, vehicles: 29, coverageKm: 9, polygon: "5-point polygon", description: "Film city and industrial estate coverage." },
+  { id: "ZN-011", name: "Kalyan", city: "Kalyan", pincode: "421301", status: "active", orders: 142, drivers: 12, vehicles: 20, coverageKm: 14, polygon: "7-point polygon", description: "Extended MMR logistics zone." },
+  { id: "ZN-012", name: "Colaba", city: "Mumbai", pincode: "400005", status: "active", orders: 165, drivers: 14, vehicles: 22, coverageKm: 5, polygon: "4-point polygon", description: "South Mumbai premium delivery zone." },
+];

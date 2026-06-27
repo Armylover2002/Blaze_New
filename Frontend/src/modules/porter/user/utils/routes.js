@@ -1,0 +1,24 @@
+const BASE = "/porter";
+
+export const getPorterHomePath = () => BASE;
+export const getPorterAddressPath = () => `${BASE}/address`;
+export const getPorterParcelDetailsPath = () => `${BASE}/parcel-details`;
+export const getPorterVehiclePath = () => `${BASE}/vehicle`;
+export const getPorterFareEstimatePath = () => `${BASE}/fare-estimate`;
+export const getPorterFindingPartnerPath = () => `${BASE}/finding-partner`;
+export const getPorterPartnerAssignedPath = () => `${BASE}/partner-assigned`;
+export const getPorterTrackingPath = () => `${BASE}/tracking`;
+export const getPorterShipmentDetailsPath = (id = "current") => `${BASE}/shipment/${id}`;
+export const getPorterShipmentsPath = () => `${BASE}/shipments`;
+export const getPorterSavedPlacesPath = () => `${BASE}/saved-places`;
+export const getPorterPromoPath = () => `${BASE}/promo`;
+export const getPorterPaymentPath = () => `${BASE}/payment`;
+export const getPorterRatePath = () => `${BASE}/rate`;
+export const getPorterCancelPath = () => `${BASE}/cancel`;
+export const getPorterSchedulePath = () => `${BASE}/schedule`;
+export const getPorterSosPath = () => `${BASE}/sos`;
+export const getPorterEmergencyPath = () => `${BASE}/emergency-contacts`;
+export const getPorterInvoicePath = (id = "current") => `${BASE}/invoice/${id}`;
+export const getPorterProfilePath = () => `/profile?from=porter`;
+export const getPorterWalletPath = () => `/food/user/wallet?from=porter`;
+export const getPorterNotificationsPath = () => `/food/user/notifications`;

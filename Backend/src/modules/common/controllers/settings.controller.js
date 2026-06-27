@@ -15,7 +15,10 @@ export async function getGlobalSettings(req, res, next) {
 
         // Cleanup any extra modules that might be in the DB (taxi, hotel, etc.)
         const rawSettings = settings.toObject();
-        const allowedModules = ['food', 'quickCommerce'];
+        // Dynamically get allowed modules from the schema (single source of truth)
+        const allowedModules = Object.keys(GlobalSettings.schema.paths)
+            .filter(p => p.startsWith('modules.'))
+            .map(p => p.replace('modules.', ''));
         const cleanedModules = {};
         
         allowedModules.forEach(mod => {
@@ -127,13 +130,20 @@ export async function updateGlobalSettings(req, res, next) {
         }
 
         // Strictly define modules and ensure persistence
-        const incomingModules = modules || data.modules;
-        const currentModules = settings.modules || { food: true, quickCommerce: true };
+        const incomingModules = modules || data.modules || {};
+        const currentModules = settings.modules || {};
         
-        settings.modules = {
-            food: (incomingModules && incomingModules.food !== undefined) ? !!incomingModules.food : !!currentModules.food,
-            quickCommerce: (incomingModules && incomingModules.quickCommerce !== undefined) ? !!incomingModules.quickCommerce : !!currentModules.quickCommerce
-        };
+        // Dynamically rebuild the modules object using the schema keys (single source of truth)
+        const allowedModules = Object.keys(GlobalSettings.schema.paths)
+            .filter(p => p.startsWith('modules.'))
+            .map(p => p.replace('modules.', ''));
+            
+        settings.modules = {};
+        allowedModules.forEach(mod => {
+            settings.modules[mod] = incomingModules[mod] !== undefined 
+                ? !!incomingModules[mod] 
+                : (currentModules[mod] !== undefined ? !!currentModules[mod] : true);
+        });
         
         // Use markModified to ensure the modules object is fully replaced in DB
         settings.markModified('modules');

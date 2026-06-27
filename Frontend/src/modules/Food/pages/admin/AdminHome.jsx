@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState, useCallback } from "react"
 import { useNavigate } from "react-router-dom"
-import { Card, CardContent, CardHeader, CardTitle } from "@food/components/ui/card"
 import {
   Select,
   SelectContent,
@@ -8,6 +7,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@food/components/ui/select"
+import {
+  PageHeader,
+  SectionCard,
+  StatCard,
+  EmptyState,
+  KpiGridSkeleton,
+  BLAZE_CHART,
+} from "@/shared/components/admin"
 import {
   Area,
   AreaChart,
@@ -23,7 +30,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts"
-import { Activity, ArrowUpRight, ShoppingBag, CreditCard, Truck, Receipt, IndianRupee, Store, UserCheck, Package, UserCircle, Clock, CheckCircle, Plus, XCircle } from "lucide-react"
+import { Activity, ShoppingBag, CreditCard, Truck, Receipt, IndianRupee, Store, UserCheck, Package, UserCircle, Clock, CheckCircle, Plus, XCircle } from "lucide-react"
 import { adminAPI } from "@food/api"
 import { useAuth } from "@core/context/AuthContext"
 import { getCurrentUser } from "@food/utils/auth"
@@ -141,19 +148,19 @@ export default function AdminHome() {
   const orderStats = useMemo(() => {
     if (!dashboardData?.orders?.byStatus) {
       return [
-        { label: "Delivered", value: 0, color: "#0ea5e9" },
-        { label: "Cancelled", value: 0, color: "#ef4444" },
-        { label: "Refunded", value: 0, color: "#f59e0b" },
-        { label: "Pending", value: 0, color: "#10b981" },
+        { label: "Delivered", value: 0, color: BLAZE_CHART.success },
+        { label: "Cancelled", value: 0, color: BLAZE_CHART.danger },
+        { label: "Refunded", value: 0, color: BLAZE_CHART.warning },
+        { label: "Pending", value: 0, color: BLAZE_CHART.info },
       ]
     }
 
     const byStatus = dashboardData.orders.byStatus
     return [
-      { label: "Delivered", value: byStatus.delivered || 0, color: "#0ea5e9" },
-      { label: "Processing", value: byStatus.processing || 0, color: "#a855f7" },
-      { label: "Cancelled", value: byStatus.cancelled || 0, color: "#ef4444" },
-      { label: "Pending", value: byStatus.pending || 0, color: "#10b981" },
+      { label: "Delivered", value: byStatus.delivered || 0, color: BLAZE_CHART.success },
+      { label: "Processing", value: byStatus.processing || 0, color: BLAZE_CHART.info },
+      { label: "Cancelled", value: byStatus.cancelled || 0, color: BLAZE_CHART.danger },
+      { label: "Pending", value: byStatus.pending || 0, color: BLAZE_CHART.warning },
     ]
   }, [dashboardData]);
 
@@ -215,32 +222,36 @@ export default function AdminHome() {
     `GST: ${formatCurrency(gstTotal)}`,
   ].join(" + ")
 
+  const showInitialSkeleton = isLoading && !dashboardData
+
+  const orderRoutes = {
+    Delivered: "/admin/food/orders/delivered",
+    Processing: "/admin/food/orders/processing",
+    Cancelled: "/admin/food/orders/canceled",
+    Pending: "/admin/food/orders/pending",
+  }
+
   return (
-    <div className="px-4 pb-10 lg:px-6 pt-4">
-      <div className="relative overflow-hidden rounded-3xl border border-neutral-200 bg-white shadow-[0_30px_120px_-60px_rgba(0,0,0,0.28)]">
-        {isLoading && (
-          <div className="absolute inset-0 z-20 flex items-center justify-center bg-white/70 backdrop-blur-sm">
-            <div className="flex items-center gap-3 rounded-full bg-white px-4 py-2 text-sm text-neutral-700 ring-1 ring-neutral-200">
-              <span className="h-3 w-3 animate-ping rounded-full bg-neutral-800/70" />
-              Updating metrics...
-            </div>
-          </div>
-        )}
-
-        <div className="flex flex-col gap-4 border-b border-neutral-200 bg-linear-to-br from-white via-neutral-50 to-neutral-100 px-6 py-5 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex items-center gap-4">
-            <div>
-              <p className="text-xs uppercase tracking-[0.2em] text-neutral-500">Admin Overview</p>
-              <h1 className="text-2xl font-semibold text-neutral-900">Operations Command</h1>
-            </div>
-
-          </div>
-          <div className="flex flex-wrap gap-3">
+    <div className="blaze-theme-scope min-h-full bg-background">
+      <div className="mx-auto w-full px-4 py-6 sm:px-6 lg:px-8 max-w-[1600px]">
+        <div className="space-y-6">
+      <PageHeader
+        eyebrow="Admin Overview"
+        title="Operations Command"
+        description={`${periodLabel} performance across your marketplace`}
+        actions={
+          <>
+            {isLoading && (
+              <span className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium text-muted-foreground shadow-sm">
+                <span className="h-2 w-2 animate-ping rounded-full bg-primary/70" />
+                Updating metrics…
+              </span>
+            )}
             <Select value={selectedZone} onValueChange={setSelectedZone}>
-              <SelectTrigger className="min-w-[160px] border-neutral-300 bg-white text-neutral-900">
+              <SelectTrigger className="h-10 min-w-[160px] rounded-xl border-border bg-card text-foreground shadow-sm">
                 <SelectValue placeholder="All zones" />
               </SelectTrigger>
-              <SelectContent className="border-neutral-200 bg-white text-neutral-900">
+              <SelectContent className="border-border bg-card text-foreground">
                 <SelectItem value="all">All zones</SelectItem>
                 {zones.map((zone) => (
                   <SelectItem key={zone._id} value={zone._id}>
@@ -250,10 +261,10 @@ export default function AdminHome() {
               </SelectContent>
             </Select>
             <Select value={selectedPeriod} onValueChange={setSelectedPeriod}>
-              <SelectTrigger className="min-w-[140px] border-neutral-300 bg-white text-neutral-900">
+              <SelectTrigger className="h-10 min-w-[140px] rounded-xl border-border bg-card text-foreground shadow-sm">
                 <SelectValue placeholder="Overall" />
               </SelectTrigger>
-              <SelectContent className="border-neutral-200 bg-white text-neutral-900">
+              <SelectContent className="border-border bg-card text-foreground">
                 <SelectItem value="overall">Overall</SelectItem>
                 <SelectItem value="today">Today</SelectItem>
                 <SelectItem value="week">This week</SelectItem>
@@ -261,430 +272,344 @@ export default function AdminHome() {
                 <SelectItem value="year">This year</SelectItem>
               </SelectContent>
             </Select>
-          </div>
+          </>
+        }
+      />
+
+      {/* KPI grid */}
+      {showInitialSkeleton ? (
+        <KpiGridSkeleton count={8} />
+      ) : (
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <StatCard
+            title="Gross revenue"
+            value={formatCurrency(revenueTotal)}
+            helper={`${periodLabel} transaction volume`}
+            icon={<ShoppingBag className="h-5 w-5" />}
+            to="/admin/food/transaction-report"
+            canAccess={canAccessPath}
+          />
+          <StatCard
+            title="Orders processed"
+            value={activeOrdersTotal.toLocaleString("en-IN")}
+            helper="Orders currently being processed"
+            icon={<Activity className="h-5 w-5" />}
+            to="/admin/food/orders/processing"
+            canAccess={canAccessPath}
+          />
+          <StatCard
+            title="Platform fee"
+            value={formatCurrency(platformFeeTotal)}
+            helper={`Platform service fees: ${periodLabel}`}
+            icon={<CreditCard className="h-5 w-5" />}
+            to="/admin/food/fee-settings"
+            canAccess={canAccessPath}
+          />
+          <StatCard
+            title="Delivery fee"
+            value={formatCurrency(deliveryFeeTotal)}
+            helper={`Total delivery fees: ${periodLabel}`}
+            icon={<Truck className="h-5 w-5" />}
+            to="/admin/food/transaction-report"
+            canAccess={canAccessPath}
+          />
+          <StatCard
+            title="GST"
+            value={formatCurrency(gstTotal)}
+            helper={`Total tax collected: ${periodLabel}`}
+            icon={<Receipt className="h-5 w-5" />}
+            to="/admin/food/tax-report"
+            canAccess={canAccessPath}
+          />
+          <StatCard
+            title="Platform Total"
+            value={formatCurrency(totalAdminEarnings, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            helper={totalRevenueHelper}
+            icon={<IndianRupee className="h-5 w-5" />}
+            to="/admin/food/transaction-report"
+            canAccess={canAccessPath}
+          />
+          <StatCard
+            title="Total restaurants"
+            value={totalRestaurants.toLocaleString("en-IN")}
+            helper="Approved restaurants"
+            icon={<Store className="h-5 w-5" />}
+            to="/admin/food/restaurants"
+            canAccess={canAccessPath}
+          />
+          <StatCard
+            title="Restaurant request pending"
+            value={pendingRestaurantRequests.toLocaleString("en-IN")}
+            helper="Awaiting approval"
+            icon={<UserCheck className="h-5 w-5" />}
+            to="/admin/food/restaurants/joining-request"
+            canAccess={canAccessPath}
+          />
+          <StatCard
+            title="Total delivery boy"
+            value={totalDeliveryBoys.toLocaleString("en-IN")}
+            helper="Approved delivery partners"
+            icon={<Truck className="h-5 w-5" />}
+            to="/admin/food/delivery-partners"
+            canAccess={canAccessPath}
+          />
+          <StatCard
+            title="Delivery boy request pending"
+            value={pendingDeliveryBoyRequests.toLocaleString("en-IN")}
+            helper="Awaiting verification"
+            icon={<Clock className="h-5 w-5" />}
+            to="/admin/food/delivery-partners/join-request"
+            canAccess={canAccessPath}
+          />
+          <StatCard
+            title="Total foods"
+            value={totalFoods.toLocaleString("en-IN")}
+            helper="Approved menu items"
+            icon={<Package className="h-5 w-5" />}
+            to="/admin/food/foods"
+            canAccess={canAccessPath}
+          />
+          <StatCard
+            title="Total addons"
+            value={totalAddons.toLocaleString("en-IN")}
+            helper="Approved addon items"
+            icon={<Plus className="h-5 w-5" />}
+            to="/admin/food/addons"
+            canAccess={canAccessPath}
+          />
+          <StatCard
+            title="Total customers"
+            value={totalCustomers.toLocaleString("en-IN")}
+            helper="Registered users"
+            icon={<UserCircle className="h-5 w-5" />}
+            to="/admin/food/customers"
+            canAccess={canAccessPath}
+          />
+          <StatCard
+            title="Pending orders"
+            value={pendingOrders.toLocaleString("en-IN")}
+            helper="Orders awaiting processing"
+            icon={<Clock className="h-5 w-5" />}
+            to="/admin/food/orders/pending"
+            canAccess={canAccessPath}
+          />
+          <StatCard
+            title="Completed orders"
+            value={completedOrders.toLocaleString("en-IN")}
+            helper="Successfully delivered"
+            icon={<CheckCircle className="h-5 w-5" />}
+            to="/admin/food/orders/delivered"
+            canAccess={canAccessPath}
+          />
         </div>
+      )}
 
-        <div className="space-y-6 px-6 py-6">
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <MetricCard
-              title="Gross revenue"
-              value={formatCurrency(revenueTotal)}
-              helper={`${periodLabel} transaction volume`}
-              icon={<ShoppingBag className="h-5 w-5 text-emerald-600" />}
-              accent="bg-emerald-200/40"
-              path="/admin/food/transaction-report"
-              canAccessPath={canAccessPath}
-            />
-            <MetricCard
-              title="Orders processed"
-              value={activeOrdersTotal.toLocaleString("en-IN")}
-              helper="Orders currently being processed"
-              icon={<Activity className="h-5 w-5 text-amber-600" />}
-              accent="bg-amber-200/40"
-              path="/admin/food/orders/processing"
-              canAccessPath={canAccessPath}
-            />
-            <MetricCard
-              title="Platform fee"
-              value={formatCurrency(platformFeeTotal)}
-              helper={`Platform service fees: ${periodLabel}`}
-              icon={<CreditCard className="h-5 w-5 text-purple-600" />}
-              accent="bg-purple-200/40"
-              path="/admin/food/fee-settings"
-              canAccessPath={canAccessPath}
-            />
-            <MetricCard
-              title="Delivery fee"
-              value={formatCurrency(deliveryFeeTotal)}
-              helper={`Total delivery fees: ${periodLabel}`}
-              icon={<Truck className="h-5 w-5 text-blue-600" />}
-              accent="bg-blue-200/40"
-              path="/admin/food/transaction-report"
-              canAccessPath={canAccessPath}
-            />
-            <MetricCard
-              title="GST"
-              value={formatCurrency(gstTotal)}
-              helper={`Total tax collected: ${periodLabel}`}
-              icon={<Receipt className="h-5 w-5 text-red-600" />}
-              accent="bg-red-200/40"
-              path="/admin/food/tax-report"
-              canAccessPath={canAccessPath}
-            />
-            <MetricCard
-              title="Platform Total"
-              value={formatCurrency(totalAdminEarnings, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-              helper={totalRevenueHelper}
-              icon={<IndianRupee className="h-5 w-5 text-green-600" />}
-              accent="bg-green-200/40"
-              path="/admin/food/transaction-report"
-              canAccessPath={canAccessPath}
-            />
-            <MetricCard
-              title="Total restaurants"
-              value={totalRestaurants.toLocaleString("en-IN")}
-              helper="Approved restaurants"
-              icon={<Store className="h-5 w-5 text-blue-600" />}
-              accent="bg-blue-200/40"
-              path="/admin/food/restaurants"
-              canAccessPath={canAccessPath}
-            />
-            <MetricCard
-              title="Restaurant request pending"
-              value={pendingRestaurantRequests.toLocaleString("en-IN")}
-              helper="Awaiting approval"
-              icon={<UserCheck className="h-5 w-5 text-red-600" />}
-              accent="bg-red-200/40"
-              path="/admin/food/restaurants/joining-request"
-              canAccessPath={canAccessPath}
-            />
-            <MetricCard
-              title="Total delivery boy"
-              value={totalDeliveryBoys.toLocaleString("en-IN")}
-              helper="Approved delivery partners"
-              icon={<Truck className="h-5 w-5 text-indigo-600" />}
-              accent="bg-indigo-200/40"
-              path="/admin/food/delivery-partners"
-              canAccessPath={canAccessPath}
-            />
-            <MetricCard
-              title="Delivery boy request pending"
-              value={pendingDeliveryBoyRequests.toLocaleString("en-IN")}
-              helper="Awaiting verification"
-              icon={<Clock className="h-5 w-5 text-yellow-600" />}
-              accent="bg-yellow-200/40"
-              path="/admin/food/delivery-partners/join-request"
-              canAccessPath={canAccessPath}
-            />
-            <MetricCard
-              title="Total foods"
-              value={totalFoods.toLocaleString("en-IN")}
-              helper="Approved menu items"
-              icon={<Package className="h-5 w-5 text-purple-600" />}
-              accent="bg-purple-200/40"
-              path="/admin/food/foods"
-              canAccessPath={canAccessPath}
-            />
-            <MetricCard
-              title="Total addons"
-              value={totalAddons.toLocaleString("en-IN")}
-              helper="Approved addon items"
-              icon={<Plus className="h-5 w-5 text-pink-600" />}
-              accent="bg-pink-200/40"
-              path="/admin/food/addons"
-              canAccessPath={canAccessPath}
-            />
-            <MetricCard
-              title="Total customers"
-              value={totalCustomers.toLocaleString("en-IN")}
-              helper="Registered users"
-              icon={<UserCircle className="h-5 w-5 text-cyan-600" />}
-              accent="bg-cyan-200/40"
-              path="/admin/food/customers"
-              canAccessPath={canAccessPath}
-            />
-            <MetricCard
-              title="Pending orders"
-              value={pendingOrders.toLocaleString("en-IN")}
-              helper="Orders awaiting processing"
-              icon={<Clock className="h-5 w-5 text-red-600" />}
-              accent="bg-red-200/40"
-              path="/admin/food/orders/pending"
-              canAccessPath={canAccessPath}
-            />
-            <MetricCard
-              title="Completed orders"
-              value={completedOrders.toLocaleString("en-IN")}
-              helper="Successfully delivered"
-              icon={<CheckCircle className="h-5 w-5 text-emerald-600" />}
-              accent="bg-emerald-200/40"
-              path="/admin/food/orders/delivered"
-              canAccessPath={canAccessPath}
-            />
+      {/* Revenue + order mix */}
+      <div className="grid gap-4 lg:grid-cols-3">
+        <SectionCard
+          className="lg:col-span-2"
+          title="Revenue trajectory"
+          subtitle="Commission and gross revenue with monthly order volume"
+        >
+          <div className="h-80 w-full min-w-0">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0}>
+              <AreaChart data={monthlyData} margin={{ top: 8, right: 8, left: -8, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="revFill" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor={BLAZE_CHART.primary} stopOpacity={0.22} />
+                    <stop offset="95%" stopColor={BLAZE_CHART.primary} stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="4 4" stroke={BLAZE_CHART.grid} vertical={false} />
+                <XAxis dataKey="month" stroke={BLAZE_CHART.axis} tickLine={false} axisLine={false} fontSize={12} />
+                <YAxis stroke={BLAZE_CHART.axis} tickLine={false} axisLine={false} fontSize={12} width={48} />
+                <Tooltip
+                  cursor={BLAZE_CHART.tooltip.cursor}
+                  contentStyle={BLAZE_CHART.tooltip.contentStyle}
+                  labelStyle={BLAZE_CHART.tooltip.labelStyle}
+                  itemStyle={BLAZE_CHART.tooltip.itemStyle}
+                />
+                <Legend iconType="circle" formatter={legendFormatter} />
+                <Area
+                  type="monotone"
+                  dataKey="revenue"
+                  stroke={BLAZE_CHART.primary}
+                  strokeWidth={2.5}
+                  fillOpacity={1}
+                  fill="url(#revFill)"
+                  name="Gross revenue"
+                />
+                <Bar
+                  dataKey="orders"
+                  fill={BLAZE_CHART.info}
+                  radius={[6, 6, 0, 0]}
+                  name="Orders"
+                  barSize={10}
+                />
+              </AreaChart>
+            </ResponsiveContainer>
           </div>
+        </SectionCard>
 
-          <div className="grid gap-4 lg:grid-cols-3">
-            <Card className="lg:col-span-2 min-w-0 border-neutral-200 bg-white">
-              <CardHeader className="flex flex-col gap-2 border-b border-neutral-200 pb-4">
-                <CardTitle className="text-lg text-neutral-900">Revenue trajectory</CardTitle>
-                <p className="text-sm text-neutral-500">
-                  Commission and gross revenue with monthly order volume
-                </p>
-              </CardHeader>
-              <CardContent className="min-w-0 pt-4">
-                <div className="h-80 w-full min-w-0">
-                  <ResponsiveContainer width="100%" height="100%" minWidth={0}>
-                    <AreaChart data={monthlyData}>
-                      <defs>
-                        <linearGradient id="revFill" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#0ea5e9" stopOpacity={0.25} />
-                          <stop offset="95%" stopColor="#0ea5e9" stopOpacity={0} />
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                      <XAxis dataKey="month" stroke="#6b7280" />
-                      <YAxis stroke="#6b7280" />
-                      <Tooltip
-                        contentStyle={{ background: "#ffffff", border: "1px solid #e5e7eb", borderRadius: 12 }}
-                        labelStyle={{ color: "#111827" }}
-                        itemStyle={{ color: "#111827" }}
-                      />
-                      <Legend />
-                      <Area
-                        type="monotone"
-                        dataKey="revenue"
-                        stroke="#0ea5e9"
-                        fillOpacity={1}
-                        fill="url(#revFill)"
-                        name="Gross revenue"
-                      />
-                      <Bar
-                        dataKey="orders"
-                        fill="#ef4444"
-                        radius={[6, 6, 0, 0]}
-                        name="Orders"
-                        barSize={10}
-                      />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="min-w-0 border-neutral-200 bg-white">
-              <CardHeader className="flex items-center justify-between border-b border-neutral-200 pb-4">
-                <div>
-                  <CardTitle className="text-lg text-neutral-900">Order mix</CardTitle>
-                  <p className="text-sm text-neutral-500">Distribution by state</p>
-                </div>
-                <span className="rounded-full bg-neutral-100 px-3 py-1 text-xs text-neutral-700">
-                  {orderStats.reduce((s, o) => s + o.value, 0)} orders
-                </span>
-              </CardHeader>
-              <CardContent className="min-w-0 pt-4">
-                <div className="h-72 w-full min-w-0">
-                  <ResponsiveContainer width="100%" height="100%" minWidth={0}>
-                    <PieChart>
-                      <Pie
-                        data={pieData}
-                        dataKey="value"
-                        nameKey="name"
-                        innerRadius={60}
-                        outerRadius={90}
-                        paddingAngle={4}
-                      >
-                        {pieData.map((entry, index) => (
-                          <Cell key={index} fill={entry.fill} stroke="none" />
-                        ))}
-                      </Pie>
-                      <Tooltip
-                        contentStyle={{ background: "#ffffff", border: "1px solid #e5e7eb", borderRadius: 12 }}
-                        labelStyle={{ color: "#111827" }}
-                        itemStyle={{ color: "#111827" }}
-                      />
-                      <Legend
-                        formatter={(value) => <span style={{ color: "#111827", fontSize: 12 }}>{value}</span>}
-                      />
-                    </PieChart>
-                  </ResponsiveContainer>
-                </div>
-                <div className="mt-3 grid grid-cols-2 gap-3">
-                  {orderStats.map((item) => (
-                    <div
-                      key={item.label}
-                      onClick={() => {
-                        const routes = {
-                          'Delivered': '/admin/food/orders/delivered',
-                          'Processing': '/admin/food/orders/processing',
-                          'Cancelled': '/admin/food/orders/canceled',
-                          'Pending': '/admin/food/orders/pending'
-                        }
-                        navigate(routes[item.label] || '/admin/food/orders/all')
-                      }}
-                      className="flex items-center justify-between rounded-xl border border-neutral-200 bg-white px-3 py-2 cursor-pointer hover:bg-neutral-50 hover:border-neutral-300 transition-all group"
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className="h-2.5 w-2.5 rounded-full transition-transform group-hover:scale-125" style={{ background: item.color }} />
-                        <p className="text-sm text-neutral-800 group-hover:text-neutral-900">{item.label}</p>
-                      </div>
-                      <p className="text-sm font-semibold text-neutral-900">{item.value}</p>
-                    </div>
+        <SectionCard
+          title="Order mix"
+          subtitle="Distribution by state"
+          action={
+            <span className="shrink-0 rounded-full bg-secondary px-3 py-1 text-xs font-semibold text-secondary-foreground">
+              {orderStats.reduce((s, o) => s + o.value, 0)} orders
+            </span>
+          }
+        >
+          <div className="h-72 w-full min-w-0">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0}>
+              <PieChart>
+                <Pie
+                  data={pieData}
+                  dataKey="value"
+                  nameKey="name"
+                  innerRadius={60}
+                  outerRadius={90}
+                  paddingAngle={4}
+                >
+                  {pieData.map((entry, index) => (
+                    <Cell key={index} fill={entry.fill} stroke="none" />
                   ))}
-                </div>
-              </CardContent>
-            </Card>
+                </Pie>
+                <Tooltip
+                  contentStyle={BLAZE_CHART.tooltip.contentStyle}
+                  labelStyle={BLAZE_CHART.tooltip.labelStyle}
+                  itemStyle={BLAZE_CHART.tooltip.itemStyle}
+                />
+                <Legend iconType="circle" formatter={legendFormatter} />
+              </PieChart>
+            </ResponsiveContainer>
           </div>
-
-          <div className="grid gap-4 lg:grid-cols-3">
-            <Card className="min-w-0 border-neutral-200 bg-white">
-              <CardHeader className="flex items-center justify-between border-b border-neutral-200 pb-4">
-                <CardTitle className="text-lg text-neutral-900">Momentum snapshot</CardTitle>
-                <span className="text-xs text-neutral-500">Summary: {ordersTotal} Orders</span>
-              </CardHeader>
-              <CardContent className="min-w-0 pt-4">
-                <div className="h-64 w-full min-w-0">
-                  <ResponsiveContainer width="100%" height="100%" minWidth={0}>
-                    <BarChart data={monthlyData.slice(-6)}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                      <XAxis dataKey="month" stroke="#6b7280" />
-                      <YAxis stroke="#6b7280" />
-                      <Tooltip
-                        contentStyle={{ background: "#ffffff", border: "1px solid #e5e7eb", borderRadius: 12 }}
-                        labelStyle={{ color: "#111827" }}
-                        itemStyle={{ color: "#111827" }}
-                      />
-                      <Legend />
-                      <Bar dataKey="orders" fill="#0ea5e9" radius={[8, 8, 0, 0]} name="Orders" />
-                    </BarChart>
-                  </ResponsiveContainer>
+          <div className="mt-3 grid grid-cols-2 gap-3">
+            {orderStats.map((item) => (
+              <div
+                key={item.label}
+                onClick={() => navigate(orderRoutes[item.label] || "/admin/food/orders/all")}
+                className="group flex cursor-pointer items-center justify-between rounded-xl border border-border bg-card px-3 py-2 transition-all hover:border-primary/30 hover:bg-secondary/60"
+              >
+                <div className="flex items-center gap-2">
+                  <span className="h-2.5 w-2.5 rounded-full transition-transform group-hover:scale-125" style={{ background: item.color }} />
+                  <p className="text-sm text-foreground">{item.label}</p>
                 </div>
-              </CardContent>
-            </Card>
+                <p className="text-sm font-semibold text-foreground">{item.value}</p>
+              </div>
+            ))}
+          </div>
+        </SectionCard>
+      </div>
 
-            <Card className="border-neutral-200 bg-white">
-              <CardHeader className="border-b border-neutral-200 pb-4">
-                <CardTitle className="text-lg text-neutral-900">Live signals</CardTitle>
-                <p className="text-sm text-neutral-500">Ops notes and service health</p>
-              </CardHeader>
-              <CardContent className="space-y-3 pt-4 h-[300px] overflow-y-auto custom-scrollbar">
-                {activityFeed.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center h-full py-10 text-neutral-400">
-                    <Activity className="h-10 w-10 mb-2 opacity-20" />
-                    <p className="text-sm">No recent signals</p>
-                  </div>
-                ) : (
-                  activityFeed.map((item, idx) => {
-                    const getIcon = (type) => {
-                      switch (type) {
-                        case "order_pending":
-                          return <Clock className="h-4 w-4 text-amber-600" />
-                        case "order_delivered":
-                          return <CheckCircle className="h-4 w-4 text-emerald-600" />
-                        case "order_cancelled":
-                          return <XCircle className="h-4 w-4 text-red-600" />
-                        case "restaurant":
-                          return <Store className="h-4 w-4 text-blue-600" />
-                        case "delivery":
-                          return <Truck className="h-4 w-4 text-purple-600" />
-                        case "customer":
-                          return <UserCircle className="h-4 w-4 text-pink-600" />
-                        default:
-                          return <Activity className="h-4 w-4 text-neutral-600" />
-                      }
-                    }
+      {/* Momentum + live signals + order states */}
+      <div className="grid gap-4 lg:grid-cols-3">
+        <SectionCard
+          title="Momentum snapshot"
+          action={<span className="text-xs text-muted-foreground">Summary: {ordersTotal} Orders</span>}
+        >
+          <div className="h-64 w-full min-w-0">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0}>
+              <BarChart data={monthlyData.slice(-6)} margin={{ top: 8, right: 8, left: -8, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="4 4" stroke={BLAZE_CHART.grid} vertical={false} />
+                <XAxis dataKey="month" stroke={BLAZE_CHART.axis} tickLine={false} axisLine={false} fontSize={12} />
+                <YAxis stroke={BLAZE_CHART.axis} tickLine={false} axisLine={false} fontSize={12} width={40} />
+                <Tooltip
+                  cursor={BLAZE_CHART.tooltip.cursor}
+                  contentStyle={BLAZE_CHART.tooltip.contentStyle}
+                  labelStyle={BLAZE_CHART.tooltip.labelStyle}
+                  itemStyle={BLAZE_CHART.tooltip.itemStyle}
+                />
+                <Legend iconType="circle" formatter={legendFormatter} />
+                <Bar dataKey="orders" fill={BLAZE_CHART.primary} radius={[8, 8, 0, 0]} name="Orders" />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </SectionCard>
 
-                    const getBg = (type) => {
-                      switch (type) {
-                        case "order_pending":
-                          return "bg-amber-50"
-                        case "order_delivered":
-                          return "bg-emerald-50"
-                        case "order_cancelled":
-                          return "bg-red-50"
-                        case "restaurant":
-                          return "bg-blue-50"
-                        case "delivery":
-                          return "bg-purple-50"
-                        case "customer":
-                          return "bg-pink-50"
-                        default:
-                          return "bg-neutral-50"
-                      }
-                    }
+        <SectionCard title="Live signals" subtitle="Ops notes and service health" flush>
+          <div className="blaze-scroll h-[300px] space-y-3 overflow-y-auto p-5">
+            {activityFeed.length === 0 ? (
+              <EmptyState
+                icon={<Activity className="h-10 w-10" />}
+                title="No recent signals"
+                description="Live operational updates will appear here as they happen."
+              />
+            ) : (
+              activityFeed.map((item, idx) => {
+                const getIcon = (type) => {
+                  switch (type) {
+                    case "order_pending":
+                      return <Clock className="h-4 w-4 text-[var(--blaze-warning)]" />
+                    case "order_delivered":
+                      return <CheckCircle className="h-4 w-4 text-[var(--blaze-success)]" />
+                    case "order_cancelled":
+                      return <XCircle className="h-4 w-4 text-[var(--blaze-danger)]" />
+                    case "restaurant":
+                      return <Store className="h-4 w-4 text-[var(--blaze-info)]" />
+                    case "delivery":
+                      return <Truck className="h-4 w-4 text-primary" />
+                    case "customer":
+                      return <UserCircle className="h-4 w-4 text-[var(--blaze-info)]" />
+                    default:
+                      return <Activity className="h-4 w-4 text-muted-foreground" />
+                  }
+                }
 
-                    return (
-                      <div
-                        key={idx}
-                        className={`flex items-start gap-3 rounded-xl border border-neutral-200 ${getBg(item.type)} px-3 py-3 hover:border-neutral-300 transition-all`}
-                      >
-                        <div className="mt-0.5">{getIcon(item.type)}</div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center justify-between gap-2">
-                            <p className="text-sm font-semibold text-neutral-900 truncate">{item.title}</p>
-                            <span className="text-[10px] text-neutral-400 whitespace-nowrap">{item.time}</span>
-                          </div>
-                          <p className="text-xs text-neutral-600 line-clamp-1">{item.detail}</p>
-                        </div>
-                      </div>
-                    )
-                  })
-                )}
-              </CardContent>
-            </Card>
-
-            <Card className="border-neutral-200 bg-white">
-              <CardHeader className="border-b border-neutral-200 pb-4">
-                <CardTitle className="text-lg text-neutral-900">Order states</CardTitle>
-                <p className="text-sm text-neutral-500">Quick glance by status</p>
-              </CardHeader>
-              <CardContent className="grid gap-3 pt-4">
-                {orderStats.map((item) => (
+                return (
                   <div
-                    key={item.label}
-                    onClick={() => {
-                      const routes = {
-                        'Delivered': '/admin/food/orders/delivered',
-                        'Processing': '/admin/food/orders/processing',
-                        'Cancelled': '/admin/food/orders/canceled',
-                        'Pending': '/admin/food/orders/pending'
-                      }
-                      navigate(routes[item.label] || '/admin/food/orders/all')
-                    }}
-                    className="flex items-center justify-between rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-3 cursor-pointer hover:bg-neutral-100 transition-colors group"
+                    key={idx}
+                    className="flex items-start gap-3 rounded-xl border border-border bg-card px-3 py-3 transition-all hover:border-primary/30 hover:bg-secondary/50"
                   >
-                    <div className="flex items-center gap-3">
-                      <span
-                        className="flex h-9 w-9 items-center justify-center rounded-lg text-sm font-semibold text-neutral-900 transition-transform group-hover:scale-110"
-                        style={{ background: `${item.color}1A`, color: item.color }}
-                      >
-                        {item.label.slice(0, 2).toUpperCase()}
-                      </span>
-                      <div>
-                        <p className="text-sm text-neutral-900 group-hover:font-medium">{item.label}</p>
-                        <p className="text-xs text-neutral-500">Tracked in {selectedPeriod}</p>
-                      </div>
+                    <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted">
+                      {getIcon(item.type)}
                     </div>
-                    <p className="text-sm font-semibold text-neutral-900">{item.value}</p>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="truncate text-sm font-semibold text-foreground">{item.title}</p>
+                        <span className="whitespace-nowrap text-[10px] text-muted-foreground">{item.time}</span>
+                      </div>
+                      <p className="line-clamp-1 text-xs text-muted-foreground">{item.detail}</p>
+                    </div>
                   </div>
-                ))}
-              </CardContent>
-            </Card>
+                )
+              })
+            )}
           </div>
+        </SectionCard>
+
+        <SectionCard title="Order states" subtitle="Quick glance by status">
+          <div className="grid gap-3">
+            {orderStats.map((item) => (
+              <div
+                key={item.label}
+                onClick={() => navigate(orderRoutes[item.label] || "/admin/food/orders/all")}
+                className="group flex cursor-pointer items-center justify-between rounded-xl border border-border bg-card px-3 py-3 transition-all hover:border-primary/30 hover:bg-secondary/50"
+              >
+                <div className="flex items-center gap-3">
+                  <span
+                    className="flex h-9 w-9 items-center justify-center rounded-lg text-sm font-semibold transition-transform group-hover:scale-110"
+                    style={{ background: `${item.color}1A`, color: item.color }}
+                  >
+                    {item.label.slice(0, 2).toUpperCase()}
+                  </span>
+                  <div>
+                    <p className="text-sm text-foreground group-hover:font-medium">{item.label}</p>
+                    <p className="text-xs text-muted-foreground">Tracked in {selectedPeriod}</p>
+                  </div>
+                </div>
+                <p className="text-sm font-semibold text-foreground">{item.value}</p>
+              </div>
+            ))}
+          </div>
+        </SectionCard>
+      </div>
         </div>
       </div>
     </div>
   )
 }
 
-function MetricCard({ title, value, helper, icon, accent, path, canAccessPath }) {
-  const navigate = useNavigate()
-
-  if (path && canAccessPath && !canAccessPath(path)) {
-    return null
-  }
-
-  return (
-    <Card
-      className="group relative overflow-hidden border-neutral-200 bg-white p-0 cursor-pointer transition-all duration-300 hover:shadow-xl hover:-translate-y-1 active:scale-[0.98]"
-      onClick={() => path && navigate(path)}
-    >
-      <CardContent className="relative flex flex-col gap-2 px-4 pb-4 pt-4 h-full">
-        <div className={`absolute inset-0 opacity-40 transition-opacity duration-300 group-hover:opacity-60 ${accent}`} />
-        <div className="relative flex items-center justify-between z-10">
-          <div className="flex-1 min-w-0 mr-2">
-            <p className="text-[10px] uppercase tracking-[0.18em] text-neutral-500 font-bold mb-1 truncate">{title}</p>
-            <p className="text-xl font-bold text-neutral-900 leading-tight mb-1">{value}</p>
-            <p className="text-[10px] text-neutral-500 font-medium line-clamp-1">{helper}</p>
-          </div>
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/90 ring-1 ring-neutral-200 shadow-sm transition-all duration-300 group-hover:scale-110 group-hover:rotate-6 group-hover:shadow-md">
-            {icon}
-          </div>
-        </div>
-        <div className="absolute bottom-2 right-2 opacity-0 transform translate-x-2 transition-all duration-300 group-hover:opacity-100 group-hover:translate-x-0">
-          <ArrowUpRight className="h-3 w-3 text-neutral-400" />
-        </div>
-      </CardContent>
-    </Card>
-  )
+function legendFormatter(value) {
+  return <span style={{ color: "#1A1A1A", fontSize: 12 }}>{value}</span>
 }
-

@@ -1,0 +1,28 @@
+
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  
+  <defs>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="12" stdDeviation="15" flood-opacity="0.25"/>
+    </filter>
+    <filter id="softShadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-opacity="0.15"/>
+    </filter>
+  </defs>
+
+  
+  <g filter="url(#shadow)">
+    <!-- Cab -->
+    <rect x="146" y="50" width="220" height="140" rx="20" fill="#f8fafc" />
+    <!-- Windshield -->
+    <path d="M156 90 L356 90 L336 140 L176 140 Z" fill="#334155" />
+    <!-- Roof -->
+    <rect x="166" y="140" width="180" height="50" fill="#e2e8f0" />
+    <!-- Container -->
+    <rect x="136" y="190" width="240" height="270" rx="10" fill="#ef4444" />
+    <rect x="146" y="200" width="220" height="250" rx="5" fill="#dc2626" />
+    <!-- Details -->
+    <rect x="180" y="250" width="152" height="150" fill="#b91c1c" />
+  </g>
+
+</svg>

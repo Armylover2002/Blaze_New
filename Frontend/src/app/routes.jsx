@@ -18,6 +18,7 @@ const NATIVE_LAST_ROUTE_KEY = 'native_last_route'
 const FoodApp = lazy(() => import('../modules/Food/routes'))
 const AuthApp = lazy(() => import('../modules/auth/routes'))
 const QuickCommerceApp = lazy(() => import('../modules/quickCommerce/routes'))
+const PorterApp = lazy(() => import('../modules/porter/routes'))
 const SellerApp = lazy(() => import('../modules/seller/routes'))
 
 
@@ -184,6 +185,9 @@ const AppRoutes = () => {
           {/* Quick storefront landing keeps the shared food layout */}
           <Route path="/quick" element={<SharedFoodHomeRoute />} />
 
+          {/* Porter landing keeps the shared food layout (embedded Porter home via tab) */}
+          <Route path="/porter" element={<SharedFoodHomeRoute />} />
+
           {/* Global shared cart */}
           <Route
             element={
@@ -219,6 +223,16 @@ const AppRoutes = () => {
           />
           <Route path="/quick-commerce/*" element={<RedirectLegacyQuickCommerce />} />
           <Route path="/qc/*" element={<Navigate to="/quick" replace />} />
+
+          {/* Porter storefront (parcel delivery booking flow) */}
+          <Route
+            path="/porter/*"
+            element={
+              <Suspense fallback={<PageLoader />}>
+                <PorterApp />
+              </Suspense>
+            }
+          />
 
           {/* Dynamic intercept redirects for bare paths (accessed programmatically) */}
           <Route path="/user/*" element={<RedirectToFood />} />

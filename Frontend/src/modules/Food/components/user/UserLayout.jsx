@@ -13,6 +13,7 @@ import SearchOverlay from "./SearchOverlay"
 import BottomNavigation from "./BottomNavigation"
 import DesktopNavbar from "./DesktopNavbar"
 import QuickBottomNav from "@/modules/quickCommerce/user/components/layout/BottomNav"
+import PorterBottomNav from "@/modules/porter/user/components/layout/BottomNav"
 import { useUserNotifications } from "../../hooks/useUserNotifications"
 
 // Create SearchOverlay context with default value
@@ -136,9 +137,14 @@ export default function UserLayout({ children }) {
     normalizedPath === "/profile" &&
     profileSource === "quick"
 
+  const isSharedPorterProfile =
+    normalizedPath === "/profile" &&
+    profileSource === "porter"
+
   const isSharedFoodProfile =
     normalizedPath === "/profile" &&
-    profileSource !== "quick"
+    profileSource !== "quick" &&
+    profileSource !== "porter"
 
   const isProfileRoot =
     normalizedPath === "/user/profile" ||
@@ -154,7 +160,7 @@ export default function UserLayout({ children }) {
     normalizedPath === "" // Handle empty string case for root relative to /food
 
   const isUnder250 = normalizedPath === "/under-250" || normalizedPath === "/user/under-250"
-  const showFoodBottomNav = showBottomNav && !isSharedQuickProfile
+  const showFoodBottomNav = showBottomNav && !isSharedQuickProfile && !isSharedPorterProfile
 
   return (
     <div className="min-h-screen bg-[#f5f5f5] dark:bg-[#0a0a0a] transition-colors duration-200">
@@ -174,6 +180,7 @@ export default function UserLayout({ children }) {
                   </main>
                   {showFoodBottomNav && <BottomNavigation />}
                   {isSharedQuickProfile && <QuickBottomNav />}
+                  {isSharedPorterProfile && <PorterBottomNav />}
                 </LocationSelectorProvider>
               </SearchOverlayProvider>
           </OrdersProvider>

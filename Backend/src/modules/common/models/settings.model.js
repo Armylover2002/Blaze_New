@@ -69,8 +69,8 @@ const globalSettingsSchema = new mongoose.Schema(
         themeColor: { type: String, default: '#0a0a0a' },
         modules: {
             food: { type: Boolean, default: true },
-
             quickCommerce: { type: Boolean, default: true },
+            porter: { type: Boolean, default: true },
 
         }
     },

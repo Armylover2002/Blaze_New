@@ -1,0 +1,38 @@
+
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  
+  <defs>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="12" stdDeviation="15" flood-opacity="0.25"/>
+    </filter>
+    <filter id="softShadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-opacity="0.15"/>
+    </filter>
+  </defs>
+
+  
+  <g filter="url(#shadow)">
+    <!-- Wheels -->
+    <rect x="236" y="90" width="40" height="80" rx="15" fill="#1e293b" />
+    <rect x="236" y="342" width="40" height="80" rx="15" fill="#1e293b" />
+    <!-- Body Base -->
+    <path d="M216 130 L296 130 L316 200 L296 360 L216 360 L196 200 Z" fill="#f8fafc" />
+    <path d="M216 130 L296 130 L316 200 L296 360 L216 360 L196 200 Z" fill="none" stroke="#10b981" stroke-width="4" />
+    <!-- Green Accent Lines -->
+    <path d="M216 150 L196 200 L216 340 M296 150 L316 200 L296 340" fill="none" stroke="#10b981" stroke-width="6" />
+    <!-- Floorboard -->
+    <rect x="226" y="210" width="60" height="60" rx="5" fill="#334155" />
+    <!-- EV Battery Indicator -->
+    <rect x="240" y="225" width="32" height="12" rx="4" fill="#10b981" />
+    <rect x="240" y="245" width="32" height="12" rx="4" fill="#10b981" />
+    <!-- Handlebars -->
+    <rect x="186" y="150" width="140" height="20" rx="10" fill="#f1f5f9" />
+    <rect x="186" y="145" width="20" height="30" rx="5" fill="#0f172a" />
+    <rect x="306" y="145" width="20" height="30" rx="5" fill="#0f172a" />
+    <!-- Headlight -->
+    <rect x="240" y="130" width="32" height="16" rx="8" fill="#6ee7b7" />
+    <!-- Seat -->
+    <path d="M236 280 L276 280 L286 350 L226 350 Z" fill="#1e293b" />
+  </g>
+
+</svg>

@@ -41,7 +41,15 @@ const tabs = [
     name: "Quick Commerce",
     icon: "https://cdn-icons-png.flaticon.com/512/3759/3759601.png",
   },
+  {
+    id: "porter",
+    name: "Porter",
+    icon: "https://cdn-icons-png.flaticon.com/512/2769/2769339.png",
+  },
 ];
+
+// Emoji glyph per module tab (used in the switcher row).
+const TAB_GLYPHS = { food: "🍔", quick: "📦", porter: "🚚" };
 
 const normalizeHex = (hex, fallback = "#8e24aa") => {
   const value = String(hex || "").trim();
@@ -171,14 +179,21 @@ export default function HomeHeader({
     return () => window.removeEventListener("notificationsUpdated", sync);
   }, []);
 
-  const theme = activeTab === "quick" ? quickTheme(FIXED_QUICK_THEME_COLOR) : foodTheme(vegMode);
+  const isPorter = activeTab === "porter";
+  // Porter reuses Food's light header chrome (white bg, red accent).
+  const theme = activeTab === "quick"
+    ? quickTheme(FIXED_QUICK_THEME_COLOR)
+    : isPorter
+    ? { accent: "#FF0000" }
+    : foodTheme(vegMode);
   const isFood = activeTab === "food";
-  const isDarkTheme = !isFood && isColorDark(theme.accent);
-  const textColorClass = isFood ? "text-gray-900" : (isDarkTheme ? "text-white" : "text-gray-900");
-  const subtextColorClass = isFood ? "text-gray-500" : (isDarkTheme ? "text-white/80" : "text-gray-600");
-  const iconColor = isFood ? theme.accent : (isDarkTheme ? "#ffffff" : "#111827");
+  const isLightChrome = isFood || isPorter;
+  const isDarkTheme = !isLightChrome && isColorDark(theme.accent);
+  const textColorClass = isLightChrome ? "text-gray-900" : (isDarkTheme ? "text-white" : "text-gray-900");
+  const subtextColorClass = isLightChrome ? "text-gray-500" : (isDarkTheme ? "text-white/80" : "text-gray-600");
+  const iconColor = isLightChrome ? theme.accent : (isDarkTheme ? "#ffffff" : "#111827");
 
-  const walletPath = isFood ? "/food/user/wallet" : "/quick/wallet";
+  const walletPath = activeTab === "quick" ? "/quick/wallet" : activeTab === "porter" ? "/food/user/wallet?from=porter" : "/food/user/wallet";
   const { title: locationTitle, subtitle: locationSubtitle } = useMemo(
     () => buildLocationDisplay(savedAddressText, location),
     [savedAddressText, location],
@@ -271,13 +286,13 @@ export default function HomeHeader({
 
   return (
     <motion.div
-      className={cn("relative transition-colors duration-300 pb-0 border-none outline-none z-50", isFood ? "bg-white" : "bg-transparent")}
-      style={!isFood ? { backgroundColor: theme.accent } : undefined}
+      className={cn("relative transition-colors duration-300 pb-0 border-none outline-none z-50", isLightChrome ? "bg-white" : "bg-transparent")}
+      style={!isLightChrome ? { backgroundColor: theme.accent } : undefined}
     >
       {/* 1. Sticky Main Header Top Section */}
       <header
-        className={cn("sticky top-0 z-50 px-4 py-3 transition-colors duration-300 outline-none", isFood ? "bg-white/85 backdrop-blur-md shadow-sm border-b border-gray-100" : "border-b-0 border-none")}
-        style={!isFood ? { backgroundColor: "transparent" } : undefined}
+        className={cn("sticky top-0 z-50 px-4 py-3 transition-colors duration-300 outline-none", isLightChrome ? "bg-white/85 backdrop-blur-md shadow-sm border-b border-gray-100" : "border-b-0 border-none")}
+        style={!isLightChrome ? { backgroundColor: "transparent" } : undefined}
       >
         <div className="flex items-center justify-between">
 
@@ -310,7 +325,7 @@ export default function HomeHeader({
             {/* Wallet Button */}
             <Link
               to={walletPath}
-              className={cn("p-2 rounded-full hover:scale-105 active:scale-95 transition-all", isFood ? "bg-gray-100 text-gray-700" : (isDarkTheme ? "bg-white/20 text-white" : "bg-black/5 text-gray-800"))}
+              className={cn("p-2 rounded-full hover:scale-105 active:scale-95 transition-all", isLightChrome ? "bg-gray-100 text-gray-700" : (isDarkTheme ? "bg-white/20 text-white" : "bg-black/5 text-gray-800"))}
               aria-label="Open wallet"
             >
               <Wallet className="h-5 w-5" strokeWidth={2} />
@@ -321,7 +336,7 @@ export default function HomeHeader({
               <PopoverTrigger asChild>
                 <button
                   type="button"
-                  className={cn("p-2 rounded-full relative hover:scale-105 active:scale-95 transition-all border-0 outline-none", isFood ? "bg-gray-100 text-gray-700" : (isDarkTheme ? "bg-white/20 text-white" : "bg-black/5 text-gray-800"))}
+                  className={cn("p-2 rounded-full relative hover:scale-105 active:scale-95 transition-all border-0 outline-none", isLightChrome ? "bg-gray-100 text-gray-700" : (isDarkTheme ? "bg-white/20 text-white" : "bg-black/5 text-gray-800"))}
                   aria-label="Open notifications"
                 >
                   <Bell className="h-5 w-5" strokeWidth={2} />
@@ -418,12 +433,12 @@ export default function HomeHeader({
               className={cn(
                 "flex-1 py-2 rounded-[8px] font-bold flex flex-col items-center justify-center transition-all duration-300 cursor-pointer",
                 isActive
-                  ? (isFood ? "text-white shadow-lg border-0" : (isDarkTheme ? "text-white shadow-lg border border-white/30" : "text-gray-900 shadow-lg border border-black/20"))
-                  : (isFood ? "bg-gray-100 text-gray-500 hover:bg-gray-200 border-0" : (isDarkTheme ? "bg-white/10 text-white hover:bg-white/20 border-0" : "bg-black/5 text-gray-700 hover:bg-black/10 border-0"))
+                  ? (isLightChrome ? "text-white shadow-lg border-0" : (isDarkTheme ? "text-white shadow-lg border border-white/30" : "text-gray-900 shadow-lg border border-black/20"))
+                  : (isLightChrome ? "bg-gray-100 text-gray-500 hover:bg-gray-200 border-0" : (isDarkTheme ? "bg-white/10 text-white hover:bg-white/20 border-0" : "bg-black/5 text-gray-700 hover:bg-black/10 border-0"))
               )}
               style={isActive ? {
                 backgroundColor: theme.accent,
-                boxShadow: tab.id === "food" ? "0 10px 15px -3px rgba(255,0,0,0.2)" : "0 10px 15px -3px rgba(0,0,0,0.15)"
+                boxShadow: tab.id === "quick" ? "0 10px 15px -3px rgba(0,0,0,0.15)" : "0 10px 15px -3px rgba(255,0,0,0.2)"
               } : undefined}
             >
               {tab.badge && (
@@ -432,7 +447,7 @@ export default function HomeHeader({
                 </span>
               )}
               <div className="h-5 w-5 mb-0.5 text-[20px] leading-none flex items-center justify-center">
-                {tab.id === "food" ? "🍔" : "📦"}
+                {TAB_GLYPHS[tab.id] || "🍔"}
               </div>
               <span className="text-[10px] uppercase tracking-wider font-bold">
                 {tab.name}

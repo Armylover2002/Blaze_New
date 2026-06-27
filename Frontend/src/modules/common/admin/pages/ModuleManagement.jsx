@@ -7,7 +7,8 @@ import {
   LayoutGrid,
   Zap,
   Check,
-  AlertCircle
+  AlertCircle,
+  Truck
 } from 'lucide-react';
 import { toast } from "sonner";
 import { adminAPI } from "@/services/api";
@@ -64,8 +65,8 @@ const ModuleManagement = () => {
   const [saving, setSaving] = useState(false);
   const [modules, setModules] = useState({
     food: true,
-
     quickCommerce: true,
+    porter: true,
   });
 
   const fetchSettings = async () => {
@@ -77,8 +78,8 @@ const ModuleManagement = () => {
       if (settings?.modules) {
         setModules({
           food: settings.modules.food ?? true,
-
           quickCommerce: settings.modules.quickCommerce ?? true,
+          porter: settings.modules.porter ?? true,
         });
       }
     } catch (err) {
@@ -166,6 +167,15 @@ const ModuleManagement = () => {
                 enabled={modules.quickCommerce} 
                 onToggle={() => handleToggle('quickCommerce')}
                 color="green"
+              />
+
+              <ModuleCard 
+                title="Porter / Logistics" 
+                description="Manage fleet, delivery logistics, and vehicle fleets." 
+                icon={Truck} 
+                enabled={modules.porter} 
+                onToggle={() => handleToggle('porter')}
+                color="blue"
               />
 
             </div>

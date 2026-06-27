@@ -1,0 +1,26 @@
+
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  
+  <defs>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="12" stdDeviation="15" flood-opacity="0.25"/>
+    </filter>
+    <filter id="softShadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-opacity="0.15"/>
+    </filter>
+  </defs>
+
+  
+  <g filter="url(#shadow)">
+    <rect x="126" y="160" width="30" height="25" rx="5" fill="#10b981" />
+    <rect x="356" y="160" width="30" height="25" rx="5" fill="#10b981" />
+    <rect x="156" y="60" width="200" height="392" rx="30" fill="#f0fdf4" />
+    <rect x="156" y="60" width="200" height="40" rx="20" fill="#10b981" />
+    <path d="M166 120 L346 120 L330 180 L182 180 Z" fill="#1e293b" />
+    <rect x="176" y="180" width="160" height="250" rx="10" fill="#ffffff" filter="url(#softShadow)" />
+    <!-- EV Plug Icon abstract on roof -->
+    <circle cx="256" cy="280" r="30" fill="#d1fae5" />
+    <path d="M256 260 L246 285 L266 285 L256 305" fill="none" stroke="#10b981" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" />
+  </g>
+
+</svg>

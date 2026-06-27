@@ -7,9 +7,8 @@ import {
   quickAdminSidebarMenu,
 } from "@food/utils/quickAdminSidebarMenu"
 
-import {
-  commonAdminSidebarMenu,
-} from "@food/utils/commonAdminSidebarMenu"
+import { commonAdminSidebarMenu } from "@food/utils/commonAdminSidebarMenu"
+import { porterAdminSidebarMenu } from "@/modules/porter/admin/utils/porterAdminSidebarMenu"
 import {
   Search,
   FileText,
@@ -87,6 +86,23 @@ const debugLog = (...args) => { }
 const debugWarn = (...args) => { }
 const debugError = (...args) => { }
 
+// Default enable-state used before settings load (sensible fallbacks). The
+// backend `modules` object is the source of truth; any key it returns is
+// normalized to a boolean, so new modules (pharmacy, taxi, hotel, ...) start
+// working without touching this file.
+const DEFAULT_ENABLED_MODULES = { food: true, quickCommerce: true, porter: true }
+
+const normalizeEnabledModules = (modules) => {
+  const result = { ...DEFAULT_ENABLED_MODULES }
+  if (modules && typeof modules === "object") {
+    for (const [key, value] of Object.entries(modules)) {
+      // A module is enabled unless the backend explicitly disables it.
+      result[key] = typeof value === "boolean" ? value : value !== false
+    }
+  }
+  return result
+}
+
 
 // Icon mapping
 const iconMap = {
@@ -148,13 +164,9 @@ export default function AdminSidebar({ isOpen = false, onClose, onCollapseChange
   const navigate = useNavigate()
   const [searchQuery, setSearchQuery] = useState("")
   const [badges, setBadges] = useState({})
-  const [enabledModules, setEnabledModules] = useState(() => {
-    const cached = getCachedSettings()?.modules;
-    return {
-      food: cached?.food !== undefined ? !!cached.food : true,
-      quickCommerce: cached?.quickCommerce !== undefined ? !!cached.quickCommerce : true,
-    };
-  });
+  const [enabledModules, setEnabledModules] = useState(() =>
+    normalizeEnabledModules(getCachedSettings()?.modules)
+  );
 
   useEffect(() => {
     const fetchBadges = async () => {
@@ -258,10 +270,7 @@ export default function AdminSidebar({ isOpen = false, onClose, onCollapseChange
           setCompanyName(settings.companyName)
         }
         if (settings.modules) {
-          setEnabledModules({
-            food: settings.modules.food !== undefined ? !!settings.modules.food : true,
-            quickCommerce: settings.modules.quickCommerce !== undefined ? !!settings.modules.quickCommerce : true,
-          });
+          setEnabledModules(normalizeEnabledModules(settings.modules));
         }
       }
     }
@@ -347,9 +356,8 @@ export default function AdminSidebar({ isOpen = false, onClose, onCollapseChange
   }
 
   const isQuickAdmin = location.pathname.startsWith("/admin/quick-commerce")
-
-
   const isCommonAdmin = location.pathname.startsWith("/admin/global-settings")
+  const isPorterAdmin = location.pathname.startsWith("/admin/porter")
 
   const { user: authUser } = useAuth()
   const user = useMemo(() => authUser || getCurrentUser("admin"), [authUser])
@@ -399,6 +407,12 @@ export default function AdminSidebar({ isOpen = false, onClose, onCollapseChange
     } else if (isCommonAdmin) {
       menu = commonAdminSidebarMenu
       rootKey = "global"
+    } else if (isPorterAdmin) {
+      menu = porterAdminSidebarMenu
+      rootKey = "porter"
+    } else {
+      menu = adminSidebarMenu
+      rootKey = "food"
     }
 
     // Special case for the "Module Switcher" or shared links if they exist
@@ -440,7 +454,7 @@ export default function AdminSidebar({ isOpen = false, onClose, onCollapseChange
     }
 
     return menu
-  }, [isQuickAdmin, isCommonAdmin, enabledModules, resolvedPermissions, user])
+  }, [isQuickAdmin, isCommonAdmin, isPorterAdmin, enabledModules, resolvedPermissions, user])
 
   // Ensure expandable keys exist for whichever admin module is active (food/quick)
   useEffect(() => {
@@ -459,6 +473,7 @@ export default function AdminSidebar({ isOpen = false, onClose, onCollapseChange
   const canAccessFoodModule = user?.role === "ADMIN" || hasAnyRootAccess(resolvedPermissions, "food")
   const canAccessQuickModule = user?.role === "ADMIN" || hasAnyRootAccess(resolvedPermissions, "quick")
   const canAccessGlobalModule = user?.role === "ADMIN" || hasAnyRootAccess(resolvedPermissions, "global")
+  const canAccessPorterModule = user?.role === "ADMIN" || hasAnyRootAccess(resolvedPermissions, "porter")
 
   const switchAdminModule = (target) => {
     if (target === "quick") {
@@ -473,6 +488,12 @@ export default function AdminSidebar({ isOpen = false, onClose, onCollapseChange
         user?.role === "ADMIN"
           ? "/admin/global-settings"
           : getFirstAccessibleAdminPath(commonAdminSidebarMenu, resolvedPermissions, "global") || "/admin/global-settings"
+      navigate(targetPath)
+    } else if (target === "porter") {
+      const targetPath =
+        user?.role === "ADMIN"
+          ? "/admin/porter"
+          : getFirstAccessibleAdminPath(porterAdminSidebarMenu, resolvedPermissions, "porter") || "/admin/porter"
       navigate(targetPath)
     } else {
       const targetPath =
@@ -767,6 +788,35 @@ export default function AdminSidebar({ isOpen = false, onClose, onCollapseChange
     return null
   }
 
+  const moduleTabs = [
+    {
+      key: "food",
+      label: "Food",
+      enabled: enabledModules.food,
+      visible: canAccessFoodModule,
+      active: !isQuickAdmin && !isCommonAdmin && !isPorterAdmin,
+      onClick: () => switchAdminModule("food")
+    },
+    {
+      key: "quick",
+      label: "Quick",
+      enabled: enabledModules.quickCommerce,
+      visible: canAccessQuickModule,
+      active: isQuickAdmin,
+      onClick: () => switchAdminModule("quick")
+    },
+    {
+      key: "porter",
+      label: "Porter",
+      enabled: enabledModules.porter,
+      visible: canAccessPorterModule,
+      active: isPorterAdmin,
+      onClick: () => switchAdminModule("porter")
+    }
+  ];
+
+  const visibleModuleTabs = moduleTabs.filter(tab => tab.enabled && tab.visible);
+
   return (
     <>
       <style>{`
@@ -930,45 +980,34 @@ export default function AdminSidebar({ isOpen = false, onClose, onCollapseChange
                 Admin Panel
               </h2>
               <div className="mt-2 rounded-xl border border-[#EDE8E0] bg-[#ffffffcc] p-1">
-                <div className="grid grid-cols-2 gap-1">
-                  {enabledModules.food && canAccessFoodModule && (
+                <div 
+                  className="grid gap-1"
+                  style={{ gridTemplateColumns: `repeat(${visibleModuleTabs.length}, minmax(0, 1fr))` }}
+                >
+                  {visibleModuleTabs.map(tab => (
                     <button
-                      key="food-module-btn"
+                      key={`${tab.key}-module-btn`}
                       type="button"
-                      onClick={() => switchAdminModule("food")}
+                      onClick={tab.onClick}
                       className={cn(
                         "rounded-lg px-2 py-1.5 text-[11px] font-bold uppercase tracking-wide transition-all",
-                        !isQuickAdmin && !isCommonAdmin
-                          ? "bg-[#FF0000] text-white shadow-xs"
-                          : "text-[#5C5247] hover:text-[#1A1A1A] hover:bg-white/50"
-                      )}
-                    >
-                      Food
-                    </button>
-                  )}
-                  {enabledModules.quickCommerce && canAccessQuickModule && (
-                    <button
-                      key="quick-module-btn"
-                      type="button"
-                      onClick={() => switchAdminModule("quick")}
-                      className={cn(
-                        "rounded-lg px-2 py-1.5 text-[11px] font-bold uppercase tracking-wide transition-all",
-                        isQuickAdmin
+                        tab.active
                           ? "bg-[#FF0000] text-white shadow-[0_4px_12px_rgba(255,0,0,0.2)]"
                           : "text-[#5C5247] hover:text-[#1A1A1A] hover:bg-white/50"
                       )}
                     >
-                      Quick
+                      {tab.label}
                     </button>
-                  )}
+                  ))}
 
                   {canAccessGlobalModule && (
                     <button
                       key="global-settings-btn"
                       type="button"
                       onClick={() => switchAdminModule("common")}
+                      style={{ gridColumn: `span ${visibleModuleTabs.length} / span ${visibleModuleTabs.length}` }}
                       className={cn(
-                        "rounded-lg px-2 py-1.5 text-[11px] font-bold uppercase tracking-wide transition-all col-span-2",
+                        "rounded-lg px-2 py-1.5 mt-1 text-[11px] font-bold uppercase tracking-wide transition-all",
                         isCommonAdmin
                           ? "bg-[#FF0000] text-white shadow-[0_4px_12px_rgba(255,0,0,0.2)]"
                           : "text-[#5C5247] hover:text-[#1A1A1A] hover:bg-white/50"
@@ -1027,15 +1066,15 @@ export default function AdminSidebar({ isOpen = false, onClose, onCollapseChange
                   <div
                     key={index}
                     className={cn(
-                      index > 0 ? "mt-4 pt-4 border-t border-[#EDE8E0]" : "",
+                      index > 0 ? "mt-2 pt-2 border-t border-[#EDE8E0]" : "",
                       "animate-[fadeIn_0.4s_ease-out]"
                     )}
                     style={{ animationDelay: `${index * 0.1}s` }}
                   >
-                    {!isCollapsed && (
-                      <div className="px-3 py-2 mb-2">
-                        <span className="text-[#5C5247] font-bold text-xs uppercase tracking-wider text-left">
-                          {item.label}
+                    {!isCollapsed && (item.label || item.title) && (
+                      <div className="px-3 py-1 mb-1">
+                        <span className="text-[#5C5247] font-bold text-[10px] uppercase tracking-wider text-left">
+                          {item.label || item.title}
                         </span>
                       </div>
                     )}
