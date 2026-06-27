@@ -24,6 +24,7 @@ const normalizeAddonDoc = (doc) => {
         price: Number(draft.price) || 0,
         image: draft.image || '',
         images: Array.isArray(draft.images) ? draft.images : [],
+        foodType: draft.foodType || 'Veg',
         // Published snapshot (what user app sees)
         published: published
             ? {
@@ -31,7 +32,8 @@ const normalizeAddonDoc = (doc) => {
                 description: published.description || '',
                 price: Number(published.price) || 0,
                 image: published.image || '',
-                images: Array.isArray(published.images) ? published.images : []
+                images: Array.isArray(published.images) ? published.images : [],
+                foodType: published.foodType || 'Veg'
             }
             : null,
         createdAt: doc.createdAt,
@@ -107,7 +109,8 @@ export async function createRestaurantAddon(restaurantId, body) {
             description: String(body.description || '').trim(),
             price: Number(body.price) || 0,
             image: String(body.image || '').trim(),
-            images: Array.isArray(body.images) ? body.images.filter(Boolean).slice(0, 10) : []
+            images: Array.isArray(body.images) ? body.images.filter(Boolean).slice(0, 10) : [],
+            foodType: body.foodType === 'Non-Veg' ? 'Non-Veg' : 'Veg'
         },
         published: null,
         approvalStatus: 'pending',
@@ -186,6 +189,7 @@ export async function updateRestaurantAddon(restaurantId, addonId, updateDto) {
             const imgs = Array.isArray(d.images) ? d.images.filter(Boolean).slice(0, 10) : [];
             set['draft.images'] = imgs;
         }
+        if (d.foodType !== undefined) set['draft.foodType'] = d.foodType === 'Non-Veg' ? 'Non-Veg' : 'Veg';
 
         // Any draft content change must go through admin approval again.
         set.approvalStatus = 'pending';

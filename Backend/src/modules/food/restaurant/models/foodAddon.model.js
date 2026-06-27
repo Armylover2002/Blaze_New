@@ -7,7 +7,8 @@ const addonPayloadSchema = new mongoose.Schema(
         description: { type: String, trim: true, default: '' },
         price: { type: Number, required: true, min: 0 },
         image: { type: String, trim: true, default: '' },
-        images: { type: [String], default: [] }
+        images: { type: [String], default: [] },
+        foodType: { type: String, enum: ['Veg', 'Non-Veg'], default: 'Veg' }
     },
     { _id: false }
 );

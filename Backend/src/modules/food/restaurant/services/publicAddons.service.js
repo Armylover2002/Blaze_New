@@ -45,7 +45,8 @@ export async function getPublicApprovedRestaurantAddons(restaurantIdOrSlug) {
                 description: p.description || '',
                 price: Number(p.price) || 0,
                 image: p.image || '',
-                images: Array.isArray(p.images) ? p.images : []
+                images: Array.isArray(p.images) ? p.images : [],
+                foodType: p.foodType || 'Veg'
             };
         });
 }
