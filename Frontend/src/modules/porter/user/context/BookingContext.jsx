@@ -10,12 +10,14 @@ const DEFAULT_PICKUP = {
 };
 
 const DEFAULT_PARCEL = {
-  sizeId: "medium",
-  weightKg: 20,
+  parcelName: "",
+  parcelDescription: "",
+  weightKg: 0,
   quantity: 1,
   instructions: "",
   receiverName: "",
   receiverPhone: "",
+  isScheduled: false,
 };
 
 export function PorterProvider({ children }) {

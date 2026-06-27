@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect, useCallback } from "react";
 import { Plus, Pencil, Trash2, IndianRupee, Truck, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -9,10 +9,10 @@ import Button from "@/shared/components/ui/Button";
 import Input from "@/shared/components/ui/Input";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import {
-  usePorterVehicles, saveVehiclePricing, clearVehiclePricing, isPricingConfigured,
-} from "../utils/vehicleStore";
+import porterAdminApi from "../services/adminApi";
 import { formatCurrency } from "../utils/porterTableHelpers";
+
+const isPricingConfigured = (vehicle) => vehicle?.pricingConfigured === true;
 
 const EMPTY_FORM = {
   vehicleId: "",
@@ -37,12 +37,29 @@ function formatCommission(vehicle) {
 }
 
 const PricingCommission = () => {
-  const [vehicles] = usePorterVehicles();
+  const [vehicles, setVehicles] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(EMPTY_FORM);
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
+
+  const fetchVehicles = useCallback(async () => {
+    setLoading(true);
+    try {
+      const result = await porterAdminApi.getVehicles({ limit: 100, sortBy: "name", sortOrder: "asc" });
+      setVehicles(result.records || []);
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to load vehicles");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchVehicles();
+  }, [fetchVehicles]);
 
   const stats = useMemo(() => {
     const configured = vehicles.filter(isPricingConfigured).length;
@@ -99,29 +116,39 @@ const PricingCommission = () => {
   const handleSave = async () => {
     if (!validate()) return;
     setSaving(true);
-    await new Promise((r) => setTimeout(r, 400));
-    const payload = {
-      enableDistanceCharges: form.enableDistanceCharges,
-      basePrice: Number(form.basePrice),
-      baseDistance: Number(form.baseDistance),
-      distancePrice: Number(form.distancePrice),
-      serviceTax: Number(form.serviceTax) || 0,
-      commissionType: form.commissionType,
-      commissionValue: Number(form.commissionValue),
-      status: form.status,
-      description: form.description.trim(),
-    };
-    saveVehiclePricing(form.vehicleId, payload);
-    setSaving(false);
-    setDialogOpen(false);
-    const v = vehicles.find((x) => x.id === form.vehicleId);
-    toast.success(`Pricing ${editingId ? "updated" : "added"} for ${v?.name || "vehicle"}`);
+    try {
+      const payload = {
+        enableDistanceCharges: form.enableDistanceCharges,
+        basePrice: Number(form.basePrice),
+        baseDistance: Number(form.baseDistance),
+        distancePrice: Number(form.distancePrice),
+        serviceTax: Number(form.serviceTax) || 0,
+        commissionType: form.commissionType,
+        commissionValue: Number(form.commissionValue),
+        status: form.status,
+        description: form.description.trim(),
+      };
+      await porterAdminApi.upsertVehiclePricing(form.vehicleId, payload);
+      setDialogOpen(false);
+      const v = vehicles.find((x) => x.id === form.vehicleId);
+      toast.success(`Pricing ${editingId ? "updated" : "added"} for ${v?.name || "vehicle"}`);
+      fetchVehicles();
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to save pricing");
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const handleDelete = (vehicle) => {
+  const handleDelete = async (vehicle) => {
     if (!window.confirm(`Remove pricing for ${vehicle.name}?`)) return;
-    clearVehiclePricing(vehicle.id);
-    toast.success("Pricing configuration removed");
+    try {
+      await porterAdminApi.clearVehiclePricing(vehicle.id);
+      toast.success("Pricing configuration removed");
+      fetchVehicles();
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to remove pricing");
+    }
   };
 
   const columns = [
@@ -198,7 +225,7 @@ const PricingCommission = () => {
 
       <SectionCard title="Pricing Rules" subtitle="One pricing configuration per vehicle" flush>
         <div className="p-4">
-          <AdminTable columns={columns} data={vehicles} getRowId={(r) => r.id} />
+          <AdminTable columns={columns} data={vehicles} getRowId={(r) => r.id} loading={loading} />
         </div>
       </SectionCard>
 

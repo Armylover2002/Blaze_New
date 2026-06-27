@@ -27,6 +27,7 @@ import subscriptionRoutes from '../modules/food/subscriptions/routes/subscriptio
 import commonSettingsRoutes from '../modules/common/routes/settings.routes.js';
 import { getGlobalSettings as getPublicSettings } from '../modules/common/controllers/settings.controller.js';
 import onboardingFeeRoutes from '../modules/common/routes/onboardingFee.routes.js';
+import porterRoutes from '../modules/porter/routes/porter.routes.js';
 
 const router = express.Router();
 
@@ -69,6 +70,7 @@ router.use('/v1/payments/webhook', webhookRoutes);
 router.use('/v1/fcm-tokens', fcmRoutes);
 router.use('/fcm-tokens', fcmRoutes);
 router.use('/v1/quick-commerce', quickCommerceRoutes);
+router.use('/v1/porter', porterRoutes);
 router.use('/v1/seller', sellerRoutes);
 
 

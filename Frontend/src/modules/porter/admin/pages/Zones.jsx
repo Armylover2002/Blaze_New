@@ -1,7 +1,8 @@
-import React, { useMemo, useState, useCallback, useRef } from "react";
+import React, { useMemo, useState, useCallback, useRef, useEffect } from "react";
 import {
   Plus, Search, MapPin, Trash2, Pencil, Eye, Map, Users, Truck, Package, X, Loader2
 } from "lucide-react";
+import { toast } from "sonner";
 import {
   PageHeader, SectionCard, StatCard, AdminTable, FilterBar,
   FormLayout, FormSection, FormRow, FormField, StatusBadge,
@@ -9,8 +10,7 @@ import {
 import Button from "@/shared/components/ui/Button";
 import Input from "@/shared/components/ui/Input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { MOCK_ZONES } from "../utils/mock/zones";
-import { filterBySearch, sortItems, paginateItems } from "../utils/porterTableHelpers";
+import porterAdminApi from "../services/adminApi";
 import { GoogleMap, useJsApiLoader, Polygon, Marker } from "@react-google-maps/api";
 
 const libraries = ["places"];
@@ -42,12 +42,15 @@ const EMPTY_ZONE = {
 };
 
 const Zones = () => {
-  const [zones, setZones] = useState(MOCK_ZONES);
+  const [zones, setZones] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [cityFilter, setCityFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
   const [formOpen, setFormOpen] = useState(false);
   const [detailOpen, setDetailOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
@@ -67,19 +70,35 @@ const Zones = () => {
     libraries,
   });
 
-  const cities = useMemo(() => [...new Set(zones.map((z) => z.city))], [zones]);
+  const cities = useMemo(() => [...new Set(zones.map((z) => z.city).filter(Boolean))], [zones]);
 
-  const filtered = useMemo(() => {
-    let rows = filterBySearch(zones, search, ["name", "city", "pincode", "id"]);
-    if (cityFilter !== "all") rows = rows.filter((r) => r.city === cityFilter);
-    if (statusFilter !== "all") rows = rows.filter((r) => r.status === statusFilter);
-    return sortItems(rows, "name", "asc");
-  }, [zones, search, cityFilter, statusFilter]);
+  const fetchZones = useCallback(async () => {
+    setLoading(true);
+    try {
+      const result = await porterAdminApi.getZones({
+        page,
+        limit: pageSize,
+        search: search.trim() || undefined,
+        city: cityFilter !== "all" ? cityFilter : undefined,
+        status: statusFilter !== "all" ? statusFilter : undefined,
+        sortBy: "name",
+        sortOrder: "asc",
+      });
+      setZones(result.records || []);
+      setTotal(result.total || 0);
+      setTotalPages(result.pages || 1);
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to load zones");
+    } finally {
+      setLoading(false);
+    }
+  }, [page, pageSize, search, cityFilter, statusFilter]);
 
-  const { items: pageItems, total, totalPages } = useMemo(
-    () => paginateItems(filtered, page, pageSize),
-    [filtered, page, pageSize]
-  );
+  useEffect(() => {
+    fetchZones();
+  }, [fetchZones]);
+
+  const pageItems = zones;
 
   const openForm = (row = null) => {
     setEditing(row);
@@ -111,29 +130,38 @@ const Zones = () => {
   const handleSave = async () => {
     if (!validate()) return;
     setSaving(true);
-    await new Promise((r) => setTimeout(r, 400));
-    const payload = { 
-      ...form, 
-      coverageKm: Number(form.coverageKm),
-      polygon: `${form.coordinates.length}-point polygon`
-    };
-    if (editing) {
-      setZones((prev) => prev.map((z) => (z.id === editing.id ? { ...z, ...payload } : z)));
-    } else {
-      setZones((prev) => [...prev, {
-        ...payload,
-        id: `ZN-${String(prev.length + 1).padStart(3, "0")}`,
-        orders: 0, drivers: 0, vehicles: 0,
-      }]);
+    try {
+      const payload = {
+        ...form,
+        coverageKm: Number(form.coverageKm),
+        polygon: `${form.coordinates.length}-point polygon`,
+      };
+      if (editing?.id) {
+        await porterAdminApi.updateZone(editing.id, payload);
+        toast.success("Zone updated successfully");
+      } else {
+        await porterAdminApi.createZone(payload);
+        toast.success("Zone created successfully");
+      }
+      setFormOpen(false);
+      fetchZones();
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to save zone");
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
-    setFormOpen(false);
   };
 
-  const handleDelete = () => {
-    if (!deleteTarget) return;
-    setZones((prev) => prev.filter((z) => z.id !== deleteTarget.id));
-    setDeleteTarget(null);
+  const handleDelete = async () => {
+    if (!deleteTarget?.id) return;
+    try {
+      await porterAdminApi.deleteZone(deleteTarget.id);
+      toast.success("Zone deleted");
+      setDeleteTarget(null);
+      fetchZones();
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to delete zone");
+    }
   };
 
   const handleMapClick = useCallback((e) => {
@@ -208,7 +236,7 @@ const Zones = () => {
                   </>
                 }
               />
-              <AdminTable columns={columns} data={pageItems} getRowId={(r) => r.id}
+              <AdminTable columns={columns} data={pageItems} getRowId={(r) => r.id} loading={loading}
                 pagination={{ page, totalPages, total, pageSize, onPageChange: setPage, onPageSizeChange: (s) => { setPageSize(s); setPage(1); } }}
               />
             </div>

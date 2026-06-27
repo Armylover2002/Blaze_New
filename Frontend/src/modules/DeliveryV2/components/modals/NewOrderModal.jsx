@@ -1,10 +1,11 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { User, MapPin, FastForward, Clock, Phone, ChefHat, ChevronDown } from 'lucide-react';
+import { ChevronDown } from 'lucide-react';
 import { ActionSlider } from '@/modules/DeliveryV2/components/ui/ActionSlider';
 import { useDeliveryStore } from '@/modules/DeliveryV2/store/useDeliveryStore';
-import { getHaversineDistance, calculateETA } from '@/modules/DeliveryV2/utils/geo';
-import { formatDeliveryAddressText, isMixedOrder, normalizePickupPoints, isReturnPickupTrip, getReturnPickupStopLabels } from '@/modules/DeliveryV2/utils/orderRouting';
+import { getHaversineDistance } from '@/modules/DeliveryV2/utils/geo';
+import { normalizePickupPoints, isMixedOrder, isReturnPickupTrip, getReturnPickupStopLabels } from '@/modules/DeliveryV2/utils/orderRouting';
+import { RenderNewOrder } from './renderers/NewOrderRenderers';
 
 /**
  * NewOrderModal - Ported to Original 1:1 Theme with Slider Accept.
@@ -137,134 +138,29 @@ export const NewOrderModal = ({ order, onAccept, onReject, onMinimize }) => {
           </button>
         </div>
 
-        {/* Header Ribbon (Old Green Style) */}
-        <div className="bg-[#FF0000] p-5 flex justify-between items-center text-white border-b border-red-600/20">
-          <div>
-            <p className="text-white/80 text-[10px] font-bold uppercase tracking-widest mb-0.5">
-              {isReturnPickup ? (order.tripLabel || 'Return Pickup') : 'Incoming Request'}
-            </p>
-            {isReturnPickup && (
-              <div className="mb-2 inline-flex items-center rounded-full border border-white/30 bg-white/15 px-2.5 py-0.5 text-[9px] font-bold uppercase tracking-widest text-white">
-                Customer → Seller
-              </div>
-            )}
-            {mixedOrder && (
-              <div className="mb-2 inline-flex items-center rounded-full border border-white/30 bg-white/15 px-2.5 py-0.5 text-[9px] font-bold uppercase tracking-widest text-white">
-                Mixed Order
-              </div>
-            )}
-            <h2 className="text-3xl font-extrabold tracking-tight">₹{Number(earnings || 0).toFixed(2)}</h2>
-          </div>
-          <div className="bg-white/20 border border-white/30 rounded-2xl px-4 py-2 text-white font-bold text-xl shadow-inner tabular-nums">
-            {timeLeft}s
-          </div>
-        </div>
+        <RenderNewOrder 
+          order={order} 
+          distanceKm={distanceKm} 
+          etaMins={etaMins} 
+          timeLeft={timeLeft} 
+        />
 
-        {/* Info Body */}
-        <div className="p-5 pb-8 space-y-6">
-          <div className="flex gap-4">
-            <div className="flex flex-col items-center gap-1 mt-1.5 py-0.5">
-              <div className="w-4 h-4 rounded-full bg-[#FF0000] border-[3px] border-red-50 shadow-lg shadow-red-500/20" />
-              <div className={`w-0.5 ${pickupStops.length > 1 ? 'h-24' : 'h-14'} bg-dashed border-l-2 border-gray-100`} />
-              <div className="w-4 h-4 rounded-full bg-blue-500 border-[3px] border-blue-50 shadow-lg shadow-blue-500/20" />
-            </div>
-            <div className="flex-1 space-y-6">
-              <div className="space-y-4">
-                {pickupStops.map((pickup, index) => {
-                  const isQuickStore = pickup.pickupType === 'quick';
-                  const pickupLabel = isReturnPickup
-                    ? returnLabels.pickupLabel
-                    : isQuickStore
-                      ? 'Store Pickup'
-                      : 'Restaurant Pickup';
-                  const pickupAccent = 'text-red-600';
-                  const pickupAddress = pickup.address || 'Address not available';
-                  const pickupPhone = pickup.phone || order?.customerPhone || order?.userPhone || '';
-                  return (
-                    <div key={pickup.id || `${pickup.pickupType}-${index}`}>
-                      <div className={`flex items-center gap-2 mb-1.5 font-bold text-[9px] uppercase tracking-widest ${pickupAccent}`}>
-                        <ChefHat className="w-3.5 h-3.5" />
-                        <span>{pickupStops.length > 1 ? `${pickupLabel} ${index + 1}` : pickupLabel}</span>
-                      </div>
-                      <p className="text-gray-950 font-bold text-lg leading-tight">{pickup.sourceName || (isReturnPickup ? order?.customerName || 'Customer' : isQuickStore ? 'Seller store' : 'Restaurant')}</p>
-                      {pickupPhone ? (
-                        <p className="text-gray-600 text-xs font-semibold">{pickupPhone}</p>
-                      ) : null}
-                      <p className="text-gray-500 text-xs font-medium leading-relaxed line-clamp-1">{pickupAddress}</p>
-                    </div>
-                  );
-                })}
-              </div>
-              <div>
-                <div className="flex items-center gap-2 mb-1.5 font-bold text-[9px] uppercase tracking-widest text-blue-600">
-                  <MapPin className="w-3.5 h-3.5" />
-                  <span>{isReturnPickup ? returnLabels.dropLabel : 'Customer Drop'}</span>
-                </div>
-                <p className="text-gray-950 font-bold text-lg leading-tight">
-                  {isReturnPickup
-                    ? dropPoint?.sourceName || order?.storeName || order?.sellerName || 'Seller'
-                    : 'Customer Location'}
-                </p>
-                {(isReturnPickup ? dropPoint?.phone || order?.storePhone || order?.sellerPhone : order?.customerPhone) ? (
-                  <p className="text-gray-600 text-xs font-semibold">
-                    {isReturnPickup
-                      ? dropPoint?.phone || order?.storePhone || order?.sellerPhone
-                      : order?.customerPhone || order?.userPhone}
-                  </p>
-                ) : null}
-                <p className="text-gray-500 text-xs font-medium line-clamp-1">
-                  {isReturnPickup
-                    ? dropPoint?.address || order?.storeAddress || order?.restaurantAddress || customerAddress
-                    : customerAddress}
-                </p>
-                {mapsLink && (
-                  <a
-                    href={mapsLink}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex mt-1 text-[9px] font-bold uppercase tracking-widest text-blue-600 hover:text-blue-700"
-                  >
-                    Open in Google Maps
-                  </a>
-                )}
-              </div>
-            </div>
-          </div>
+        {/* Action Area (Shared Shell Bottom) */}
+        <div className="p-5 pb-8 space-y-4">
+          <ActionSlider
+            label="Slide to Accept"
+            onConfirm={() => onAccept(order)}
+            color="bg-black"
+            successLabel="Order Accepted ✓"
+            timeProgress={(timeLeft / 30) * 100}
+          />
 
-          <div className="grid grid-cols-2 gap-3">
-            <div className="p-3 bg-gray-50 rounded-xl border border-gray-100 flex items-center gap-3">
-              <Clock className="w-4 h-4 text-red-500" />
-              <div className="flex flex-col">
-                <span className="text-[9px] text-gray-400 font-bold uppercase tracking-widest">Time</span>
-                <span className="text-xs font-bold text-gray-900">{etaMins} MINS</span>
-              </div>
-            </div>
-            <div className="p-3 bg-gray-50 rounded-xl border border-gray-100 flex items-center gap-3">
-              <MapPin className="w-4 h-4 text-gray-400" />
-              <div className="flex flex-col">
-                <span className="text-[9px] text-gray-400 font-bold uppercase tracking-widest">Distance</span>
-                <span className="text-xs font-bold text-gray-900">{distanceKm} KM</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Action Area */}
-          <div className="space-y-4">
-            <ActionSlider
-              label="Slide to Accept"
-              onConfirm={() => onAccept(order)}
-              color="bg-[#FF0000]"
-              successLabel="Order Accepted ✓"
-              timeProgress={(timeLeft / 30) * 100}
-            />
-
-            <button
-              onClick={onReject}
-              className="w-full text-gray-400 font-bold text-[9px] uppercase tracking-widest hover:text-red-500 transition-colors py-1 active:scale-95"
-            >
-              Pass this task
-            </button>
-          </div>
+          <button
+            onClick={onReject}
+            className="w-full text-gray-400 font-bold text-[9px] uppercase tracking-widest hover:text-red-500 transition-colors py-1 active:scale-95"
+          >
+            Pass this task
+          </button>
         </div>
       </motion.div>
     </motion.div>

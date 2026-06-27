@@ -26,6 +26,8 @@ export const useDeliveryStore = create(
       // --- Rider Status ---
       isOnline: false,
       riderLocation: null, // { lat, lng }
+      activeVehicleId: null, // string | null
+      driverVehicles: [], // array of vehicle objects
       
       // --- Trip State ---
       activeOrder: null, // ActiveOrder | null
@@ -38,9 +40,35 @@ export const useDeliveryStore = create(
       },
 
       // --- Actions ---
-      toggleOnline: () => set((state) => ({ isOnline: !state.isOnline })),
+      toggleOnline: () => set((state) => {
+        if (!state.isOnline && !state.activeVehicleId) {
+          // Cannot go online without a selected vehicle
+          // This should be handled by UI, but we protect the store as well
+          console.warn("Cannot go online without an active vehicle");
+          return state;
+        }
+        return { isOnline: !state.isOnline };
+      }),
       
-      setOnline: (online) => set({ isOnline: online }),
+      setOnline: (online) => set((state) => {
+        if (online && !state.activeVehicleId) {
+          console.warn("Cannot go online without an active vehicle");
+          return state;
+        }
+        return { isOnline: online };
+      }),
+
+      setDriverVehicles: (vehicles) => set({ driverVehicles: vehicles }),
+
+      setActiveVehicle: (id) => {
+        const state = get();
+        if (state.isOnline) {
+          console.error("Cannot change active vehicle while online");
+          return false;
+        }
+        set({ activeVehicleId: id });
+        return true;
+      },
       
       setRiderLocation: (location) => set({ riderLocation: location }),
       
@@ -69,12 +97,34 @@ export const useDeliveryStore = create(
       canAdvanceToDeliver: () => {
         const { activeOrder, tripStatus } = get();
         return activeOrder && tripStatus === 'PICKED_UP';
+      },
+
+      // Derived Getters
+      getActiveVehicle: () => {
+        const { activeVehicleId, driverVehicles } = get();
+        if (!activeVehicleId || !driverVehicles || driverVehicles.length === 0) return null;
+        return driverVehicles.find(v => v.vehicleId === activeVehicleId || v.id === activeVehicleId) || null;
+      },
+
+      getAvailableModules: () => {
+        const activeVehicle = get().getActiveVehicle();
+        if (!activeVehicle) return [];
+        // Support either a nested master vehicle object or a flat supportedServices array
+        return activeVehicle.supportedServices || (activeVehicle.master && activeVehicle.master.supportedServices) || [];
+      },
+
+      getCurrentModule: () => {
+        const { activeOrder } = get();
+        return activeOrder?.module || 'food'; // Default fallback
       }
     }),
     {
       name: 'delivery-v2-online-pref',
-      // ONLY persist the 'isOnline' state, ignoring orders/location to prevent dummy order bugs
-      partialize: (state) => ({ isOnline: state.isOnline }),
+      // ONLY persist the 'isOnline' and 'activeVehicleId' state
+      partialize: (state) => ({ 
+        isOnline: state.isOnline,
+        activeVehicleId: state.activeVehicleId
+      }),
     }
   )
 );

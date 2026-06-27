@@ -4,6 +4,7 @@ import { ArrowLeft, Upload, X, Check, Camera, Image as ImageIcon } from "lucide-
 import { toast } from "sonner"
 import { openCamera, openGallery } from "@food/utils/imageUploadUtils"
 import useDeliveryBackNavigation from "../../hooks/useDeliveryBackNavigation"
+import { usePorterVehicles } from "../../../porter/admin/utils/vehicleStore"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -96,6 +97,7 @@ const removeFileFromDB = async (key) => {
 export default function SignupStep1() {
   const navigate = useNavigate()
   const goBack = useDeliveryBackNavigation()
+  const [porterVehicles] = usePorterVehicles()
   const location = useLocation()
   const searchParams = new URLSearchParams(location.search)
   const queryRef = searchParams.get("ref") || ""
@@ -111,9 +113,7 @@ export default function SignupStep1() {
       address: "",
       city: "",
       state: "",
-      vehicleType: "bike",
-      vehicleName: "",
-      vehicleNumber: "",
+      vehicles: [],
       drivingLicenseNumber: "",
       panNumber: "",
       aadharNumber: ""
@@ -121,7 +121,9 @@ export default function SignupStep1() {
     if (saved) {
       try {
         const parsed = JSON.parse(saved)
-        return { ...base, ...parsed, ref: parsed.ref || queryRef }
+        // Ensure vehicles is an array even if old data had vehicleType
+        const vehicles = Array.isArray(parsed.vehicles) ? parsed.vehicles : [];
+        return { ...base, ...parsed, ref: parsed.ref || queryRef, vehicles }
       } catch (e) {
         debugError("Error parsing saved details:", e)
       }
@@ -130,64 +132,61 @@ export default function SignupStep1() {
   })
   const [errors, setErrors] = useState({})
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const vehicleFileInputRef = useRef(null)
-  const [vehicleImage, setVehicleImage] = useState(null)
-  const [vehicleImagePreview, setVehicleImagePreview] = useState(null)
+  
+  const [showAddVehicle, setShowAddVehicle] = useState(false)
+  const [newVehicle, setNewVehicle] = useState({
+    vehicleId: "",
+    registrationNumber: "",
+    model: ""
+  })
 
-  useEffect(() => {
-    const loadSavedVehicleImage = async () => {
-      try {
-        const file = await getFileFromDB("vehicleImage")
-        if (file && (file instanceof File || file instanceof Blob)) {
-          const restoredFile = file instanceof File ? file : new File([file], "vehicleImage.jpg", { type: file.type || "image/jpeg" })
-          setVehicleImage(restoredFile)
-          setVehicleImagePreview(URL.createObjectURL(restoredFile))
-        }
-      } catch (e) {
-        debugError("Error loading saved vehicle image:", e)
-      }
+  const handleAddVehicle = () => {
+    if (!newVehicle.vehicleId) {
+      toast.error("Please select a vehicle category");
+      return;
     }
-    loadSavedVehicleImage()
-  }, [])
+    
+    const selectedMaster = porterVehicles.find(v => v.id === newVehicle.vehicleId);
+    if (!selectedMaster) return;
 
-  useEffect(() => {
-    return () => {
-      if (vehicleImagePreview) {
-        URL.revokeObjectURL(vehicleImagePreview)
-      }
-    }
-  }, [vehicleImagePreview])
+    const isBicycle = selectedMaster.category?.toLowerCase() === "bicycle";
+    // Future ready registration requirement
+    const registrationRequired = selectedMaster.registrationRequired !== undefined ? selectedMaster.registrationRequired : !isBicycle;
 
-  const handleVehicleImageSelect = async (file) => {
-    if (!file) return
-
-    if (!file.type.startsWith("image/")) {
-      toast.error("Please select an image file")
-      return
-    }
-    if (file.size > 5 * 1024 * 1024) {
-      toast.error("Image size should be less than 5MB")
-      return
+    if (registrationRequired && !newVehicle.registrationNumber.trim()) {
+      toast.error("Registration Number is required for this vehicle");
+      return;
     }
 
-    if (vehicleImagePreview) {
-      URL.revokeObjectURL(vehicleImagePreview)
+    if (registrationRequired && !/^[A-Z]{2}[0-9]{1,2}[A-Z]{1,2}[0-9]{4}$/.test(newVehicle.registrationNumber.trim().toUpperCase())) {
+      toast.error("Invalid Indian vehicle number format (e.g., MH12AB1234)");
+      return;
     }
 
-    setVehicleImage(file)
-    setVehicleImagePreview(URL.createObjectURL(file))
-    await saveFileToDB("vehicleImage", file)
-    toast.success("Vehicle image selected")
+    setFormData(prev => ({
+      ...prev,
+      vehicles: [...prev.vehicles, {
+        id: Date.now().toString(),
+        vehicleId: newVehicle.vehicleId,
+        registrationNumber: newVehicle.registrationNumber.trim().toUpperCase(),
+        model: newVehicle.model.trim(),
+        status: "Draft"
+      }]
+    }));
+
+    setNewVehicle({ vehicleId: "", registrationNumber: "", model: "" });
+    setShowAddVehicle(false);
+    toast.success("Vehicle added successfully");
+    if (errors.vehicles) {
+      setErrors(prev => ({ ...prev, vehicles: "" }));
+    }
   }
 
-  const handleVehicleImageRemove = async () => {
-    if (vehicleImagePreview) {
-      URL.revokeObjectURL(vehicleImagePreview)
-    }
-    setVehicleImage(null)
-    setVehicleImagePreview(null)
-    await removeFileFromDB("vehicleImage")
-    toast.info("Vehicle image removed")
+  const handleRemoveVehicle = (id) => {
+    setFormData(prev => ({
+      ...prev,
+      vehicles: prev.vehicles.filter(v => v.id !== id)
+    }));
   }
 
   const sanitizeLocationValue = (value) =>
@@ -240,19 +239,6 @@ export default function SignupStep1() {
   const handleChange = (e) => {
     const { name, value } = e.target
     let updatedValue = value
-
-    // Auto-uppercase for Vehicle, DL and PAN numbers
-    if (name === "vehicleNumber" || name === "panNumber" || name === "drivingLicenseNumber") {
-      updatedValue = value.toUpperCase()
-    }
-
-    if (name === "name") {
-      updatedValue = sanitizeNameValue(value)
-    }
-
-    if (name === "vehicleNumber") {
-      updatedValue = updatedValue.slice(0, 10)
-    }
 
     if (name === "drivingLicenseNumber") {
       updatedValue = updatedValue.replace(/[^A-Z0-9]/g, "").slice(0, 16)
@@ -314,18 +300,17 @@ export default function SignupStep1() {
       newErrors.state = "State can contain letters only"
     }
 
-    const isBicycle = formData.vehicleType === "bicycle";
-    const isElectricBike = formData.vehicleType === "electric_bike";
-
-    if (!isBicycle) {
-      if (!formData.vehicleNumber.trim()) {
-        newErrors.vehicleNumber = "Vehicle number is required"
-      } else if (!/^[A-Z]{2}[0-9]{1,2}[A-Z]{1,2}[0-9]{4}$/.test(formData.vehicleNumber)) {
-        newErrors.vehicleNumber = "Invalid Indian vehicle number format (e.g., MH12AB1234)"
-      }
+    if (formData.vehicles.length === 0) {
+      newErrors.vehicles = "Please add at least one vehicle"
     }
 
-    if (!isBicycle && !isElectricBike) {
+    const requiresDl = formData.vehicles.some(v => {
+      const master = porterVehicles.find(p => p.id === v.vehicleId);
+      const cat = master?.category?.toLowerCase() || "";
+      return cat !== "bicycle" && cat !== "electric bike" && cat !== "electric_bike";
+    });
+
+    if (requiresDl) {
       if (!formData.drivingLicenseNumber.trim()) {
         newErrors.drivingLicenseNumber = "Driving license number is required"
       } else if (!/^[A-Z]{2}[0-9]{2}[0-9]{4}[0-9]{7}$/.test(formData.drivingLicenseNumber)) {
@@ -376,9 +361,7 @@ export default function SignupStep1() {
         address: formData.address.trim(),
         city: formData.city.trim(),
         state: formData.state.trim(),
-        vehicleType: formData.vehicleType || "bike",
-        vehicleName: formData.vehicleName?.trim() || "",
-        vehicleNumber: formData.vehicleNumber.trim(),
+        vehicles: formData.vehicles,
         drivingLicenseNumber: formData.drivingLicenseNumber.trim().toUpperCase(),
         panNumber: formData.panNumber.trim().toUpperCase(),
         aadharNumber: formData.aadharNumber.replace(/\s/g, "")
@@ -393,6 +376,12 @@ export default function SignupStep1() {
       setIsSubmitting(false)
     }
   }
+
+  const requiresDl = formData.vehicles.some(v => {
+    const master = porterVehicles.find(p => p.id === v.vehicleId);
+    const cat = master?.category?.toLowerCase() || "";
+    return cat !== "bicycle" && cat !== "electric bike" && cat !== "electric_bike";
+  });
 
   return (
     <div className="min-h-screen bg-gray-100">
@@ -505,141 +494,148 @@ export default function SignupStep1() {
             </div>
           </div>
 
-          {/* Vehicle Type */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Vehicle Type <span className="text-red-500">*</span>
-            </label>
-            <select
-              name="vehicleType"
-              value={formData.vehicleType}
-              onChange={handleChange}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
-            >
-              <option value="bike">Bike</option>
-              <option value="scooter">Scooter</option>
-              <option value="bicycle">Bicycle</option>
-              <option value="electric_bike">Electric Bike</option>
-              <option value="car">Car</option>
-            </select>
-          </div>
-
-          {/* Vehicle Name */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Vehicle Name/Model (Optional)
-            </label>
-            <input
-              type="text"
-              name="vehicleName"
-              value={formData.vehicleName}
-              onChange={handleChange}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
-              placeholder="e.g., Honda Activa"
-            />
-          </div>
-
-          {/* Vehicle Image Upload */}
-          <div className="bg-white rounded-lg p-4 border border-gray-200">
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Vehicle Image (Optional)
-            </label>
-            {vehicleImagePreview ? (
-              <div className="relative">
-                <img
-                  src={vehicleImagePreview}
-                  alt="Vehicle Preview"
-                  className="w-full h-48 object-cover rounded-lg"
-                />
-                <button
-                  type="button"
-                  onClick={handleVehicleImageRemove}
-                  className="absolute top-2 right-2 bg-red-500 text-white p-2 rounded-full hover:bg-red-600 transition-colors"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-                <div className="absolute bottom-2 left-2 bg-green-500 text-white px-3 py-1 rounded-full flex items-center gap-1 text-sm">
-                  <Check className="w-4 h-4" />
-                  <span>Selected</span>
-                </div>
+          {/* My Vehicles Section */}
+          <div className="pt-4 border-t border-gray-200">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-bold text-gray-900">My Vehicles</h3>
+            </div>
+            
+            {formData.vehicles.length === 0 ? (
+              <div className="text-center py-6 bg-gray-50 rounded-lg border border-gray-200">
+                <p className="text-sm text-gray-500">No vehicles added yet.</p>
+                {errors.vehicles && <p className="text-red-500 text-sm mt-1">{errors.vehicles}</p>}
               </div>
             ) : (
-              <div className="flex flex-col items-center justify-center w-full h-48 border-2 border-dashed border-gray-300 rounded-lg hover:border-green-500 transition-colors px-4">
-                <div className="flex flex-col items-center justify-center pt-5 pb-3">
-                  <Upload className="w-8 h-8 text-gray-400 mb-2" />
-                  <p className="text-sm text-gray-500 mb-1">Upload vehicle image</p>
-                  <p className="text-xs text-gray-400">PNG, JPG up to 5MB</p>
-                </div>
-                <div className="w-full grid grid-cols-2 gap-2 pb-4">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      openCamera({
-                        onSelectFile: handleVehicleImageSelect,
-                        fileNamePrefix: "signup-vehicle"
-                      })
-                    }}
-                    className="flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-gray-900 text-white text-xs font-bold cursor-pointer hover:bg-black transition-all active:scale-95"
-                  >
-                    <Camera className="w-4 h-4" />
-                    <span>Take Photo</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      openGallery({
-                        onSelectFile: handleVehicleImageSelect,
-                        fileNamePrefix: "signup-vehicle"
-                      })
-                    }}
-                    className="flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-[#00B761] text-white text-xs font-bold cursor-pointer hover:bg-[#00A055] transition-all active:scale-95"
-                  >
-                    <ImageIcon className="w-4 h-4" />
-                    <span>Gallery</span>
-                  </button>
-                </div>
-                <input
-                  ref={vehicleFileInputRef}
-                  type="file"
-                  className="hidden"
-                  accept=".jpg,.jpeg,.png,.webp,.heic,.heif,image/jpeg,image/png,image/webp,image/heic,image/heif"
-                  onClick={(e) => {
-                    e.target.value = ""
-                  }}
-                  onChange={(e) => {
-                    const selectedFile = e.target.files[0]
-                    if (selectedFile) {
-                      handleVehicleImageSelect(selectedFile)
-                    }
-                    e.target.value = ""
-                  }}
-                />
+              <div className="space-y-4">
+                {formData.vehicles.map(v => {
+                  const master = porterVehicles.find(p => p.id === v.vehicleId);
+                  return (
+                    <div key={v.id} className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm relative">
+                      <button 
+                        type="button" 
+                        onClick={() => handleRemoveVehicle(v.id)}
+                        className="absolute top-3 right-3 text-gray-400 hover:text-red-500 transition-colors"
+                      >
+                        <X className="w-5 h-5" />
+                      </button>
+                      <div className="flex items-start gap-4">
+                        <div className="w-16 h-16 bg-gray-50 rounded-lg flex items-center justify-center p-2 border border-gray-100 shrink-0">
+                          {master?.image ? (
+                            <img src={master.image} alt={master.name} className="w-full h-full object-contain" />
+                          ) : (
+                            <Truck className="w-8 h-8 text-gray-400" />
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <h4 className="font-bold text-gray-900 text-base truncate">{master?.name || "Unknown Vehicle"}</h4>
+                          <p className="text-xs text-gray-500 mt-0.5">{master?.category || ""}</p>
+                          
+                          <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
+                            <div>
+                              <span className="text-gray-500 text-xs block">Reg. Number</span>
+                              <span className="font-medium text-gray-900">{v.registrationNumber || "N/A"}</span>
+                            </div>
+                            <div>
+                              <span className="text-gray-500 text-xs block">Status</span>
+                              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                                {v.status}
+                              </span>
+                            </div>
+                          </div>
+                          
+                          {master?.supportedServices && master.supportedServices.length > 0 && (
+                            <div className="mt-3 flex flex-wrap gap-1.5">
+                              {master.supportedServices.map(service => (
+                                <span key={service} className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded-full text-xs font-medium capitalize">
+                                  {service}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
               </div>
             )}
-          </div>
 
-          {/* Vehicle Number */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Vehicle Number {formData.vehicleType !== "bicycle" && <span className="text-red-500">*</span>}
-            </label>
-            <input
-              type="text"
-              name="vehicleNumber"
-              value={formData.vehicleNumber}
-              onChange={handleChange}
-              maxLength={10}
-              className={`w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 ${errors.vehicleNumber ? "border-red-500" : "border-gray-300"
-                }`}
-              placeholder="e.g., MH12AB1234"
-            />
-            {errors.vehicleNumber && <p className="text-red-500 text-sm mt-1">{errors.vehicleNumber}</p>}
+            {!showAddVehicle ? (
+              <button
+                type="button"
+                onClick={() => setShowAddVehicle(true)}
+                className="mt-4 w-full py-3 rounded-lg border-2 border-dashed border-green-500 text-green-600 font-medium hover:bg-green-50 transition-colors flex items-center justify-center gap-2"
+              >
+                <span>+ Add Another Vehicle</span>
+              </button>
+            ) : (
+              <div className="mt-4 bg-gray-50 p-4 rounded-xl border border-gray-200">
+                <div className="flex items-center justify-between mb-4">
+                  <h4 className="font-bold text-gray-900">Add New Vehicle</h4>
+                  <button type="button" onClick={() => setShowAddVehicle(false)} className="text-gray-500 hover:text-gray-700">
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+                
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Select Vehicle <span className="text-red-500">*</span>
+                    </label>
+                    <select
+                      value={newVehicle.vehicleId}
+                      onChange={(e) => setNewVehicle(p => ({ ...p, vehicleId: e.target.value }))}
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                    >
+                      <option value="">Choose from list...</option>
+                      {porterVehicles.filter(pv => !formData.vehicles.some(v => v.vehicleId === pv.id)).map(pv => (
+                        <option key={pv.id} value={pv.id}>{pv.name} ({pv.category})</option>
+                      ))}
+                    </select>
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Registration Number
+                    </label>
+                    <input
+                      type="text"
+                      value={newVehicle.registrationNumber}
+                      onChange={(e) => setNewVehicle(p => ({ ...p, registrationNumber: e.target.value.toUpperCase().slice(0, 10) }))}
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                      placeholder="e.g., MH12AB1234"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Vehicle Model (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      value={newVehicle.model}
+                      onChange={(e) => setNewVehicle(p => ({ ...p, model: e.target.value }))}
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                      placeholder="e.g., 2022 Edition"
+                    />
+                  </div>
+                  
+                  <button
+                    type="button"
+                    onClick={handleAddVehicle}
+                    className="w-full py-3 rounded-lg font-bold text-white bg-gray-900 hover:bg-black transition-colors"
+                  >
+                    Confirm Vehicle
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Driving License Number */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Driving License Number {formData.vehicleType !== "bicycle" && formData.vehicleType !== "electric_bike" && <span className="text-red-500">*</span>}
+              Driving License Number {requiresDl && <span className="text-red-500">*</span>}
             </label>
             <input
               type="text"

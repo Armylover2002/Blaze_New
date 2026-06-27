@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect, useCallback } from "react";
 import {
   Plus, Search, Ticket, Eye, Pencil, Trash2, Percent, IndianRupee, Upload, Loader2,
 } from "lucide-react";
@@ -11,22 +11,24 @@ import Button from "@/shared/components/ui/Button";
 import Input from "@/shared/components/ui/Input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
-  MOCK_COUPONS, MOCK_COUPON_USAGE, getCouponSummary,
-  DISCOUNT_TYPES, VEHICLE_TYPES, ZONE_OPTIONS, GOODS_TYPE_OPTIONS,
+  MOCK_COUPON_USAGE, getCouponSummary,
+  DISCOUNT_TYPES, VEHICLE_TYPES, ZONE_OPTIONS,
 } from "../utils/mock/coupons";
-import { filterBySearch, sortItems, paginateItems, formatCurrency, formatDateTime } from "../utils/porterTableHelpers";
+import porterAdminApi from "../services/adminApi";
+import { formatCurrency, formatDateTime } from "../utils/porterTableHelpers";
 
 const EMPTY_COUPON = {
   code: "", name: "", description: "", discountType: "percentage", discountValue: 10,
   maxDiscount: 100, minOrderValue: 100, maxUses: 1000, perUserLimit: 1,
   validFrom: "", validUntil: "", firstOrderOnly: false, newCustomerOnly: false,
   active: true, autoApply: false, zones: ["All Zones"], vehicleTypes: ["All"],
-  goodsTypes: ["All"], customerSegment: "All Customers", status: "active",
+  customerSegment: "All Customers", status: "active",
   image: null, banner: null, usedCount: 0, campaignRevenue: 0, totalDiscountGiven: 0,
 };
 
 const Coupons = () => {
-  const [coupons, setCoupons] = useState(MOCK_COUPONS);
+  const [coupons, setCoupons] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
@@ -34,6 +36,8 @@ const Coupons = () => {
   const [sortDir, setSortDir] = useState("asc");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
   const [formOpen, setFormOpen] = useState(false);
   const [detailOpen, setDetailOpen] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -44,21 +48,33 @@ const Coupons = () => {
 
   const summary = useMemo(() => getCouponSummary(coupons), [coupons]);
 
-  const filtered = useMemo(() => {
-    let rows = filterBySearch(coupons, search, ["code", "name", "description", "id"]);
-    if (statusFilter !== "all") rows = rows.filter((r) => r.status === statusFilter);
-    if (typeFilter !== "all") rows = rows.filter((r) => r.discountType === typeFilter);
-    return sortItems(rows, sortKey, sortDir, {
-      discountValue: (r) => r.discountValue,
-      usedCount: (r) => r.usedCount,
-      minOrderValue: (r) => r.minOrderValue,
-    });
-  }, [coupons, search, statusFilter, typeFilter, sortKey, sortDir]);
+  const fetchCoupons = useCallback(async () => {
+    setLoading(true);
+    try {
+      const result = await porterAdminApi.getCoupons({
+        page,
+        limit: pageSize,
+        search: search.trim() || undefined,
+        status: statusFilter !== "all" ? statusFilter : undefined,
+        discountType: typeFilter !== "all" ? typeFilter : undefined,
+        sortBy: sortKey,
+        sortOrder: sortDir,
+      });
+      setCoupons(result.records || []);
+      setTotal(result.total || 0);
+      setTotalPages(result.pages || 1);
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to load coupons");
+    } finally {
+      setLoading(false);
+    }
+  }, [page, pageSize, search, statusFilter, typeFilter, sortKey, sortDir]);
 
-  const { items: pageItems, total, totalPages } = useMemo(
-    () => paginateItems(filtered, page, pageSize),
-    [filtered, page, pageSize]
-  );
+  useEffect(() => {
+    fetchCoupons();
+  }, [fetchCoupons]);
+
+  const pageItems = coupons;
 
   const openForm = (row = null) => {
     setEditing(row);
@@ -86,33 +102,41 @@ const Coupons = () => {
   const handleSave = async () => {
     if (!validate()) return;
     setSaving(true);
-    await new Promise((r) => setTimeout(r, 400));
-    const payload = {
-      ...form,
-      discountValue: Number(form.discountValue),
-      maxDiscount: Number(form.maxDiscount),
-      minOrderValue: Number(form.minOrderValue),
-      maxUses: Number(form.maxUses),
-      perUserLimit: Number(form.perUserLimit),
-      validFrom: new Date(form.validFrom).toISOString(),
-      validUntil: new Date(form.validUntil).toISOString(),
-    };
-    if (editing) {
-      setCoupons((prev) => prev.map((c) => (c.id === editing.id ? { ...c, ...payload } : c)));
-      toast.success("Coupon updated successfully");
-    } else {
-      const id = `CPN-${String(100 + coupons.length + 1).padStart(3, "0")}`;
-      setCoupons((prev) => [...prev, { ...payload, id, usedCount: 0, campaignRevenue: 0, totalDiscountGiven: 0 }]);
-      toast.success("Coupon created successfully");
+    try {
+      const payload = {
+        ...form,
+        discountValue: Number(form.discountValue),
+        maxDiscount: Number(form.maxDiscount),
+        minOrderValue: Number(form.minOrderValue),
+        maxUses: Number(form.maxUses),
+        perUserLimit: Number(form.perUserLimit),
+        validFrom: new Date(form.validFrom).toISOString(),
+        validUntil: new Date(form.validUntil).toISOString(),
+      };
+      if (editing?.id) {
+        await porterAdminApi.updateCoupon(editing.id, payload);
+        toast.success("Coupon updated successfully");
+      } else {
+        await porterAdminApi.createCoupon(payload);
+        toast.success("Coupon created successfully");
+      }
+      setFormOpen(false);
+      fetchCoupons();
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to save coupon");
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
-    setFormOpen(false);
   };
 
-  const handleDelete = (id) => {
-    if (window.confirm("Delete this coupon?")) {
-      setCoupons((prev) => prev.filter((c) => c.id !== id));
+  const handleDelete = async (id) => {
+    if (!window.confirm("Delete this coupon?")) return;
+    try {
+      await porterAdminApi.deleteCoupon(id);
       toast.success("Coupon removed");
+      fetchCoupons();
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to delete coupon");
     }
   };
 
@@ -187,7 +211,7 @@ const Coupons = () => {
               </>
             }
           />
-          <AdminTable columns={columns} data={pageItems} getRowId={(r) => r.id}
+          <AdminTable columns={columns} data={pageItems} getRowId={(r) => r.id} loading={loading}
             pagination={{ page, totalPages, total, pageSize, onPageChange: setPage, onPageSizeChange: (s) => { setPageSize(s); setPage(1); } }}
           />
         </div>

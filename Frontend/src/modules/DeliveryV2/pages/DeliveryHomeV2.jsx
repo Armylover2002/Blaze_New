@@ -15,6 +15,7 @@ import { DeliveryVerificationModal } from '@/modules/DeliveryV2/components/modal
 import { isReturnPickupTrip, getReturnPickupStopLabels, enrichReturnDeliveryOrder } from '@/modules/DeliveryV2/utils/orderRouting';
 import { OrderSummaryModal } from '@/modules/DeliveryV2/components/modals/OrderSummaryModal';
 import ActionSlider from '@/modules/DeliveryV2/components/ui/ActionSlider';
+import VehicleSwitcherSheet from '@/modules/DeliveryV2/components/modals/VehicleSwitcherSheet';
 
 // Sub Pages (Lazy Loaded for Bundle Size Optimization)
 const PocketV2 = React.lazy(() => import('@/modules/DeliveryV2/pages/PocketV2'));
@@ -225,6 +226,9 @@ const CashLimitBlockingModal = ({ isOpen, onClose }) => {
 export default function DeliveryHomeV2({ tab = 'feed' }) {
   const navigate = useNavigate();
   const { isOnline, setOnline, toggleOnline, activeOrder, tripStatus, setRiderLocation, setActiveOrder, updateTripStatus, clearActiveOrder } = useDeliveryStore();
+  const getActiveVehicle = useDeliveryStore(state => state.getActiveVehicle);
+  const activeVehicle = getActiveVehicle();
+  const [showVehicleSwitcher, setShowVehicleSwitcher] = useState(false);
   const { isWithinRange, distanceToTarget } = useProximityCheck();
   const { acceptOrder, reachPickup, pickUpOrder, reachDrop, completeDelivery, resetTrip } = useOrderManager();
   const { newOrder, clearNewOrder, orderStatusUpdate, clearOrderStatusUpdate, isConnected: isSocketConnected, emitLocation, forcedOfflineEvent, clearForcedOfflineEvent } = useDeliveryNotifications();
@@ -840,41 +844,6 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
                     return;
                   }
 
-                  // Turning ON: Check Eligibility (Bypassed)
-                  /* Comment out the related restriction/check logic in the codebase instead of removing it completely.
-                  setIsProcessingToggle(true);
-                  try {
-                    const eligRes = await subscriptionAPI.getEligibility("DELIVERY_PARTNER");
-                    const elig = eligRes.data?.data;
-
-                    if (!elig.eligible) {
-                      if (elig.reason === 'LOW_BALANCE') {
-                        setEligibilityData(elig);
-                        setShowLowBalanceModal(true);
-                      } else {
-                        toast.error(elig.message || "Insufficient balance to go online");
-                      }
-                      setIsProcessingToggle(false);
-                      return;
-                    }
-
-                    if (elig.shouldDeduct) {
-                      setEligibilityData(elig);
-                      setShowSubModal(true);
-                      setIsProcessingToggle(false);
-                    } else {
-                      await deliveryAPI.updateOnlineStatus(true);
-                      setOnline(true);
-                      setIsProcessingToggle(false);
-                      navigator.geolocation.getCurrentPosition((pos) => {
-                          deliveryAPI.updateLocation(pos.coords.latitude, pos.coords.longitude, true).catch(() => {});
-                      }, (err) => console.warn('Online sync position failed:', err), { enableHighAccuracy: true });
-                    }
-                  } catch (err) {
-                    toast.error("Failed to verify subscription");
-                    setIsProcessingToggle(false);
-                  }
-                  */
                   setIsProcessingToggle(true);
                   try {
                     await deliveryAPI.updateOnlineStatus(true);
@@ -964,16 +933,55 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
                   </div>
                 </div>
               ) : (
-                <div className="bg-white/5 rounded-2xl p-4 flex items-center border border-white/5 shadow-sm backdrop-blur-md">
-                  <div className="flex items-center gap-4">
-                    <div className="w-10 h-10 bg-green-500/10 rounded-full flex items-center justify-center">
-                      <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-green-500 animate-pulse' : 'bg-gray-500'}`} />
-                    </div>
-                    <div>
-                      <h3 className="text-white font-black text-[11px] uppercase tracking-widest leading-none mb-1">{isOnline ? 'System Online' : 'System Offline'}</h3>
-                      <p className="text-gray-400 text-[10px] font-bold uppercase tracking-tight">{isOnline ? 'Waiting for order requests' : 'Go online to receive jobs'}</p>
+                <div className="flex flex-col gap-2">
+                  <div className="bg-white/5 rounded-2xl p-4 flex items-center border border-white/5 shadow-sm backdrop-blur-md">
+                    <div className="flex items-center gap-4">
+                      <div className="w-10 h-10 bg-green-500/10 rounded-full flex items-center justify-center">
+                        <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-green-500 animate-pulse' : 'bg-gray-500'}`} />
+                      </div>
+                      <div>
+                        <h3 className="text-white font-black text-[11px] uppercase tracking-widest leading-none mb-1">{isOnline ? 'System Online' : 'System Offline'}</h3>
+                        <p className="text-gray-400 text-[10px] font-bold uppercase tracking-tight">{isOnline ? 'Waiting for order requests' : 'Go online to receive jobs'}</p>
+                      </div>
                     </div>
                   </div>
+                  
+                  {activeVehicle && (
+                    <div 
+                      onClick={() => setShowVehicleSwitcher(true)}
+                      className="bg-white/5 rounded-2xl p-4 flex flex-col border border-white/10 shadow-sm backdrop-blur-md relative overflow-hidden group cursor-pointer active:scale-95 transition-all"
+                    >
+                      <div className="flex items-center justify-between mb-3">
+                        <span className="text-[9px] text-white/50 font-black uppercase tracking-[0.15em]">Current Vehicle</span>
+                        <div className="flex items-center gap-1 text-[10px] text-blue-400 font-bold uppercase tracking-widest">
+                          <span>Change</span>
+                          <ChevronRight className="w-3 h-3" />
+                        </div>
+                      </div>
+                      
+                      <div className="flex items-center gap-3">
+                        <div className="w-12 h-12 bg-white/10 rounded-xl flex items-center justify-center shrink-0 shadow-inner">
+                          <img src={(activeVehicle.master || activeVehicle).image || "https://i.ibb.co/68zRzVv/Auto.png"} alt="Vehicle" className="w-8 h-8 object-contain" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <h3 className="text-white font-bold text-sm truncate">{(activeVehicle.master || activeVehicle).name || 'Vehicle'}</h3>
+                          <div className="text-[10px] text-gray-400 uppercase tracking-widest font-semibold flex items-center gap-1.5 mt-0.5 truncate">
+                            <span>{activeVehicle.registrationNumber || 'No Reg'}</span>
+                            <span>•</span>
+                            <span className={activeVehicle.verificationStatus === 'Approved' ? 'text-green-400' : 'text-orange-400'}>{activeVehicle.verificationStatus || 'Unknown'}</span>
+                          </div>
+                        </div>
+                      </div>
+                      
+                      {((activeVehicle.master || activeVehicle).supportedServices || []).length > 0 && (
+                        <div className="flex items-center gap-1 mt-3 flex-wrap">
+                          {((activeVehicle.master || activeVehicle).supportedServices || []).map(s => (
+                            <span key={s} className="text-[9px] bg-white/10 text-white px-2 py-1 rounded font-black uppercase">{s}</span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             </motion.div>
@@ -1323,6 +1331,11 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
             setIsProcessingToggle(false);
           }
         }}
+      />
+      
+      <VehicleSwitcherSheet 
+        isOpen={showVehicleSwitcher}
+        onClose={() => setShowVehicleSwitcher(false)}
       />
     </div>
   );

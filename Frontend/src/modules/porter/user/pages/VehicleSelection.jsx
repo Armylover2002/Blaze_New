@@ -35,8 +35,7 @@ export default function VehicleSelection() {
 
       <SectionLabel>Select vehicle</SectionLabel>
       <div className="space-y-2">
-        {DELIVERY_VEHICLES.map((v) => {
-          const disabled = v.maxWeightKg < totalWeight;
+        {DELIVERY_VEHICLES.filter(v => totalWeight >= v.minWeightKg && totalWeight <= v.maxWeightKg).map((v) => {
           const fare = estimateDeliveryCost(v.id, distanceKm, durationMin);
           return (
             <VehicleCard
@@ -44,7 +43,7 @@ export default function VehicleSelection() {
               vehicle={v}
               fare={fare}
               selected={vehicleId === v.id}
-              disabled={disabled}
+              disabled={false}
               onSelect={() => setVehicleId(v.id)}
             />
           );
