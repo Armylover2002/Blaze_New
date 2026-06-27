@@ -12,11 +12,9 @@ const coordinateSchema = z.object({
 
 const zoneBodySchema = z.object({
     name: z.string().min(1, 'Zone name is required').max(120),
-    city: z.string().min(1, 'City is required').max(80),
-    pincode: z.string().min(1, 'Pincode is required').max(12),
+    country: z.string().min(1, 'Country is required').max(80),
+    unit: z.enum(['kilometer', 'mile']).default('kilometer'),
     status: z.enum(['active', 'inactive']).optional(),
-    coverageKm: z.coerce.number().min(0, 'Coverage must be positive'),
-    description: z.string().max(500).optional(),
     coordinates: z.array(coordinateSchema).min(3, 'Draw a polygon with at least 3 points'),
     polygon: z.string().optional(),
     displayOrder: z.coerce.number().int().min(0).optional(),
@@ -40,10 +38,9 @@ export const validateCreateZoneDto = (body = {}) => {
     return {
         ...result.data,
         name: result.data.name.trim(),
-        city: result.data.city.trim(),
-        pincode: result.data.pincode.trim(),
+        country: result.data.country.trim(),
+        unit: result.data.unit,
         status: result.data.status || 'active',
-        description: (result.data.description || '').trim(),
         coordinates,
         polygon,
         displayOrder: result.data.displayOrder ?? 0,
@@ -58,9 +55,7 @@ export const validateUpdateZoneDto = (body = {}) => {
 
     const data = { ...partial.data };
     if (data.name !== undefined) data.name = data.name.trim();
-    if (data.city !== undefined) data.city = data.city.trim();
-    if (data.pincode !== undefined) data.pincode = data.pincode.trim();
-    if (data.description !== undefined) data.description = data.description.trim();
+    if (data.country !== undefined) data.country = data.country.trim();
     if (Array.isArray(data.coordinates)) {
         data.coordinates = normalizeCoordinates(data.coordinates);
         if (data.coordinates.length < 3) {

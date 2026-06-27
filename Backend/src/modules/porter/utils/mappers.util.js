@@ -3,11 +3,9 @@ const toId = (doc) => (doc?._id ? String(doc._id) : doc?.id ? String(doc.id) : '
 export const mapZone = (doc = {}, stats = {}) => ({
     id: toId(doc),
     name: doc.name || '',
-    city: doc.city || '',
-    pincode: doc.pincode || '',
+    country: doc.country || 'India',
+    unit: doc.unit || 'kilometer',
     status: doc.status || 'inactive',
-    coverageKm: Number(doc.coverageKm || 0),
-    description: doc.description || '',
     polygon: doc.polygon || (Array.isArray(doc.coordinates) && doc.coordinates.length
         ? `${doc.coordinates.length}-point polygon`
         : 'No area selected'),
@@ -154,12 +152,15 @@ export const mapPorterUser = (doc = {}, extras = {}) => ({
     email: doc.email || '',
     phone: doc.phone ? (doc.countryCode ? `${doc.countryCode} ${doc.phone}` : doc.phone) : '',
     zone: extras.zone || '',
-    address: extras.address || [
-        doc.address?.street,
-        doc.address?.city,
-        doc.address?.state,
-        doc.address?.zipCode,
-    ].filter(Boolean).join(', '),
+    address: extras.address || (() => {
+        const main = [doc.address?.street, doc.address?.city, doc.address?.state, doc.address?.zipCode].filter(Boolean).join(', ');
+        if (main) return main;
+        if (doc.addresses && doc.addresses.length > 0) {
+            const addr = doc.addresses[0];
+            return [addr.street, addr.city, addr.state, addr.zipCode].filter(Boolean).join(', ');
+        }
+        return '';
+    })(),
     totalOrders: Number(extras.totalOrders || 0),
     completedOrders: Number(extras.completedOrders || 0),
     cancelledOrders: Number(extras.cancelledOrders || 0),

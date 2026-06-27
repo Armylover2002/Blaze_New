@@ -36,8 +36,8 @@ const orderPointsRadially = (pts) => {
 };
 
 const EMPTY_ZONE = {
-  name: "", city: "Mumbai", pincode: "", status: "active",
-  coverageKm: "", description: "", polygon: "No area selected",
+  name: "", country: "India", unit: "kilometer", status: "active",
+  polygon: "No area selected",
   coordinates: []
 };
 
@@ -45,7 +45,7 @@ const Zones = () => {
   const [zones, setZones] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
-  const [cityFilter, setCityFilter] = useState("all");
+  const [countryFilter, setCountryFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
@@ -70,7 +70,7 @@ const Zones = () => {
     libraries,
   });
 
-  const cities = useMemo(() => [...new Set(zones.map((z) => z.city).filter(Boolean))], [zones]);
+  const countries = useMemo(() => [...new Set(zones.map((z) => z.country).filter(Boolean))], [zones]);
 
   const fetchZones = useCallback(async () => {
     setLoading(true);
@@ -79,7 +79,7 @@ const Zones = () => {
         page,
         limit: pageSize,
         search: search.trim() || undefined,
-        city: cityFilter !== "all" ? cityFilter : undefined,
+        country: countryFilter !== "all" ? countryFilter : undefined,
         status: statusFilter !== "all" ? statusFilter : undefined,
         sortBy: "name",
         sortOrder: "asc",
@@ -92,7 +92,7 @@ const Zones = () => {
     } finally {
       setLoading(false);
     }
-  }, [page, pageSize, search, cityFilter, statusFilter]);
+  }, [page, pageSize, search, countryFilter, statusFilter]);
 
   useEffect(() => {
     fetchZones();
@@ -102,9 +102,8 @@ const Zones = () => {
 
   const openForm = (row = null) => {
     setEditing(row);
-    setForm(row ? { 
-      ...row, 
-      coverageKm: String(row.coverageKm),
+    setForm(row ? {
+      ...row,
       coordinates: row.coordinates || []
     } : EMPTY_ZONE);
     setErrors({});
@@ -120,8 +119,7 @@ const Zones = () => {
   const validate = () => {
     const e = {};
     if (!form.name.trim()) e.name = "Zone name required";
-    if (!form.pincode.trim()) e.pincode = "Pincode required";
-    if (!form.coverageKm || Number(form.coverageKm) <= 0) e.coverageKm = "Coverage required";
+    if (!form.country.trim()) e.country = "Country required";
     if (!form.coordinates || form.coordinates.length < 3) e.coordinates = "Draw a polygon with at least 3 points";
     setErrors(e);
     return Object.keys(e).length === 0;
@@ -133,7 +131,6 @@ const Zones = () => {
     try {
       const payload = {
         ...form,
-        coverageKm: Number(form.coverageKm),
         polygon: `${form.coordinates.length}-point polygon`,
       };
       if (editing?.id) {
@@ -178,8 +175,7 @@ const Zones = () => {
 
   const columns = [
     { key: "name", header: "Zone", cell: (row) => <span className="font-semibold">{row.name}</span> },
-    { key: "city", header: "City" },
-    { key: "pincode", header: "Pincode" },
+    { key: "country", header: "Country" },
     { key: "orders", header: "Orders", cell: (row) => String(row.orders) },
     { key: "drivers", header: "Drivers", cell: (row) => String(row.drivers) },
     { key: "vehicles", header: "Vehicles", cell: (row) => String(row.vehicles) },
@@ -224,9 +220,9 @@ const Zones = () => {
                       <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                       <Input className="pl-9" placeholder="Search zones..." value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} />
                     </div>
-                    <select className={selectCls + " w-auto"} value={cityFilter} onChange={(e) => { setCityFilter(e.target.value); setPage(1); }}>
-                      <option value="all">All Cities</option>
-                      {cities.map((c) => <option key={c} value={c}>{c}</option>)}
+                    <select className={selectCls + " w-auto"} value={countryFilter} onChange={(e) => { setCountryFilter(e.target.value); setPage(1); }}>
+                      <option value="all">All Countries</option>
+                      {countries.map((c) => <option key={c} value={c}>{c}</option>)}
                     </select>
                     <select className={selectCls + " w-auto"} value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}>
                       <option value="all">All Status</option>
@@ -274,7 +270,7 @@ const Zones = () => {
           {pageItems[0] && (
             <div className="mt-4 rounded-lg border p-3 text-sm">
               <p className="font-semibold">{pageItems[0].name}</p>
-              <p className="text-muted-foreground text-xs mt-1">{pageItems[0].polygon} · {pageItems[0].coverageKm} km coverage</p>
+              <p className="text-muted-foreground text-xs mt-1">{pageItems[0].polygon}</p>
             </div>
           )}
         </SectionCard>
@@ -293,20 +289,28 @@ const Zones = () => {
               <FormLayout>
                 <FormSection>
                   <FormRow>
-                    <FormField label="Zone Name" required error={errors.name}><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. South Mumbai" /></FormField>
-                    <FormField label="City"><Input value={form.city} onChange={(e) => setForm({ ...form, city: e.target.value })} placeholder="e.g. Mumbai" /></FormField>
+                    <FormField label="Create Zone name" required error={errors.name}><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Enter zone name" /></FormField>
+                    <FormField label="Country" required error={errors.country}>
+                      <select className={selectCls} value={form.country} onChange={(e) => setForm({ ...form, country: e.target.value })}>
+                        <option value="India">India</option>
+                        {/* Add more countries if needed */}
+                      </select>
+                    </FormField>
                   </FormRow>
                   <FormRow>
-                    <FormField label="Pincode" required error={errors.pincode}><Input value={form.pincode} onChange={(e) => setForm({ ...form, pincode: e.target.value })} placeholder="e.g. 400001" /></FormField>
-                    <FormField label="Coverage (km)" required error={errors.coverageKm}><Input type="number" value={form.coverageKm} onChange={(e) => setForm({ ...form, coverageKm: e.target.value })} placeholder="e.g. 15" /></FormField>
-                  </FormRow>
-                  <FormField label="Description"><textarea className={selectCls + " h-20 py-2"} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Brief description of the zone..."/></FormField>
+                    <FormField label="Select Unit">
+                      <select className={selectCls} value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })}>
+                        <option value="kilometer">Kilometers (km)</option>
+                        <option value="mile">Miles (mi)</option>
+                      </select>
+                    </FormField>
                   <FormField label="Status">
                     <select className={selectCls} value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
                       <option value="active">Active</option>
                       <option value="inactive">Inactive</option>
                     </select>
                   </FormField>
+                  </FormRow>
                   {errors.coordinates && (
                     <p className="text-red-500 text-sm mt-2">{errors.coordinates}</p>
                   )}
@@ -405,14 +409,10 @@ const Zones = () => {
                 </div>
                 
                 <FormSection title="Zone Info">
-                  <FormField label="Description">
-                    <p className="text-sm text-gray-700 bg-gray-50/50 p-3 rounded-lg border">{detail.description || "No description provided."}</p>
-                  </FormField>
                   <FormRow>
-                    <FormField label="City"><div className="text-sm font-medium">{detail.city}</div></FormField>
-                    <FormField label="Pincode"><div className="text-sm font-medium">{detail.pincode}</div></FormField>
+                    <FormField label="Country"><div className="text-sm font-medium">{detail.country}</div></FormField>
+                    <FormField label="Unit"><div className="text-sm font-medium capitalize">{detail.unit}</div></FormField>
                   </FormRow>
-                  <FormField label="Coverage Area"><div className="text-sm font-medium flex items-center gap-2"><MapPin size={14} className="text-muted-foreground"/> {detail.coverageKm} km</div></FormField>
                 </FormSection>
 
                 <FormSection title="Metrics">

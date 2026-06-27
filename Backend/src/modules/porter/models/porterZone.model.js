@@ -17,33 +17,23 @@ const porterZoneSchema = new mongoose.Schema(
             trim: true,
             index: true,
         },
-        city: {
+        country: {
             type: String,
-            required: true,
+            default: 'India',
             trim: true,
             index: true,
         },
-        pincode: {
+        unit: {
             type: String,
-            required: true,
-            trim: true,
-            index: true,
+            default: 'kilometer',
+            enum: ['kilometer', 'mile'],
         },
+
         status: {
             type: String,
             enum: ['active', 'inactive'],
             default: 'active',
             index: true,
-        },
-        coverageKm: {
-            type: Number,
-            default: 0,
-            min: 0,
-        },
-        description: {
-            type: String,
-            default: '',
-            trim: true,
         },
         polygon: {
             type: String,
@@ -89,7 +79,7 @@ const porterZoneSchema = new mongoose.Schema(
     },
 );
 
-porterZoneSchema.index({ status: 1, city: 1 });
+porterZoneSchema.index({ status: 1, country: 1 });
 porterZoneSchema.index({ status: 1, displayOrder: 1 });
 porterZoneSchema.index({ isDeleted: 1, status: 1, createdAt: -1 });
 

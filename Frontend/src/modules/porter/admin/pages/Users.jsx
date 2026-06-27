@@ -1,7 +1,7 @@
 import React, { useMemo, useState, useEffect, useCallback } from "react";
 import {
   Search, Users as UsersIcon, Eye, Pencil, Trash2, Star, Phone, Mail, MapPin,
-  Wallet, Package, CheckCircle2, XCircle, ArrowUpDown, Loader2,
+  Wallet, Package, CheckCircle2, XCircle, ArrowUpDown, Loader2, User,
 } from "lucide-react";
 import {
   PageHeader, SectionCard, StatCard, AdminTable, FilterBar,
@@ -121,7 +121,11 @@ const Users = () => {
       key: "name", header: sortableHeader("Customer", "name"),
       cell: (row) => (
         <div className="flex items-center gap-3">
-          <img src={row.avatar} alt={row.name} className="h-10 w-10 rounded-full border bg-muted object-cover" />
+          {row.avatar ? (
+            <img src={row.avatar} alt={row.name} className="h-10 w-10 rounded-full border bg-muted object-cover" />
+          ) : (
+            <div className="h-10 w-10 rounded-full border bg-muted flex items-center justify-center text-muted-foreground"><User size={20} /></div>
+          )}
           <div>
             <p className="font-semibold text-sm">{row.name}</p>
           </div>
@@ -193,7 +197,11 @@ const Users = () => {
             {selected && (
               <FormLayout>
                 <div className="flex items-center gap-4 mb-2">
-                  <img src={selected.avatar} alt={selected.name} className="h-16 w-16 rounded-full border bg-muted" />
+                  {selected.avatar ? (
+                    <img src={selected.avatar} alt={selected.name} className="h-16 w-16 rounded-full border bg-muted object-cover" />
+                  ) : (
+                    <div className="h-16 w-16 rounded-full border bg-muted flex items-center justify-center text-muted-foreground"><User size={32} /></div>
+                  )}
                   <div>
                     <h3 className="font-bold text-lg">{selected.name}</h3>
                     <div className="flex gap-2 mt-1">

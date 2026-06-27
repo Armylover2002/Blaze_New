@@ -15,7 +15,7 @@ import { applySoftDelete } from '../utils/softDelete.util.js';
 const baseFilter = { isDeleted: { $ne: true } };
 
 const buildSort = (sortBy, sortOrder) => {
-    const allowed = ['name', 'city', 'pincode', 'status', 'coverageKm', 'displayOrder', 'createdAt'];
+    const allowed = ['name', 'country', 'status', 'displayOrder', 'createdAt'];
     const key = allowed.includes(sortBy) ? sortBy : 'displayOrder';
     return { [key]: sortOrder };
 };
@@ -26,14 +26,13 @@ export async function listZones(query = {}) {
     const filter = { ...baseFilter };
 
     if (parsed.status) filter.status = parsed.status;
-    if (parsed.city) filter.city = parsed.city;
+    if (parsed.country) filter.country = parsed.country;
 
     if (parsed.search) {
         const term = escapeRegex(parsed.search);
         filter.$or = [
             { name: { $regex: term, $options: 'i' } },
-            { city: { $regex: term, $options: 'i' } },
-            { pincode: { $regex: term, $options: 'i' } },
+            { country: { $regex: term, $options: 'i' } },
         ];
     }
 
@@ -69,11 +68,11 @@ export async function createZone(body, reqUser) {
     const existing = await PorterZone.findOne({
         ...baseFilter,
         name: { $regex: new RegExp(`^${escapeRegex(payload.name)}$`, 'i') },
-        city: payload.city,
+        country: payload.country,
     }).select('_id').lean();
 
     if (existing) {
-        throw new ValidationError('Zone with this name already exists in the city');
+        throw new ValidationError('Zone with this name already exists in the country');
     }
 
     const doc = await PorterZone.create({
@@ -130,7 +129,7 @@ export async function deleteZone(id, reqUser) {
 export async function listZoneDropdown() {
     const docs = await PorterZone.find({ ...baseFilter, status: 'active' })
         .sort({ displayOrder: 1, name: 1 })
-        .select('name city pincode status')
+        .select('name country unit status')
         .lean();
 
     return docs.map((doc) => mapZone(doc));
