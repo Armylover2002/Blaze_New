@@ -1,6 +1,6 @@
 import React from "react";
 import { useNavigate } from "react-router-dom";
-import { MapPin, Package, Calendar, Tag, CreditCard, ChevronRight } from "lucide-react";
+import { MapPin, Package, Calendar, Tag, CreditCard, ChevronRight, Navigation, FileText, Scale } from "lucide-react";
 import Screen from "../components/Screen";
 import { PrimaryButton, StickyBar, FareRow, SectionLabel, inr } from "../components/ui";
 import { useBooking } from "../context/BookingContext";
@@ -34,7 +34,7 @@ export default function FareEstimate() {
   const payable = total + platformFee;
 
   return (
-    <Screen title="Confirm booking" subtitle="Review delivery details & fare">
+    <Screen title="Review booking" subtitle="Check all details before payment">
       <div className="mb-4 rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
         <div className="mb-3 flex items-start gap-2">
           <span className="mt-1 h-3 w-3 shrink-0 rounded-full bg-[#2e7d32]" />
@@ -46,7 +46,7 @@ export default function FareEstimate() {
         </div>
         <div className="mb-3 ml-1.5 h-4 border-l-2 border-dashed border-gray-200" />
         <div className="flex items-start gap-2">
-          <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-[#FF0000]" />
+          <Navigation className="mt-0.5 h-4 w-4 shrink-0 text-[#FF0000]" />
           <div>
             <p className="text-[11px] font-bold uppercase text-gray-400">Delivery</p>
             <p className="text-[13px] font-bold text-gray-900">{delivery?.title}</p>
@@ -55,43 +55,55 @@ export default function FareEstimate() {
         </div>
       </div>
 
-      <SectionLabel>Parcel summary</SectionLabel>
-      <div className="mb-4 rounded-2xl border border-gray-100 bg-white p-4">
-        <div className="flex items-center gap-2 text-[13px]">
-          <Package className="h-4 w-4 text-[#FF0000]" />
-          <span className="font-bold text-gray-900">Parcel</span>
-          <span className="text-gray-400">·</span>
-          <span className="text-gray-600">{parcel.weightKg} kg × {parcel.quantity}</span>
+      <SectionLabel>Parcel Details</SectionLabel>
+      <div className="mb-4 rounded-2xl border border-gray-100 bg-white p-4 space-y-3">
+        <div className="flex items-center gap-3">
+          <FileText className="h-4 w-4 text-[#FF0000]" />
+          <div>
+            <p className="text-[13px] font-bold text-gray-900">{parcel.parcelName || "N/A"}</p>
+            {parcel.parcelDescription && <p className="text-[12px] text-gray-500">{parcel.parcelDescription}</p>}
+          </div>
         </div>
-        <p className="mt-1 text-[12px] text-gray-500">
-          {vehicle?.name} · {distanceKm} km · ~{durationMin} min
-        </p>
+        <div className="flex items-center gap-3">
+          <Scale className="h-4 w-4 text-[#FF0000]" />
+          <p className="text-[13px] font-medium text-gray-900">{parcel.weightKg * parcel.quantity} kg (Total Weight)</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="text-lg">{vehicle?.icon}</span>
+          <p className="text-[13px] font-medium text-gray-900">{vehicle?.name}</p>
+        </div>
         {parcel.receiverName && (
-          <p className="mt-2 text-[12px] text-gray-600">
-            Receiver: {parcel.receiverName} · {parcel.receiverPhone}
-          </p>
+          <div className="border-t border-gray-100 pt-2 mt-2">
+            <p className="text-[12px] text-gray-600">
+              Receiver: <span className="font-bold text-gray-900">{parcel.receiverName}</span> · {parcel.receiverPhone}
+            </p>
+          </div>
         )}
-      </div>
-
-      <SectionLabel>Fare breakdown</SectionLabel>
-      <div className="mb-4 rounded-2xl border border-gray-100 bg-white p-4">
-        <FareRow label="Base delivery fare" value={inr(baseFare)} />
-        <FareRow label="Handling & platform fee" value={inr(platformFee)} />
-        {discount > 0 && <FareRow label="Promo discount" value={`−${inr(discount)}`} accent />}
-        <div className="my-2 border-t border-gray-100" />
-        <FareRow label="Total payable" value={inr(payable)} strong />
       </div>
 
       <div className="mb-4 space-y-2">
         <button
           type="button"
+          onClick={() => navigate(getPorterSchedulePath())}
+          className="flex w-full items-center justify-between rounded-2xl border border-gray-100 bg-white p-3 shadow-sm"
+        >
+          <div className="flex items-center gap-2">
+            <Calendar className="h-4 w-4 text-[#FF0000]" />
+            <span className="text-[14px] font-bold text-gray-900">
+              {parcel.isScheduled && scheduledAt ? `Scheduled: ${new Date(scheduledAt).toLocaleString()}` : "Schedule Delivery"}
+            </span>
+          </div>
+          <ChevronRight className="h-4 w-4 text-gray-400" />
+        </button>
+        <button
+          type="button"
           onClick={() => navigate(getPorterPromoPath())}
-          className="flex w-full items-center justify-between rounded-2xl border border-gray-100 bg-white p-3"
+          className="flex w-full items-center justify-between rounded-2xl border border-gray-100 bg-white p-3 shadow-sm"
         >
           <div className="flex items-center gap-2">
             <Tag className="h-4 w-4 text-[#FF0000]" />
             <span className="text-[14px] font-bold text-gray-900">
-              {coupon ? coupon.code : "Apply promo code"}
+              {coupon ? coupon.code : "Apply Promo Code"}
             </span>
           </div>
           <ChevronRight className="h-4 w-4 text-gray-400" />
@@ -99,32 +111,28 @@ export default function FareEstimate() {
         <button
           type="button"
           onClick={() => navigate(getPorterPaymentPath())}
-          className="flex w-full items-center justify-between rounded-2xl border border-gray-100 bg-white p-3"
+          className="flex w-full items-center justify-between rounded-2xl border border-gray-100 bg-white p-3 shadow-sm"
         >
           <div className="flex items-center gap-2">
             <CreditCard className="h-4 w-4 text-[#FF0000]" />
-            <span className="text-[14px] font-bold text-gray-900">{payment?.label || "Payment method"}</span>
-          </div>
-          <ChevronRight className="h-4 w-4 text-gray-400" />
-        </button>
-        <button
-          type="button"
-          onClick={() => navigate(getPorterSchedulePath())}
-          className="flex w-full items-center justify-between rounded-2xl border border-gray-100 bg-white p-3"
-        >
-          <div className="flex items-center gap-2">
-            <Calendar className="h-4 w-4 text-[#FF0000]" />
-            <span className="text-[14px] font-bold text-gray-900">
-              {scheduledAt ? new Date(scheduledAt).toLocaleString() : "Schedule pickup (optional)"}
-            </span>
+            <span className="text-[14px] font-bold text-gray-900">{payment?.label || "Payment Method"}</span>
           </div>
           <ChevronRight className="h-4 w-4 text-gray-400" />
         </button>
       </div>
 
+      <SectionLabel>Estimated Fare</SectionLabel>
+      <div className="mb-4 rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
+        <FareRow label="Base delivery fare" value={inr(baseFare)} />
+        <FareRow label="Handling & platform fee" value={inr(platformFee)} />
+        {discount > 0 && <FareRow label="Promo discount" value={`−${inr(discount)}`} accent />}
+        <div className="my-2 border-t border-gray-100" />
+        <FareRow label="Total Payable" value={inr(payable)} strong />
+      </div>
+
       <StickyBar>
         <PrimaryButton onClick={() => navigate(getPorterFindingPartnerPath())}>
-          Confirm & find delivery partner
+          Book Parcel
         </PrimaryButton>
       </StickyBar>
     </Screen>

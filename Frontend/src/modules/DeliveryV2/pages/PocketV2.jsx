@@ -7,6 +7,7 @@ import {
   Sparkles, Loader2, Gift
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { useDeliveryStore } from '@/modules/DeliveryV2/store/useDeliveryStore';
 import { deliveryAPI } from '@food/api';
 import { toast } from 'sonner';
 import { formatCurrency } from '@food/utils/currency';
@@ -19,6 +20,9 @@ import DepositPopup from '../components/DepositPopup';
  */
 export const PocketV2 = () => {
   const navigate = useNavigate();
+  const getAvailableModules = useDeliveryStore(state => state.getAvailableModules);
+  const availableModules = getAvailableModules();
+  const [activeModuleFilter, setActiveModuleFilter] = useState('all');
   const [loading, setLoading] = useState(true);
   const [walletState, setWalletState] = useState({
     totalBalance: 0,
@@ -50,7 +54,10 @@ export const PocketV2 = () => {
         setLoading(true);
         const [profileRes, earningsRes, walletRes] = await Promise.all([
           deliveryAPI.getProfile(),
-          deliveryAPI.getEarnings({ period: 'week' }),
+          deliveryAPI.getEarnings({ 
+            period: 'week', 
+            ...(activeModuleFilter !== 'all' && { module: activeModuleFilter }) 
+          }),
           deliveryAPI.getWallet()
         ]);
 
@@ -95,7 +102,7 @@ export const PocketV2 = () => {
       }
     };
     fetchData();
-  }, []);
+  }, [activeModuleFilter]);
 
   const handleDepositSuccess = useCallback(() => {
     setShowDepositPopup(false);
@@ -178,6 +185,35 @@ export const PocketV2 = () => {
 
        <div className="px-4 py-6 bg-gray-100">
           
+          {/* 1.5 MODULE FILTERS */}
+          {availableModules && availableModules.length > 0 && (
+            <div className="flex gap-2 overflow-x-auto pb-4 no-scrollbar">
+              <button
+                onClick={() => setActiveModuleFilter('all')}
+                className={`px-4 py-1.5 rounded-full text-xs font-bold uppercase tracking-widest whitespace-nowrap transition-all ${
+                  activeModuleFilter === 'all' 
+                    ? 'bg-black text-white shadow-md' 
+                    : 'bg-white text-gray-500 border border-gray-200'
+                }`}
+              >
+                All
+              </button>
+              {availableModules.map(mod => (
+                <button
+                  key={mod}
+                  onClick={() => setActiveModuleFilter(mod)}
+                  className={`px-4 py-1.5 rounded-full text-xs font-bold uppercase tracking-widest whitespace-nowrap transition-all ${
+                    activeModuleFilter === mod 
+                      ? 'bg-black text-white shadow-md' 
+                      : 'bg-white text-gray-500 border border-gray-200'
+                  }`}
+                >
+                  {mod.replace('_', ' ')}
+                </button>
+              ))}
+            </div>
+          )}
+
           {/* 2. WEEKLY EARNINGS CARD */}
           <div 
             onClick={() => navigate('/food/delivery/pocket/details')}

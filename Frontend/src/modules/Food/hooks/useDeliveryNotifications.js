@@ -5,6 +5,7 @@ import { deliveryAPI } from '@food/api';
 import alertSound from '@food/assets/audio/alert.mp3';
 import originalSound from '@food/assets/audio/original.mp3';
 import { dispatchNotificationInboxRefresh } from '@food/hooks/useNotificationInbox';
+import { useDeliveryStore } from '@/modules/DeliveryV2/store/useDeliveryStore';
 
 const shouldLogDeliverySocket = () => {
   if (typeof window === 'undefined') return import.meta.env.DEV;
@@ -236,6 +237,7 @@ export const useDeliveryNotifications = () => {
   const [isConnected, setIsConnected] = useState(false);
   const [deliveryPartnerId, setDeliveryPartnerId] = useState(null);
   const [forcedOfflineEvent, setForcedOfflineEvent] = useState(null);
+  const activeVehicleId = useDeliveryStore(state => state.activeVehicleId);
   const joinedDeliveryRoomRef = useRef(null);
   const ALERT_LOOP_INTERVAL_MS = 4500;
   const ALERT_LOOP_MAX_MS = 120000;
@@ -493,7 +495,7 @@ export const useDeliveryNotifications = () => {
     socketRef.current.emit('join-delivery', deliveryPartnerId);
     joinedDeliveryRoomRef.current = deliveryPartnerId;
     return true;
-  }, [deliveryPartnerId]);
+  }, [deliveryPartnerId, activeVehicleId]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -795,6 +797,7 @@ export const useDeliveryNotifications = () => {
       tokenPresent: Boolean(token),
       tokenPreview,
       deliveryPartnerId,
+      activeVehicleId,
       socketUrl,
     });
 
@@ -809,7 +812,10 @@ export const useDeliveryNotifications = () => {
       auth: {
         token: token || ""
       },
-      query: token ? { token } : undefined,
+      query: { 
+        ...(token ? { token } : {}),
+        ...(activeVehicleId ? { activeVehicleId } : {})
+      },
     });
 
     debugLog('Socket.IO client created', {
@@ -1095,7 +1101,7 @@ export const useDeliveryNotifications = () => {
         socketRef.current = null;
       }
     };
-  }, [deliveryPartnerId, handleIncomingOrderAlert, joinDeliveryRoomIfPossible, playNotificationSound, recoverDeliveryState, showBackgroundOrderNotification, startAlertLoop, stopAlertLoop]);
+  }, [deliveryPartnerId, activeVehicleId, handleIncomingOrderAlert, joinDeliveryRoomIfPossible, playNotificationSound, recoverDeliveryState, showBackgroundOrderNotification, startAlertLoop, stopAlertLoop]);
 
   useEffect(() => {
     if (!deliveryPartnerId) {

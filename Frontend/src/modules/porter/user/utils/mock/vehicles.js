@@ -4,7 +4,8 @@ export const DELIVERY_VEHICLES = [
     name: "Bike",
     icon: "🏍️",
     tagline: "Documents & small parcels up to 5 km",
-    maxWeightKg: 10,
+    maxWeightKg: 20,
+    minWeightKg: 0,
     baseFare: 40,
     perKm: 8,
     perMin: 1.2,
@@ -16,7 +17,8 @@ export const DELIVERY_VEHICLES = [
     name: "Scooter",
     icon: "🛵",
     tagline: "Quick city deliveries for light goods",
-    maxWeightKg: 15,
+    maxWeightKg: 50,
+    minWeightKg: 0,
     baseFare: 45,
     perKm: 9,
     perMin: 1.3,
@@ -28,7 +30,8 @@ export const DELIVERY_VEHICLES = [
     name: "Auto Rickshaw",
     icon: "🛺",
     tagline: "Best for medium parcels & local routes",
-    maxWeightKg: 50,
+    maxWeightKg: 100,
+    minWeightKg: 0,
     baseFare: 55,
     perKm: 11,
     perMin: 1.5,
@@ -41,6 +44,7 @@ export const DELIVERY_VEHICLES = [
     icon: "🛻",
     tagline: "Furniture, appliances & bulk items",
     maxWeightKg: 500,
+    minWeightKg: 50,
     baseFare: 120,
     perKm: 18,
     perMin: 2.5,
@@ -52,7 +56,8 @@ export const DELIVERY_VEHICLES = [
     name: "Mini Truck",
     icon: "🚚",
     tagline: "Heavy goods & business shipments",
-    maxWeightKg: 750,
+    maxWeightKg: 1500,
+    minWeightKg: 100,
     baseFare: 180,
     perKm: 22,
     perMin: 3,
@@ -64,7 +69,8 @@ export const DELIVERY_VEHICLES = [
     name: "Tempo",
     icon: "🚛",
     tagline: "Large loads & warehouse transfers",
-    maxWeightKg: 1500,
+    maxWeightKg: 2500,
+    minWeightKg: 500,
     baseFare: 250,
     perKm: 28,
     perMin: 3.5,
@@ -76,7 +82,8 @@ export const DELIVERY_VEHICLES = [
     name: "Truck",
     icon: "🚛",
     tagline: "Industrial & commercial freight",
-    maxWeightKg: 3000,
+    maxWeightKg: 9000,
+    minWeightKg: 1500,
     baseFare: 400,
     perKm: 35,
     perMin: 4,
@@ -89,6 +96,7 @@ export const DELIVERY_VEHICLES = [
     icon: "⚡",
     tagline: "Eco-friendly mid-size deliveries",
     maxWeightKg: 300,
+    minWeightKg: 0,
     baseFare: 95,
     perKm: 15,
     perMin: 2,
@@ -108,6 +116,10 @@ export function estimateDeliveryCost(vehicleId, distanceKm = 8.2, durationMin = 
 }
 
 export function recommendVehicle(weightKg = 20) {
+  const eligible = DELIVERY_VEHICLES.filter(v => weightKg >= v.minWeightKg && weightKg <= v.maxWeightKg);
+  if (eligible.length > 0) {
+    return eligible.reduce((prev, curr) => (prev.baseFare < curr.baseFare ? prev : curr));
+  }
   const sorted = [...DELIVERY_VEHICLES].sort((a, b) => a.maxWeightKg - b.maxWeightKg);
   return sorted.find((v) => v.maxWeightKg >= weightKg) || sorted[sorted.length - 1];
 }

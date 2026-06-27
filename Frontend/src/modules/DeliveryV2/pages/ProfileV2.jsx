@@ -12,11 +12,13 @@ import {
   Loader2,
   Briefcase,
   Trash2,
-  AlertTriangle
+  AlertTriangle,
+  Truck
 } from "lucide-react"
 import { deliveryAPI } from "@food/api"
 import { toast } from "sonner"
 import { clearModuleAuth } from "@food/utils/auth"
+import VehicleSwitcherSheet from '@/modules/DeliveryV2/components/modals/VehicleSwitcherSheet'
 
 /**
  * ProfileV2 - 1:1 EXACT Restoration of the Legacy Profile Hub.
@@ -32,6 +34,7 @@ export const ProfileV2 = () => {
   const [logoutSubmitting, setLogoutSubmitting] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
+  const [showVehicleSwitcher, setShowVehicleSwitcher] = useState(false)
 
   // Fetch profile data
   useEffect(() => {
@@ -162,15 +165,25 @@ export const ProfileV2 = () => {
 
       <div className="px-4 py-6">
         {/* Navigation Buttons */}
-        <div className="grid grid-cols-1 gap-3 mb-6">
+        <div className="grid grid-cols-2 gap-3 mb-6">
           <button
             onClick={() => navigate("/food/delivery/history")}
-            className="bg-white rounded-xl p-4 flex flex-col items-center gap-2 border border-transparent active:bg-gray-50 transition-colors"
+            className="bg-white rounded-xl p-4 flex flex-col items-center gap-2 border border-transparent active:bg-gray-50 transition-colors shadow-sm"
           >
-            <div className="rounded-full bg-gray-50 p-3">
-              <Bike className="w-6 h-6 text-gray-700" />
+            <div className="rounded-full bg-blue-50 p-3">
+              <Bike className="w-6 h-6 text-blue-600" />
             </div>
             <span className="text-sm font-bold text-gray-900">Trips history</span>
+          </button>
+
+          <button
+            onClick={() => setShowVehicleSwitcher(true)}
+            className="bg-white rounded-xl p-4 flex flex-col items-center gap-2 border border-transparent active:bg-gray-50 transition-colors shadow-sm"
+          >
+            <div className="rounded-full bg-green-50 p-3">
+              <Truck className="w-6 h-6 text-green-600" />
+            </div>
+            <span className="text-sm font-bold text-gray-900">My Vehicles</span>
           </button>
         </div>
 
@@ -299,6 +312,11 @@ export const ProfileV2 = () => {
           </div>
         </div>
       )}
+
+      <VehicleSwitcherSheet 
+        isOpen={showVehicleSwitcher}
+        onClose={() => setShowVehicleSwitcher(false)}
+      />
     </div>
   )
 }

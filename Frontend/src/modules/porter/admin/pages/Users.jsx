@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect, useCallback } from "react";
 import {
   Search, Users as UsersIcon, Eye, Pencil, Trash2, Star, Phone, Mail, MapPin,
   Wallet, Package, CheckCircle2, XCircle, ArrowUpDown, Loader2,
@@ -10,11 +10,14 @@ import {
 import Button from "@/shared/components/ui/Button";
 import Input from "@/shared/components/ui/Input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { MOCK_USERS } from "../utils/mock/users";
-import { filterBySearch, sortItems, paginateItems, formatCurrency, formatDateTime } from "../utils/porterTableHelpers";
+import porterAdminApi from "../services/adminApi";
+import { formatCurrency, formatDateTime } from "../utils/porterTableHelpers";
+
+import { toast } from "sonner";
 
 const Users = () => {
-  const [users, setUsers] = useState(MOCK_USERS);
+  const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [cityFilter, setCityFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -23,6 +26,8 @@ const Users = () => {
   const [sortDir, setSortDir] = useState("asc");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
   const [detailOpen, setDetailOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
@@ -31,24 +36,35 @@ const Users = () => {
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
 
-  const cities = useMemo(() => [...new Set(users.map((u) => u.city))], [users]);
+  const cities = useMemo(() => [...new Set(users.map((u) => u.city).filter(Boolean))], [users]);
 
-  const filtered = useMemo(() => {
-    let rows = filterBySearch(users, search, ["id", "name", "email", "phone", "city", "zone"]);
-    if (cityFilter !== "all") rows = rows.filter((r) => r.city === cityFilter);
-    if (statusFilter !== "all") rows = rows.filter((r) => r.status === statusFilter);
-    if (verifyFilter !== "all") rows = rows.filter((r) => r.verification === verifyFilter);
-    return sortItems(rows, sortKey, sortDir, {
-      totalOrders: (r) => r.totalOrders,
-      walletBalance: (r) => r.walletBalance,
-      rating: (r) => Number(r.rating),
-    });
-  }, [users, search, cityFilter, statusFilter, verifyFilter, sortKey, sortDir]);
+  const fetchUsers = useCallback(async () => {
+    setLoading(true);
+    try {
+      const result = await porterAdminApi.getUsers({
+        page,
+        limit: pageSize,
+        search: search.trim() || undefined,
+        status: statusFilter !== "all" ? statusFilter : undefined,
+        verification: verifyFilter !== "all" ? verifyFilter : undefined,
+        sortBy: sortKey,
+        sortOrder: sortDir,
+      });
+      setUsers(result.records || []);
+      setTotal(result.total || 0);
+      setTotalPages(result.pages || 1);
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to load users");
+    } finally {
+      setLoading(false);
+    }
+  }, [page, pageSize, search, statusFilter, verifyFilter, sortKey, sortDir]);
 
-  const { items: pageItems, total, totalPages } = useMemo(
-    () => paginateItems(filtered, page, pageSize),
-    [filtered, page, pageSize]
-  );
+  useEffect(() => {
+    fetchUsers();
+  }, [fetchUsers]);
+
+  const pageItems = users;
 
   const toggleSort = (key) => {
     if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -70,16 +86,28 @@ const Users = () => {
   const handleSave = async () => {
     if (!validate()) return;
     setSaving(true);
-    await new Promise((r) => setTimeout(r, 400));
-    setUsers((prev) => prev.map((u) => (u.id === selected.id ? { ...u, ...form } : u)));
-    setSaving(false);
-    setEditOpen(false);
+    try {
+      await porterAdminApi.updateUser(selected.id, form);
+      toast.success("User updated successfully");
+      setEditOpen(false);
+      fetchUsers();
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to update user");
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const handleDelete = () => {
-    if (!deleteTarget) return;
-    setUsers((prev) => prev.filter((u) => u.id !== deleteTarget.id));
-    setDeleteTarget(null);
+  const handleDelete = async () => {
+    if (!deleteTarget?.id) return;
+    try {
+      await porterAdminApi.deleteUser(deleteTarget.id);
+      setDeleteTarget(null);
+      toast.success("User deleted");
+      fetchUsers();
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to delete user");
+    }
   };
 
   const sortableHeader = (label, key) => (
@@ -96,16 +124,13 @@ const Users = () => {
           <img src={row.avatar} alt={row.name} className="h-10 w-10 rounded-full border bg-muted object-cover" />
           <div>
             <p className="font-semibold text-sm">{row.name}</p>
-            <p className="text-xs text-muted-foreground">{row.id}</p>
           </div>
         </div>
       ),
     },
     { key: "phone", header: "Phone", cell: (row) => <span className="text-sm">{row.phone}</span> },
-    { key: "city", header: "City" },
     { key: "totalOrders", header: sortableHeader("Orders", "totalOrders"), cell: (row) => String(row.totalOrders) },
     { key: "walletBalance", header: sortableHeader("Wallet", "walletBalance"), cell: (row) => formatCurrency(row.walletBalance) },
-    { key: "rating", header: sortableHeader("Rating", "rating"), cell: (row) => <span className="text-amber-600 font-medium">★ {row.rating}</span> },
     { key: "verification", header: "Verified", cell: (row) => <StatusBadge status={row.verification === "verified" ? "success" : "warning"} label={row.verification} /> },
     { key: "status", header: "Status", cell: (row) => <StatusBadge status={row.status} /> },
     {
@@ -126,11 +151,10 @@ const Users = () => {
     <div className="blaze-theme-scope space-y-6 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 pb-24">
       <PageHeader title="Customers" description="Manage logistics customers, activity and account status" />
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
         <StatCard title="Total Customers" value={String(users.length)} icon={<UsersIcon size={18} />} />
         <StatCard title="Active" value={String(users.filter((u) => u.status === "active").length)} />
         <StatCard title="Verified" value={String(users.filter((u) => u.verification === "verified").length)} />
-        <StatCard title="Avg Rating" value={(users.reduce((a, u) => a + Number(u.rating), 0) / users.length).toFixed(1)} icon={<Star size={18} />} />
       </div>
 
       <SectionCard flush>
@@ -142,10 +166,6 @@ const Users = () => {
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                   <Input className="pl-9" placeholder="Search customers..." value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} />
                 </div>
-                <select className={selectCls} value={cityFilter} onChange={(e) => { setCityFilter(e.target.value); setPage(1); }}>
-                  <option value="all">All Cities</option>
-                  {cities.map((c) => <option key={c} value={c}>{c}</option>)}
-                </select>
                 <select className={selectCls} value={verifyFilter} onChange={(e) => { setVerifyFilter(e.target.value); setPage(1); }}>
                   <option value="all">All Verification</option>
                   <option value="verified">Verified</option>
@@ -159,7 +179,7 @@ const Users = () => {
               </div>
             }
           />
-          <AdminTable columns={columns} data={pageItems} getRowId={(r) => r.id}
+          <AdminTable columns={columns} data={pageItems} getRowId={(r) => r.id} loading={loading}
             pagination={{ page, totalPages, total, pageSize, onPageChange: setPage, onPageSizeChange: (s) => { setPageSize(s); setPage(1); } }}
           />
         </div>
@@ -176,7 +196,6 @@ const Users = () => {
                   <img src={selected.avatar} alt={selected.name} className="h-16 w-16 rounded-full border bg-muted" />
                   <div>
                     <h3 className="font-bold text-lg">{selected.name}</h3>
-                    <p className="text-sm text-muted-foreground">{selected.id}</p>
                     <div className="flex gap-2 mt-1">
                       <StatusBadge status={selected.status} />
                       <StatusBadge status={selected.verification === "verified" ? "success" : "warning"} label={selected.verification} />
@@ -191,7 +210,6 @@ const Users = () => {
                   </FormRow>
                   <FormField label="Address"><div className="text-sm font-medium flex items-center gap-2"><MapPin size={14} className="text-muted-foreground"/> {selected.address}</div></FormField>
                   <FormRow>
-                    <FormField label="Rating"><div className="text-sm font-medium flex items-center gap-2 text-amber-600"><Star size={14}/> {selected.rating} rating</div></FormField>
                     <FormField label="Wallet"><div className="text-sm font-medium flex items-center gap-2 text-emerald-600"><Wallet size={14}/> {formatCurrency(selected.walletBalance)}</div></FormField>
                   </FormRow>
                 </FormSection>

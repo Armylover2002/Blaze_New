@@ -6,6 +6,7 @@ import { toast } from "sonner"
 import { initRazorpayPayment } from "@food/utils/razorpay"
 import { openCamera, openGallery } from "@food/utils/imageUploadUtils"
 import useDeliveryBackNavigation from "../../hooks/useDeliveryBackNavigation"
+import { usePorterVehicles } from "../../../porter/admin/utils/vehicleStore"
 
 const debugLog = (...args) => { }
 const debugWarn = (...args) => { }
@@ -260,11 +261,6 @@ const getFriendlyRegistrationError = (error) => {
 const buildFormData = async (details, documents) => {
   const formData = new FormData()
 
-  const vehicleImageFile = await getFileFromDB("vehicleImage")
-  if (vehicleImageFile instanceof File || vehicleImageFile instanceof Blob) {
-    formData.append("vehicleImage", vehicleImageFile)
-  }
-
   formData.append("name", details.name || "")
   formData.append("phone", String(details.phone || "").replace(/\D/g, "").slice(0, 15))
   if (details.email) formData.append("email", String(details.email).trim())
@@ -273,9 +269,12 @@ const buildFormData = async (details, documents) => {
   if (details.address) formData.append("address", details.address)
   if (details.city) formData.append("city", details.city)
   if (details.state) formData.append("state", details.state)
-  if (details.vehicleType) formData.append("vehicleType", details.vehicleType)
-  if (details.vehicleName) formData.append("vehicleName", details.vehicleName)
-  if (details.vehicleNumber) formData.append("vehicleNumber", details.vehicleNumber)
+  
+  if (details.vehicles && Array.isArray(details.vehicles)) {
+    // Send array as JSON string for future backend processing
+    formData.append("vehicles", JSON.stringify(details.vehicles))
+  }
+
   if (details.drivingLicenseNumber) {
     formData.append("drivingLicenseNumber", details.drivingLicenseNumber)
     formData.append("documents[drivingLicense][number]", details.drivingLicenseNumber)
@@ -283,10 +282,11 @@ const buildFormData = async (details, documents) => {
   if (details.panNumber) formData.append("panNumber", details.panNumber)
   if (details.aadharNumber) formData.append("aadharNumber", details.aadharNumber)
 
-  if (documents.profilePhoto instanceof File) formData.append("profilePhoto", documents.profilePhoto)
-  if (documents.aadharPhoto instanceof File) formData.append("aadharPhoto", documents.aadharPhoto)
-  if (documents.panPhoto instanceof File) formData.append("panPhoto", documents.panPhoto)
-  if (documents.drivingLicensePhoto instanceof File) formData.append("drivingLicensePhoto", documents.drivingLicensePhoto)
+  Object.keys(documents).forEach(key => {
+    if (documents[key] instanceof File) {
+      formData.append(key, documents[key])
+    }
+  })
 
   let fcmToken = null
   let platform = "web"
@@ -365,6 +365,7 @@ const submitRegistration = async ({ isCompleteProfile, formData, navigate }) => 
 export default function SignupStep2() {
   const navigate = useNavigate()
   const goBack = useDeliveryBackNavigation()
+  const [porterVehicles] = usePorterVehicles()
   const signupDetailsRaw = sessionStorage.getItem("deliverySignupDetails")
 
   let signupDetails = {}
@@ -374,7 +375,11 @@ export default function SignupStep2() {
     }
   } catch (e) { }
 
-  const isDlOptional = signupDetails.vehicleType === "bicycle" || signupDetails.vehicleType === "electric_bike"
+  const isDlOptional = !(signupDetails.vehicles || []).some(v => {
+    const master = porterVehicles.find(p => p.id === v.vehicleId);
+    const cat = master?.category?.toLowerCase() || "";
+    return cat !== "bicycle" && cat !== "electric bike" && cat !== "electric_bike";
+  });
 
   const fileInputRefs = useRef({
     profilePhoto: null,
@@ -537,18 +542,32 @@ export default function SignupStep2() {
     removeFileFromDB(docType)
   }
 
+  const isFormValid = () => {
+    if (!hasDocumentValue(documents.profilePhoto, uploadedDocs.profilePhoto)) return false;
+    if (!hasDocumentValue(documents.aadharPhoto, uploadedDocs.aadharPhoto)) return false;
+    if (!hasDocumentValue(documents.panPhoto, uploadedDocs.panPhoto)) return false;
+    if (!isDlOptional && !hasDocumentValue(documents.drivingLicensePhoto, uploadedDocs.drivingLicensePhoto)) return false;
+
+    let hasAllVehicleDocs = true;
+    (signupDetails.vehicles || []).forEach(v => {
+      const master = porterVehicles.find(p => p.id === v.vehicleId);
+      if (!master) return;
+      const isBicycle = master.category?.toLowerCase() === "bicycle";
+      const requiresDocs = master.registrationRequired !== undefined ? master.registrationRequired : !isBicycle;
+
+      if (!hasDocumentValue(documents[`vehiclePhoto_${v.id}`], uploadedDocs[`vehiclePhoto_${v.id}`])) hasAllVehicleDocs = false;
+      if (requiresDocs) {
+        if (!hasDocumentValue(documents[`rc_${v.id}`], uploadedDocs[`rc_${v.id}`])) hasAllVehicleDocs = false;
+        if (!hasDocumentValue(documents[`insurance_${v.id}`], uploadedDocs[`insurance_${v.id}`])) hasAllVehicleDocs = false;
+      }
+    });
+    return hasAllVehicleDocs;
+  }
+
   const handleSubmit = async (e) => {
     e.preventDefault()
 
-    const hasProfilePhoto = hasDocumentValue(documents.profilePhoto, uploadedDocs.profilePhoto)
-    const hasAadharPhoto = hasDocumentValue(documents.aadharPhoto, uploadedDocs.aadharPhoto)
-    const hasPanPhoto = hasDocumentValue(documents.panPhoto, uploadedDocs.panPhoto)
-    const hasDrivingLicensePhoto = hasDocumentValue(
-      documents.drivingLicensePhoto,
-      uploadedDocs.drivingLicensePhoto
-    )
-
-    if (!hasProfilePhoto || !hasAadharPhoto || !hasPanPhoto || (!isDlOptional && !hasDrivingLicensePhoto)) {
+    if (!isFormValid()) {
       toast.error("Please upload all required documents")
       return
     }
@@ -789,6 +808,9 @@ export default function SignupStep2() {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="mb-4">
+             <h3 className="text-lg font-bold text-gray-900 mb-4">Global Documents</h3>
+          </div>
           <DocumentUpload docType="profilePhoto" label="Profile Photo" required={true} />
           <DocumentUpload docType="aadharPhoto" label="Aadhar Card Photo" required={true} />
           <DocumentUpload docType="panPhoto" label="PAN Card Photo" required={true} />
@@ -796,8 +818,45 @@ export default function SignupStep2() {
             <DocumentUpload docType="drivingLicensePhoto" label="Driving License Photo" required={true} />
           )}
 
+          {signupDetails.vehicles && signupDetails.vehicles.length > 0 && (
+             <div className="pt-6 mt-6 border-t border-gray-200">
+                <h3 className="text-lg font-bold text-gray-900 mb-2">Vehicle Documents</h3>
+                <p className="text-sm text-gray-600 mb-4">Please upload documents for each of your selected vehicles.</p>
+                <div className="space-y-6">
+                  {signupDetails.vehicles.map(v => {
+                    const master = porterVehicles.find(p => p.id === v.vehicleId);
+                    if (!master) return null;
+                    const isBicycle = master.category?.toLowerCase() === "bicycle";
+                    const requiresDocs = master.registrationRequired !== undefined ? master.registrationRequired : !isBicycle;
+                    
+                    return (
+                      <div key={v.id} className="bg-gray-50 rounded-xl p-4 border border-gray-200 space-y-4">
+                        <div className="flex items-center gap-3 mb-2">
+                          <div className="w-10 h-10 bg-white rounded-lg p-1.5 border border-gray-200 shadow-sm">
+                            {master.image ? <img src={master.image} alt={master.name} className="w-full h-full object-contain" /> : <div className="w-full h-full bg-gray-200 rounded"></div>}
+                          </div>
+                          <div>
+                            <h4 className="font-bold text-gray-900 text-sm">{master.name}</h4>
+                            <p className="text-xs text-gray-500">{v.registrationNumber || "No Reg No"}</p>
+                          </div>
+                        </div>
+                        
+                        <DocumentUpload docType={`vehiclePhoto_${v.id}`} label={`${master.name} Photo`} required={true} />
+                        {requiresDocs && (
+                          <>
+                            <DocumentUpload docType={`rc_${v.id}`} label="RC (Registration Certificate)" required={true} />
+                            <DocumentUpload docType={`insurance_${v.id}`} label="Vehicle Insurance" required={true} />
+                          </>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+             </div>
+          )}
+
           {feeConfig && feeConfig.isActive && feeConfig.price > 0 && (
-            <div className="bg-red-50 border border-red-200 rounded-xl p-4 space-y-1">
+            <div className="bg-red-50 border border-red-200 rounded-xl p-4 space-y-1 mt-6">
               <h3 className="text-sm font-bold text-red-800">Required Onboarding Fee</h3>
               <p className="text-xs text-red-700">
                 An onboarding fee of <span className="font-bold">₹{feeConfig.price}</span> is required to register as a delivery partner. You will pay secure online on the next step.
@@ -807,18 +866,8 @@ export default function SignupStep2() {
 
           <button
             type="submit"
-            disabled={
-              isSubmitting ||
-              !hasDocumentValue(documents.profilePhoto, uploadedDocs.profilePhoto) ||
-              !hasDocumentValue(documents.aadharPhoto, uploadedDocs.aadharPhoto) ||
-              !hasDocumentValue(documents.panPhoto, uploadedDocs.panPhoto) ||
-              (!isDlOptional && !hasDocumentValue(documents.drivingLicensePhoto, uploadedDocs.drivingLicensePhoto))
-            }
-            className={`w-full py-4 rounded-lg font-bold text-white text-base transition-colors mt-6 ${isSubmitting ||
-              !hasDocumentValue(documents.profilePhoto, uploadedDocs.profilePhoto) ||
-              !hasDocumentValue(documents.aadharPhoto, uploadedDocs.aadharPhoto) ||
-              !hasDocumentValue(documents.panPhoto, uploadedDocs.panPhoto) ||
-              (!isDlOptional && !hasDocumentValue(documents.drivingLicensePhoto, uploadedDocs.drivingLicensePhoto))
+            disabled={isSubmitting || !isFormValid()}
+            className={`w-full py-4 rounded-lg font-bold text-white text-base transition-colors mt-6 ${isSubmitting || !isFormValid()
               ? "bg-gray-400 cursor-not-allowed"
               : "bg-[#00B761] hover:bg-[#00A055]"
               }`}

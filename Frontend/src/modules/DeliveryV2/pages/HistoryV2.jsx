@@ -7,6 +7,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { deliveryAPI } from '@food/api';
 import { toast } from 'sonner';
 import useDeliveryBackNavigation from '../hooks/useDeliveryBackNavigation';
+import { useDeliveryStore } from '@/modules/DeliveryV2/store/useDeliveryStore';
 
 /**
  * HistoryV2 - EXACT 1:1 Match with User Screenshot.
@@ -26,6 +27,9 @@ export const HistoryV2 = () => {
   const [showBonusModal, setShowBonusModal] = useState(false);
   const [bonusTransactions, setBonusTransactions] = useState([]);
   const [bonusLoading, setBonusLoading] = useState(false);
+  const getAvailableModules = useDeliveryStore(state => state.getAvailableModules);
+  const availableModules = getAvailableModules();
+  const [activeModuleFilter, setActiveModuleFilter] = useState('all');
 
   const tripTypes = ["ALL TRIPS", "Completed", "Cancelled", "Pending"];
 
@@ -43,6 +47,7 @@ export const HistoryV2 = () => {
           period: activeTab,
           date: dateStr,
           status: selectedTripType !== "ALL TRIPS" ? selectedTripType : undefined,
+          module: activeModuleFilter !== 'all' ? activeModuleFilter : undefined,
           limit: 1000
         };
         
@@ -57,7 +62,7 @@ export const HistoryV2 = () => {
       }
     };
     fetchTrips();
-  }, [selectedDate, activeTab, selectedTripType]);
+  }, [selectedDate, activeTab, selectedTripType, activeModuleFilter]);
 
   // Bonus Logic
   useEffect(() => {
@@ -151,27 +156,56 @@ export const HistoryV2 = () => {
        </div>
 
        {/* 3. Filter Controls (Matched to Image) */}
-       <div className="bg-white px-4 py-4 flex gap-3 sticky top-[118px] z-[80]">
-          <button 
-             onClick={() => { setShowDatePicker(!showDatePicker); setShowTripTypePicker(false); }}
-             className="flex-1 px-4 py-3 bg-[#f8f9fa] border border-gray-100 rounded-xl flex items-center justify-between text-gray-800"
-          >
-             <span className="text-sm font-medium">{formatDateDisplay(selectedDate)}</span>
-             <ChevronDown className={`w-4 h-4 text-gray-400 transform transition-transform ${showDatePicker ? 'rotate-180' : ''}`} />
-          </button>
-          <button 
-             onClick={() => { setShowTripTypePicker(!showTripTypePicker); setShowDatePicker(false); }}
-             className="w-[140px] px-4 py-3 bg-[#f8f9fa] border border-gray-100 rounded-xl flex items-center justify-between text-gray-800"
-          >
-             <span className="text-sm font-medium">{selectedTripType}</span>
-             <ChevronDown className={`w-4 h-4 text-gray-400 transform transition-transform ${showTripTypePicker ? 'rotate-180' : ''}`} />
-          </button>
+       <div className="bg-white px-4 py-4 flex flex-col gap-3 sticky top-[118px] z-[80]">
+          {availableModules && availableModules.length > 0 && (
+            <div className="flex gap-2 overflow-x-auto no-scrollbar">
+              <button
+                onClick={() => setActiveModuleFilter('all')}
+                className={`px-4 py-1.5 rounded-full text-xs font-bold uppercase tracking-widest whitespace-nowrap transition-all ${
+                  activeModuleFilter === 'all' 
+                    ? 'bg-black text-white shadow-md' 
+                    : 'bg-white text-gray-500 border border-gray-200'
+                }`}
+              >
+                All
+              </button>
+              {availableModules.map(mod => (
+                <button
+                  key={mod}
+                  onClick={() => setActiveModuleFilter(mod)}
+                  className={`px-4 py-1.5 rounded-full text-xs font-bold uppercase tracking-widest whitespace-nowrap transition-all ${
+                    activeModuleFilter === mod 
+                      ? 'bg-black text-white shadow-md' 
+                      : 'bg-white text-gray-500 border border-gray-200'
+                  }`}
+                >
+                  {mod.replace('_', ' ')}
+                </button>
+              ))}
+            </div>
+          )}
+          <div className="flex gap-3 w-full">
+            <button 
+               onClick={() => { setShowDatePicker(!showDatePicker); setShowTripTypePicker(false); }}
+               className="flex-1 px-4 py-3 bg-[#f8f9fa] border border-gray-100 rounded-xl flex items-center justify-between text-gray-800"
+            >
+               <span className="text-sm font-medium">{formatDateDisplay(selectedDate)}</span>
+               <ChevronDown className={`w-4 h-4 text-gray-400 transform transition-transform ${showDatePicker ? 'rotate-180' : ''}`} />
+            </button>
+            <button 
+               onClick={() => { setShowTripTypePicker(!showTripTypePicker); setShowDatePicker(false); }}
+               className="w-[140px] px-4 py-3 bg-[#f8f9fa] border border-gray-100 rounded-xl flex items-center justify-between text-gray-800"
+            >
+               <span className="text-sm font-medium">{selectedTripType}</span>
+               <ChevronDown className={`w-4 h-4 text-gray-400 transform transition-transform ${showTripTypePicker ? 'rotate-180' : ''}`} />
+            </button>
+          </div>
        </div>
 
        {/* Dropdowns */}
        <AnimatePresence>
           {showDatePicker && (
-             <motion.div initial={{ opacity: 0, y: -5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -5 }} className="fixed left-4 right-4 top-[185px] z-[200] bg-white rounded-2xl shadow-2xl border border-gray-100 max-h-[300px] overflow-y-auto p-2">
+             <motion.div initial={{ opacity: 0, y: -5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -5 }} className="fixed left-4 right-4 top-[230px] z-[200] bg-white rounded-2xl shadow-2xl border border-gray-100 max-h-[300px] overflow-y-auto p-2">
                 {recentDates.map((date, idx) => (
                    <button 
                       key={idx} 
@@ -184,7 +218,7 @@ export const HistoryV2 = () => {
              </motion.div>
           )}
           {showTripTypePicker && (
-             <motion.div initial={{ opacity: 0, y: -5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -5 }} className="fixed right-4 top-[185px] w-48 z-[200] bg-white rounded-2xl shadow-2xl border border-gray-100 p-2">
+             <motion.div initial={{ opacity: 0, y: -5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -5 }} className="fixed right-4 top-[230px] w-48 z-[200] bg-white rounded-2xl shadow-2xl border border-gray-100 p-2">
                 {tripTypes.map((type, idx) => (
                    <button 
                       key={idx} 

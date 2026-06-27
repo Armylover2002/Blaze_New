@@ -1,7 +1,7 @@
 import React from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Package, MapPin, ChevronRight, Bell, Shield, Clock } from "lucide-react";
+import { Package, MapPin, ChevronRight, Bell, Shield, Clock, Search } from "lucide-react";
 import MapPreview from "../components/MapPreview";
 import PorterBottomNav from "../components/layout/BottomNav";
 import { PrimaryButton, SectionLabel, inr } from "../components/ui";
@@ -25,29 +25,14 @@ export default function Home({ embedded = false }) {
   return (
     <div className={`min-h-screen bg-[#FAF7F2] dark:bg-[#0a0a0a] ${embedded ? "pb-24" : "pb-28"}`}>
       <header className="sticky top-0 z-40 bg-white/90 dark:bg-[#1a1a1a]/90 backdrop-blur-md border-b border-gray-100 dark:border-white/10">
-        <div className="flex items-center justify-between px-4 py-3">
-          <div>
-            <p className="text-[11px] font-semibold text-gray-500">Blaze Porter</p>
-            <h1 className="text-[16px] font-bold text-gray-900 dark:text-white">Parcel Logistics</h1>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => navigate(getPorterSosPath())}
-              className="flex h-9 w-9 items-center justify-center rounded-full bg-[#FFF1F1] text-[#FF0000]"
-              aria-label="Safety"
-            >
-              <Shield className="h-4 w-4" />
-            </button>
-            <button
-              type="button"
-              onClick={() => navigate(getPorterNotificationsPath())}
-              className="relative flex h-9 w-9 items-center justify-center rounded-full bg-gray-100 text-gray-700"
-              aria-label="Notifications"
-            >
-              <Bell className="h-4 w-4" />
-              <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-[#FF0000]" />
-            </button>
+        <div className="px-4 py-3">
+          <div className="flex w-full items-center relative">
+            <Search className="absolute left-3 h-4 w-4 text-gray-400" />
+            <input
+              type="text"
+              placeholder="Search..."
+              className="w-full rounded-full bg-gray-100 dark:bg-[#2a2a2a] py-2 pl-9 pr-4 text-[13px] text-gray-900 dark:text-white outline-none border border-transparent focus:border-gray-200 dark:focus:border-white/10 transition-colors"
+            />
           </div>
         </div>
       </header>

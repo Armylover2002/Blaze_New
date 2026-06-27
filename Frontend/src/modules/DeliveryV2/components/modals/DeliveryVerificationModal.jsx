@@ -15,6 +15,7 @@ import { deliveryAPI } from "@food/api";
 import { toast } from "sonner";
 import { ActionSlider } from "@/modules/DeliveryV2/components/ui/ActionSlider";
 import { isReturnPickupTrip } from "@/modules/DeliveryV2/utils/orderRouting";
+import { RenderDeliveryVerification } from './renderers/DeliveryVerificationRenderers';
 
 const Backdrop = ({ onClose }) => (
   <motion.div
@@ -662,12 +663,16 @@ const ForwardDeliveryVerificationModal = ({ order, onComplete, onClose }) => {
 
 export const DeliveryVerificationModal = ({ order, onComplete, onClose }) => {
   if (!order) return null;
-  if (isReturnPickupTrip(order)) {
-    return (
-      <ReturnSellerOtpModal order={order} onComplete={onComplete} onClose={onClose} />
-    );
-  }
-  return (
+  
+  const innerContent = isReturnPickupTrip(order) ? (
+    <ReturnSellerOtpModal order={order} onComplete={onComplete} onClose={onClose} />
+  ) : (
     <ForwardDeliveryVerificationModal order={order} onComplete={onComplete} onClose={onClose} />
+  );
+
+  return (
+    <RenderDeliveryVerification order={order} onComplete={onComplete} onClose={onClose}>
+      {innerContent}
+    </RenderDeliveryVerification>
   );
 };

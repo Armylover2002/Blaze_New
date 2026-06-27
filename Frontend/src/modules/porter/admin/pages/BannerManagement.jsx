@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect, useCallback } from "react";
 import {
   Plus, Search, Image as ImageIcon, Eye, Pencil, Trash2, Upload, Calendar, Loader2,
 } from "lucide-react";
@@ -10,18 +10,22 @@ import {
 import Button from "@/shared/components/ui/Button";
 import Input from "@/shared/components/ui/Input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { MOCK_BANNERS, BANNER_TYPES, BANNER_TARGETS } from "../utils/mock/bannerData";
-import { MOCK_BANNER_IMAGES } from "../utils/mock/mockImages";
-import { filterBySearch, sortItems, paginateItems, formatDateTime } from "../utils/porterTableHelpers";
+import { BANNER_TYPES, BANNER_TARGETS } from "../utils/mock/bannerData";
+import porterAdminApi from "../services/adminApi";
+import { formatDateTime } from "../utils/porterTableHelpers";
 
-const EMPTY = { title: "", type: "promotional", target: "Home", priority: "1", image: MOCK_BANNER_IMAGES[0], startDate: "", endDate: "", status: "active" };
+const EMPTY = { title: "", type: "promotional", target: "Home", priority: "1", image: "", startDate: "", endDate: "", status: "active" };
 
 const BannerManagement = () => {
-  const [banners, setBanners] = useState(MOCK_BANNERS);
+  const [banners, setBanners] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const [imageFile, setImageFile] = useState(null);
   const [formOpen, setFormOpen] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
@@ -38,18 +42,35 @@ const BannerManagement = () => {
     expired: banners.filter((b) => b.status === "expired").length,
   }), [banners]);
 
-  const filtered = useMemo(() => {
-    let rows = filterBySearch(banners, search, ["id", "title", "type", "target"]);
-    if (statusFilter !== "all") rows = rows.filter((r) => r.status === statusFilter);
-    return sortItems(rows, "priority", "asc", { priority: (r) => Number(r.priority) });
-  }, [banners, search, statusFilter]);
+  const fetchBanners = useCallback(async () => {
+    setLoading(true);
+    try {
+      const result = await porterAdminApi.getBanners({
+        page,
+        limit: pageSize,
+        search: search.trim() || undefined,
+        status: statusFilter !== "all" ? statusFilter : undefined,
+        sortBy: "priority",
+        sortOrder: "asc",
+      });
+      setBanners(result.records || []);
+      setTotal(result.total || 0);
+      setTotalPages(result.pages || 1);
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to load banners");
+    } finally {
+      setLoading(false);
+    }
+  }, [page, pageSize, search, statusFilter]);
 
-  const { items: pageItems, total, totalPages } = useMemo(
-    () => paginateItems(filtered, page, pageSize),
-    [filtered, page, pageSize]
-  );
+  useEffect(() => {
+    fetchBanners();
+  }, [fetchBanners]);
+
+  const pageItems = banners;
 
   const openForm = (row = null) => {
+    setImageFile(null);
     setEditing(row);
     if (row) {
       setForm({
@@ -75,35 +96,48 @@ const BannerManagement = () => {
   const handleSave = async () => {
     if (!validate()) return;
     setSaving(true);
-    await new Promise((r) => setTimeout(r, 400));
-    const payload = {
-      ...form,
-      priority: Number(form.priority),
-      startDate: new Date(form.startDate).toISOString(),
-      endDate: new Date(form.endDate + "T23:59:59").toISOString(),
-    };
-    if (editing) {
-      setBanners((prev) => prev.map((b) => (b.id === editing.id ? { ...b, ...payload } : b)));
-      toast.success("Banner updated");
-    } else {
-      setBanners((prev) => [...prev, { ...payload, id: `BNR-${String(3020 + prev.length)}`, linkUrl: `/promo/${3020 + prev.length}` }]);
-      toast.success("Banner created");
+    try {
+      const payload = {
+        ...form,
+        priority: Number(form.priority),
+        startDate: new Date(form.startDate).toISOString(),
+        endDate: new Date(form.endDate + "T23:59:59").toISOString(),
+      };
+      if (editing?.id) {
+        await porterAdminApi.updateBanner(editing.id, payload, imageFile);
+        toast.success("Banner updated");
+      } else {
+        await porterAdminApi.createBanner(payload, imageFile);
+        toast.success("Banner created");
+      }
+      setFormOpen(false);
+      fetchBanners();
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to save banner");
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
-    setFormOpen(false);
   };
 
-  const handleDelete = () => {
-    if (!deleteTarget) return;
-    setBanners((prev) => prev.filter((b) => b.id !== deleteTarget.id));
-    setDeleteTarget(null);
-    toast.success("Banner deleted");
+  const handleDelete = async () => {
+    if (!deleteTarget?.id) return;
+    try {
+      await porterAdminApi.deleteBanner(deleteTarget.id);
+      setDeleteTarget(null);
+      toast.success("Banner deleted");
+      fetchBanners();
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to delete banner");
+    }
   };
 
   const handleImageDrop = (e) => {
     e.preventDefault();
     const file = e.dataTransfer?.files?.[0] || e.target.files?.[0];
-    if (file) setForm((f) => ({ ...f, image: URL.createObjectURL(file) }));
+    if (file) {
+      setImageFile(file);
+      setForm((f) => ({ ...f, image: URL.createObjectURL(file) }));
+    }
   };
 
   const columns = [
@@ -112,8 +146,6 @@ const BannerManagement = () => {
       cell: (row) => <img src={row.image} alt={row.title} className="h-12 w-28 rounded-md object-cover border" />,
     },
     { key: "title", header: "Title", cell: (row) => <span className="font-semibold">{row.title}</span> },
-    { key: "type", header: "Type", cell: (row) => <StatusBadge status="info" label={row.type} /> },
-    { key: "target", header: "Target" },
     { key: "priority", header: "Priority", cell: (row) => `#${row.priority}` },
     { key: "startDate", header: "Start", cell: (row) => <span className="text-xs">{formatDateTime(row.startDate).split(",")[0]}</span> },
     { key: "endDate", header: "End", cell: (row) => <span className="text-xs">{formatDateTime(row.endDate).split(",")[0]}</span> },
@@ -166,7 +198,7 @@ const BannerManagement = () => {
               </>
             }
           />
-          <AdminTable columns={columns} data={pageItems} getRowId={(r) => r.id}
+          <AdminTable columns={columns} data={pageItems} getRowId={(r) => r.id} loading={loading}
             pagination={{ page, totalPages, total, pageSize, onPageChange: setPage, onPageSizeChange: (s) => { setPageSize(s); setPage(1); } }}
           />
         </div>
@@ -192,18 +224,7 @@ const BannerManagement = () => {
                 <FormField label="Banner Title" required error={errors.title}>
                   <Input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
                 </FormField>
-                <FormRow>
-                  <FormField label="Type">
-                    <select className={selectCls} value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
-                      {BANNER_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-                    </select>
-                  </FormField>
-                  <FormField label="Target">
-                    <select className={selectCls} value={form.target} onChange={(e) => setForm({ ...form, target: e.target.value })}>
-                      {BANNER_TARGETS.map((t) => <option key={t} value={t}>{t}</option>)}
-                    </select>
-                  </FormField>
-                </FormRow>
+
                 <FormRow>
                   <FormField label="Priority"><Input type="number" min="1" value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })} /></FormField>
                   <FormField label="Status">
@@ -235,8 +256,8 @@ const BannerManagement = () => {
             <div className="space-y-3">
               <img src={preview.image} alt={preview.title} className="w-full rounded-xl border" />
               <h3 className="font-bold">{preview.title}</h3>
-              <div className="flex gap-2"><StatusBadge status={preview.status} /><StatusBadge status="info" label={preview.type} /></div>
-              <p className="text-sm text-muted-foreground">Target: {preview.target} · Priority #{preview.priority}</p>
+              <div className="flex gap-2"><StatusBadge status={preview.status} /></div>
+              <p className="text-sm text-muted-foreground">Priority #{preview.priority}</p>
             </div>
           )}
         </DialogContent>
