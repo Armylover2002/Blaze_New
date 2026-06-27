@@ -808,6 +808,7 @@ export default function Inventory() {
   const [addonName, setAddonName] = useState("")
   const [addonDescription, setAddonDescription] = useState("")
   const [addonPrice, setAddonPrice] = useState("")
+  const [addonFoodType, setAddonFoodType] = useState("Veg")
   const [addonImageFile, setAddonImageFile] = useState(null)
   const [addonImagePreview, setAddonImagePreview] = useState("")
   const [savingAddon, setSavingAddon] = useState(false)
@@ -1086,6 +1087,7 @@ export default function Inventory() {
     setAddonName("")
     setAddonDescription("")
     setAddonPrice("")
+    setAddonFoodType("Veg")
     setAddonImageFile(null)
     setAddonImagePreview("")
     if (addonImageInputRef.current) {
@@ -1141,6 +1143,7 @@ export default function Inventory() {
         price: parsedPrice,
         image: imageUrl,
         images: imageUrl ? [imageUrl] : [],
+        foodType: addonFoodType,
       }
       await restaurantAPI.addAddon(payload)
       toast.success("Add-on submitted to admin for approval")
@@ -1815,8 +1818,8 @@ export default function Inventory() {
           <motion.button
             onClick={() => setActiveTab("all-items")}
             className={`relative overflow-hidden rounded-[24px] border px-4 py-3 text-sm font-semibold whitespace-nowrap ${activeTab === "all-items"
-                ? "border-[#FF0000] text-white shadow-[0_18px_32px_-24px_rgba(73,171,20,0.8)]"
-                : "border-white/80 bg-white/80 text-slate-700 shadow-[0_16px_40px_-34px_rgba(15,23,42,0.45)]"
+              ? "border-[#FF0000] text-white shadow-[0_18px_32px_-24px_rgba(73,171,20,0.8)]"
+              : "border-white/80 bg-white/80 text-slate-700 shadow-[0_16px_40px_-34px_rgba(15,23,42,0.45)]"
               }`}
             animate={{
               scale: activeTab === "all-items" ? 1.02 : 1,
@@ -1847,8 +1850,8 @@ export default function Inventory() {
           <motion.button
             onClick={() => setActiveTab("add-ons")}
             className={`relative overflow-hidden rounded-[24px] border px-4 py-3 text-sm font-semibold whitespace-nowrap ${activeTab === "add-ons"
-                ? "border-[#FF0000] text-white shadow-[0_18px_32px_-24px_rgba(73,171,20,0.8)]"
-                : "border-white/80 bg-white/80 text-slate-700 shadow-[0_16px_40px_-34px_rgba(15,23,42,0.45)]"
+              ? "border-[#FF0000] text-white shadow-[0_18px_32px_-24px_rgba(73,171,20,0.8)]"
+              : "border-white/80 bg-white/80 text-slate-700 shadow-[0_16px_40px_-34px_rgba(15,23,42,0.45)]"
               }`}
             animate={{
               scale: activeTab === "add-ons" ? 1.02 : 1,
@@ -1962,8 +1965,8 @@ export default function Inventory() {
                     type="button"
                     onClick={() => setSelectedFilter(option.value)}
                     className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors ${isActive
-                        ? "border-[#FF0000] bg-[#FF0000] text-white shadow-[0_14px_28px_-24px_rgba(255,0,0,0.5)]"
-                        : "border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300 hover:bg-white"
+                      ? "border-[#FF0000] bg-[#FF0000] text-white shadow-[0_14px_28px_-24px_rgba(255,0,0,0.5)]"
+                      : "border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300 hover:bg-white"
                       }`}
                   >
                     <span>{option.label}</span>
@@ -2004,6 +2007,43 @@ export default function Inventory() {
                         rows={3}
                         placeholder="Describe the add-on..."
                       />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Food Type *</label>
+                      <div className="flex items-center gap-4">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="radio"
+                            name="addonFoodType"
+                            value="Veg"
+                            checked={addonFoodType === "Veg"}
+                            onChange={(e) => setAddonFoodType(e.target.value)}
+                            className="w-4 h-4 text-[#FF0000] border-gray-300 focus:ring-[#FF0000]"
+                          />
+                          <div className="flex items-center gap-1.5">
+                            <span className="flex items-center justify-center w-4 h-4 rounded-sm border border-green-600">
+                              <span className="w-2 h-2 rounded-full bg-green-600"></span>
+                            </span>
+                            <span className="text-sm text-gray-700">Veg</span>
+                          </div>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="radio"
+                            name="addonFoodType"
+                            value="Non-Veg"
+                            checked={addonFoodType === "Non-Veg"}
+                            onChange={(e) => setAddonFoodType(e.target.value)}
+                            className="w-4 h-4 text-[#FF0000] border-gray-300 focus:ring-[#FF0000]"
+                          />
+                          <div className="flex items-center gap-1.5">
+                            <span className="flex items-center justify-center w-4 h-4 rounded-sm border border-red-600">
+                              <span className="w-2 h-2 rounded-full bg-red-600"></span>
+                            </span>
+                            <span className="text-sm text-gray-700">Non-Veg</span>
+                          </div>
+                        </label>
+                      </div>
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Price (₹) *</label>
@@ -2100,10 +2140,15 @@ export default function Inventory() {
                       <div className="flex items-start justify-between gap-4">
                         <div className="flex-1 min-w-0">
                           <div className="mb-2 flex items-center gap-2 flex-wrap">
-                            <h3 className="text-base font-semibold text-slate-950">{addon.name}</h3>
+                            <div className="flex items-center gap-2">
+                              <span className={`flex items-center justify-center w-4 h-4 rounded-sm border ${addon.foodType === 'Veg' ? 'border-green-600' : 'border-red-600'}`}>
+                                <span className={`w-2 h-2 rounded-full ${addon.foodType === 'Veg' ? 'bg-green-600' : 'bg-red-600'}`}></span>
+                              </span>
+                              <h3 className="text-base font-semibold text-slate-950">{addon.name}</h3>
+                            </div>
                             <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${addon.isAvailable !== false
-                                ? "bg-emerald-50 text-emerald-700"
-                                : "bg-slate-100 text-slate-600"
+                              ? "bg-emerald-50 text-emerald-700"
+                              : "bg-slate-100 text-slate-600"
                               }`}>
                               {addon.isAvailable !== false ? "Live" : "Paused"}
                             </span>
@@ -2206,8 +2251,8 @@ export default function Inventory() {
                           {category.items?.length || category.itemCount || 0} items
                         </span>
                         <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${category.inStock
-                            ? "bg-emerald-50 text-emerald-700"
-                            : "bg-amber-50 text-amber-700"
+                          ? "bg-emerald-50 text-emerald-700"
+                          : "bg-amber-50 text-amber-700"
                           }`}>
                           {category.inStock ? "Healthy" : "Needs attention"}
                         </span>
@@ -2299,8 +2344,8 @@ export default function Inventory() {
                                     <p className="truncate text-sm font-bold text-slate-950 mb-1.5">{item.name}</p>
                                     <div className="flex items-center gap-2 flex-wrap">
                                       <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold flex items-center gap-1 ${item.isVeg
-                                          ? "bg-emerald-50 text-emerald-700 border border-emerald-100"
-                                          : "bg-rose-50 text-rose-700 border border-rose-100"
+                                        ? "bg-emerald-50 text-emerald-700 border border-emerald-100"
+                                        : "bg-rose-50 text-rose-700 border border-rose-100"
                                         }`}>
                                         <div className={`h-2.5 w-2.5 shrink-0 rounded-sm border flex items-center justify-center ${item.isVeg ? 'border-green-600' : 'border-red-500'}`}>
                                           <div className={`h-1 w-1 rounded-full ${item.isVeg ? 'bg-green-600' : 'bg-red-500'}`} />
@@ -2329,8 +2374,8 @@ export default function Inventory() {
                                       type="button"
                                       onClick={() => handleEditItem(category, item)}
                                       className={`mt-2 inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-semibold transition-colors ${isRejectedItem
-                                          ? "bg-red-600 text-white hover:bg-red-700"
-                                          : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-100"
+                                        ? "bg-red-600 text-white hover:bg-red-700"
+                                        : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-100"
                                         }`}
                                     >
                                       <Pencil className="h-3 w-3" />
@@ -2346,8 +2391,8 @@ export default function Inventory() {
                                       handleRecommendToggle(category.id, item.id)
                                     }}
                                     className={`rounded-2xl p-2 transition-colors ${item.isRecommended
-                                        ? "bg-blue-100 text-blue-600"
-                                        : "bg-white text-gray-400 hover:bg-slate-100"
+                                      ? "bg-blue-100 text-blue-600"
+                                      : "bg-white text-gray-400 hover:bg-slate-100"
                                       }`}
                                     title={item.isRecommended ? "Recommended" : "Click to recommend"}
                                   >

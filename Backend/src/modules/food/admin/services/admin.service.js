@@ -2854,6 +2854,9 @@ export async function updateRestaurantAddonAdmin(addonId, body) {
     } else if (updatePayload.image) {
         updatePayload.images = [updatePayload.image];
     }
+    if (body.foodType !== undefined) {
+        updatePayload.foodType = body.foodType === 'Non-Veg' ? 'Non-Veg' : 'Veg';
+    }
 
     // Update draft fields
     if (addon.draft) {

@@ -6,7 +6,8 @@ const addonPayloadSchema = z.object({
     description: z.string().max(2000).optional().default(''),
     price: z.coerce.number().min(0, 'Price must be >= 0'),
     image: z.string().max(2000).optional().default(''),
-    images: z.array(z.string().max(2000)).max(10).optional().default([])
+    images: z.array(z.string().max(2000)).max(10).optional().default([]),
+    foodType: z.enum(['Veg', 'Non-Veg']).default('Veg')
 });
 
 const listSchema = z.object({

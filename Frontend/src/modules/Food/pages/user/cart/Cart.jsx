@@ -151,7 +151,7 @@ export default function Cart() {
   const hasFoodItems = cart.some((item) => (item?.orderType || "food") === "food")
   const isQuickCart = cart.length > 0 && cart.every((item) => (item?.orderType || "food") === "quick")
 
-  const { getDefaultAddress, getDefaultPaymentMethod, setDefaultAddress, addresses, paymentMethods, userProfile } = useProfile()
+  const { getDefaultAddress, getDefaultPaymentMethod, setDefaultAddress, addresses, paymentMethods, userProfile, vegMode } = useProfile()
   const { createOrder } = useOrders()
   const { openLocationSelector } = useLocationSelector()
   const { location: currentLocation, loading: currentLocationLoading } = useUserLocation() // Get live location address
@@ -2385,7 +2385,9 @@ export default function Cart() {
                     </div>
                   ) : (
                     <div className="flex gap-3 md:gap-4 overflow-x-auto pb-2 -mx-4 md:-mx-6 px-4 md:px-6 scrollbar-hide">
-                      {addons.map((addon) => (
+                      {addons
+                        .filter(addon => !vegMode || addon.foodType === 'Veg' || addon.foodType !== 'Non-Veg')
+                        .map((addon) => (
                         <div key={addon.id} className="flex-shrink-0 w-28 md:w-36">
                           <div className="relative bg-gray-100 dark:bg-gray-800 rounded-lg md:rounded-xl overflow-hidden">
                             <img
@@ -2398,8 +2400,8 @@ export default function Cart() {
                               }}
                             />
                             <div className="absolute top-1 md:top-2 left-1 md:left-2">
-                              <div className="w-3.5 h-3.5 md:w-4 md:h-4 bg-white border border-green-600 flex items-center justify-center rounded">
-                                <div className="w-1.5 h-1.5 md:w-2 md:h-2 rounded-full bg-green-600" />
+                              <div className={`w-3.5 h-3.5 md:w-4 md:h-4 bg-white border flex items-center justify-center rounded ${addon.foodType === 'Non-Veg' ? 'border-red-600' : 'border-green-600'}`}>
+                                <div className={`w-1.5 h-1.5 md:w-2 md:h-2 rounded-full ${addon.foodType === 'Non-Veg' ? 'bg-red-600' : 'bg-green-600'}`} />
                               </div>
                             </div>
                             <button
@@ -2426,7 +2428,7 @@ export default function Cart() {
                                   price: addon.price,
                                   image: addon.image || (addon.images && addon.images[0]) || "",
                                   description: addon.description || "",
-                                  isVeg: true,
+                                  isVeg: addon.foodType !== 'Non-Veg',
                                   restaurant: cartRestaurantName,
                                   restaurantId: cartRestaurantId
                                 });
