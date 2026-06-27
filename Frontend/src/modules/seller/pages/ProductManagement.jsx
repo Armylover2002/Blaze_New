@@ -49,9 +49,7 @@ const ProductMobileCard = React.memo(({
   setIsVariantsViewModalOpen,
   cn
 }) => {
-  const totalStock = p.variants?.length > 0
-    ? p.variants.reduce((sum, v) => sum + (Number(v.stock) || 0), 0)
-    : p.stock;
+  const totalStock = Math.max(Number(p.stock) || 0, p.variants?.reduce((sum, v) => sum + (Number(v.stock) || 0), 0) || 0);
   return (
     <div className="flex items-center gap-3 p-3 hover:bg-slate-50 transition-colors">
       <div className="h-14 w-14 rounded-xl overflow-hidden bg-slate-100 ring-1 ring-slate-200 shrink-0">
@@ -114,9 +112,7 @@ const ProductRow = React.memo(({
   setIsVariantsViewModalOpen,
   cn
 }) => {
-  const totalStock = p.variants?.length > 0
-    ? p.variants.reduce((sum, v) => sum + (Number(v.stock) || 0), 0)
-    : p.stock;
+  const totalStock = Math.max(Number(p.stock) || 0, p.variants?.reduce((sum, v) => sum + (Number(v.stock) || 0), 0) || 0);
   return (
     <tr className="ds-table-row">
       <td className="ds-table-cell">
@@ -374,10 +370,8 @@ const getRxOtcLabel = (pd) => {
 };
 
 const getProductTotalStock = (product) => {
-  if (product.variants?.length > 0) {
-    return product.variants.reduce((sum, v) => sum + (Number(v.stock) || 0), 0);
-  }
-  return Number(product.stock) || 0;
+  const variantStock = product.variants?.reduce((sum, v) => sum + (Number(v.stock) || 0), 0) || 0;
+  return Math.max(Number(product.stock) || 0, variantStock);
 };
 
 const getPharmacyProductMeta = (product) => {
@@ -906,9 +900,8 @@ const ProductManagement = () => {
   }, [safeProducts, searchTerm, filterCategory, filterStatus, priceMin, priceMax]);
 
   const getProductTotalStock = (p) => {
-    return p.variants?.length > 0
-      ? p.variants.reduce((sum, v) => sum + (Number(v.stock) || 0), 0)
-      : p.stock;
+    const variantStock = p.variants?.reduce((sum, v) => sum + (Number(v.stock) || 0), 0) || 0;
+    return Math.max(Number(p.stock) || 0, variantStock);
   };
 
   const stats = useMemo(
@@ -950,6 +943,7 @@ const ProductManagement = () => {
       data.append("price", Number(formData.price));
       data.append("salePrice", Number(formData.salePrice) || 0);
       data.append("stock", Number(formData.stock));
+      data.append("lowStockAlert", Number(formData.lowStockAlert) || 0);
       data.append("headerId", formData.header);
       data.append("categoryId", formData.category);
       data.append("subcategoryId", formData.subcategory);
@@ -1944,7 +1938,7 @@ const ProductManagement = () => {
                           </label>
                           <input
                             type="number"
-                            value={formData.variants?.length > 0 ? formData.variants.reduce((sum, v) => sum + (Number(v.stock) || 0), 0) : formData.stock}
+                            value={formData.stock}
                             onChange={(e) =>
                               setFormData({
                                 ...formData,
@@ -1952,7 +1946,7 @@ const ProductManagement = () => {
                               })
                             }
                             className="w-full px-4 py-2.5 bg-slate-100 border-none rounded-xl text-sm font-bold outline-none ring-red-500/5 focus:ring-2 disabled:opacity-60"
-                            disabled={isViewMode || formData.variants?.length > 0}
+                            disabled={isViewMode}
                           />
                         </div>
                         <div className="space-y-1.5 flex flex-col">
@@ -1968,6 +1962,7 @@ const ProductManagement = () => {
                                 lowStockAlert: e.target.value,
                               })
                             }
+                            disabled={isViewMode}
                             className="w-full px-4 py-2.5 bg-rose-50/30 border-none rounded-xl text-sm font-bold text-rose-600 outline-none ring-rose-100 focus:ring-2"
                           />
                         </div>

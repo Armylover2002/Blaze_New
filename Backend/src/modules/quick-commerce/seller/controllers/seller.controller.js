@@ -1316,7 +1316,12 @@ export const createSellerProductController = async (req, res) => {
     }
 
     if (basePayload.variants && basePayload.variants.length > 0) {
-      basePayload.stock = basePayload.variants.reduce((sum, v) => sum + (Number(v.stock) || 0), 0);
+      const isDefaultVariantOnly = basePayload.variants.length === 1 && String(basePayload.variants[0].name || "").trim() === "Default";
+      if (isDefaultVariantOnly) {
+         basePayload.variants[0].stock = basePayload.stock;
+      } else {
+         basePayload.stock = basePayload.variants.reduce((sum, v) => sum + (Number(v.stock) || 0), 0);
+      }
     }
 
     const categoryIds = await resolveSellerCategoryIds({
@@ -1397,7 +1402,12 @@ export const updateSellerProductController = async (req, res) => {
     }
 
     if (payload.variants && payload.variants.length > 0) {
-      payload.stock = payload.variants.reduce((sum, v) => sum + (Number(v.stock) || 0), 0);
+      const isDefaultVariantOnly = payload.variants.length === 1 && String(payload.variants[0].name || "").trim() === "Default";
+      if (isDefaultVariantOnly) {
+         payload.variants[0].stock = payload.stock;
+      } else {
+         payload.stock = payload.variants.reduce((sum, v) => sum + (Number(v.stock) || 0), 0);
+      }
     }
 
     Object.assign(existing, {
