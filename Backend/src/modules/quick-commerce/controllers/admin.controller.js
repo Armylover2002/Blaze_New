@@ -699,9 +699,15 @@ export const createProduct = async (req, res) => {
   const slug = count > 0 ? `${baseSlug}-${count + 1}` : baseSlug;
 
   const parsedVariants = parseVariants(variants);
-  const calculatedStock = parsedVariants && parsedVariants.length > 0 
-    ? parsedVariants.reduce((sum, v) => sum + (Number(v.stock) || 0), 0) 
-    : parseNumber(stock, 0);
+  let calculatedStock = parseNumber(stock, 0);
+  if (parsedVariants && parsedVariants.length > 0) {
+    const isDefaultVariantOnly = parsedVariants.length === 1 && String(parsedVariants[0].name || "").trim() === "Default";
+    if (isDefaultVariantOnly) {
+       parsedVariants[0].stock = calculatedStock;
+    } else {
+       calculatedStock = parsedVariants.reduce((sum, v) => sum + (Number(v.stock) || 0), 0);
+    }
+  }
 
   const product = await QuickProduct.create({
     name,
@@ -796,7 +802,12 @@ export const updateProduct = async (req, res) => {
     product.variants = parseVariants(body.variants);
   }
   if (product.variants && product.variants.length > 0) {
-    product.stock = product.variants.reduce((sum, v) => sum + (Number(v.stock) || 0), 0);
+    const isDefaultVariantOnly = product.variants.length === 1 && String(product.variants[0].name || "").trim() === "Default";
+    if (isDefaultVariantOnly) {
+       product.variants[0].stock = product.stock;
+    } else {
+       product.stock = product.variants.reduce((sum, v) => sum + (Number(v.stock) || 0), 0);
+    }
   }
   if (body.deliveryTime !== undefined) product.deliveryTime = body.deliveryTime || '10 mins';
   if (body.badge !== undefined) product.badge = body.badge || '';
