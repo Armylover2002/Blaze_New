@@ -27,7 +27,7 @@ import {
   Bell, HelpCircle, AlertTriangle, 
   Wallet, History, User as UserIcon, LayoutGrid,
   Plus, Minus, Navigation2, Target, Play, CheckCircle2, Clock, ChevronDown,
-  Contact, Package, ShieldCheck, Loader2, Zap
+  Contact, Package, ShieldCheck, Loader2, Zap, Phone, Navigation
 } from 'lucide-react';
 import { subscriptionAPI } from '@food/api';
 
@@ -1172,30 +1172,30 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
                              <ChevronDown className="w-6 h-6 text-gray-400 stroke-[3]" />
                           </button>
                         </div>
-                        <div className="flex justify-between w-full items-center mb-10 px-2 text-left">
-                          <div className="flex items-center gap-4">
-                            <div className="w-16 h-16 rounded-2xl overflow-hidden border border-gray-100 shadow-sm">
+                        <div className="flex justify-between w-full items-start mb-8 px-2 text-left">
+                          <div className="flex items-center gap-4 min-w-0 flex-1">
+                            <div className="w-16 h-16 rounded-2xl overflow-hidden border border-gray-100 shadow-sm shrink-0">
                                <img 
                                  src={activeOrder?.user?.logo || activeOrder?.user?.profileImage || 'https://cdn-icons-png.flaticon.com/512/1275/1275302.png'} 
                                  className="w-full h-full object-cover" 
                                  alt="User"
                                />
                             </div>
-                            <div>
-                               <h3 className="text-gray-950 text-2xl font-bold uppercase">
+                            <div className="min-w-0 flex-1">
+                               <h3 className="text-gray-950 text-xl md:text-2xl font-bold uppercase truncate">
                                  {isReturnPickupTrip(activeOrder) ? getReturnPickupStopLabels().dropLabel : 'Handover Drop'}
                                </h3>
                                {isReturnPickupTrip(activeOrder) && (
                                  <>
-                                   <p className="text-sm font-bold text-gray-900 mt-2">
+                                   <p className="text-sm font-bold text-gray-900 mt-1 truncate">
                                      {activeOrder?.dropPoint?.sourceName || activeOrder?.storeName || activeOrder?.sellerName || 'Seller'}
                                    </p>
                                    {(activeOrder?.dropPoint?.phone || activeOrder?.storePhone || activeOrder?.sellerPhone) && (
-                                     <p className="text-xs font-semibold text-gray-600">
+                                     <p className="text-xs font-semibold text-gray-600 truncate">
                                        {activeOrder?.dropPoint?.phone || activeOrder?.storePhone || activeOrder?.sellerPhone}
                                      </p>
                                    )}
-                                   <p className="text-xs font-medium text-gray-500 mt-1 line-clamp-2">
+                                   <p className="text-xs font-medium text-gray-500 mt-0.5 line-clamp-1">
                                      {activeOrder?.dropPoint?.address || activeOrder?.storeAddress || activeOrder?.restaurantAddress || 'Seller address'}
                                    </p>
                                  </>
@@ -1204,6 +1204,38 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
                                  {isWithinRange ? 'Ready - Swipe to Arrive √' : `${(distanceToTarget / 1000).toFixed(1)} km • ${eta || '--'} min Arrival`}
                                </p>
                             </div>
+                          </div>
+                          
+                          <div className="flex gap-2 shrink-0 ml-3">
+                            <button
+                              onClick={() => {
+                                const phone = isReturnPickupTrip(activeOrder) 
+                                  ? (activeOrder?.dropPoint?.phone || activeOrder?.storePhone || activeOrder?.sellerPhone)
+                                  : (activeOrder?.userPhone || activeOrder?.user?.phone || activeOrder?.customerPhone || activeOrder?.customer_phone || activeOrder?.deliveryAddress?.phone);
+                                if (phone) window.location.href = `tel:${phone}`;
+                                else toast.error('Phone number not available');
+                              }}
+                              className={`w-10 h-10 rounded-full flex items-center justify-center border ${
+                                isReturnPickupTrip(activeOrder)
+                                  ? 'bg-red-50 text-red-600 border-red-100'
+                                  : 'bg-green-50 text-green-600 border-green-100'
+                              }`}
+                            >
+                              <Phone className="w-4 h-4" />
+                            </button>
+                            <button 
+                              onClick={() => {
+                                const address = isReturnPickupTrip(activeOrder)
+                                  ? (activeOrder?.dropPoint?.address || activeOrder?.storeAddress || activeOrder?.restaurantAddress)
+                                  : (activeOrder?.customerAddress || activeOrder?.deliveryAddress?.formattedAddress || activeOrder?.deliveryAddress || '');
+                                window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`, '_blank');
+                              }}
+                              className={`w-10 h-10 rounded-full flex items-center justify-center text-white shadow-lg ${
+                                isReturnPickupTrip(activeOrder) ? 'bg-red-600' : 'bg-gray-900'
+                              }`}
+                            >
+                              <Navigation className="w-4 h-4" />
+                            </button>
                           </div>
                         </div>
 
