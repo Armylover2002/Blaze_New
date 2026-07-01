@@ -272,10 +272,21 @@ export default function RestaurantOTP() {
       const normalizedPhone = data?.phone || phone
 
       if (needsRegistration) {
-        setRestaurantPendingPhone(normalizedPhone)
+        const displayPhone = String(normalizedPhone || phone || "")
+          .replace(/\D/g, "")
+          .slice(-10)
+        setRestaurantPendingPhone(normalizedPhone || phone)
         sessionStorage.removeItem("restaurantAuthData")
         sessionStorage.removeItem("restaurantLoginPhone")
-        navigate("/food/restaurant/onboarding", { replace: true })
+        const resumeStep = Number(data?.resumeStep)
+        const onboardingPath =
+          resumeStep >= 2 && resumeStep <= 4
+            ? `/food/restaurant/onboarding?step=${resumeStep}`
+            : "/food/restaurant/onboarding"
+        navigate(onboardingPath, {
+          replace: true,
+          state: { verifiedPhone: displayPhone },
+        })
         return
       }
 

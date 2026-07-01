@@ -240,7 +240,8 @@ export function setRestaurantPendingPhone(phone) {
     localStorage.removeItem("restaurant_pendingPhone");
     return;
   }
-  localStorage.setItem("restaurant_pendingPhone", phone);
+  const digits = String(phone).replace(/\D/g, "").slice(-10);
+  localStorage.setItem("restaurant_pendingPhone", digits || String(phone).trim());
 }
 
 export function getRestaurantPendingPhone() {
@@ -306,9 +307,6 @@ export function setAuthData(module, token, user, refreshToken = null) {
     }
 
     localStorage.setItem(tokenKey, token);
-    
-    // Always set global accessToken for any module login
-    localStorage.setItem("accessToken", token);
 
     if (module === "admin") {
       localStorage.setItem("auth_admin", token);
@@ -319,6 +317,7 @@ export function setAuthData(module, token, user, refreshToken = null) {
     }
     if (module === "user") {
       localStorage.setItem("auth_customer", token);
+      localStorage.setItem("accessToken", token);
       localStorage.setItem("token", token);
     }
     if (refreshToken && typeof refreshToken === "string") {

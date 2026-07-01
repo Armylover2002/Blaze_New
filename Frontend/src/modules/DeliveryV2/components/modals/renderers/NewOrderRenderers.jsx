@@ -2,12 +2,17 @@ import React from 'react';
 import { MapPin, ChefHat, Package, Clock, Phone } from 'lucide-react';
 import { formatDeliveryAddressText, isMixedOrder, normalizePickupPoints, isReturnPickupTrip, getReturnPickupStopLabels } from '@/modules/DeliveryV2/utils/orderRouting';
 
-const BaseOrderHeader = ({ title, subtitle, badges, earnings, timeLeft, bgColor = 'bg-[#FF0000]' }) => (
+const BaseOrderHeader = ({ title, subtitle, badges, earnings, timeLeft, bgColor = 'bg-[#FF0000]', orderId }) => (
   <div className={`${bgColor} p-5 flex justify-between items-center text-white border-b border-black/10`}>
     <div>
       <p className="text-white/80 text-[10px] font-bold uppercase tracking-widest mb-0.5">{title}</p>
+      {orderId && (
+        <div className="mb-2 inline-flex items-center rounded-lg bg-black/20 px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest text-white font-mono shadow-sm">
+          ID: {orderId}
+        </div>
+      )}
       {subtitle && (
-        <div className="mb-2 inline-flex items-center rounded-full border border-white/30 bg-white/15 px-2.5 py-0.5 text-[9px] font-bold uppercase tracking-widest text-white">
+        <div className="mb-2 ml-2 inline-flex items-center rounded-full border border-white/30 bg-white/15 px-2.5 py-0.5 text-[9px] font-bold uppercase tracking-widest text-white">
           {subtitle}
         </div>
       )}
@@ -114,6 +119,7 @@ const FoodOrderRenderer = ({ order, distanceKm, etaMins, timeLeft }) => {
         earnings={earnings} 
         timeLeft={timeLeft} 
         bgColor="bg-[#FF0000]"
+        orderId={order?.orderId || order?._id}
       />
       <BaseOrderBody 
         pickupStops={pickupStops}
@@ -155,6 +161,7 @@ const QuickCommerceOrderRenderer = ({ order, distanceKm, etaMins, timeLeft }) =>
         earnings={earnings} 
         timeLeft={timeLeft} 
         bgColor="bg-blue-600"
+        orderId={order?.orderId || order?._id}
       />
       <BaseOrderBody 
         pickupStops={pickupStops}
@@ -189,6 +196,7 @@ const ParcelOrderRenderer = ({ order, distanceKm, etaMins, timeLeft }) => {
         earnings={earnings} 
         timeLeft={timeLeft} 
         bgColor="bg-[#10B981]"
+        orderId={order?.orderId || order?._id}
       />
       <BaseOrderBody 
         pickupStops={pickupStops}
