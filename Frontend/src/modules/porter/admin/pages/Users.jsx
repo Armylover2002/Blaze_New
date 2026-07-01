@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect, useCallback } from "react";
 import {
-  Search, Users as UsersIcon, Eye, Pencil, Trash2, Star, Phone, Mail, MapPin,
+  Search, Users as UsersIcon, Eye, Star, Phone, Mail, MapPin,
   Wallet, Package, CheckCircle2, XCircle, ArrowUpDown, Loader2, User,
 } from "lucide-react";
 import {
@@ -29,12 +29,7 @@ const Users = () => {
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
   const [detailOpen, setDetailOpen] = useState(false);
-  const [editOpen, setEditOpen] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState(null);
   const [selected, setSelected] = useState(null);
-  const [form, setForm] = useState({});
-  const [errors, setErrors] = useState({});
-  const [saving, setSaving] = useState(false);
 
   const cities = useMemo(() => [...new Set(users.map((u) => u.city).filter(Boolean))], [users]);
 
@@ -72,43 +67,6 @@ const Users = () => {
   };
 
   const openDetail = (row) => { setSelected(row); setDetailOpen(true); };
-  const openEdit = (row) => { setSelected(row); setForm({ ...row }); setErrors({}); setEditOpen(true); };
-
-  const validate = () => {
-    const e = {};
-    if (!form.name?.trim()) e.name = "Name is required";
-    if (!form.email?.trim()) e.email = "Email is required";
-    if (!form.phone?.trim()) e.phone = "Phone is required";
-    setErrors(e);
-    return Object.keys(e).length === 0;
-  };
-
-  const handleSave = async () => {
-    if (!validate()) return;
-    setSaving(true);
-    try {
-      await porterAdminApi.updateUser(selected.id, form);
-      toast.success("User updated successfully");
-      setEditOpen(false);
-      fetchUsers();
-    } catch (err) {
-      toast.error(err?.response?.data?.message || "Failed to update user");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleDelete = async () => {
-    if (!deleteTarget?.id) return;
-    try {
-      await porterAdminApi.deleteUser(deleteTarget.id);
-      setDeleteTarget(null);
-      toast.success("User deleted");
-      fetchUsers();
-    } catch (err) {
-      toast.error(err?.response?.data?.message || "Failed to delete user");
-    }
-  };
 
   const sortableHeader = (label, key) => (
     <button type="button" className="inline-flex items-center gap-1" onClick={() => toggleSort(key)}>
@@ -142,8 +100,6 @@ const Users = () => {
       cell: (row) => (
         <div className="flex justify-end gap-1">
           <Button variant="ghost" size="sm" onClick={() => openDetail(row)}><Eye size={14} /></Button>
-          <Button variant="ghost" size="sm" onClick={() => openEdit(row)}><Pencil size={14} /></Button>
-          <Button variant="ghost" size="sm" className="text-red-500" onClick={() => setDeleteTarget(row)}><Trash2 size={14} /></Button>
         </div>
       ),
     },
@@ -264,54 +220,7 @@ const Users = () => {
         </DialogContent>
       </Dialog>
 
-      {/* Edit Dialog */}
-      <Dialog open={editOpen} onOpenChange={setEditOpen}>
-        <DialogContent className="blaze-theme-scope sm:max-w-[560px] p-0">
-          <DialogHeader className="px-6 py-4 border-b"><DialogTitle>Edit Customer</DialogTitle></DialogHeader>
-          <div className="px-6 py-4">
-            <FormLayout>
-              <FormSection>
-                <FormRow>
-                  <FormField label="Full Name" required error={errors.name}><Input value={form.name || ""} onChange={(e) => setForm({ ...form, name: e.target.value })} /></FormField>
-                  <FormField label="Phone" required error={errors.phone}><Input value={form.phone || ""} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></FormField>
-                </FormRow>
-                <FormField label="Email" required error={errors.email}><Input value={form.email || ""} onChange={(e) => setForm({ ...form, email: e.target.value })} /></FormField>
-                <FormField label="Address"><Input value={form.address || ""} onChange={(e) => setForm({ ...form, address: e.target.value })} /></FormField>
-                <FormRow>
-                  <FormField label="Verification">
-                    <select className={selectCls + " w-full"} value={form.verification || "pending"} onChange={(e) => setForm({ ...form, verification: e.target.value })}>
-                      <option value="verified">Verified</option>
-                      <option value="pending">Pending</option>
-                    </select>
-                  </FormField>
-                  <FormField label="Status">
-                    <select className={selectCls + " w-full"} value={form.status || "active"} onChange={(e) => setForm({ ...form, status: e.target.value })}>
-                      <option value="active">Active</option>
-                      <option value="inactive">Inactive</option>
-                    </select>
-                  </FormField>
-                </FormRow>
-              </FormSection>
-            </FormLayout>
-          </div>
-          <div className="px-6 py-4 border-t flex justify-end gap-2">
-            <Button variant="outline" onClick={() => setEditOpen(false)}>Cancel</Button>
-            <Button onClick={handleSave} disabled={saving}>{saving ? <><Loader2 className="animate-spin mr-1" size={14} /> Saving...</> : "Save"}</Button>
-          </div>
-        </DialogContent>
-      </Dialog>
 
-      {/* Delete Confirmation */}
-      <Dialog open={!!deleteTarget} onOpenChange={() => setDeleteTarget(null)}>
-        <DialogContent className="blaze-theme-scope sm:max-w-[400px]">
-          <DialogHeader><DialogTitle>Delete Customer</DialogTitle></DialogHeader>
-          <p className="text-sm">Delete <strong>{deleteTarget?.name}</strong>? This action cannot be undone.</p>
-          <div className="flex justify-end gap-2 mt-4">
-            <Button variant="outline" onClick={() => setDeleteTarget(null)}>Cancel</Button>
-            <Button className="bg-red-600 hover:bg-red-700" onClick={handleDelete}>Delete</Button>
-          </div>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 };

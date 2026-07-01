@@ -16,14 +16,45 @@ const zoneBodySchema = z.object({
     unit: z.enum(['kilometer', 'mile']).default('kilometer'),
     status: z.enum(['active', 'inactive']).optional(),
     coordinates: z.array(coordinateSchema).min(3, 'Draw a polygon with at least 3 points'),
-    polygon: z.string().optional(),
     displayOrder: z.coerce.number().int().min(0).optional(),
 });
 
-const normalizeCoordinates = (coords = []) => coords.map((c) => ({
-    lat: Number(c.lat ?? c.latitude),
-    lng: Number(c.lng ?? c.longitude),
-}));
+const normalizeCoordinates = (coords = []) => {
+    const parsed = coords.map((c) => ({
+        lat: Number(c.lat ?? c.latitude),
+        lng: Number(c.lng ?? c.longitude),
+    }));
+
+    for (const c of parsed) {
+        if (isNaN(c.lat) || isNaN(c.lng) || c.lat < -90 || c.lat > 90 || c.lng < -180 || c.lng > 180) {
+            throw new ValidationError('Invalid latitude or longitude values');
+        }
+    }
+
+    const uniquePoints = new Set();
+    const finalCoords = [];
+    
+    for (let i = 0; i < parsed.length; i++) {
+        const c = parsed[i];
+        if (i > 0 && c.lat === parsed[i - 1].lat && c.lng === parsed[i - 1].lng) {
+            throw new ValidationError('Duplicate consecutive points are not allowed');
+        }
+        uniquePoints.add(`${c.lat},${c.lng}`);
+        finalCoords.push(c);
+    }
+
+    if (uniquePoints.size < 3) {
+        throw new ValidationError('Polygon must have at least 3 unique points');
+    }
+
+    const first = finalCoords[0];
+    const last = finalCoords[finalCoords.length - 1];
+    if (first.lat !== last.lat || first.lng !== last.lng) {
+        finalCoords.push({ ...first });
+    }
+
+    return finalCoords;
+};
 
 export const validateCreateZoneDto = (body = {}) => {
     const result = zoneBodySchema.safeParse(body);
@@ -32,8 +63,6 @@ export const validateCreateZoneDto = (body = {}) => {
     }
 
     const coordinates = normalizeCoordinates(result.data.coordinates);
-    const polygon = result.data.polygon?.trim()
-        || `${coordinates.length}-point polygon`;
 
     return {
         ...result.data,
@@ -42,8 +71,7 @@ export const validateCreateZoneDto = (body = {}) => {
         unit: result.data.unit,
         status: result.data.status || 'active',
         coordinates,
-        polygon,
-        displayOrder: result.data.displayOrder ?? 0,
+        displayOrder: result.data.displayOrder,
     };
 };
 
@@ -54,14 +82,12 @@ export const validateUpdateZoneDto = (body = {}) => {
     }
 
     const data = { ...partial.data };
+    delete data.displayOrder;
+    
     if (data.name !== undefined) data.name = data.name.trim();
     if (data.country !== undefined) data.country = data.country.trim();
     if (Array.isArray(data.coordinates)) {
         data.coordinates = normalizeCoordinates(data.coordinates);
-        if (data.coordinates.length < 3) {
-            throw new ValidationError('Draw a polygon with at least 3 points');
-        }
-        data.polygon = data.polygon?.trim() || `${data.coordinates.length}-point polygon`;
     }
     return data;
 };

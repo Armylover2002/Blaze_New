@@ -39,6 +39,7 @@ const STATUS_ALIASES = {
   danger: "danger",
   error: "danger",
   refunded: "danger",
+  expired: "danger",
 
   info: "info",
   scheduled: "info",

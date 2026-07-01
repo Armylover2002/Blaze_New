@@ -1,6 +1,6 @@
-import React, { useMemo, useState, useEffect, useCallback } from "react";
+import React, { useMemo, useState, useEffect, useCallback, useRef } from "react";
 import {
-  Plus, Search, Ticket, Eye, Pencil, Trash2, Percent, IndianRupee, Upload, Loader2,
+  Plus, Search, Ticket, Eye, Pencil, Trash2, Percent, IndianRupee, Loader2,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -10,20 +10,102 @@ import {
 import Button from "@/shared/components/ui/Button";
 import Input from "@/shared/components/ui/Input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import {
-  MOCK_COUPON_USAGE, getCouponSummary,
-  DISCOUNT_TYPES, VEHICLE_TYPES, ZONE_OPTIONS,
-} from "../utils/mock/coupons";
+import { DISCOUNT_TYPES } from "../utils/mock/coupons";
 import porterAdminApi from "../services/adminApi";
 import { formatCurrency, formatDateTime } from "../utils/porterTableHelpers";
 
 const EMPTY_COUPON = {
-  code: "", name: "", description: "", discountType: "percentage", discountValue: 10,
-  maxDiscount: 100, minOrderValue: 100, maxUses: 1000, perUserLimit: 1,
-  validFrom: "", validUntil: "", firstOrderOnly: false, newCustomerOnly: false,
-  active: true, autoApply: false, zones: ["All Zones"], vehicleTypes: ["All"],
-  customerSegment: "All Customers", status: "active",
-  image: null, banner: null, usedCount: 0, campaignRevenue: 0, totalDiscountGiven: 0,
+  code: "",
+  name: "",
+  description: "",
+  discountType: "percentage",
+  discountValue: 10,
+  maxDiscount: 100,
+  minOrderValue: 100,
+  maxUses: 1000,
+  perUserLimit: 1,
+  validFrom: "",
+  validUntil: "",
+  firstOrderOnly: false,
+  newCustomerOnly: false,
+  autoApply: false,
+  status: "active",
+  zoneIds: [],
+  vehicleIds: [],
+};
+
+const toLocalDateTime = (value) => {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const offset = date.getTimezoneOffset();
+  const local = new Date(date.getTime() - offset * 60000);
+  return local.toISOString().slice(0, 16);
+};
+
+const extractRelationIds = (items = []) => (
+  (items || []).map((item) => (typeof item === "object" ? item.id : item)).filter(Boolean)
+);
+
+const mapCouponToForm = (row) => ({
+  code: row.code || "",
+  name: row.name || "",
+  description: row.description || "",
+  discountType: row.discountType || "percentage",
+  discountValue: row.discountValue ?? 10,
+  maxDiscount: row.maxDiscount ?? 0,
+  minOrderValue: row.minOrderValue ?? 0,
+  maxUses: row.maxUses ?? 1,
+  perUserLimit: row.perUserLimit ?? 1,
+  validFrom: toLocalDateTime(row.validFrom),
+  validUntil: toLocalDateTime(row.validUntil),
+  firstOrderOnly: Boolean(row.firstOrderOnly),
+  newCustomerOnly: Boolean(row.newCustomerOnly),
+  autoApply: Boolean(row.autoApply),
+  status: row.status === "inactive" ? "inactive" : "active",
+  zoneIds: extractRelationIds(row.zones),
+  vehicleIds: extractRelationIds(row.vehicles),
+});
+
+const buildCouponPayload = (form) => {
+  const payload = {
+    code: form.code.trim(),
+    name: form.name.trim(),
+    description: (form.description || "").trim(),
+    discountType: form.discountType,
+    discountValue: Number(form.discountValue),
+    maxDiscount: Number(form.maxDiscount || 0),
+    minOrderValue: Number(form.minOrderValue || 0),
+    maxUses: Number(form.maxUses),
+    perUserLimit: Number(form.perUserLimit),
+    validFrom: new Date(form.validFrom).toISOString(),
+    validUntil: new Date(form.validUntil).toISOString(),
+    firstOrderOnly: Boolean(form.firstOrderOnly),
+    newCustomerOnly: Boolean(form.newCustomerOnly),
+    autoApply: Boolean(form.autoApply),
+    zoneIds: form.zoneIds || [],
+    vehicleIds: form.vehicleIds || [],
+  };
+
+  if (form.status === "inactive") {
+    payload.status = "inactive";
+  }
+
+  return payload;
+};
+
+const formatZoneLabel = (zoneIds = [], zoneOptions = []) => {
+  if (!zoneIds.length) return "All Zones";
+  return zoneIds
+    .map((id) => zoneOptions.find((z) => z.id === id)?.name || id)
+    .join(", ");
+};
+
+const formatVehicleLabel = (vehicleIds = [], vehicleOptions = []) => {
+  if (!vehicleIds.length) return "All Vehicles";
+  return vehicleIds
+    .map((id) => vehicleOptions.find((v) => v.id === id)?.name || id)
+    .join(", ");
 };
 
 const Coupons = () => {
@@ -45,8 +127,64 @@ const Coupons = () => {
   const [form, setForm] = useState(EMPTY_COUPON);
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [zoneOptions, setZoneOptions] = useState([]);
+  const [vehicleOptions, setVehicleOptions] = useState([]);
+  const [summary, setSummary] = useState({
+    total: 0,
+    active: 0,
+    scheduled: 0,
+    expired: 0,
+    inactive: 0,
+    totalRedemption: 0,
+    totalDiscountGiven: 0,
+    campaignRevenue: 0,
+  });
 
-  const summary = useMemo(() => getCouponSummary(coupons), [coupons]);
+  const submitLockRef = useRef(false);
+
+  useEffect(() => {
+    let active = true;
+    Promise.all([
+      porterAdminApi.getZoneDropdown(),
+      porterAdminApi.getVehicleDropdown(),
+    ])
+      .then(([zones, vehicles]) => {
+        if (!active) return;
+        setZoneOptions((zones || []).map((z) => ({ id: z.id, name: z.name })));
+        setVehicleOptions((vehicles || []).map((v) => ({
+          id: v.id,
+          name: v.name,
+          category: v.category,
+        })));
+      })
+      .catch(() => {
+        if (active) {
+          setZoneOptions([]);
+          setVehicleOptions([]);
+        }
+      });
+    return () => { active = false; };
+  }, []);
+
+  const fetchSummary = useCallback(async () => {
+    try {
+      const data = await porterAdminApi.getCouponSummary();
+      setSummary({
+        total: data.total || 0,
+        active: data.active || 0,
+        scheduled: data.scheduled || 0,
+        expired: data.expired || 0,
+        inactive: data.inactive || 0,
+        totalRedemption: data.totalRedemption || 0,
+        totalDiscountGiven: data.totalDiscountGiven || 0,
+        campaignRevenue: data.campaignRevenue || 0,
+      });
+    } catch {
+      // Summary failure should not block the page
+    }
+  }, []);
 
   const fetchCoupons = useCallback(async () => {
     setLoading(true);
@@ -71,15 +209,45 @@ const Coupons = () => {
   }, [page, pageSize, search, statusFilter, typeFilter, sortKey, sortDir]);
 
   useEffect(() => {
+    fetchSummary();
+  }, [fetchSummary]);
+
+  useEffect(() => {
     fetchCoupons();
   }, [fetchCoupons]);
 
-  const pageItems = coupons;
+  const closeForm = useCallback(() => {
+    setFormOpen(false);
+    setEditing(null);
+    setForm({ ...EMPTY_COUPON });
+    setErrors({});
+    submitLockRef.current = false;
+  }, []);
+
+  const resolveFormRelations = (row, mapped) => {
+    const next = { ...mapped };
+    if (!next.zoneIds.length && row.zones?.length) {
+      next.zoneIds = row.zones
+        .map((zone) => zone.id || zoneOptions.find((option) => option.name === zone.name)?.id)
+        .filter(Boolean);
+    }
+    if (!next.vehicleIds.length && row.vehicles?.length) {
+      next.vehicleIds = row.vehicles
+        .map((vehicle) => vehicle.id || vehicleOptions.find((option) => option.name === vehicle.name)?.id)
+        .filter(Boolean);
+    }
+    return next;
+  };
 
   const openForm = (row = null) => {
     setEditing(row);
-    setForm(row ? { ...row, validFrom: row.validFrom?.slice(0, 16) || "", validUntil: row.validUntil?.slice(0, 16) || "" } : EMPTY_COUPON);
+    if (row) {
+      setForm(resolveFormRelations(row, mapCouponToForm(row)));
+    } else {
+      setForm({ ...EMPTY_COUPON });
+    }
     setErrors({});
+    submitLockRef.current = false;
     setFormOpen(true);
   };
 
@@ -88,31 +256,69 @@ const Coupons = () => {
     setDetailOpen(true);
   };
 
+  const toggleZone = (zoneId) => {
+    setForm((prev) => {
+      const current = Array.isArray(prev.zoneIds) ? prev.zoneIds : [];
+      const next = current.includes(zoneId)
+        ? current.filter((id) => id !== zoneId)
+        : [...current, zoneId];
+      return { ...prev, zoneIds: next };
+    });
+  };
+
+  const selectAllZones = () => {
+    setForm((prev) => ({ ...prev, zoneIds: [] }));
+  };
+
+  const toggleVehicle = (vehicleId) => {
+    setForm((prev) => {
+      const current = Array.isArray(prev.vehicleIds) ? prev.vehicleIds : [];
+      const next = current.includes(vehicleId)
+        ? current.filter((id) => id !== vehicleId)
+        : [...current, vehicleId];
+      return { ...prev, vehicleIds: next };
+    });
+  };
+
+  const selectAllVehicles = () => {
+    setForm((prev) => ({ ...prev, vehicleIds: [] }));
+  };
+
   const validate = () => {
     const e = {};
     if (!form.code.trim()) e.code = "Coupon code is required";
     if (!form.name.trim()) e.name = "Coupon name is required";
     if (!form.discountValue || Number(form.discountValue) <= 0) e.discountValue = "Valid discount required";
+    if (form.discountType === "percentage" && Number(form.discountValue) > 100) {
+      e.discountValue = "Percentage cannot exceed 100";
+    }
+    if (form.discountType === "percentage" && (!form.maxDiscount || Number(form.maxDiscount) <= 0)) {
+      e.maxDiscount = "Maximum discount is required for percentage coupons";
+    }
+    if (form.discountType === "flat") {
+      if (Number(form.discountValue) > Number(form.minOrderValue)) {
+        e.discountValue = "Flat discount cannot exceed minimum order value";
+      }
+    }
+    if (!form.maxUses || Number(form.maxUses) < 1) e.maxUses = "Usage limit must be at least 1";
+    if (!form.perUserLimit || Number(form.perUserLimit) < 1) e.perUserLimit = "Per user limit must be at least 1";
     if (!form.validFrom) e.validFrom = "Start date required";
     if (!form.validUntil) e.validUntil = "End date required";
+    if (form.validFrom && form.validUntil && new Date(form.validUntil) <= new Date(form.validFrom)) {
+      e.validUntil = "End date must be after start date";
+    }
     setErrors(e);
     return Object.keys(e).length === 0;
   };
 
   const handleSave = async () => {
+    if (submitLockRef.current || saving) return;
     if (!validate()) return;
+
+    submitLockRef.current = true;
     setSaving(true);
     try {
-      const payload = {
-        ...form,
-        discountValue: Number(form.discountValue),
-        maxDiscount: Number(form.maxDiscount),
-        minOrderValue: Number(form.minOrderValue),
-        maxUses: Number(form.maxUses),
-        perUserLimit: Number(form.perUserLimit),
-        validFrom: new Date(form.validFrom).toISOString(),
-        validUntil: new Date(form.validUntil).toISOString(),
-      };
+      const payload = buildCouponPayload(form);
       if (editing?.id) {
         await porterAdminApi.updateCoupon(editing.id, payload);
         toast.success("Coupon updated successfully");
@@ -120,29 +326,33 @@ const Coupons = () => {
         await porterAdminApi.createCoupon(payload);
         toast.success("Coupon created successfully");
       }
-      setFormOpen(false);
-      fetchCoupons();
+      closeForm();
+      await Promise.all([fetchCoupons(), fetchSummary()]);
     } catch (err) {
       toast.error(err?.response?.data?.message || "Failed to save coupon");
+      submitLockRef.current = false;
     } finally {
       setSaving(false);
     }
   };
 
-  const handleDelete = async (id) => {
-    if (!window.confirm("Delete this coupon?")) return;
+  const handleDelete = async () => {
+    if (!deleteTarget?.id || deletingId) return;
+
+    setDeletingId(deleteTarget.id);
     try {
-      await porterAdminApi.deleteCoupon(id);
-      toast.success("Coupon removed");
-      fetchCoupons();
+      await porterAdminApi.deleteCoupon(deleteTarget.id);
+      toast.success("Coupon deleted");
+      await Promise.all([fetchCoupons(), fetchSummary()]);
     } catch (err) {
       toast.error(err?.response?.data?.message || "Failed to delete coupon");
+    } finally {
+      setDeletingId(null);
+      setDeleteTarget(null);
     }
   };
 
-  const detailUsage = detail ? MOCK_COUPON_USAGE.filter((u) => u.couponId === detail.id) : [];
-
-  const columns = [
+  const columns = useMemo(() => [
     { key: "code", header: "Coupon Code", cell: (row) => <span className="font-mono font-semibold text-primary">{row.code}</span> },
     { key: "name", header: "Coupon Name", cell: (row) => <span className="font-medium">{row.name}</span> },
     { key: "discountType", header: "Discount Type", cell: (row) => <StatusBadge status={row.discountType === "percentage" ? "info" : "primary"} label={row.discountType} /> },
@@ -161,11 +371,18 @@ const Coupons = () => {
         <div className="flex items-center justify-end gap-1">
           <Button variant="ghost" size="sm" onClick={() => openDetail(row)}><Eye size={14} /></Button>
           <Button variant="ghost" size="sm" onClick={() => openForm(row)}><Pencil size={14} /></Button>
-          <Button variant="ghost" size="sm" onClick={() => handleDelete(row.id)}><Trash2 size={14} className="text-red-500" /></Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={deletingId === row.id}
+            onClick={() => setDeleteTarget(row)}
+          >
+            {deletingId === row.id ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} className="text-red-500" />}
+          </Button>
         </div>
       ),
     },
-  ];
+  ], [deletingId]);
 
   const selectCls = "w-full h-10 px-3 bg-white border border-gray-200 rounded-lg text-sm outline-none focus:border-red-500 focus:ring-4 focus:ring-red-500/10";
 
@@ -178,10 +395,10 @@ const Coupons = () => {
       />
 
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
-        <StatCard title="Total Coupons" value={String(summary.totalCoupons)} icon={<Ticket size={18} />} />
-        <StatCard title="Active" value={String(summary.activeCoupons)} />
-        <StatCard title="Expired" value={String(summary.expiredCoupons)} />
-        <StatCard title="Scheduled" value={String(summary.scheduledCoupons)} />
+        <StatCard title="Total Coupons" value={String(summary.total)} icon={<Ticket size={18} />} />
+        <StatCard title="Active" value={String(summary.active)} />
+        <StatCard title="Expired" value={String(summary.expired)} />
+        <StatCard title="Scheduled" value={String(summary.scheduled)} />
         <StatCard title="Total Redemption" value={summary.totalRedemption.toLocaleString()} />
         <StatCard title="Discount Given" value={formatCurrency(summary.totalDiscountGiven)} icon={<Percent size={18} />} />
         <StatCard title="Campaign Revenue" value={formatCurrency(summary.campaignRevenue)} icon={<IndianRupee size={18} />} />
@@ -211,74 +428,144 @@ const Coupons = () => {
               </>
             }
           />
-          <AdminTable columns={columns} data={pageItems} getRowId={(r) => r.id} loading={loading}
+          <AdminTable columns={columns} data={coupons} getRowId={(r) => r.id} loading={loading}
             pagination={{ page, totalPages, total, pageSize, onPageChange: setPage, onPageSizeChange: (s) => { setPageSize(s); setPage(1); } }}
           />
         </div>
       </SectionCard>
 
-      {/* Create/Edit Dialog */}
-      <Dialog open={formOpen} onOpenChange={setFormOpen}>
+      <Dialog open={formOpen} onOpenChange={(open) => { if (!open) closeForm(); else setFormOpen(true); }}>
         <DialogContent className="blaze-theme-scope sm:max-w-[700px] p-0">
           <DialogHeader className="px-6 py-4 border-b"><DialogTitle>{editing ? "Edit Coupon" : "Create Coupon"}</DialogTitle></DialogHeader>
           <div className="px-6 py-4 max-h-[70vh] overflow-y-auto">
-            <FormLayout>
+            <FormLayout onSubmit={(e) => { e.preventDefault(); handleSave(); }}>
               <FormSection title="Basic Details">
                 <FormRow>
                   <FormField label="Coupon Code" required error={errors.code}>
-                    <Input value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value.toUpperCase() })} placeholder="BLAZE50" />
+                    <Input value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value.toUpperCase() })} placeholder="BLAZE50" disabled={saving} />
                   </FormField>
                   <FormField label="Coupon Name" required error={errors.name}>
-                    <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+                    <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} disabled={saving} />
                   </FormField>
                 </FormRow>
                 <FormField label="Description">
-                  <Input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+                  <Input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} disabled={saving} />
                 </FormField>
               </FormSection>
               <FormSection title="Discount Configuration">
                 <FormRow>
                   <FormField label="Discount Type">
-                    <select className={selectCls} value={form.discountType} onChange={(e) => setForm({ ...form, discountType: e.target.value })}>
+                    <select className={selectCls} value={form.discountType} onChange={(e) => setForm({ ...form, discountType: e.target.value })} disabled={saving}>
                       {DISCOUNT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
                     </select>
                   </FormField>
                   <FormField label="Discount Value" required error={errors.discountValue}>
-                    <Input type="number" value={form.discountValue} onChange={(e) => setForm({ ...form, discountValue: e.target.value })} />
+                    <Input type="number" value={form.discountValue} onChange={(e) => setForm({ ...form, discountValue: e.target.value })} disabled={saving} />
                   </FormField>
                 </FormRow>
                 <FormRow>
-                  <FormField label="Maximum Discount"><Input type="number" value={form.maxDiscount} onChange={(e) => setForm({ ...form, maxDiscount: e.target.value })} /></FormField>
-                  <FormField label="Minimum Order Value"><Input type="number" value={form.minOrderValue} onChange={(e) => setForm({ ...form, minOrderValue: e.target.value })} /></FormField>
+                  <FormField label="Maximum Discount" error={errors.maxDiscount}><Input type="number" value={form.discountType === 'flat' ? form.discountValue : form.maxDiscount} onChange={(e) => setForm({ ...form, maxDiscount: e.target.value })} disabled={saving || form.discountType === 'flat'} /></FormField>
+                  <FormField label="Minimum Order Value"><Input type="number" value={form.minOrderValue} onChange={(e) => setForm({ ...form, minOrderValue: e.target.value })} disabled={saving} /></FormField>
                 </FormRow>
                 <FormRow>
-                  <FormField label="Maximum Uses"><Input type="number" value={form.maxUses} onChange={(e) => setForm({ ...form, maxUses: e.target.value })} /></FormField>
-                  <FormField label="Per User Limit"><Input type="number" value={form.perUserLimit} onChange={(e) => setForm({ ...form, perUserLimit: e.target.value })} /></FormField>
+                  <FormField label="Maximum Uses" error={errors.maxUses}><Input type="number" value={form.maxUses} onChange={(e) => setForm({ ...form, maxUses: e.target.value })} disabled={saving} /></FormField>
+                  <FormField label="Per User Limit" error={errors.perUserLimit}><Input type="number" value={form.perUserLimit} onChange={(e) => setForm({ ...form, perUserLimit: e.target.value })} disabled={saving} /></FormField>
                 </FormRow>
               </FormSection>
               <FormSection title="Validity & Rules">
                 <FormRow>
-                  <FormField label="Valid From" required error={errors.validFrom}><Input type="datetime-local" value={form.validFrom} onChange={(e) => setForm({ ...form, validFrom: e.target.value })} /></FormField>
-                  <FormField label="Valid To" required error={errors.validUntil}><Input type="datetime-local" value={form.validUntil} onChange={(e) => setForm({ ...form, validUntil: e.target.value })} /></FormField>
+                  <FormField label="Valid From" required error={errors.validFrom}><Input type="datetime-local" value={form.validFrom} onChange={(e) => setForm({ ...form, validFrom: e.target.value })} disabled={saving} /></FormField>
+                  <FormField label="Valid To" required error={errors.validUntil}><Input type="datetime-local" value={form.validUntil} onChange={(e) => setForm({ ...form, validUntil: e.target.value })} disabled={saving} /></FormField>
                 </FormRow>
                 <div className="flex flex-wrap gap-4">
-                  <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.firstOrderOnly} onChange={(e) => setForm({ ...form, firstOrderOnly: e.target.checked })} /> First Order Only</label>
-                  <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.newCustomerOnly} onChange={(e) => setForm({ ...form, newCustomerOnly: e.target.checked })} /> New Customer Only</label>
-                  <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} /> Active</label>
-                  <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.autoApply} onChange={(e) => setForm({ ...form, autoApply: e.target.checked })} /> Auto Apply</label>
+                  <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.firstOrderOnly} onChange={(e) => setForm({ ...form, firstOrderOnly: e.target.checked })} disabled={saving} /> First Order Only</label>
+                  <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.newCustomerOnly} onChange={(e) => setForm({ ...form, newCustomerOnly: e.target.checked })} disabled={saving} /> New Customer Only</label>
+                  <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.autoApply} onChange={(e) => setForm({ ...form, autoApply: e.target.checked })} disabled={saving} /> Auto Apply</label>
                 </div>
               </FormSection>
               <FormSection title="Applicability">
-                <FormField label="Applicable Zones">
-                  <select className={selectCls} multiple value={form.zones} onChange={(e) => setForm({ ...form, zones: Array.from(e.target.selectedOptions, (o) => o.value) })}>
-                    {ZONE_OPTIONS.map((z) => <option key={z} value={z}>{z}</option>)}
-                  </select>
+                <FormField label="Applicable Zones" hint="Empty selection means the coupon applies to all zones.">
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={selectAllZones}
+                      disabled={saving}
+                      className={
+                        "rounded-full border px-3 py-1.5 text-sm font-medium transition-colors " +
+                        (!form.zoneIds.length
+                          ? "border-red-500 bg-red-50 text-red-600"
+                          : "border-gray-200 bg-white text-gray-600 hover:border-gray-300")
+                      }
+                    >
+                      All Zones
+                    </button>
+                    {zoneOptions.map((zone) => {
+                      const selected = form.zoneIds.includes(zone.id);
+                      return (
+                        <button
+                          key={zone.id}
+                          type="button"
+                          onClick={() => toggleZone(zone.id)}
+                          disabled={saving}
+                          className={
+                            "rounded-full border px-3 py-1.5 text-sm font-medium transition-colors " +
+                            (selected
+                              ? "border-red-500 bg-red-50 text-red-600"
+                              : "border-gray-200 bg-white text-gray-600 hover:border-gray-300")
+                          }
+                        >
+                          {zone.name}
+                        </button>
+                      );
+                    })}
+                    {!zoneOptions.length && (
+                      <span className="text-sm text-muted-foreground">No active zones available.</span>
+                    )}
+                  </div>
                 </FormField>
-                <FormField label="Status">
-                  <select className={selectCls} value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
-                    <option value="active">Active</option>
-                    <option value="scheduled">Scheduled</option>
-                    <option value="inactive">Inactive</option>
+                <FormField label="Applicable Vehicles" hint="Empty selection means the coupon applies to all vehicles.">
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={selectAllVehicles}
+                      disabled={saving}
+                      className={
+                        "rounded-full border px-3 py-1.5 text-sm font-medium transition-colors " +
+                        (!form.vehicleIds.length
+                          ? "border-red-500 bg-red-50 text-red-600"
+                          : "border-gray-200 bg-white text-gray-600 hover:border-gray-300")
+                      }
+                    >
+                      All Vehicles
+                    </button>
+                    {vehicleOptions.map((vehicle) => {
+                      const selected = form.vehicleIds.includes(vehicle.id);
+                      return (
+                        <button
+                          key={vehicle.id}
+                          type="button"
+                          onClick={() => toggleVehicle(vehicle.id)}
+                          disabled={saving}
+                          className={
+                            "rounded-full border px-3 py-1.5 text-sm font-medium transition-colors " +
+                            (selected
+                              ? "border-red-500 bg-red-50 text-red-600"
+                              : "border-gray-200 bg-white text-gray-600 hover:border-gray-300")
+                          }
+                        >
+                          {vehicle.name}
+                        </button>
+                      );
+                    })}
+                    {!vehicleOptions.length && (
+                      <span className="text-sm text-muted-foreground">No active vehicles available.</span>
+                    )}
+                  </div>
+                </FormField>
+                <FormField label="Status" hint="Lifecycle (Scheduled / Active / Expired) is managed automatically from validity dates.">
+                  <select className={selectCls} value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })} disabled={saving}>
+                    <option value="active">Enabled</option>
+                    <option value="inactive">Disabled (Inactive)</option>
                   </select>
                 </FormField>
               </FormSection>
@@ -291,18 +578,22 @@ const Coupons = () => {
                     {form.discountType === "percentage" ? `${form.discountValue || 0}% off` : `${formatCurrency(form.discountValue || 0)} off`}
                     {form.minOrderValue ? ` · Min order ${formatCurrency(form.minOrderValue)}` : ""}
                   </p>
+                  <p className="text-xs text-muted-foreground mt-2">
+                    Zones: {formatZoneLabel(form.zoneIds, zoneOptions)} · Vehicles: {formatVehicleLabel(form.vehicleIds, vehicleOptions)}
+                  </p>
                 </div>
               </FormSection>
             </FormLayout>
           </div>
           <div className="px-6 py-4 border-t flex justify-end gap-2">
-            <Button variant="outline" onClick={() => setFormOpen(false)}>Cancel</Button>
-            <Button onClick={handleSave} disabled={saving}>{saving ? <><Loader2 size={14} className="animate-spin mr-1" /> Saving...</> : "Save Coupon"}</Button>
+            <Button variant="outline" onClick={closeForm} disabled={saving}>Cancel</Button>
+            <Button onClick={handleSave} disabled={saving}>
+              {saving ? <><Loader2 size={14} className="animate-spin mr-1" /> Saving...</> : editing ? "Update Coupon" : "Save Coupon"}
+            </Button>
           </div>
         </DialogContent>
       </Dialog>
 
-      {/* Details Drawer (Dialog) */}
       <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
         <DialogContent className="blaze-theme-scope sm:max-w-[650px] p-0">
           <DialogHeader className="px-6 py-4 border-b"><DialogTitle>Coupon Details — {detail?.code}</DialogTitle></DialogHeader>
@@ -313,39 +604,38 @@ const Coupons = () => {
                 <div><p className="text-xs text-muted-foreground">Status</p><StatusBadge status={detail.status} /></div>
                 <div><p className="text-xs text-muted-foreground">Discount</p><p className="font-semibold">{detail.discountType === "percentage" ? `${detail.discountValue}%` : formatCurrency(detail.discountValue)}</p></div>
                 <div><p className="text-xs text-muted-foreground">Used / Limit</p><p className="font-semibold">{detail.usedCount} / {detail.maxUses}</p></div>
+                <div><p className="text-xs text-muted-foreground">Zones</p><p className="font-semibold">{detail.zones?.length ? detail.zones.map((z) => z.name).join(", ") : "All Zones"}</p></div>
+                <div><p className="text-xs text-muted-foreground">Vehicles</p><p className="font-semibold">{detail.vehicles?.length ? detail.vehicles.map((v) => v.name).join(", ") : "All Vehicles"}</p></div>
                 <div><p className="text-xs text-muted-foreground">Campaign Revenue</p><p className="font-semibold">{formatCurrency(detail.campaignRevenue)}</p></div>
                 <div><p className="text-xs text-muted-foreground">Total Discount Given</p><p className="font-semibold">{formatCurrency(detail.totalDiscountGiven)}</p></div>
               </div>
-              <SectionCard title="Usage History" flush>
-                <div className="p-4">
-                  {detailUsage.length > 0 ? (
-                    <table className="w-full text-sm">
-                      <thead><tr className="border-b text-left text-muted-foreground"><th className="pb-2">Order</th><th className="pb-2">Customer</th><th className="pb-2">Discount</th><th className="pb-2">Date</th></tr></thead>
-                      <tbody>
-                        {detailUsage.map((u) => (
-                          <tr key={u.id} className="border-b last:border-0">
-                            <td className="py-2 font-mono">{u.orderId}</td>
-                            <td className="py-2">{u.customer}</td>
-                            <td className="py-2">{formatCurrency(u.discount)}</td>
-                            <td className="py-2 text-muted-foreground">{formatDateTime(u.usedAt)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  ) : (
-                    <p className="text-sm text-muted-foreground text-center py-4">No usage recorded yet for this coupon.</p>
-                  )}
-                </div>
-              </SectionCard>
               <SectionCard title="Campaign Performance">
                 <div className="grid grid-cols-3 gap-4 text-center">
-                  <div className="rounded-lg bg-muted/50 p-3"><p className="text-xs text-muted-foreground">Redemption Rate</p><p className="text-lg font-bold">{((detail.usedCount / detail.maxUses) * 100).toFixed(1)}%</p></div>
+                  <div className="rounded-lg bg-muted/50 p-3"><p className="text-xs text-muted-foreground">Redemption Rate</p><p className="text-lg font-bold">{detail.maxUses ? ((detail.usedCount / detail.maxUses) * 100).toFixed(1) : "0.0"}%</p></div>
                   <div className="rounded-lg bg-muted/50 p-3"><p className="text-xs text-muted-foreground">Avg Order Value</p><p className="text-lg font-bold">{detail.usedCount ? formatCurrency(Math.round(detail.campaignRevenue / detail.usedCount)) : "—"}</p></div>
-                  <div className="rounded-lg bg-muted/50 p-3"><p className="text-xs text-muted-foreground">ROI</p><p className="text-lg font-bold">{detail.totalDiscountGiven ? ((detail.campaignRevenue / detail.totalDiscountGiven) * 100).toFixed(0) + "%" : "—"}</p></div>
+                  <div className="rounded-lg bg-muted/50 p-3"><p className="text-xs text-muted-foreground">ROI</p><p className="text-lg font-bold">{detail.totalDiscountGiven ? `${((detail.campaignRevenue / detail.totalDiscountGiven) * 100).toFixed(0)}%` : "—"}</p></div>
                 </div>
               </SectionCard>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+      <Dialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}>
+        <DialogContent className="blaze-theme-scope sm:max-w-[425px] p-0 overflow-hidden bg-white">
+          <DialogHeader className="px-6 py-4 border-b border-gray-100 bg-gray-50">
+            <DialogTitle className="text-red-600 font-bold">Delete Coupon</DialogTitle>
+          </DialogHeader>
+          <div className="p-6">
+            <p className="text-sm text-gray-600 leading-relaxed mb-6">
+              Are you sure you want to permanently delete the coupon <strong className="text-gray-900">{deleteTarget?.code}</strong>? This action cannot be undone and will remove it from the database.
+            </p>
+            <div className="flex justify-end gap-3">
+              <Button variant="outline" onClick={() => setDeleteTarget(null)} disabled={!!deletingId}>Cancel</Button>
+              <Button className="bg-red-600 hover:bg-red-700 text-white" onClick={handleDelete} disabled={!!deletingId}>
+                {deletingId ? <><Loader2 className="animate-spin mr-1" size={14} /> Deleting...</> : "Delete"}
+              </Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

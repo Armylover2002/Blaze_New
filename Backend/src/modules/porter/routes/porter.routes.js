@@ -59,14 +59,27 @@ import {
 import {
     listPorterUsers,
     getPorterUserById,
-    updatePorterUser,
-    deletePorterUser,
 } from '../controllers/user.controller.js';
+
+import { getPublicHomeData } from '../controllers/home.controller.js';
+import {
+    reverseGeocode,
+    getPlaceDetails,
+    getRoutePreview,
+    getQuotePreview,
+} from '../controllers/maps.controller.js';
 
 const router = express.Router();
 const adminOrEmployee = [authMiddleware, requireRoles('ADMIN', 'EMPLOYEE')];
 
 router.get('/health', (_req, res) => res.json({ success: true, module: 'porter', status: 'ok' }));
+
+// Public customer endpoints
+router.get('/home', getPublicHomeData);
+router.get('/maps/reverse-geocode', reverseGeocode);
+router.get('/maps/place-details', getPlaceDetails);
+router.post('/maps/route-preview', getRoutePreview);
+router.post('/maps/quote-preview', getQuotePreview);
 
 // Zones
 router.get('/admin/zones/dropdown', ...adminOrEmployee, checkPermission('porter::zones', 'view'), listZoneDropdown);
@@ -119,7 +132,5 @@ router.delete('/admin/banners/:id', ...adminOrEmployee, checkPermission('porter:
 // Users (FoodUser listing)
 router.get('/admin/users', ...adminOrEmployee, checkPermission('porter::users', 'view'), listPorterUsers);
 router.get('/admin/users/:id', ...adminOrEmployee, checkPermission('porter::users', 'view'), getPorterUserById);
-router.put('/admin/users/:id', ...adminOrEmployee, checkPermission('porter::users', 'edit'), updatePorterUser);
-router.delete('/admin/users/:id', ...adminOrEmployee, checkPermission('porter::users', 'delete'), deletePorterUser);
 
 export default router;

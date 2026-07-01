@@ -1,11 +1,11 @@
 import { PorterVehicle } from '../models/porterVehicle.model.js';
 import { PorterPricing } from '../models/porterPricing.model.js';
-import { NotFoundError, ValidationError } from '../../../core/auth/errors.js';
+import { NotFoundError, ValidationError, ConflictError } from '../../../core/auth/errors.js';
 import { resolveActionPerformerSnapshot } from '../../../core/utils/performer.js';
 import { uploadBufferDetailed } from '../../../services/cloudinary.service.js';
 import { v2 as cloudinary } from 'cloudinary';
 import { parseListQuery, buildDateRangeFilter, toPorterPagination, escapeRegex } from '../utils/pagination.util.js';
-import { mapVehicle } from '../utils/mappers.util.js';
+import { mapVehicle, mapPublicVehicle } from '../utils/mappers.util.js';
 import {
     validateCreateVehicleDto,
     validateUpdateVehicleDto,
@@ -19,23 +19,12 @@ import { generateVehicleCode } from '../utils/vehicleCode.util.js';
 const baseFilter = { isDeleted: { $ne: true } };
 
 const buildSort = (sortBy, sortOrder) => {
-    const allowed = ['name', 'category', 'status', 'displayOrder', 'vehicleCode', 'minWeight', 'maxWeight', 'createdAt'];
+    const allowed = ['name', 'category', 'status', 'displayOrder', 'vehicleCode', 'minWeight', 'maxWeight', 'createdAt', 'updatedAt'];
     const key = allowed.includes(sortBy) ? sortBy : 'displayOrder';
     return { [key]: sortOrder };
 };
 
-async function attachPricingMap(vehicleDocs = []) {
-    const ids = vehicleDocs.map((v) => v._id);
-    if (!ids.length) return new Map();
 
-    const pricingDocs = await PorterPricing.find({
-        vehicleId: { $in: ids },
-        isDeleted: { $ne: true },
-        zoneId: null,
-    }).lean();
-
-    return new Map(pricingDocs.map((p) => [String(p.vehicleId), p]));
-}
 
 export async function listVehicles(query = {}) {
     validateListQuery(query);
@@ -44,6 +33,13 @@ export async function listVehicles(query = {}) {
 
     if (parsed.status) filter.status = parsed.status;
     if (parsed.category) filter.category = parsed.category;
+
+    if (query.supportedServices) {
+        const svcs = typeof query.supportedServices === 'string' ? query.supportedServices.split(',') : query.supportedServices;
+        if (Array.isArray(svcs) && svcs.length > 0) {
+            filter.supportedServices = { $in: svcs };
+        }
+    }
 
     if (parsed.search) {
         const term = escapeRegex(parsed.search);
@@ -69,8 +65,7 @@ export async function listVehicles(query = {}) {
         PorterVehicle.countDocuments(filter),
     ]);
 
-    const pricing = await attachPricingMap(docs);
-    const records = docs.map((doc) => mapVehicle(doc, pricing.get(String(doc._id)) || null));
+    const records = docs.map((doc) => mapVehicle(doc));
 
     return toPorterPagination({ docs: records, total, page: parsed.page, limit: parsed.limit });
 }
@@ -80,18 +75,20 @@ export async function getVehicleById(id) {
     const doc = await PorterVehicle.findOne({ _id: vehicleId, ...baseFilter }).lean();
     if (!doc) throw new NotFoundError('Vehicle not found');
 
-    const pricing = await PorterPricing.findOne({
-        vehicleId: doc._id,
-        zoneId: null,
-        isDeleted: { $ne: true },
-    }).lean();
-
-    return mapVehicle(doc, pricing);
+    return mapVehicle(doc);
 }
 
 export async function createVehicle(body, reqUser, file = null) {
     const payload = validateCreateVehicleDto(body);
     const performer = await resolveActionPerformerSnapshot(reqUser);
+
+    const duplicate = await PorterVehicle.findOne({ 
+        category: payload.category,
+        isDeleted: { $ne: true }
+    }).lean();
+    if (duplicate) {
+        throw new ConflictError(`Vehicle category already exists.`);
+    }
 
     if (file?.buffer) {
         const uploaded = await uploadBufferDetailed(file.buffer, {
@@ -100,15 +97,15 @@ export async function createVehicle(body, reqUser, file = null) {
         });
         payload.iconUrl = uploaded.secure_url;
         payload.iconPublicId = uploaded.public_id;
-    } else if (payload.iconUrl?.startsWith('data:')) {
-        // keep data URL in icon field for lucide-less custom svg
-        payload.icon = payload.iconUrl;
-        payload.iconUrl = '';
     }
+
+    const maxOrderVehicle = await PorterVehicle.findOne({}, 'displayOrder').sort({ displayOrder: -1 }).lean();
+    const displayOrder = (maxOrderVehicle?.displayOrder || 0) + 1;
 
     const doc = await PorterVehicle.create({
         ...payload,
         vehicleCode: await generateVehicleCode(),
+        displayOrder,
         createdBy: performer,
         updatedBy: performer,
         statusHistory: [{ status: payload.status, changedBy: performer }],
@@ -123,6 +120,18 @@ export async function updateVehicle(id, body, reqUser, file = null) {
     const doc = await PorterVehicle.findOne({ _id: vehicleId, ...baseFilter });
     if (!doc) throw new NotFoundError('Vehicle not found');
 
+    if (payload.category !== undefined) {
+        const checkCategory = payload.category;
+        const duplicate = await PorterVehicle.findOne({ 
+            category: checkCategory,
+            isDeleted: { $ne: true },
+            _id: { $ne: vehicleId }
+        }).lean();
+        if (duplicate) {
+            throw new ConflictError(`Vehicle category already exists.`);
+        }
+    }
+
     const performer = await resolveActionPerformerSnapshot(reqUser);
 
     if (file?.buffer) {
@@ -132,22 +141,13 @@ export async function updateVehicle(id, body, reqUser, file = null) {
         const uploaded = await uploadBufferDetailed(file.buffer, { folder: 'porter/vehicles', resourceType: 'image' });
         payload.iconUrl = uploaded.secure_url;
         payload.iconPublicId = uploaded.public_id;
-    } else if (payload.iconUrl?.startsWith('data:')) {
-        payload.icon = payload.iconUrl;
-        payload.iconUrl = '';
     }
 
     Object.assign(doc, payload);
     doc.updatedBy = performer;
     await doc.save();
 
-    const pricing = await PorterPricing.findOne({
-        vehicleId: doc._id,
-        zoneId: null,
-        isDeleted: { $ne: true },
-    }).lean();
-
-    return mapVehicle(doc.toObject(), pricing);
+    return mapVehicle(doc.toObject());
 }
 
 export async function updateVehicleStatus(id, body, reqUser) {
@@ -162,13 +162,7 @@ export async function updateVehicleStatus(id, body, reqUser) {
     doc.statusHistory.push({ status, changedBy: performer });
     await doc.save();
 
-    const pricing = await PorterPricing.findOne({
-        vehicleId: doc._id,
-        zoneId: null,
-        isDeleted: { $ne: true },
-    }).lean();
-
-    return mapVehicle(doc.toObject(), pricing);
+    return mapVehicle(doc.toObject());
 }
 
 export async function deleteVehicle(id, reqUser) {
@@ -197,11 +191,30 @@ export async function deleteVehicle(id, reqUser) {
 export async function listVehicleDropdown() {
     const docs = await PorterVehicle.find({ ...baseFilter, status: 'active' })
         .sort({ displayOrder: 1, name: 1 })
-        .select('name category status icon iconUrl')
         .lean();
 
-    const pricingMap = await attachPricingMap(docs);
-    return docs.map((doc) => mapVehicle(doc, pricingMap.get(String(doc._id)) || null));
+    return docs.map((doc) => mapVehicle(doc));
+}
+
+const PUBLIC_VEHICLE_PROJECTION = {
+    name: 1,
+    iconUrl: 1,
+    maxWeight: 1,
+    description: 1,
+    displayOrder: 1,
+};
+
+export async function listPublicParcelVehicles() {
+    const docs = await PorterVehicle.find({
+        ...baseFilter,
+        status: 'active',
+        supportedServices: { $in: ['parcel'] },
+    })
+        .select(PUBLIC_VEHICLE_PROJECTION)
+        .sort({ displayOrder: 1, name: 1 })
+        .lean();
+
+    return docs.map((doc) => mapPublicVehicle(doc));
 }
 
 export async function uploadVehicleIcon(id, file, reqUser) {

@@ -552,8 +552,8 @@ export default function SignupStep2() {
     (signupDetails.vehicles || []).forEach(v => {
       const master = porterVehicles.find(p => p.id === v.vehicleId);
       if (!master) return;
-      const isBicycle = master.category?.toLowerCase() === "bicycle";
-      const requiresDocs = master.registrationRequired !== undefined ? master.registrationRequired : !isBicycle;
+      const isBicycle = master.category?.toLowerCase() === "bicycle" || master.category?.toLowerCase() === "bike";
+      const requiresDocs = !isBicycle;
 
       if (!hasDocumentValue(documents[`vehiclePhoto_${v.id}`], uploadedDocs[`vehiclePhoto_${v.id}`])) hasAllVehicleDocs = false;
       if (requiresDocs) {
@@ -826,8 +826,8 @@ export default function SignupStep2() {
                   {signupDetails.vehicles.map(v => {
                     const master = porterVehicles.find(p => p.id === v.vehicleId);
                     if (!master) return null;
-                    const isBicycle = master.category?.toLowerCase() === "bicycle";
-                    const requiresDocs = master.registrationRequired !== undefined ? master.registrationRequired : !isBicycle;
+                    const isBicycle = master.category?.toLowerCase() === "bicycle" || master.category?.toLowerCase() === "bike";
+                    const requiresDocs = !isBicycle;
                     
                     return (
                       <div key={v.id} className="bg-gray-50 rounded-xl p-4 border border-gray-200 space-y-4">

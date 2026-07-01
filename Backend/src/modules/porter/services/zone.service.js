@@ -1,5 +1,5 @@
 import { PorterZone } from '../models/porterZone.model.js';
-import { NotFoundError, ValidationError } from '../../../core/auth/errors.js';
+import { NotFoundError, ValidationError, ConflictError } from '../../../core/auth/errors.js';
 import { resolveActionPerformerSnapshot } from '../../../core/utils/performer.js';
 import { parseListQuery, buildDateRangeFilter, toPorterPagination, escapeRegex } from '../utils/pagination.util.js';
 import { mapZone } from '../utils/mappers.util.js';
@@ -33,6 +33,7 @@ export async function listZones(query = {}) {
         filter.$or = [
             { name: { $regex: term, $options: 'i' } },
             { country: { $regex: term, $options: 'i' } },
+            { zoneCode: { $regex: term, $options: 'i' } },
         ];
     }
 
@@ -61,6 +62,23 @@ export async function getZoneById(id) {
     return mapZone(doc);
 }
 
+const convertToGeoJSON = (coordinates) => {
+    if (!Array.isArray(coordinates) || coordinates.length < 3) return null;
+    const geoCoords = coordinates.map((c) => [c.lng, c.lat]);
+    
+    // Close the polygon if not closed
+    const first = geoCoords[0];
+    const last = geoCoords[geoCoords.length - 1];
+    if (first[0] !== last[0] || first[1] !== last[1]) {
+        geoCoords.push([...first]);
+    }
+
+    return {
+        type: 'Polygon',
+        coordinates: [geoCoords],
+    };
+};
+
 export async function createZone(body, reqUser) {
     const payload = validateCreateZoneDto(body);
     const performer = await resolveActionPerformerSnapshot(reqUser);
@@ -72,7 +90,13 @@ export async function createZone(body, reqUser) {
     }).select('_id').lean();
 
     if (existing) {
-        throw new ValidationError('Zone with this name already exists in the country');
+        throw new ConflictError('Zone with this name already exists in the country');
+    }
+
+    if (payload.coordinates) {
+        payload.geometry = convertToGeoJSON(payload.coordinates);
+        delete payload.coordinates;
+        delete payload.polygon;
     }
 
     const doc = await PorterZone.create({
@@ -88,40 +112,75 @@ export async function createZone(body, reqUser) {
 export async function updateZone(id, body, reqUser) {
     const zoneId = validateZoneId(id);
     const payload = validateUpdateZoneDto(body);
-    const doc = await PorterZone.findOne({ _id: zoneId, ...baseFilter });
+    const doc = await PorterZone.findOne({ _id: zoneId, ...baseFilter }).lean();
     if (!doc) throw new NotFoundError('Zone not found');
 
-    const performer = await resolveActionPerformerSnapshot(reqUser);
-    Object.assign(doc, payload);
-    doc.updatedBy = performer;
-    await doc.save();
+    if (payload.name || payload.country) {
+        const checkName = payload.name || doc.name;
+        const checkCountry = payload.country || doc.country;
+        const existing = await PorterZone.findOne({
+            ...baseFilter,
+            _id: { $ne: zoneId },
+            name: { $regex: new RegExp(`^${escapeRegex(checkName)}$`, 'i') },
+            country: checkCountry,
+        }).select('_id').lean();
 
-    return mapZone(doc.toObject());
+        if (existing) {
+            throw new ConflictError('Zone with this name already exists in the country');
+        }
+    }
+
+    if (payload.coordinates) {
+        payload.geometry = convertToGeoJSON(payload.coordinates);
+        delete payload.coordinates;
+        delete payload.polygon;
+    }
+
+    const performer = await resolveActionPerformerSnapshot(reqUser);
+    const updated = await PorterZone.findOneAndUpdate(
+        { _id: zoneId, ...baseFilter },
+        { $set: { ...payload, updatedBy: performer } },
+        { new: true, runValidators: true }
+    ).lean();
+
+    return mapZone(updated);
 }
 
 export async function updateZoneStatus(id, body, reqUser) {
     const zoneId = validateZoneId(id);
-    const { status } = validateZoneStatusDto(body);
-    const doc = await PorterZone.findOne({ _id: zoneId, ...baseFilter });
-    if (!doc) throw new NotFoundError('Zone not found');
-
     const performer = await resolveActionPerformerSnapshot(reqUser);
-    doc.status = status;
-    doc.updatedBy = performer;
-    doc.statusHistory.push({ status, changedBy: performer });
-    await doc.save();
 
-    return mapZone(doc.toObject());
+    const updated = await PorterZone.findOneAndUpdate(
+        { _id: zoneId, ...baseFilter },
+        {
+            $set: { status, updatedBy: performer },
+            $push: { statusHistory: { status, changedBy: performer } }
+        },
+        { new: true, runValidators: true }
+    ).lean();
+
+    if (!updated) throw new NotFoundError('Zone not found');
+
+    return mapZone(updated);
 }
 
 export async function deleteZone(id, reqUser) {
     const zoneId = validateZoneId(id);
-    const doc = await PorterZone.findOne({ _id: zoneId, ...baseFilter });
-    if (!doc) throw new NotFoundError('Zone not found');
-
     const performer = await resolveActionPerformerSnapshot(reqUser);
-    applySoftDelete(doc, performer);
-    await doc.save();
+    const updated = await PorterZone.findOneAndUpdate(
+        { _id: zoneId, ...baseFilter },
+        {
+            $set: {
+                isDeleted: true,
+                deletedAt: new Date(),
+                deletedBy: performer,
+                status: 'inactive'
+            }
+        },
+        { new: true }
+    ).lean();
+
+    if (!updated) throw new NotFoundError('Zone not found');
 
     return { id: zoneId };
 }

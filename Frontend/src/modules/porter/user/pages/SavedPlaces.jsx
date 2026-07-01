@@ -3,7 +3,7 @@ import { Home, Briefcase, MapPin, Plus, Trash2 } from "lucide-react";
 import Screen from "../components/Screen";
 import BottomSheet from "../components/BottomSheet";
 import { PrimaryButton, SectionLabel } from "../components/ui";
-import { SAVED_PLACES } from "../utils/mock/places";
+import { userAPI } from "../../../../services/api";
 
 const TYPE_ICONS = {
   home: Home,
@@ -12,21 +12,68 @@ const TYPE_ICONS = {
 };
 
 export default function SavedPlaces() {
-  const [places, setPlaces] = useState(SAVED_PLACES);
+  const [places, setPlaces] = useState([]);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [form, setForm] = useState({ label: "", title: "", address: "", type: "other" });
 
-  const addPlace = () => {
+  React.useEffect(() => {
+    const fetchPlaces = async () => {
+      try {
+        const response = await userAPI.getAddresses();
+        const data = response?.data?.data?.addresses || response?.data?.addresses || [];
+        const mapped = data.map(a => ({
+          id: a._id,
+          label: a.type || "Other",
+          title: a.name || a.type || "Other",
+          address: [a.street, a.address, a.city].filter(Boolean).join(", "),
+          type: a.type === "home" ? "home" : a.type === "work" ? "work" : "other",
+        }));
+        setPlaces(mapped);
+      } catch (err) {
+        console.error("Failed to fetch addresses:", err);
+      }
+    };
+    fetchPlaces();
+  }, []);
+
+  const addPlace = async () => {
     if (!form.label.trim() || !form.address.trim()) return;
-    setPlaces((prev) => [
-      ...prev,
-      { id: `sp${Date.now()}`, label: form.label, title: form.title || form.label, address: form.address, type: form.type },
-    ]);
-    setForm({ label: "", title: "", address: "", type: "other" });
-    setSheetOpen(false);
+    try {
+      const payload = {
+        type: form.type,
+        name: form.title || form.label,
+        street: form.address,
+        city: "", // Can be extended if needed
+      };
+      const response = await userAPI.addAddress(payload);
+      const newA = response?.data?.data?.address || response?.data?.address;
+      if (newA) {
+        setPlaces((prev) => [
+          ...prev,
+          {
+            id: newA._id,
+            label: newA.type || "Other",
+            title: newA.name || newA.type || "Other",
+            address: newA.street || newA.address,
+            type: newA.type === "home" ? "home" : newA.type === "work" ? "work" : "other"
+          },
+        ]);
+      }
+      setForm({ label: "", title: "", address: "", type: "other" });
+      setSheetOpen(false);
+    } catch (err) {
+      console.error("Failed to add address:", err);
+    }
   };
 
-  const removePlace = (id) => setPlaces((prev) => prev.filter((p) => p.id !== id));
+  const removePlace = async (id) => {
+    try {
+      await userAPI.deleteAddress(id);
+      setPlaces((prev) => prev.filter((p) => p.id !== id));
+    } catch (err) {
+      console.error("Failed to delete address:", err);
+    }
+  };
 
   return (
     <Screen

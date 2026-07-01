@@ -221,8 +221,8 @@ const reverseGeocodeDirect = async (latitude, longitude, forceFresh = false) => 
   }
 
   // If another caller is already fetching, wait for it when it's "close enough".
-  // Skip dedup when forceFresh is true
-  if (!forceFresh && globalReverseGeocodeInFlight) {
+  // Even if forceFresh is true, if it's currently in flight, it's fresh enough.
+  if (globalReverseGeocodeInFlight) {
     const inFlightMoved = geoDistanceMeters(
       globalReverseGeocodeLastCoords.latitude,
       globalReverseGeocodeLastCoords.longitude,
@@ -878,79 +878,89 @@ export function useLocation() {
         return lastDbLocationRef.current
       }
 
-      const res = await userAPI.getLocation()
-      const loc = res?.data?.data?.location
-      if (loc?.latitude && loc?.longitude) {
-        // Validate coordinates are in India range BEFORE attempting geocoding
-        const isInIndiaRange = loc.latitude >= 6.5 && loc.latitude <= 37.1 && loc.longitude >= 68.7 && loc.longitude <= 97.4 && loc.longitude > 0
+      // Deduplicate DB fetch globally across components
+      if (window._globalFetchDbLocationInFlight) {
+        return await window._globalFetchDbLocationInFlight
+      }
 
-        if (!isInIndiaRange || loc.longitude < 0) {
-          // Coordinates are outside India - return placeholder
-          debugWarn("?? Coordinates from DB are outside India range:", { latitude: loc.latitude, longitude: loc.longitude })
-          const outOfRangeLocation = {
-            latitude: loc.latitude,
-            longitude: loc.longitude,
-            city: "Current Location",
-            state: "",
-            country: "",
-            area: "",
-            address: "Select location",
-            formattedAddress: "Select location",
+      window._globalFetchDbLocationInFlight = (async () => {
+        const res = await userAPI.getLocation()
+        const loc = res?.data?.data?.location
+        if (loc?.latitude && loc?.longitude) {
+          // Validate coordinates are in India range BEFORE attempting geocoding
+          const isInIndiaRange = loc.latitude >= 6.5 && loc.latitude <= 37.1 && loc.longitude >= 68.7 && loc.longitude <= 97.4 && loc.longitude > 0
+
+          if (!isInIndiaRange || loc.longitude < 0) {
+            // Coordinates are outside India - return placeholder
+            debugWarn("?? Coordinates from DB are outside India range:", { latitude: loc.latitude, longitude: loc.longitude })
+            const outOfRangeLocation = {
+              latitude: loc.latitude,
+              longitude: loc.longitude,
+              city: "Current Location",
+              state: "",
+              country: "",
+              area: "",
+              address: "Select location",
+              formattedAddress: "Select location",
+            }
+            return outOfRangeLocation
           }
-          lastDbLocationRef.current = outOfRangeLocation
-          lastDbLocationFetchAtRef.current = Date.now()
-          return outOfRangeLocation
-        }
 
-        const hasUsableStoredAddress =
-          (loc.formattedAddress && loc.formattedAddress !== "Select location") ||
-          (loc.address && loc.address !== "Select location") ||
-          (loc.city && loc.city !== "Current Location")
+          const hasUsableStoredAddress =
+            (loc.formattedAddress && loc.formattedAddress !== "Select location") ||
+            (loc.address && loc.address !== "Select location") ||
+            (loc.city && loc.city !== "Current Location")
 
-        if (hasUsableStoredAddress) {
-          const storedLocation = {
-            latitude: loc.latitude,
-            longitude: loc.longitude,
-            city: loc.city || "Current Location",
-            area: loc.area || "",
-            state: loc.state || "",
-            country: loc.country || "",
-            address: loc.address || loc.formattedAddress || "Select location",
-            formattedAddress: loc.formattedAddress || loc.address || "Select location"
+          if (hasUsableStoredAddress) {
+            const storedLocation = {
+              latitude: loc.latitude,
+              longitude: loc.longitude,
+              city: loc.city || "Current Location",
+              area: loc.area || "",
+              state: loc.state || "",
+              country: loc.country || "",
+              address: loc.address || loc.formattedAddress || "Select location",
+              formattedAddress: loc.formattedAddress || loc.address || "Select location"
+            }
+            return storedLocation
           }
-          lastDbLocationRef.current = storedLocation
-          lastDbLocationFetchAtRef.current = Date.now()
-          return storedLocation
-        }
 
-        try {
-          const addr = await reverseGeocodeWithGoogleMaps(
-            loc.latitude,
-            loc.longitude,
-            { includePlaceDetails: false }
-          )
-          const resolvedLocation = { ...addr, latitude: loc.latitude, longitude: loc.longitude }
-          lastDbLocationRef.current = resolvedLocation
-          lastDbLocationFetchAtRef.current = Date.now()
-          return resolvedLocation
-        } catch (geocodeErr) {
-          // If reverse geocoding fails, return location without coordinates in address
-          debugWarn("?? Reverse geocoding failed in fetchLocationFromDB:", geocodeErr.message)
-          const fallbackLocation = {
-            latitude: loc.latitude,
-            longitude: loc.longitude,
-            city: "Current Location",
-            area: "",
-            state: "",
-            address: "Select location", // Don't show coordinates
-            formattedAddress: "Select location", // Don't show coordinates
+          try {
+            const addr = await reverseGeocodeWithGoogleMaps(
+              loc.latitude,
+              loc.longitude,
+              { includePlaceDetails: false }
+            )
+            const resolvedLocation = { ...addr, latitude: loc.latitude, longitude: loc.longitude }
+            return resolvedLocation
+          } catch (geocodeErr) {
+            // If reverse geocoding fails, return location without coordinates in address
+            debugWarn("?? Reverse geocoding failed in fetchLocationFromDB:", geocodeErr.message)
+            const fallbackLocation = {
+              latitude: loc.latitude,
+              longitude: loc.longitude,
+              city: "Current Location",
+              area: "",
+              state: "",
+              address: "Select location", // Don't show coordinates
+              formattedAddress: "Select location", // Don't show coordinates
+            }
+            return fallbackLocation
           }
-          lastDbLocationRef.current = fallbackLocation
-          lastDbLocationFetchAtRef.current = Date.now()
-          return fallbackLocation
         }
+        return null;
+      })();
+
+      const resolved = await window._globalFetchDbLocationInFlight;
+      window._globalFetchDbLocationInFlight = null;
+      
+      if (resolved) {
+        lastDbLocationRef.current = resolved
+        lastDbLocationFetchAtRef.current = Date.now()
+        return resolved
       }
     } catch (err) {
+      window._globalFetchDbLocationInFlight = null;
       // Silently fail for 404/401 (user not authenticated) or network errors
       if (err.code !== "ERR_NETWORK" && err.response?.status !== 404 && err.response?.status !== 401) {
         debugError("DB location fetch error:", err)

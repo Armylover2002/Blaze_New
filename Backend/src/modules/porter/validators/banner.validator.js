@@ -2,57 +2,142 @@ import { z } from 'zod';
 import mongoose from 'mongoose';
 import { ValidationError } from '../../../core/auth/errors.js';
 
-const bannerBodySchema = z.object({
+export const BANNER_TYPES = ['promotional', 'offer', 'announcement', 'festival', 'hero'];
+export const BANNER_TARGETS = ['home', 'food', 'quick', 'porter', 'vehicles', 'offers', 'coupons', 'orders', 'tracking'];
+export const BANNER_STATUSES = ['active', 'inactive', 'scheduled', 'expired'];
+
+const LEGACY_TYPE_MAP = {
+    promotional: 'promotional',
+    announcement: 'announcement',
+    offer: 'offer',
+    seasonal: 'festival',
+    feature: 'hero',
+    internal: 'announcement',
+    external: 'promotional',
+    festival: 'festival',
+    hero: 'hero',
+};
+
+const LEGACY_TARGET_MAP = {
+    home: 'home',
+    food: 'food',
+    quick: 'quick',
+    porter: 'porter',
+    vehicles: 'vehicles',
+    offers: 'offers',
+    coupons: 'coupons',
+    orders: 'orders',
+    tracking: 'tracking',
+    Home: 'home',
+    Orders: 'orders',
+    'Driver App': 'porter',
+    'Customer App': 'home',
+    Checkout: 'orders',
+    Dashboard: 'home',
+};
+
+export const normalizeBannerType = (value, fallback = 'promotional') => {
+    const key = String(value || '').trim();
+    if (!key) return fallback;
+    const lower = key.toLowerCase();
+    if (BANNER_TYPES.includes(lower)) return lower;
+    if (LEGACY_TYPE_MAP[key]) return LEGACY_TYPE_MAP[key];
+    if (LEGACY_TYPE_MAP[lower]) return LEGACY_TYPE_MAP[lower];
+    return fallback;
+};
+
+export const normalizeBannerTarget = (value, fallback = 'home') => {
+    const key = String(value || '').trim();
+    if (!key) return fallback;
+    const lower = key.toLowerCase();
+    if (BANNER_TARGETS.includes(lower)) return lower;
+    if (LEGACY_TARGET_MAP[key]) return LEGACY_TARGET_MAP[key];
+    if (LEGACY_TARGET_MAP[lower]) return LEGACY_TARGET_MAP[lower];
+    return fallback;
+};
+
+const bannerEditableSchema = z.object({
     title: z.string().min(1, 'Title required').max(120),
-    subtitle: z.string().max(200).optional(),
-    type: z.enum(['promotional', 'announcement', 'offer', 'seasonal', 'feature']).optional(),
-    target: z.string().max(80).optional(),
-    redirectType: z.enum(['promotional', 'announcement', 'offer', 'seasonal', 'feature', 'internal', 'external']).optional(),
-    redirectValue: z.string().max(120).optional(),
-    priority: z.coerce.number().int().min(0).optional(),
-    displayOrder: z.coerce.number().int().min(0).optional(),
-    image: z.string().optional(),
-    linkUrl: z.string().optional(),
-    link: z.string().optional(),
+    type: z.string().optional(),
+    target: z.string().optional(),
+    priority: z.coerce.number().int().min(1, 'Priority must be at least 1').optional(),
     startDate: z.string().min(1, 'Start date required'),
     endDate: z.string().min(1, 'End date required'),
-    status: z.enum(['active', 'inactive', 'scheduled', 'expired']).optional(),
+    status: z.enum(BANNER_STATUSES).optional(),
+    // Backward compatibility — normalized in service, never persisted
+    redirectType: z.string().optional(),
+    redirectValue: z.string().optional(),
 });
 
-const parseDate = (value) => {
+const SERVER_MANAGED_KEYS = new Set([
+    'displayOrder',
+    'createdBy',
+    'updatedBy',
+    'statusHistory',
+    'createdAt',
+    'updatedAt',
+    'deletedAt',
+    'deletedBy',
+    'isDeleted',
+    'imagePublicId',
+    'subtitle',
+    'link',
+    'linkUrl',
+    '_id',
+    'id',
+]);
+
+export const stripServerManagedFields = (body = {}) => {
+    const clean = { ...body };
+    SERVER_MANAGED_KEYS.forEach((key) => delete clean[key]);
+    return clean;
+};
+
+const parseDate = (value, label = 'date') => {
     const d = new Date(value);
     if (Number.isNaN(d.getTime())) {
-        throw new ValidationError('Invalid date');
+        throw new ValidationError(`Invalid ${label}`);
     }
     return d;
 };
 
-const deriveBannerStatus = (startDate, endDate, status) => {
-    if (status) return status;
+export const deriveBannerStatus = (startDate, endDate, status) => {
     const now = Date.now();
     if (endDate.getTime() < now) return 'expired';
-    if (startDate.getTime() > now) return 'scheduled';
-    return 'active';
+    if (startDate.getTime() > now) return status === 'inactive' ? 'inactive' : 'scheduled';
+    if (status === 'scheduled' || status === 'active') return 'active';
+    return status || 'active';
 };
 
 export const validateCreateBannerDto = (body = {}) => {
-    const result = bannerBodySchema.safeParse(body);
+    const cleaned = stripServerManagedFields(body);
+    const result = bannerEditableSchema.safeParse(cleaned);
     if (!result.success) {
         throw new ValidationError(result.error.errors[0].message);
     }
-    const startDate = parseDate(result.data.startDate);
-    const endDate = parseDate(result.data.endDate);
-    if (endDate.getTime() < startDate.getTime()) {
-        throw new ValidationError('End date must be on or after start date');
+
+    const startDate = parseDate(result.data.startDate, 'startDate');
+    const endDate = parseDate(result.data.endDate, 'endDate');
+
+    if (endDate.getTime() <= startDate.getTime()) {
+        throw new ValidationError('endDate must be after startDate');
     }
+
+    const type = normalizeBannerType(result.data.type || result.data.redirectType);
+    const target = normalizeBannerTarget(result.data.target || result.data.redirectValue);
+
+    if (!BANNER_TYPES.includes(type)) {
+        throw new ValidationError('Invalid banner type');
+    }
+    if (!BANNER_TARGETS.includes(target)) {
+        throw new ValidationError('Invalid banner target');
+    }
+
     return {
         title: result.data.title.trim(),
-        subtitle: (result.data.subtitle || '').trim(),
-        redirectType: result.data.redirectType || result.data.type || 'promotional',
-        redirectValue: result.data.redirectValue || result.data.target || 'Home',
-        priority: result.data.priority ?? 1,
-        displayOrder: result.data.displayOrder ?? result.data.priority ?? 1,
-        link: (result.data.link || result.data.linkUrl || '').trim(),
+        type,
+        target,
+        priority: Number(result.data.priority ?? 1),
         startDate,
         endDate,
         status: deriveBannerStatus(startDate, endDate, result.data.status),
@@ -60,25 +145,39 @@ export const validateCreateBannerDto = (body = {}) => {
 };
 
 export const validateUpdateBannerDto = (body = {}) => {
-    const partial = bannerBodySchema.partial().safeParse(body);
+    const cleaned = stripServerManagedFields(body);
+    const partial = bannerEditableSchema.partial().safeParse(cleaned);
     if (!partial.success) {
         throw new ValidationError(partial.error.errors[0].message);
     }
+
     const data = { ...partial.data };
     if (data.title !== undefined) data.title = data.title.trim();
-    if (data.subtitle !== undefined) data.subtitle = data.subtitle.trim();
-    if (data.redirectType !== undefined || data.type !== undefined) {
-        data.redirectType = data.redirectType || data.type;
+
+    if (data.type !== undefined || data.redirectType !== undefined) {
+        data.type = normalizeBannerType(data.type || data.redirectType);
+        if (!BANNER_TYPES.includes(data.type)) {
+            throw new ValidationError('Invalid banner type');
+        }
     }
-    if (data.redirectValue !== undefined || data.target !== undefined) {
-        data.redirectValue = data.redirectValue || data.target;
+
+    if (data.target !== undefined || data.redirectValue !== undefined) {
+        data.target = normalizeBannerTarget(data.target || data.redirectValue);
+        if (!BANNER_TARGETS.includes(data.target)) {
+            throw new ValidationError('Invalid banner target');
+        }
     }
-    if (data.link !== undefined || data.linkUrl !== undefined) {
-        data.link = (data.link || data.linkUrl || '').trim();
+
+    if (data.startDate) data.startDate = parseDate(data.startDate, 'startDate');
+    if (data.endDate) data.endDate = parseDate(data.endDate, 'endDate');
+
+    if (data.startDate && data.endDate && data.endDate.getTime() <= data.startDate.getTime()) {
+        throw new ValidationError('endDate must be after startDate');
     }
-    if (data.startDate) data.startDate = parseDate(data.startDate);
-    if (data.endDate) data.endDate = parseDate(data.endDate);
-    if (data.linkUrl !== undefined) data.linkUrl = data.linkUrl.trim();
+
+    delete data.redirectType;
+    delete data.redirectValue;
+
     return data;
 };
 
@@ -91,7 +190,7 @@ export const validateBannerId = (id) => {
 
 export const validateBannerStatusDto = (body = {}) => {
     const status = String(body.status || '').trim();
-    if (!['active', 'inactive', 'scheduled', 'expired'].includes(status)) {
+    if (!BANNER_STATUSES.includes(status)) {
         throw new ValidationError('Invalid banner status');
     }
     return { status };

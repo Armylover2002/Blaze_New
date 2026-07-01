@@ -2,6 +2,7 @@ import React from "react";
 import { useNavigate } from "react-router-dom";
 import { MapPin, Package, Calendar, Tag, CreditCard, ChevronRight, Navigation, FileText, Scale } from "lucide-react";
 import Screen from "../components/Screen";
+import PorterRouteMap from "../components/PorterRouteMap";
 import { PrimaryButton, StickyBar, FareRow, SectionLabel, inr } from "../components/ui";
 import { useBooking } from "../context/BookingContext";
 import {
@@ -24,24 +25,37 @@ export default function FareEstimate() {
     scheduledAt,
     distanceKm,
     durationMin,
+    distanceText,
+    durationText,
     baseFare,
     discount,
     total,
+    routeQuote,
   } = useBooking();
 
   const payment = PAYMENT_METHODS.find((p) => p.id === paymentMethodId);
   const platformFee = 12;
-  const payable = total + platformFee;
+  const payable = (total ?? 0) + platformFee;
+  const hasRouteCoordinates = (
+    Number.isFinite(Number(pickup?.lat))
+    && Number.isFinite(Number(pickup?.lng))
+    && Number.isFinite(Number(delivery?.lat))
+    && Number.isFinite(Number(delivery?.lng))
+  );
 
   return (
     <Screen title="Review booking" subtitle="Check all details before payment">
+      {hasRouteCoordinates && (
+        <PorterRouteMap pickup={pickup} delivery={delivery} routeQuote={routeQuote} height={160} className="mb-4" />
+      )}
+
       <div className="mb-4 rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
         <div className="mb-3 flex items-start gap-2">
           <span className="mt-1 h-3 w-3 shrink-0 rounded-full bg-[#2e7d32]" />
           <div>
             <p className="text-[11px] font-bold uppercase text-gray-400">Pickup</p>
-            <p className="text-[13px] font-bold text-gray-900">{pickup.title}</p>
-            <p className="text-[12px] text-gray-500">{pickup.address}</p>
+            <p className="text-[13px] font-bold text-gray-900">{pickup?.title || "Pickup"}</p>
+            <p className="text-[12px] text-gray-500">{pickup?.address || "—"}</p>
           </div>
         </div>
         <div className="mb-3 ml-1.5 h-4 border-l-2 border-dashed border-gray-200" />
@@ -123,7 +137,13 @@ export default function FareEstimate() {
 
       <SectionLabel>Estimated Fare</SectionLabel>
       <div className="mb-4 rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
-        <FareRow label="Base delivery fare" value={inr(baseFare)} />
+        <FareRow label="Base delivery fare" value={inr(baseFare ?? 0)} />
+        {(distanceText || distanceKm != null) && (
+          <FareRow label="Distance" value={distanceText || `${distanceKm} km`} />
+        )}
+        {(durationText || durationMin != null) && (
+          <FareRow label="ETA" value={durationText || `${durationMin} min`} />
+        )}
         <FareRow label="Handling & platform fee" value={inr(platformFee)} />
         {discount > 0 && <FareRow label="Promo discount" value={`−${inr(discount)}`} accent />}
         <div className="my-2 border-t border-gray-100" />

@@ -151,7 +151,7 @@ export default function SignupStep1() {
 
     const isBicycle = selectedMaster.category?.toLowerCase() === "bicycle";
     // Future ready registration requirement
-    const registrationRequired = selectedMaster.registrationRequired !== undefined ? selectedMaster.registrationRequired : !isBicycle;
+    const registrationRequired = !isBicycle;
 
     if (registrationRequired && !newVehicle.registrationNumber.trim()) {
       toast.error("Registration Number is required for this vehicle");

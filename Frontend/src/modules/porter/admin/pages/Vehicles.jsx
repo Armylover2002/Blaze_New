@@ -16,10 +16,16 @@ import { toast } from "sonner";
 import porterAdminApi from "../services/adminApi";
 import { getIconComponent, ICONS_DICTIONARY } from "../utils/VehicleIcons";
 const VEHICLE_CATEGORIES = [
-  "Bike", "EV Bike", "Bicycle", "Scooter", "Auto Rickshaw", "Pickup", "Tata Ace", "Mini Truck", 
-  "Truck", "Heavy Truck", "Tempo", "Tempo Traveller", "Cargo Van", "Van", "EV Van", 
-  "Mini Bus", "Bus", "Ambulance", "Tractor", "Dumper", "Trailer", "Crane", "Water Tanker", 
-  "Refrigerated Truck", "Other"
+  { label: "Bike", value: "bike" },
+  { label: "Electric Bike", value: "electric_bike" },
+  { label: "Scooter", value: "scooter" },
+  { label: "Electric Scooter", value: "electric_scooter" },
+  { label: "Bicycle", value: "bicycle" },
+  { label: "Mini Truck", value: "mini_truck" },
+  { label: "Pickup", value: "pickup" },
+  { label: "Van", value: "van" },
+  { label: "Tempo", value: "tempo" },
+  { label: "Truck", value: "truck" }
 ];
 
 const SERVICES_MAP = {
@@ -31,12 +37,12 @@ const SERVICES_MAP = {
 const EMPTY_FORM = {
   name: "", 
   category: "", 
-  icon: "Truck",
+  iconUrl: "",
   description: "", 
   minWeight: "", 
   maxWeight: "", 
   status: "active",
-  supportedServices: []
+  supportedServices: [],
 };
 
 const Vehicles = () => {
@@ -57,6 +63,7 @@ const Vehicles = () => {
 
   const [formData, setFormData] = useState(EMPTY_FORM);
   const [errors, setErrors] = useState({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   
   const [isCategoryOpen, setIsCategoryOpen] = useState(false);
@@ -106,9 +113,8 @@ const Vehicles = () => {
       setFormData({
         ...EMPTY_FORM,
         ...vehicle,
-        icon: vehicle.icon || "Truck",
-        supportedGoods: vehicle.supportedGoods || [],
-        supportedServices: vehicle.supportedServices || []
+        iconUrl: vehicle.iconUrl || "",
+        supportedServices: vehicle.supportedServices || [],
       });
     } else {
       setEditingVehicle(null);
@@ -127,18 +133,20 @@ const Vehicles = () => {
     return ICONS_DICTIONARY[cat] ? cat : "Truck";
   };
 
-  const handleCategorySelect = (cat) => {
+  const getCategoryLabel = (val) => {
+    const cat = VEHICLE_CATEGORIES.find(c => c.value === val);
+    return cat ? cat.label : val;
+  };
+
+  const handleCategorySelect = (catValue) => {
     let suggestedServices = ["parcel"];
-    if (["Bike", "EV Bike", "Scooter", "Bicycle"].includes(cat)) {
+    if (["bike", "electric_bike", "scooter"].includes(catValue)) {
        suggestedServices = ["food", "quick", "parcel"];
-    } else if (["Bus", "Mini Bus", "Other"].includes(cat)) {
-       suggestedServices = [];
     }
 
     setFormData(prev => ({
       ...prev,
-      category: cat,
-      icon: getSuggestedIcon(cat),
+      category: catValue,
       supportedServices: prev.category === "" ? suggestedServices : prev.supportedServices
     }));
     setIsCategoryOpen(false);
@@ -149,7 +157,7 @@ const Vehicles = () => {
     const newErrors = {};
     if (!formData.name.trim()) newErrors.name = "Vehicle Name is required";
     if (!formData.category.trim()) newErrors.category = "Vehicle Category is required";
-    if (!formData.icon) newErrors.icon = "Vehicle Icon is required";
+    if (!iconFile && !formData.iconUrl && !editingVehicle?.iconUrl) newErrors.iconUrl = "Vehicle Icon is required";
     if (formData.minWeight === "" || Number(formData.minWeight) < 0) newErrors.minWeight = "Min weight must be >= 0";
     if (formData.maxWeight === "" || Number(formData.maxWeight) <= Number(formData.minWeight)) newErrors.maxWeight = "Max weight must be greater than min weight";
     if (!formData.supportedServices || formData.supportedServices.length === 0) newErrors.supportedServices = "At least one Supported Service is required";
@@ -159,13 +167,17 @@ const Vehicles = () => {
   };
 
   const handleSave = async () => {
+    if (isSubmitting) return;
     if (!validate()) {
         toast.error("Please fix the validation errors before saving.");
         return;
     }
     
+    setIsSubmitting(true);
+    const { iconUrl, ...restFormData } = formData;
     const payload = {
-        ...formData,
+        ...restFormData,
+        name: formData.name.trim(),
         minWeight: Number(formData.minWeight),
         maxWeight: Number(formData.maxWeight),
         supportedServices: formData.supportedServices || [],
@@ -183,6 +195,8 @@ const Vehicles = () => {
       fetchVehicles();
     } catch (err) {
       toast.error(err?.response?.data?.message || "Failed to save vehicle");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -219,7 +233,7 @@ const Vehicles = () => {
       },
     },
     { header: "Vehicle Name", key: "name", className: "font-semibold text-gray-900" },
-    { header: "Category", key: "category", cell: (row) => <span className="font-medium text-gray-700">{row.category}</span> },
+    { header: "Category", key: "category", cell: (row) => <span className="font-medium text-gray-700">{getCategoryLabel(row.category)}</span> },
     { header: "Min Weight", key: "minWeight", cell: (row) => <span>{row.minWeight} kg</span> },
     { header: "Max Weight", key: "maxWeight", cell: (row) => <span>{row.maxWeight} kg</span> },
     { 
@@ -255,8 +269,6 @@ const Vehicles = () => {
     },
   ];
 
-
-  const filteredCategories = VEHICLE_CATEGORIES.filter(c => c.toLowerCase().includes(categorySearch.toLowerCase()));
 
   return (
     <div className="blaze-theme-scope space-y-6 max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 py-8 pb-24">
@@ -304,7 +316,7 @@ const Vehicles = () => {
               onChange: (val) => { setCategoryFilter(val); setCurrentPage(1); },
               options: [
                 { label: "All Categories", value: "all" },
-                ...Array.from(new Set(vehicles.map(v => v.category))).map(t => ({ label: t, value: t }))
+                ...Array.from(new Set(vehicles.map(v => v.category))).map(t => ({ label: getCategoryLabel(t), value: t }))
               ],
             }
           ]}
@@ -339,10 +351,10 @@ const Vehicles = () => {
           </div>
         ) : (
           <EmptyState
-            icon={Truck}
+            icon={<Truck className="w-12 h-12" />}
             title="No vehicles found"
             description={searchTerm || statusFilter !== "all" || categoryFilter !== "all" ? "Try adjusting your search or filters." : "Get started by adding a new vehicle to your logistics fleet."}
-            action={{ label: "Add Vehicle", onClick: () => handleOpenModal() }}
+            action={<Button onClick={() => handleOpenModal()} className="gap-2"><Plus size={16} /> Add Vehicle</Button>}
           />
         )}
       </SectionCard>
@@ -372,7 +384,7 @@ const Vehicles = () => {
                         onClick={() => setIsCategoryOpen(!isCategoryOpen)}
                       >
                         <span className={formData.category ? "text-gray-900" : "text-gray-400"}>
-                          {formData.category || "Select Category..."}
+                          {formData.category ? getCategoryLabel(formData.category) : "Select Category..."}
                         </span>
                         <ChevronDown size={16} className="text-gray-400" />
                       </div>
@@ -391,18 +403,18 @@ const Vehicles = () => {
                             </div>
                           </div>
                           <div className="max-h-60 overflow-y-auto p-1">
-                            {filteredCategories.map(cat => {
-                              const CatIcon = getIconComponent(getSuggestedIcon(cat));
+                            {VEHICLE_CATEGORIES.filter(c => c.label.toLowerCase().includes(categorySearch.toLowerCase())).map(cat => {
+                              const CatIcon = getIconComponent(getSuggestedIcon(cat.label));
                               return (
                                 <div 
-                                  key={cat} 
+                                  key={cat.value} 
                                   className="flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 cursor-pointer rounded-md"
-                                  onClick={() => handleCategorySelect(cat)}
+                                  onClick={() => handleCategorySelect(cat.value)}
                                 >
                                   <div className="w-4 h-4 text-gray-400">
                                     <CatIcon />
                                   </div>
-                                  {cat}
+                                  {cat.label}
                                 </div>
                               );
                             })}
@@ -415,41 +427,47 @@ const Vehicles = () => {
 
                 <FormRow cols={2}>
                   <div className="flex flex-col">
-                    <h4 className="text-sm font-semibold text-gray-900 mb-1">Vehicle Icon (SVG) <span className="text-red-500">*</span></h4>
+                    <h4 className="text-sm font-semibold text-gray-900 mb-1">Vehicle Icon (Image) <span className="text-red-500">*</span></h4>
                     <div className="flex items-center gap-4 mt-1">
                       <div className="w-12 h-12 rounded-xl border border-gray-200 bg-gray-50 flex items-center justify-center shadow-sm p-1 overflow-hidden">
                         {(() => {
-                          const isSvgData = formData.icon?.startsWith('data:image/svg+xml') || formData.icon?.startsWith('http');
+                          const isSvgData = formData.iconUrl?.startsWith('data:image/') || formData.iconUrl?.startsWith('http');
                           if (isSvgData) {
-                            return <img src={formData.icon} alt="Vehicle Icon" className="w-full h-full object-contain" />;
+                            return <img src={formData.iconUrl} alt="Vehicle Icon" className="w-full h-full object-contain" />;
                           }
-                          const IconComp = getIconComponent(formData.icon);
+                          const IconComp = getIconComponent(getSuggestedIcon(getCategoryLabel(formData.category)));
                           return <IconComp className="w-full h-full text-gray-400" />;
                         })()}
                       </div>
                       <div className="relative">
                         <input 
                           type="file" 
-                          accept=".svg" 
+                          accept="image/jpeg, image/png, image/webp, image/svg+xml" 
                           className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" 
                           onChange={(e) => {
                             const file = e.target.files?.[0];
-                            if (file && file.type.includes("svg")) {
-                              setIconFile(file);
-                              const reader = new FileReader();
-                              reader.onload = (ev) => {
-                                setFormData({ ...formData, icon: ev.target.result });
-                              };
-                              reader.readAsDataURL(file);
-                            } else if (file) {
-                              alert("Please upload a valid SVG file.");
+                            if (!file) return;
+                            const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/svg+xml'];
+                            if (!allowedTypes.includes(file.type)) {
+                              toast.error("Invalid file type. Only JPG, PNG, WEBP, and SVG are allowed.");
+                              return;
                             }
+                            if (file.size > 2 * 1024 * 1024) {
+                              toast.error("File is too large. Maximum size is 2MB.");
+                              return;
+                            }
+                            setIconFile(file);
+                            const reader = new FileReader();
+                            reader.onload = (ev) => {
+                              setFormData({ ...formData, iconUrl: ev.target.result });
+                            };
+                            reader.readAsDataURL(file);
                           }}
                         />
-                        <Button variant="outline" size="sm" type="button">Upload SVG</Button>
+                        <Button variant="outline" size="sm" type="button">Upload Image</Button>
                       </div>
                     </div>
-                    {errors.icon && <p className="text-xs text-red-500 font-medium mt-1">{errors.icon}</p>}
+                    {errors.iconUrl && <p className="text-xs text-red-500 font-medium mt-1">{errors.iconUrl}</p>}
                   </div>
 
                   <FormField label="Status">
@@ -561,8 +579,8 @@ const Vehicles = () => {
             <Button variant="outline" onClick={handleCloseModal}>
               Cancel
             </Button>
-            <Button onClick={handleSave}>
-              {editingVehicle ? "Save Changes" : "Create Vehicle"}
+            <Button onClick={handleSave} disabled={isSubmitting}>
+              {isSubmitting ? "Saving..." : (editingVehicle ? "Save Changes" : "Create Vehicle")}
             </Button>
           </div>
         </DialogContent>
