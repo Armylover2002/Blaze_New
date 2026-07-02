@@ -17,6 +17,7 @@ import {
 import { DateRangeCalendar } from "@food/components/ui/date-range-calendar"
 import { restaurantAPI } from "@food/api"
 import { useRestaurantNotifications } from "@food/hooks/useRestaurantNotifications"
+import OrderDetails from "@food/pages/restaurant/OrderDetails"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -150,6 +151,7 @@ export default function AllOrdersPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [restaurantData, setRestaurantData] = useState(null)
+  const [selectedOrderId, setSelectedOrderId] = useState(null)
   const { newOrder } = useRestaurantNotifications()
   const ORDERS_PER_PAGE = 10
   const [currentPage, setCurrentPage] = useState(1)
@@ -497,7 +499,10 @@ export default function AllOrdersPage() {
   }, [currentPage, totalPages])
 
   return (
-    <div className="min-h-screen bg-gray-100">
+    <div className="flex h-full flex-col bg-slate-50 p-4 md:p-6 lg:p-8">
+      <div className="mx-auto flex h-full w-full max-w-7xl flex-row overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
+        {/* Left Main Content */}
+        <div className={`flex-1 overflow-y-auto scrollbar-hide flex flex-col ${selectedOrderId ? 'hidden lg:flex' : 'flex'}`}>
       {/* Header */}
       <div className="bg-white border-b border-gray-200 px-4 py-3 sticky top-0 z-50">
         <div className="flex items-center gap-3">
@@ -625,6 +630,13 @@ export default function AllOrdersPage() {
             ) : paginatedOrders.map((order, index) => (
             <motion.div
               key={order.id}
+              onClick={() => {
+                if (window.innerWidth >= 1024) {
+                  setSelectedOrderId(order.id)
+                } else {
+                  navigate(`/restaurant/orders/${order.id}`)
+                }
+              }}
               layout
               initial={{ opacity: 0, scale: 0.95, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -634,7 +646,6 @@ export default function AllOrdersPage() {
                 delay: Math.min(index * 0.05, 0.3),
                 layout: { duration: 0.3 }
               }}
-              onClick={() => navigate(`/restaurant/orders/${order.id}`)}
               className="bg-white border border-gray-200 rounded-lg p-4 cursor-pointer hover:shadow-md transition-shadow"
             >
             {/* Status and Order ID Row */}
@@ -773,13 +784,13 @@ export default function AllOrdersPage() {
       {/* Date Range Popup */}
       <AnimatePresence>
         {showDateRangePopup && (
-          <>
+          <div className="fixed inset-0 z-[60] flex flex-col justify-end md:justify-center items-center pointer-events-none p-0 md:p-4">
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.2 }}
-              className="fixed inset-0 bg-black/50 z-50"
+              className="absolute inset-0 bg-black/50 pointer-events-auto"
               onClick={() => setShowDateRangePopup(false)}
             />
 
@@ -792,10 +803,10 @@ export default function AllOrdersPage() {
                 damping: 30,
                 stiffness: 300
               }}
-              className="fixed bottom-0 left-0 right-0 bg-white rounded-t-2xl shadow-2xl z-50"
+              className="relative w-full md:w-[450px] bg-white rounded-t-2xl md:rounded-2xl shadow-2xl pointer-events-auto"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="flex justify-center pt-2 pb-1">
+              <div className="md:hidden flex justify-center pt-2 pb-1">
                 <div className="w-10 h-1 bg-gray-300 rounded-full"></div>
               </div>
 
@@ -845,7 +856,7 @@ export default function AllOrdersPage() {
                 })}
               </div>
             </motion.div>
-          </>
+          </div>
         )}
       </AnimatePresence>
 
@@ -885,14 +896,14 @@ export default function AllOrdersPage() {
       {/* Filter Popup */}
       <AnimatePresence>
         {showFilterPopup && (
-          <>
+          <div className="fixed inset-0 z-[60] flex flex-col justify-end md:justify-center items-center pointer-events-none p-0 md:p-4">
             {/* Backdrop */}
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.2 }}
-              className="fixed inset-0 bg-black/50 z-50"
+              className="absolute inset-0 bg-black/50 pointer-events-auto"
               onClick={() => setShowFilterPopup(false)}
             />
             
@@ -906,12 +917,11 @@ export default function AllOrdersPage() {
                 damping: 30,
                 stiffness: 300
               }}
-              className="fixed bottom-0 left-0 right-0 bg-white rounded-t-2xl shadow-2xl z-50 flex flex-col"
-              style={{ height: '65vh' }}
+              className="relative w-full md:w-[700px] h-[75vh] md:h-[600px] bg-white rounded-t-2xl md:rounded-2xl shadow-2xl flex flex-col overflow-hidden pointer-events-auto"
               onClick={(e) => e.stopPropagation()}
             >
               {/* Drag Handle */}
-              <div className="flex justify-center pt-2 pb-1">
+              <div className="md:hidden flex justify-center pt-2 pb-1">
                 <div className="w-10 h-1 bg-gray-300 rounded-full"></div>
               </div>
 
@@ -1046,7 +1056,7 @@ export default function AllOrdersPage() {
                 </button>
               </div>
             </motion.div>
-          </>
+          </div>
         )}
       </AnimatePresence>
 
@@ -1087,6 +1097,19 @@ export default function AllOrdersPage() {
           </motion.div>
         )}
       </AnimatePresence>
+      </div>
+
+      {/* Right Sidebar for Desktop */}
+      {selectedOrderId && (
+        <div className="hidden lg:block w-[450px] border-l border-gray-200 bg-white h-full overflow-y-auto scrollbar-hide shrink-0">
+          <OrderDetails 
+            orderId={selectedOrderId} 
+            isSidebar={true} 
+            onClose={() => setSelectedOrderId(null)} 
+          />
+        </div>
+      )}
+      </div>
     </div>
   )
 }
