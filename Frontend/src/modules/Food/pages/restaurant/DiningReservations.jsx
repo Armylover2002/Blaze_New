@@ -405,121 +405,94 @@ export default function DiningReservations() {
     if (loading) return <Loader />
 
     return (
-        <div className="min-h-screen bg-slate-50 pb-20">
-            {/* Header */}
-            <div className="bg-white/80 backdrop-blur-xl sticky top-0 z-30 border-b border-slate-100">
-                <div className="max-w-7xl mx-auto px-6 py-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
-                    <motion.div
-                        initial={{ opacity: 0, x: -20 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        className="flex items-center gap-4"
-                    >
+        <div className="flex h-full flex-col bg-slate-50 overflow-hidden">
+            {/* Header - Always Fixed/Sticky */}
+            <div className="shrink-0 bg-white border-b border-gray-100 z-30">
+                <div className="max-w-[1400px] mx-auto px-6 py-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div className="flex items-center gap-3">
                         <button
                             onClick={() => navigate(-1)}
-                            className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors"
+                            className="p-2 rounded-full bg-slate-50 hover:bg-slate-100 text-slate-600 transition-colors"
                         >
                             <ArrowLeft className="w-5 h-5" />
                         </button>
-                        <div>
-                            <h1 className="text-2xl font-black text-slate-900 tracking-tight flex items-center gap-2">
-                                Table Reservations
-                                <span className="flex h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-                            </h1>
-                            <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mt-1">Live Queue Management</p>
-                        </div>
-                    </motion.div>
+                        <h1 className="text-xl md:text-2xl font-bold text-slate-900 flex items-center gap-3">
+                            Table Reservations
+                            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Live Queue Management</span>
+                        </h1>
+                    </div>
 
-                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
-                        <div className="relative group">
-                            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-focus-within:text-blue-500 transition-colors" />
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4">
+                        <div className="relative">
+                            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                             <input
                                 type="text"
-                                id="reservation-search"
-                                name="reservation-search"
                                 placeholder="Search guests..."
                                 value={searchTerm}
                                 onChange={(e) => setSearchTerm(e.target.value)}
-                                className="w-full sm:w-64 pl-11 pr-4 py-2.5 bg-slate-100/50 border-2 border-transparent rounded-2xl text-sm font-bold focus:bg-white focus:border-blue-500/20 focus:ring-4 focus:ring-blue-500/5 transition-all outline-none"
+                                className="w-full sm:w-64 pl-10 pr-4 py-2 bg-slate-50 border border-transparent rounded-full text-sm font-medium focus:bg-white focus:border-gray-200 outline-none transition-all"
                             />
                         </div>
-                        <div className="flex items-center gap-1 bg-slate-100/50 p-1 rounded-2xl border border-slate-200/50">
+                        <div className="flex items-center bg-slate-50 p-1 rounded-full border border-gray-100">
                             <button
                                 onClick={() => setActiveSection("reservations")}
-                                className={`px-4 py-2 text-xs font-black uppercase tracking-widest rounded-xl transition-all ${activeSection === "reservations" ? "bg-white text-slate-900 shadow-md shadow-slate-200/50 scale-[1.02]" : "text-slate-400 hover:text-slate-600"}`}
+                                className={`px-5 py-1.5 text-xs font-bold rounded-full transition-all ${activeSection === "reservations" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
                             >
-                                Queue
+                                QUEUE
                             </button>
                             <button
                                 onClick={() => setActiveSection("media")}
-                                className={`px-4 py-2 text-xs font-black uppercase tracking-widest rounded-xl transition-all ${activeSection === "media" ? "bg-white text-slate-900 shadow-md shadow-slate-200/50 scale-[1.02]" : "text-slate-400 hover:text-slate-600"}`}
+                                className={`px-5 py-1.5 text-xs font-bold rounded-full transition-all ${activeSection === "media" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
                             >
-                                Media
+                                MEDIA
                             </button>
                         </div>
                     </div>
                 </div>
             </div>
 
-            <div className="max-w-7xl mx-auto p-6">
-                {/* Stats */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-                    <motion.div
-                        initial={{ opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ duration: 0.3 }}
-                        className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 relative overflow-hidden group hover:shadow-md transition-shadow"
-                    >
-                        <div className="absolute top-0 right-0 w-24 h-24 bg-blue-50/50 rounded-bl-full -mr-8 -mt-8 transition-transform group-hover:scale-110" />
-                        <div className="flex items-center gap-4 relative">
-                            <div className="bg-blue-600 p-3 rounded-xl text-white shadow-lg shadow-blue-200">
-                                <Users className="w-6 h-6" />
-                            </div>
-                            <div>
-                                <p className="text-slate-500 text-sm font-semibold uppercase tracking-wider">Total Bookings</p>
-                                <p className="text-3xl font-black text-slate-900 leading-none mt-1">{bookings.length}</p>
-                            </div>
+            {/* Scrollable Content Area */}
+            <div className="flex-1 overflow-y-auto custom-scrollbar">
+                <div className="max-w-[1400px] mx-auto p-6 space-y-6 pb-20">
+                    {/* Stats */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 flex items-center gap-4 relative overflow-hidden">
+                        <div className="absolute top-0 right-0 w-32 h-32 bg-blue-50/30 rounded-bl-full -mr-10 -mt-10" />
+                        <div className="bg-blue-600 p-3 rounded-2xl text-white shadow-sm z-10">
+                            <Users className="w-5 h-5" />
                         </div>
-                    </motion.div>
+                        <div className="z-10">
+                            <p className="text-slate-500 text-[11px] font-bold uppercase tracking-wider">Total Bookings</p>
+                            <p className="text-2xl font-black text-slate-900 leading-none mt-1">{bookings.length}</p>
+                        </div>
+                    </div>
 
-                    <motion.div
-                        initial={{ opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ duration: 0.3, delay: 0.1 }}
-                        className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 relative overflow-hidden group hover:shadow-md transition-shadow"
-                    >
-                        <div className="absolute top-0 right-0 w-24 h-24 bg-green-50/50 rounded-bl-full -mr-8 -mt-8 transition-transform group-hover:scale-110" />
-                        <div className="flex items-center gap-4 relative">
-                            <div className="bg-emerald-600 p-3 rounded-xl text-white shadow-lg shadow-emerald-200">
-                                <CheckCircle2 className="w-6 h-6" />
-                            </div>
-                            <div>
-                                <p className="text-slate-500 text-sm font-semibold uppercase tracking-wider">Active</p>
-                                <p className="text-3xl font-black text-slate-900 leading-none mt-1">
-                                    {bookings.filter(b => ['confirmed', 'accepted', 'checked-in'].includes(String(b.status || '').toLowerCase())).length}
-                                </p>
-                            </div>
+                    <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 flex items-center gap-4 relative overflow-hidden">
+                        <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-50/30 rounded-bl-full -mr-10 -mt-10" />
+                        <div className="bg-emerald-600 p-3 rounded-2xl text-white shadow-sm z-10">
+                            <CheckCircle2 className="w-5 h-5" />
                         </div>
-                    </motion.div>
+                        <div className="z-10">
+                            <p className="text-slate-500 text-[11px] font-bold uppercase tracking-wider">Active</p>
+                            <p className="text-2xl font-black text-slate-900 leading-none mt-1">
+                                {bookings.filter(b => ['confirmed', 'accepted', 'checked-in'].includes(String(b.status || '').toLowerCase())).length}
+                            </p>
+                        </div>
+                    </div>
 
-                    <motion.div
-                        initial={{ opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ duration: 0.3, delay: 0.2 }}
-                        className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 relative overflow-hidden group hover:shadow-md transition-shadow"
-                    >
-                        <div className="absolute top-0 right-0 w-24 h-24 bg-red-50/50 rounded-bl-full -mr-8 -mt-8 transition-transform group-hover:scale-110" />
-                        <div className="flex items-center gap-4 relative">
-                            <div className="bg-red-600 p-3 rounded-xl text-white shadow-lg shadow-red-200">
-                                <Clock4 className="w-6 h-6" />
-                            </div>
-                            <div>
-                                <p className="text-slate-500 text-sm font-semibold uppercase tracking-wider">Today's Bookings</p>
-                                <p className="text-3xl font-black text-slate-900 leading-none mt-1">
-                                    {bookings.filter(b => new Date(b.date).toDateString() === new Date().toDateString()).length}
-                                </p>
-                            </div>
+                    <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 flex items-center gap-4 relative overflow-hidden">
+                        <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-50/30 rounded-bl-full -mr-10 -mt-10" />
+                        <div className="bg-emerald-600 p-3 rounded-2xl text-white shadow-sm z-10">
+                            <Clock className="w-5 h-5" />
                         </div>
-                    </motion.div>
+                        <div className="z-10">
+                            <p className="text-slate-500 text-[11px] font-bold uppercase tracking-wider">Today's Bookings</p>
+                            <p className="text-2xl font-black text-slate-900 leading-none mt-1">
+                                {bookings.filter(b => new Date(b.date).toDateString() === new Date().toDateString()).length}
+                            </p>
+                        </div>
+                    </div>
                 </div>
 
                 <div className="mb-6 md:hidden">
@@ -679,154 +652,99 @@ export default function DiningReservations() {
                 )}
 
                 {activeSection === "reservations" && (
-                    <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-                            <div className="max-w-xl">
-                                <p className="text-xs font-bold uppercase tracking-[0.22em] text-slate-400">Dining Controls</p>
-                                <h2 className="mt-1 text-lg font-black text-slate-900">Manage dining availability and booking limit</h2>
-                                <p className="mt-1 text-sm text-slate-500">
-                                    Save your dining changes as an approval request. They will go live for customers only after admin approval.
-                                </p>
+                    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 mb-6">
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">Dining Controls</p>
+                        <h2 className="text-lg font-bold text-slate-900">Manage dining availability and booking limit</h2>
+                        <p className="text-sm text-slate-500 mt-1 max-w-3xl">
+                            These settings update the same dining profile the guest booking flow reads, so restaurant changes are reflected on the user side too.
+                        </p>
+
+                        <div className="flex items-center gap-4 mt-6 border-b border-gray-100 pb-6">
+                            <div className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-4 py-2">
+                                <span className={`h-2 w-2 rounded-full ${diningEnabled ? "bg-emerald-500" : "bg-rose-500"}`} />
+                                <span className="text-sm font-semibold text-slate-700">
+                                    {diningEnabled ? "Dining active" : "Dining paused"}
+                                </span>
                             </div>
 
-                            <div className="flex flex-wrap items-center gap-3">
-                                <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-2">
-                                    <span className={`h-2.5 w-2.5 rounded-full ${diningEnabled ? "bg-emerald-500" : "bg-rose-500"}`} />
-                                    <span className="text-sm font-semibold text-slate-700">
-                                        {diningEnabled ? "Dining enabled" : "Dining paused"}
-                                    </span>
-                                </div>
-
-                                <div className="inline-flex items-center gap-3 rounded-full border border-slate-200 bg-white px-4 py-2">
-                                    <span className="text-sm font-medium text-slate-700">Turn dining on/off</span>
-                                    <button
-                                        type="button"
-                                        onClick={() => {
-                                            setDiningEnabled((prev) => {
-                                                const nextValue = !prev
-                                                if (!nextValue) {
-                                                    setSelectedDiningCategoryIds([])
-                                                    setMaxGuestsLimit(0)
-                                                } else {
-                                                    setMaxGuestsLimit((current) => Math.max(1, parseInt(current, 10) || 6))
-                                                }
-                                                return nextValue
-                                            })
-                                        }}
-                                        className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors ${diningEnabled ? "bg-emerald-600" : "bg-slate-300"}`}
-                                        aria-pressed={diningEnabled}
-                                    >
-                                        <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform duration-200 ${diningEnabled ? "translate-x-6" : "translate-x-1"}`} />
-                                    </button>
-                                </div>
-
-                                <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2">
-                                    <span className="text-sm font-medium text-slate-700">Customer limit</span>
-                                    <input
-                                        type="number"
-                                        min={isDiningToggleOn ? "1" : "0"}
-                                        value={maxGuestsLimit}
-                                        onChange={(e) => setMaxGuestsLimit(e.target.value)}
-                                        disabled={!isDiningToggleOn}
-                                        className="w-20 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-center text-sm font-semibold text-slate-900 outline-none focus:border-blue-500"
-                                    />
-                                </div>
-
+                            <div className="inline-flex items-center gap-3 rounded-full border border-gray-200 bg-white px-4 py-2">
+                                <span className="text-sm font-medium text-slate-700">Turn dining on/off</span>
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setDiningEnabled((prev) => {
+                                            const nextValue = !prev;
+                                            if (!nextValue) {
+                                                setSelectedDiningCategoryIds([]);
+                                                setMaxGuestsLimit(0);
+                                            } else {
+                                                setMaxGuestsLimit((current) => Math.max(1, parseInt(current, 10) || 6));
+                                            }
+                                            return nextValue;
+                                        });
+                                    }}
+                                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${diningEnabled ? "bg-slate-800" : "bg-slate-300"}`}
+                                >
+                                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${diningEnabled ? "translate-x-6" : "translate-x-1"}`} />
+                                </button>
                             </div>
                         </div>
 
-                        <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                            <div className="flex items-center justify-between gap-3">
-                                <div>
-                                    <p className="text-sm font-semibold text-slate-900">Dining categories</p>
-                                    <p className="mt-1 text-xs text-slate-500">Choose one or multiple categories for this request.</p>
-                                </div>
-                                {activeDiningRequest?.requestedAt ? (
-                                    <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700">
-                                        Approval pending
-                                    </span>
-                                ) : null}
+                        <div className="pt-6 pb-6 border-b border-gray-100">
+                            <div className="flex items-center gap-2 mb-4">
+                                <Sparkles className="w-4 h-4 text-emerald-500" />
+                                <span className="text-sm font-bold text-slate-900">Choose Dining Categories (Pick Multiple)</span>
                             </div>
-
-                            <div className="mt-4 grid grid-cols-2 gap-3">
+                            <div className="flex flex-wrap gap-4">
                                 {diningCategories.length === 0 ? (
-                                    <p className="col-span-2 text-sm text-slate-500">No dining categories available right now.</p>
+                                    <div className="text-sm text-slate-500 italic">No categories configured for this restaurant.</div>
                                 ) : (
-                                    diningCategories.map((category) => {
-                                        const isSelected = selectedDiningCategoryIds.includes(String(category?._id))
-                                        return (
-                                            <button
-                                                key={category?._id}
-                                                type="button"
-                                                onClick={() => toggleDiningCategory(category?._id)}
-                                                className={`overflow-hidden rounded-2xl border text-left transition-all ${isSelected
-                                                    ? "border-slate-900 bg-slate-900 text-white shadow-lg shadow-slate-300/40"
-                                                    : "border-slate-200 bg-white text-slate-700 hover:border-slate-400 hover:shadow-sm"
-                                                    }`}
-                                                disabled={!isDiningToggleOn}
-                                            >
-                                                <div className="relative h-24 w-full overflow-hidden">
-                                                    {category?.imageUrl ? (
-                                                        <img
-                                                            src={category.imageUrl}
-                                                            alt={category?.name || "Category"}
-                                                            className={`h-full w-full object-cover transition-transform duration-300 ${isSelected ? "scale-105 opacity-80" : "hover:scale-105"}`}
-                                                        />
-                                                    ) : (
-                                                        <div className={`flex h-full w-full items-center justify-center ${isSelected ? "bg-slate-800" : "bg-slate-100"}`}>
-                                                            <span className={`text-2xl font-black ${isSelected ? "text-white/90" : "text-slate-400"}`}>
-                                                                {String(category?.name || "C").charAt(0).toUpperCase()}
-                                                            </span>
-                                                        </div>
-                                                    )}
-
-                                                    <div className={`absolute inset-0 ${isSelected ? "bg-slate-900/35" : "bg-slate-900/10"}`} />
-
-                                                    {isSelected ? (
-                                                        <div className="absolute right-2 top-2 rounded-full bg-white px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-slate-900">
-                                                            Selected
-                                                        </div>
-                                                    ) : null}
-                                                </div>
-
-                                                <div className="p-3">
-                                                    <p className={`text-sm font-bold ${isSelected ? "text-white" : "text-slate-900"}`}>
-                                                        {category?.name || "Category"}
-                                                    </p>
-                                                    <p className={`mt-1 text-[11px] ${isSelected ? "text-white/75" : "text-slate-500"}`}>
-                                                        {!isDiningToggleOn ? "Enable dining to select" : isSelected ? "Included in this request" : "Tap to include"}
-                                                    </p>
-                                                </div>
-                                            </button>
-                                        )
-                                    })
+                                    diningCategories.map((category) => (
+                                        <button
+                                            key={category?._id}
+                                            onClick={() => toggleDiningCategory(category?._id)}
+                                            className={`w-36 p-3 rounded-2xl border flex flex-col items-center transition-all ${selectedDiningCategoryIds.includes(category?._id) ? "border-slate-800 ring-1 ring-slate-800 bg-slate-50/50" : "border-gray-200 hover:border-gray-300"}`}
+                                        >
+                                            <img src={category.imageUrl} className="w-full aspect-square object-cover rounded-xl mb-3" />
+                                            <span className="text-xs font-bold text-slate-800">{category.name}</span>
+                                        </button>
+                                    ))
                                 )}
                             </div>
-
-                            {activeDiningRequest?.requestedAt ? (
-                                <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                                    Pending request: {activeDiningRequest?.isEnabled ? "Dining On" : "Dining Off"}, guest limit {Number(activeDiningRequest?.maxGuests ?? 0)}
-                                    {Array.isArray(activeDiningRequest?.categories) && activeDiningRequest.categories.length > 0
-                                        ? `, categories ${activeDiningRequest.categories.map((category) => category?.name).filter(Boolean).join(", ")}`
-                                        : ""}
-                                </div>
-                            ) : null}
-
-                            <button
-                                type="button"
-                                onClick={handleSaveDiningSettings}
-                                disabled={savingDiningSettings}
-                                className="mt-4 w-full rounded-2xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-                            >
-                                {savingDiningSettings ? "Sending..." : "Save settings"}
-                            </button>
                         </div>
 
+                        <div className="pt-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6">
+                            <div>
+                                <h3 className="text-sm font-bold text-slate-900">Maximum Guest Limit</h3>
+                                <p className="text-xs text-slate-500 mt-0.5">Guests allowed per reservation</p>
+                            </div>
+                            <div className="flex flex-col sm:flex-row items-center gap-4">
+                                <div className="flex items-center bg-slate-50 border border-gray-200 rounded-full p-1">
+                                    <button onClick={() => setMaxGuestsLimit(Math.max(1, maxGuestsLimit - 1))} className="w-8 h-8 flex items-center justify-center text-slate-600 font-bold rounded-full hover:bg-slate-200">-</button>
+                                    <span className="w-10 text-center text-sm font-bold text-slate-900">{maxGuestsLimit}</span>
+                                    <button onClick={() => setMaxGuestsLimit(maxGuestsLimit + 1)} className="w-8 h-8 flex items-center justify-center text-slate-600 font-bold rounded-full hover:bg-slate-200">+</button>
+                                </div>
+                                <button
+                                    onClick={handleSaveDiningSettings}
+                                    disabled={savingDiningSettings}
+                                    className="px-6 py-2.5 bg-[#0F172A] text-white text-sm font-bold rounded-full hover:bg-slate-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                    {savingDiningSettings ? "SAVING..." : "SAVE SETTINGS"}
+                                </button>
+                            </div>
+                        </div>
+
+                        {activeDiningRequest?.requestedAt && (
+                            <div className="mt-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                                Pending request: {activeDiningRequest?.isEnabled ? "Dining On" : "Dining Off"}, guest limit {Number(activeDiningRequest?.maxGuests ?? 0)}
+                                {Array.isArray(activeDiningRequest?.categories) && activeDiningRequest.categories.length > 0
+                                    ? `, categories ${activeDiningRequest.categories.map((category) => category?.name).filter(Boolean).join(", ")}`
+                                    : ""}
+                            </div>
+                        )}
+
                         {(diningSettingsMessage || diningSettingsError) && (
-                            <div className={`mt-4 rounded-xl border px-4 py-3 text-sm font-medium ${diningSettingsError
-                                ? "border-rose-200 bg-rose-50 text-rose-700"
-                                : "border-emerald-200 bg-emerald-50 text-emerald-700"
-                                }`}>
+                            <div className={`mt-4 rounded-xl border px-4 py-3 text-sm font-medium ${diningSettingsError ? "border-rose-200 bg-rose-50 text-rose-700" : "border-emerald-200 bg-emerald-50 text-emerald-700"}`}>
                                 {diningSettingsError || diningSettingsMessage}
                             </div>
                         )}
@@ -845,24 +763,24 @@ export default function DiningReservations() {
                 {/* Bookings List */}
                 {activeSection === "reservations" && (
                 <div className="space-y-4">
-                    <div className="flex items-center justify-between mb-2">
-                        <h2 className="font-bold text-slate-800">Reservation Queue</h2>
-                        <div className="flex items-center gap-2 rounded-xl bg-white border border-slate-200 p-1">
+                    <div className="flex items-center justify-between mb-4">
+                        <h2 className="text-lg font-bold text-slate-900">Reservation Queue</h2>
+                        <div className="flex items-center rounded-full border border-gray-200 bg-white p-0.5 overflow-hidden shadow-sm">
                             <button
                                 onClick={() => setActiveView("priority")}
-                                className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${activeView === "priority" ? "bg-slate-900 text-white" : "text-slate-500"}`}
+                                className={`px-4 py-1.5 text-xs font-bold rounded-full transition-colors ${activeView === "priority" ? "bg-[#0F172A] text-white" : "text-slate-500 hover:text-slate-700"}`}
                             >
                                 Priority
                             </button>
                             <button
                                 onClick={() => setActiveView("new")}
-                                className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${activeView === "new" ? "bg-slate-900 text-white" : "text-slate-500"}`}
+                                className={`px-4 py-1.5 text-xs font-bold rounded-full transition-colors ${activeView === "new" ? "bg-[#0F172A] text-white" : "text-slate-500 hover:text-slate-700"}`}
                             >
                                 New ({newRequestsCount})
                             </button>
                             <button
                                 onClick={() => setActiveView("today")}
-                                className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${activeView === "today" ? "bg-slate-900 text-white" : "text-slate-500"}`}
+                                className={`px-4 py-1.5 text-xs font-bold rounded-full transition-colors ${activeView === "today" ? "bg-[#0F172A] text-white" : "text-slate-500 hover:text-slate-700"}`}
                             >
                                 Today
                             </button>
@@ -1103,19 +1021,21 @@ export default function DiningReservations() {
                         <motion.div 
                             initial={{ opacity: 0, scale: 0.9 }}
                             animate={{ opacity: 1, scale: 1 }}
-                            className="bg-white rounded-3xl p-16 text-center border border-slate-100 shadow-sm"
+                            className="bg-white border border-gray-200 rounded-3xl p-16 flex flex-col items-center justify-center text-center shadow-sm"
                         >
-                            <div className="bg-slate-50 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6">
-                                <Calendar className="w-10 h-10 text-slate-300" />
+                            <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mb-6">
+                                <Calendar className="w-8 h-8 text-slate-300" strokeWidth={1.5} />
                             </div>
-                            <h3 className="text-2xl font-black text-slate-800">No reservations found</h3>
-                            <p className="text-slate-500 mt-2 max-w-xs mx-auto">When guests book a table, they will appear here in your live queue.</p>
+                            <h3 className="text-xl font-bold text-slate-900 mb-2">No reservations found</h3>
+                            <p className="text-sm text-slate-500 max-w-sm mx-auto">
+                                When guests book a table, they will appear here in your live queue.
+                            </p>
                         </motion.div>
                     )}
                 </div>
-            )}
+                )}
+            </div>
         </div>
-    </div>
+        </div>
     )
 }
-

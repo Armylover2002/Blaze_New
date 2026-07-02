@@ -743,6 +743,7 @@ export default function Inventory() {
       return "all-items"
     }
   })
+  const [activeDesktopCategory, setActiveDesktopCategory] = useState("all")
   const [searchQuery, setSearchQuery] = useState("")
   const [filterOpen, setFilterOpen] = useState(false)
   const [selectedFilter, setSelectedFilter] = useState("all")
@@ -1812,14 +1813,39 @@ export default function Inventory() {
         />
       </div>
 
+      {/* DESKTOP HEADER & STATS (Hidden on Mobile) */}
+      <div className="hidden lg:block px-6 pt-6 pb-2">
+        <h1 className="text-2xl font-bold text-slate-900">Menu inventory</h1>
+        <p className="text-sm text-slate-500 mb-6">Manage dishes, stock, and add-ons</p>
+        
+        <div className="grid grid-cols-4 gap-4">
+          <div className="bg-emerald-50/50 rounded-xl p-4 border border-emerald-100">
+            <h3 className="text-xs font-bold text-emerald-700 uppercase tracking-wider mb-2">Categories</h3>
+            <p className="text-2xl font-bold text-emerald-900">{categories.length}</p>
+          </div>
+          <div className="bg-emerald-50/50 rounded-xl p-4 border border-emerald-100">
+            <h3 className="text-xs font-bold text-emerald-700 uppercase tracking-wider mb-2">Menu Items</h3>
+            <p className="text-2xl font-bold text-emerald-900">{categories.reduce((acc, cat) => acc + (cat.items?.length || 0), 0)}</p>
+          </div>
+          <div className="bg-emerald-50/50 rounded-xl p-4 border border-emerald-100">
+            <h3 className="text-xs font-bold text-emerald-700 uppercase tracking-wider mb-2">In Stock</h3>
+            <p className="text-2xl font-bold text-emerald-900">{categories.reduce((acc, cat) => acc + (cat.items?.filter(i => i.inStock)?.length || 0), 0)}</p>
+          </div>
+          <div className="bg-emerald-50/50 rounded-xl p-4 border border-emerald-100">
+            <h3 className="text-xs font-bold text-emerald-700 uppercase tracking-wider mb-2">Paused</h3>
+            <p className="text-2xl font-bold text-emerald-900">{categories.reduce((acc, cat) => acc + (cat.items?.filter(i => !i.inStock)?.length || 0), 0)}</p>
+          </div>
+        </div>
+      </div>
+
       {/* Tabs */}
-      <div className="bg-[#f3f5f8] px-4 pt-4 pb-4">
-        <div ref={tabBarRef} className="grid grid-cols-2 gap-3">
+      <div className="bg-[#f3f5f8] px-4 lg:px-6 pt-4 pb-4">
+        <div ref={tabBarRef} className="flex lg:inline-flex lg:bg-white lg:rounded-2xl lg:p-1.5 lg:border lg:border-slate-200 grid lg:grid-cols-none grid-cols-2 gap-3 lg:gap-1">
           <motion.button
             onClick={() => setActiveTab("all-items")}
-            className={`relative overflow-hidden rounded-[24px] border px-4 py-3 text-sm font-semibold whitespace-nowrap ${activeTab === "all-items"
-              ? "border-[#FF0000] text-white shadow-[0_18px_32px_-24px_rgba(73,171,20,0.8)]"
-              : "border-white/80 bg-white/80 text-slate-700 shadow-[0_16px_40px_-34px_rgba(15,23,42,0.45)]"
+            className={`relative overflow-hidden rounded-[24px] lg:rounded-xl border lg:border-none px-4 py-3 lg:py-2 text-sm font-semibold whitespace-nowrap ${activeTab === "all-items"
+              ? "border-[#FF0000] lg:text-[#FF0000] text-white shadow-[0_18px_32px_-24px_rgba(73,171,20,0.8)] lg:shadow-none"
+              : "border-white/80 bg-white/80 lg:bg-transparent text-slate-700 shadow-[0_16px_40px_-34px_rgba(15,23,42,0.45)] lg:shadow-none hover:bg-slate-50 lg:hover:bg-transparent"
               }`}
             animate={{
               scale: activeTab === "all-items" ? 1.02 : 1,
@@ -1829,7 +1855,7 @@ export default function Inventory() {
             {activeTab === "all-items" && (
               <motion.div
                 layoutId="activeTabBackground"
-                className="absolute inset-0 rounded-[24px] bg-[#FF0000] -z-10"
+                className="absolute inset-0 rounded-[24px] lg:rounded-xl bg-[#FF0000] lg:bg-white lg:shadow-sm -z-10"
                 initial={false}
                 transition={{
                   type: "spring",
@@ -1839,8 +1865,8 @@ export default function Inventory() {
               />
             )}
             <span className="relative z-10 flex items-center justify-center gap-2">
-              <span>All items</span>
-              <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${activeTab === "all-items" ? "bg-white text-[#FF0000]" : "bg-slate-100 text-slate-600"
+              <span>Menu Items</span>
+              <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${activeTab === "all-items" ? "bg-white lg:bg-emerald-50 lg:text-emerald-700 text-[#FF0000]" : "bg-slate-100 text-slate-600"
                 }`}>
                 {totalItems}
               </span>
@@ -1849,9 +1875,9 @@ export default function Inventory() {
 
           <motion.button
             onClick={() => setActiveTab("add-ons")}
-            className={`relative overflow-hidden rounded-[24px] border px-4 py-3 text-sm font-semibold whitespace-nowrap ${activeTab === "add-ons"
-              ? "border-[#FF0000] text-white shadow-[0_18px_32px_-24px_rgba(73,171,20,0.8)]"
-              : "border-white/80 bg-white/80 text-slate-700 shadow-[0_16px_40px_-34px_rgba(15,23,42,0.45)]"
+            className={`relative overflow-hidden rounded-[24px] lg:rounded-xl border lg:border-none px-4 py-3 lg:py-2 text-sm font-semibold whitespace-nowrap ${activeTab === "add-ons"
+              ? "border-[#FF0000] lg:text-[#FF0000] text-white shadow-[0_18px_32px_-24px_rgba(73,171,20,0.8)] lg:shadow-none"
+              : "border-white/80 bg-white/80 lg:bg-transparent text-slate-700 shadow-[0_16px_40px_-34px_rgba(15,23,42,0.45)] lg:shadow-none hover:bg-slate-50 lg:hover:bg-transparent"
               }`}
             animate={{
               scale: activeTab === "add-ons" ? 1.02 : 1,
@@ -1861,7 +1887,7 @@ export default function Inventory() {
             {activeTab === "add-ons" && (
               <motion.div
                 layoutId="activeTabBackground"
-                className="absolute inset-0 rounded-[24px] bg-[#FF0000] -z-10"
+                className="absolute inset-0 rounded-[24px] lg:rounded-xl bg-[#FF0000] lg:bg-white lg:shadow-sm -z-10"
                 initial={false}
                 transition={{
                   type: "spring",
@@ -1871,8 +1897,8 @@ export default function Inventory() {
               />
             )}
             <span className="relative z-10 flex items-center justify-center gap-2">
-              <span>Add ons</span>
-              <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${activeTab === "add-ons" ? "bg-white text-slate-950" : "bg-slate-100 text-slate-600"
+              <span>Add-ons</span>
+              <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${activeTab === "add-ons" ? "bg-white lg:bg-emerald-50 lg:text-emerald-700 text-slate-950" : "bg-slate-100 text-slate-600"
                 }`}>
                 {addons.length}
               </span>
@@ -1884,10 +1910,34 @@ export default function Inventory() {
       {/* Main Content */}
       <div
         ref={contentContainerRef}
-        className="flex-1 overflow-y-auto px-4 pb-32"
+        className="flex-1 overflow-y-auto pb-32"
       >
-        {/* Search and Filter */}
-        <div className="sticky top-0 z-30 -mx-4 px-4 pb-4 bg-[#f3f5f8]/95 backdrop-blur supports-[backdrop-filter]:bg-[#f3f5f8]/80">
+        {/* Desktop Search & Add Button (Hidden on Mobile) */}
+        <div className="hidden lg:flex items-center gap-4 px-6 mb-6">
+          <div className="flex-1 relative">
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder={activeTab === "add-ons" ? "Search add-ons by name or status" : "Search categories or dishes..."}
+              className="w-full h-12 pl-12 pr-4 bg-white border border-slate-200 rounded-full text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-shadow shadow-sm"
+            />
+          </div>
+          <button
+            onClick={() => {
+              if (activeTab === "add-ons") setIsAddAddonOpen(true)
+              else navigate("/food/restaurant/hub-menu/item/new")
+            }}
+            className="h-12 px-6 bg-[#27a15a] text-white rounded-full font-semibold hover:bg-[#1f874a] transition-colors flex items-center gap-2 shadow-sm"
+          >
+            <Plus className="w-5 h-5" />
+            Add item
+          </button>
+        </div>
+
+        {/* Mobile Search and Filter (Hidden on Desktop) */}
+        <div className="lg:hidden sticky top-0 z-30 px-4 pb-4 bg-[#f3f5f8]/95 backdrop-blur supports-[backdrop-filter]:bg-[#f3f5f8]/80">
           <div className="overflow-hidden rounded-2xl border border-white/80 bg-white/90 p-3 sm:p-4 shadow-[0_20px_48px_-34px_rgba(15,23,42,0.45)] backdrop-blur">
             <div className="flex items-center justify-between gap-3">
               <div>
@@ -1981,8 +2031,174 @@ export default function Inventory() {
           </div>
         </div>
 
-        {/* Categories Accordions */}
-        <div className="space-y-4 mb-6">
+        {/* Desktop 2-Column Layout (Hidden on Mobile) */}
+        <div className="hidden lg:flex px-6 gap-6 mb-6">
+          {/* Categories Sidebar */}
+          {activeTab !== "add-ons" && (
+            <div className="w-[280px] shrink-0">
+              <div className="bg-white rounded-2xl shadow-[0_2px_10px_-4px_rgba(0,0,0,0.1)] border border-slate-100 overflow-hidden sticky top-6">
+                <div className="p-4 bg-white border-b border-slate-100">
+                  <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Categories</h3>
+                </div>
+                <div className="flex flex-col max-h-[calc(100vh-140px)] overflow-y-auto">
+                  <button
+                    onClick={() => setActiveDesktopCategory("all")}
+                    className={`px-4 py-3.5 flex items-center justify-between text-sm transition-colors border-l-4 ${activeDesktopCategory === "all" ? "bg-emerald-50/50 text-emerald-800 border-emerald-500 font-bold" : "text-slate-600 hover:bg-slate-50 border-transparent font-medium"}`}
+                  >
+                    <span>All items</span>
+                  </button>
+                  {categories.map((cat) => (
+                    <button
+                      key={cat.id}
+                      onClick={() => setActiveDesktopCategory(cat.id)}
+                      className={`px-4 py-3.5 flex items-center justify-between text-sm transition-colors border-l-4 border-t border-t-slate-50 ${activeDesktopCategory === cat.id ? "bg-emerald-50/50 text-emerald-800 border-l-emerald-500 font-bold" : "text-slate-600 hover:bg-slate-50 border-l-transparent font-medium"}`}
+                    >
+                      <span className="truncate pr-2">{cat.name}</span>
+                      <span className="text-[11px] font-bold text-slate-400">{cat.items?.length || 0}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Desktop Grid Content */}
+          <div className="flex-1">
+            {activeTab === "add-ons" ? (
+              <div className="grid grid-cols-2 xl:grid-cols-3 gap-5">
+                {filteredAddons.map((addon) => (
+                  <div key={addon.id} className="bg-white rounded-2xl shadow-[0_4px_16px_-8px_rgba(0,0,0,0.1)] border border-slate-100 overflow-hidden hover:shadow-md transition-shadow flex flex-col">
+                    <div className="relative h-44 bg-slate-100 shrink-0">
+                      {addon.images && addon.images[0] ? (
+                        <img src={addon.images[0]} alt={addon.name} className="w-full h-full object-cover" />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-slate-300">
+                          <Utensils className="w-8 h-8 opacity-20" />
+                        </div>
+                      )}
+                      <div className={`absolute top-2 left-2 px-2 py-0.5 rounded text-[10px] font-bold text-white shadow-sm ${addon.foodType === "Veg" ? "bg-[#27a15a]" : "bg-[#ef4444]"}`}>
+                        {addon.foodType === "Veg" ? "VEG" : "NON-VEG"}
+                      </div>
+                    </div>
+                    <div className="p-4 flex-1 flex flex-col">
+                      <h3 className="font-bold text-slate-900 mb-1 line-clamp-1">{addon.name}</h3>
+                      <p className="text-[#27a15a] font-bold mb-2">₹{addon.price}</p>
+                      
+                      <div className="mb-2 flex gap-2 flex-wrap">
+                        {addon.approvalStatus === 'approved' && <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-100">APPROVED</span>}
+                        {addon.approvalStatus === 'pending' && <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-100">PENDING</span>}
+                        {addon.approvalStatus === 'rejected' && <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-100">REJECTED</span>}
+                      </div>
+
+                      {addon.description && (
+                        <p className="text-xs text-slate-500 mb-3 line-clamp-2">{addon.description}</p>
+                      )}
+                      
+                      <div className="mt-auto pt-2">
+                        <p className="text-xs font-semibold text-slate-700 mb-4">Stock: <span className="font-bold">{addon.isAvailable !== false ? "Unlimited" : "Paused"}</span></p>
+                        
+                        <div className="flex items-center gap-3">
+                          <button className="p-2 rounded-lg border border-slate-200 text-slate-400 hover:bg-slate-50 transition-colors">
+                            <ThumbsUp className="w-4 h-4" />
+                          </button>
+                          <div className="px-3 py-1.5 rounded-lg border border-slate-200 flex items-center justify-center">
+                            <Switch
+                              checked={addon.isAvailable !== false}
+                              onCheckedChange={(checked) => handleAddonToggle(addon.id, checked)}
+                              className="data-[state=checked]:bg-[#27a15a]"
+                            />
+                          </div>
+                          <button
+                            className="flex-1 py-1.5 bg-emerald-50 text-emerald-700 text-sm font-semibold rounded-lg border border-emerald-100 hover:bg-emerald-100 transition-colors flex items-center justify-center gap-1.5"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                            Edit
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 xl:grid-cols-3 gap-5">
+                {listToRender
+                  .filter((cat) => activeDesktopCategory === "all" || cat.id === activeDesktopCategory)
+                  .map((category) => (
+                    category.items?.map((item) => {
+                      const approvalMeta = getApprovalDisplayMeta(item.approvalStatus)
+                      return (
+                        <div key={item.id} className="bg-white rounded-2xl shadow-[0_4px_16px_-8px_rgba(0,0,0,0.1)] border border-slate-100 overflow-hidden hover:shadow-md transition-shadow flex flex-col">
+                          <div className="relative h-44 bg-slate-100 shrink-0">
+                            {item.image || (item.images && item.images[0]) ? (
+                              <img src={item.image || item.images[0]} alt={item.name} className="w-full h-full object-cover" />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center text-slate-300">
+                                <Utensils className="w-8 h-8 opacity-20" />
+                              </div>
+                            )}
+                            <div className={`absolute top-2 left-2 px-2 py-0.5 rounded text-[10px] font-bold text-white shadow-sm ${item.isVeg ? "bg-[#27a15a]" : "bg-[#ef4444]"}`}>
+                              {item.isVeg ? "VEG" : "NON-VEG"}
+                            </div>
+                          </div>
+                          <div className="p-4 flex-1 flex flex-col">
+                            <h3 className="font-bold text-slate-900 mb-1 line-clamp-1">{item.name}</h3>
+                            <p className="text-[#27a15a] font-bold mb-2">₹{item.price}</p>
+                            
+                            <div className="mb-2 flex gap-2 flex-wrap">
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${approvalMeta.className}`}>
+                                {approvalMeta.label.toUpperCase()}
+                              </span>
+                            </div>
+
+                            {item.description && (
+                              <p className="text-xs text-slate-500 mb-3 line-clamp-2">{item.description}</p>
+                            )}
+                            
+                            <div className="mt-auto pt-2">
+                              <p className="text-[11px] font-semibold text-slate-700 mb-4 truncate">
+                                Stock: <span className="font-bold">{item.inStock ? "Unlimited" : getRuleStatusLabel(item.stockRule)}</span>
+                              </p>
+                              
+                              <div className="flex items-center gap-3">
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    handleRecommendToggle(category.id, item.id)
+                                  }}
+                                  className={`p-2 rounded-lg border transition-colors ${item.isRecommended ? 'border-blue-200 bg-blue-50 text-blue-600' : 'border-slate-200 text-slate-400 hover:bg-slate-50'}`}
+                                >
+                                  <ThumbsUp className="w-4 h-4" />
+                                </button>
+                                <div className="px-3 py-1.5 rounded-lg border border-slate-200 flex items-center justify-center">
+                                  <Switch
+                                    checked={item.inStock}
+                                    onCheckedChange={(checked) => handleToggleChange("item", category.id, item.id, checked)}
+                                    className="data-[state=checked]:bg-[#27a15a]"
+                                  />
+                                </div>
+                                <button
+                                  onClick={() => handleEditItem(category, item)}
+                                  className="flex-1 py-1.5 bg-emerald-50 text-emerald-700 text-sm font-semibold rounded-lg border border-emerald-100 hover:bg-emerald-100 transition-colors flex items-center justify-center gap-1.5"
+                                >
+                                  <Pencil className="w-3.5 h-3.5" />
+                                  Edit
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })
+                  ))
+                }
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Mobile Categories Accordions (Hidden on Desktop) */}
+        <div className="lg:hidden space-y-4 mb-6 px-4">
           {activeTab === "add-ons" && (
             <>
               {isAddAddonOpen && (
