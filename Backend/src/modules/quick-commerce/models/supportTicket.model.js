@@ -18,6 +18,9 @@ const quickSupportTicketSchema = new mongoose.Schema(
 quickSupportTicketSchema.index({ createdAt: -1 });
 quickSupportTicketSchema.index({ userId: 1, createdAt: -1 });
 quickSupportTicketSchema.index({ sessionId: 1, createdAt: -1 });
+// Admin support grid filters by status/type and sorts by createdAt desc.
+quickSupportTicketSchema.index({ status: 1, createdAt: -1 });
+quickSupportTicketSchema.index({ type: 1, status: 1, createdAt: -1 });
 
 export const QuickSupportTicket = mongoose.model(
   'QuickSupportTicket',

@@ -143,6 +143,11 @@ sellerTransactionSchema.index(
   { sellerId: 1, referenceId: 1 },
   { unique: true, partialFilterExpression: { referenceId: { $type: 'string', $ne: '' } } },
 );
+// Idempotent order-payment upserts/lookups filter by sellerId + type + orderId
+// (quickOrder.service.js, sellerLedger.service.js) on the order hot path.
+sellerTransactionSchema.index({ sellerId: 1, type: 1, orderId: 1 });
+// Admin withdrawal grid + finance aggregations filter by type and sort by createdAt.
+sellerTransactionSchema.index({ type: 1, createdAt: -1 });
 
 export const SellerTransaction = mongoose.model(
   'SellerTransaction',

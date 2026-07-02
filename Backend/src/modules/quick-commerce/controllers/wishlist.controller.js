@@ -34,6 +34,10 @@ const getWishlistDocument = async (idQuery) =>
     { upsert: true, new: true }
   );
 
+// Read-only variant for GET requests so reads never create/write documents.
+const getWishlistDocumentReadOnly = async (idQuery) =>
+  QuickWishlist.findOne(idQuery).lean();
+
 const buildWishlistResponse = async (wishlistDoc, { idsOnly = false } = {}) => {
   const productIds = Array.isArray(wishlistDoc?.products)
     ? wishlistDoc.products.map((id) => String(id)).filter((id) => mongoose.isValidObjectId(id))
@@ -69,7 +73,7 @@ export const getWishlist = async (req, res) => {
     return res.status(400).json({ success: false, message: 'sessionId or userId is required' });
   }
 
-  const wishlist = await getWishlistDocument(idQuery);
+  const wishlist = await getWishlistDocumentReadOnly(idQuery);
   const result = await buildWishlistResponse(wishlist, { idsOnly: parseIdsOnly(req.query.idsOnly) });
   return res.json({ success: true, result });
 };

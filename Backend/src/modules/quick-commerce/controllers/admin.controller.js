@@ -891,13 +891,14 @@ export const getAdminOrders = async (req, res) => {
     )
   )].filter(id => mongoose.Types.ObjectId.isValid(id));
 
-  const sellers = await Seller.find({ _id: { $in: sellerIds } })
-    .select('_id shopName name shopInfo.businessType')
-    .lean();
-
-  const sellerOrders = await SellerOrder.find({ orderId: { $in: orders.map((order) => order.orderId).filter(Boolean) } })
-    .select('_id orderId status workflowStatus customer address')
-    .lean();
+  const [sellers, sellerOrders] = await Promise.all([
+    Seller.find({ _id: { $in: sellerIds } })
+      .select('_id shopName name shopInfo.businessType')
+      .lean(),
+    SellerOrder.find({ orderId: { $in: orders.map((order) => order.orderId).filter(Boolean) } })
+      .select('_id orderId status workflowStatus customer address')
+      .lean(),
+  ]);
 
   const sellerMap = sellers.reduce((acc, s) => {
     acc[String(s._id)] = s;

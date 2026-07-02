@@ -18,4 +18,9 @@ const sellerCouponSchema = new mongoose.Schema(
     { collection: 'quick_seller_coupons', timestamps: true }
 );
 
+// Coupon apply / duplicate-check look up by sellerId + couponCode.
+sellerCouponSchema.index({ sellerId: 1, couponCode: 1 });
+// Public coupon listing filters by sellerId + status + active expiry window.
+sellerCouponSchema.index({ sellerId: 1, status: 1, expiryDate: 1 });
+
 export const SellerCoupon = mongoose.model('SellerCoupon', sellerCouponSchema, 'quick_seller_coupons');

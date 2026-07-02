@@ -102,10 +102,20 @@ const walkSeed = async (nodes, parentId = null, depth = 0, parentKey = "") => {
   }
 };
 
+// Once categories exist they are never removed back to zero, so we cache the
+// "seeded" state in-process to skip a countDocuments() on every catalog/category
+// operation (create/update/read all funnel through here).
+let sellerCategoriesSeeded = false;
+
 export const ensureSellerCategoriesSeeded = async () => {
+  if (sellerCategoriesSeeded) return;
   const existingCount = await QuickCategory.countDocuments();
-  if (existingCount > 0) return;
+  if (existingCount > 0) {
+    sellerCategoriesSeeded = true;
+    return;
+  }
   await walkSeed(DEFAULT_CATEGORY_TREE);
+  sellerCategoriesSeeded = true;
 };
 
 export const buildSellerCategoryTree = async () => {
@@ -324,16 +334,25 @@ const headerIdMatch = (headerId) => {
     : id;
 };
 
+let pharmacySellerIdsCache = { value: null, expiry: 0 };
+
 const getPharmacySellerIds = async () => {
+  if (pharmacySellerIdsCache.value && Date.now() < pharmacySellerIdsCache.expiry) {
+    return pharmacySellerIdsCache.value;
+  }
+
   const sellers = await Seller.find({
     "shopInfo.businessType": { $regex: /^pharmacy$/i },
   })
     .select("_id")
     .lean();
 
-  return sellers
+  const ids = sellers
     .map((seller) => seller._id)
     .filter((id) => mongoose.Types.ObjectId.isValid(String(id)));
+
+  pharmacySellerIdsCache = { value: ids, expiry: Date.now() + 60_000 };
+  return ids;
 };
 
 const isPharmacyCatalogProductClause = (scope, pharmacySellerIds = []) => {

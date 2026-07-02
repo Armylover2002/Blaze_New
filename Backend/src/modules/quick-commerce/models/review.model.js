@@ -40,6 +40,8 @@ const quickReviewSchema = new mongoose.Schema({
   },
 }, { timestamps: true });
 
-quickReviewSchema.index({ productId: 1, status: 1 });
+// Product review lists filter by productId+status and sort by createdAt desc;
+// the trailing createdAt lets the index satisfy the sort (avoids in-memory sort).
+quickReviewSchema.index({ productId: 1, status: 1, createdAt: -1 });
 
 export const QuickReview = mongoose.model('quick_review', quickReviewSchema, 'quick_reviews');

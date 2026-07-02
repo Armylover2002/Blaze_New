@@ -4,7 +4,6 @@ import { QuickProduct } from '../models/product.model.js';
 import { QuickReview } from '../models/review.model.js';
 import { FoodUser } from '../../../core/users/user.model.js';
 import { Seller } from '../seller/models/seller.model.js';
-import { ensureQuickCommerceSeedData } from '../services/seed.service.js';
 import {
   getQuickCategories,
   getQuickCoupons,
@@ -548,7 +547,7 @@ export const getProducts = async (req, res) => {
 
 export const getProductById = async (req, res) => {
   setPublicCache(res, 600); // 10 minutes cache
-  await ensureQuickCommerceSeedData();
+  // Note: ensureQuickCommerceSeedData runs at server startup — no need here.
 
   const product = await QuickProduct.findOne({ _id: req.params.productId, ...publicProductFilter }).lean();
 

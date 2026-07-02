@@ -720,16 +720,24 @@ export async function getQuickCommerceDeliveryCashBalances({
   ]);
 
   const limitAmount = Math.max(1, Number(deliveryCashLimit || 0) || 5000);
-  const items = await Promise.all(
-    (partners || []).map(async (partner) => {
-      const [wallet, deliveredOrders, pendingOrders, lastSettlement] = await Promise.all([
-        getDeliveryPartnerWalletEnhanced(partner._id),
-        FoodOrder.countDocuments({
-          "dispatch.deliveryPartnerId": partner._id,
-          orderStatus: "delivered",
-        }),
-        FoodOrder.countDocuments({
-          "dispatch.deliveryPartnerId": partner._id,
+  const partnerIds = (partners || []).map((partner) => partner._id);
+
+  // Batch the previously per-partner queries (delivered count, pending count,
+  // last settlement) into 3 aggregations across all partners on the page,
+  // reducing ~4*N round-trips to N wallet calls + 3 aggregations. Output is
+  // identical to the per-partner computation.
+  const [wallets, deliveredAgg, pendingAgg, lastSettlementAgg] = await Promise.all([
+    Promise.all(
+      (partners || []).map((partner) => getDeliveryPartnerWalletEnhanced(partner._id)),
+    ),
+    FoodOrder.aggregate([
+      { $match: { "dispatch.deliveryPartnerId": { $in: partnerIds }, orderStatus: "delivered" } },
+      { $group: { _id: "$dispatch.deliveryPartnerId", count: { $sum: 1 } } },
+    ]),
+    FoodOrder.aggregate([
+      {
+        $match: {
+          "dispatch.deliveryPartnerId": { $in: partnerIds },
           orderStatus: {
             $nin: [
               "delivered",
@@ -739,33 +747,49 @@ export async function getQuickCommerceDeliveryCashBalances({
               "cancelled_by_admin",
             ],
           },
-        }),
-        FoodDeliveryCashDeposit.findOne({
-          deliveryPartnerId: partner._id,
-          status: "Completed",
-        })
-          .sort({ createdAt: -1 })
-          .select("createdAt")
-          .lean(),
-      ]);
+        },
+      },
+      { $group: { _id: "$dispatch.deliveryPartnerId", count: { $sum: 1 } } },
+    ]),
+    FoodDeliveryCashDeposit.aggregate([
+      { $match: { deliveryPartnerId: { $in: partnerIds }, status: "Completed" } },
+      { $sort: { createdAt: -1 } },
+      { $group: { _id: "$deliveryPartnerId", createdAt: { $first: "$createdAt" } } },
+    ]),
+  ]);
 
-      const currentCash = Math.max(0, Number(wallet?.cashInHand || 0));
-      const ratio = currentCash / limitAmount;
-      const status = ratio >= 1 ? "critical" : ratio >= 0.75 ? "warning" : "safe";
-
-      return {
-        id: String(partner._id),
-        name: partner.name || "Delivery Partner",
-        avatar: partner.profilePhoto || "",
-        currentCash,
-        limit: limitAmount,
-        status,
-        lastSettlement: lastSettlement?.createdAt || "Never",
-        totalOrders: Number(deliveredOrders || 0),
-        pendingOrders: Number(pendingOrders || 0),
-      };
-    }),
+  const walletByPartner = new Map(
+    (partners || []).map((partner, index) => [String(partner._id), wallets[index]]),
   );
+  const deliveredByPartner = new Map(
+    deliveredAgg.map((row) => [String(row._id), row.count]),
+  );
+  const pendingByPartner = new Map(
+    pendingAgg.map((row) => [String(row._id), row.count]),
+  );
+  const lastSettlementByPartner = new Map(
+    lastSettlementAgg.map((row) => [String(row._id), row.createdAt]),
+  );
+
+  const items = (partners || []).map((partner) => {
+    const partnerKey = String(partner._id);
+    const wallet = walletByPartner.get(partnerKey);
+    const currentCash = Math.max(0, Number(wallet?.cashInHand || 0));
+    const ratio = currentCash / limitAmount;
+    const status = ratio >= 1 ? "critical" : ratio >= 0.75 ? "warning" : "safe";
+
+    return {
+      id: partnerKey,
+      name: partner.name || "Delivery Partner",
+      avatar: partner.profilePhoto || "",
+      currentCash,
+      limit: limitAmount,
+      status,
+      lastSettlement: lastSettlementByPartner.get(partnerKey) || "Never",
+      totalOrders: Number(deliveredByPartner.get(partnerKey) || 0),
+      pendingOrders: Number(pendingByPartner.get(partnerKey) || 0),
+    };
+  });
 
   return {
     items,
