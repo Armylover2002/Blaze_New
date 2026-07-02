@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import io from 'socket.io-client';
 import { toast } from 'sonner';
 import { API_BASE_URL } from '@food/api/config';
-import { userAPI } from '@food/api';
 import { dispatchNotificationInboxRefresh } from '@food/hooks/useNotificationInbox';
+import { getUserIdFromStorage } from '@food/utils/userSessionCache';
 
 const debugLog = (...args) => {
   if (import.meta.env.DEV) {
@@ -20,21 +20,21 @@ export const useUserNotifications = () => {
   const [isConnected, setIsConnected] = useState(false);
   const [userId, setUserId] = useState(null);
 
-  // Fetch current user ID
+  // Resolve user ID from localStorage — avoids extra /auth/me on every layout mount
   useEffect(() => {
-    const fetchUserId = async () => {
-      try {
-        const response = await userAPI.getProfile();
-        if (response.data?.success && response.data.data?.user) {
-          const user = response.data.data.user;
-          const id = user._id?.toString() || user.userId || user.id;
-          setUserId(id);
-        }
-      } catch (error) {
-        // Not logged in or error
-      }
+    const storedId = getUserIdFromStorage();
+    if (storedId) {
+      setUserId(storedId);
+      return;
+    }
+
+    const handleAuthChange = () => {
+      const id = getUserIdFromStorage();
+      if (id) setUserId(id);
     };
-    fetchUserId();
+
+    window.addEventListener('userAuthChanged', handleAuthChange);
+    return () => window.removeEventListener('userAuthChanged', handleAuthChange);
   }, []);
 
   useEffect(() => {

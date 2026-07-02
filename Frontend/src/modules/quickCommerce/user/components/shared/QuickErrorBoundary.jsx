@@ -13,6 +13,12 @@ class QuickErrorBoundary extends React.Component {
     return { hasError: true };
   }
 
+  componentDidUpdate(prevProps) {
+    if (this.props.resetKey !== prevProps.resetKey && this.state.hasError) {
+      this.setState({ hasError: false });
+    }
+  }
+
   componentDidCatch(error, errorInfo) {
     console.error("Caught by QuickErrorBoundary:", error, errorInfo);
   }

@@ -151,6 +151,92 @@ export async function getPublicApprovedRestaurantMenu(restaurantIdOrSlug) {
     return buildMenuFromFoods(foods);
 }
 
+const MAX_BATCH_MENU_IDS = 50;
+
+/**
+ * Lightweight batch fetch for home-page category union.
+ * Returns section names + first item image per restaurant in a single DB query.
+ */
+export async function getPublicMenusBatch(restaurantIds = []) {
+    const validIds = Array.from(
+        new Set(
+            (restaurantIds || [])
+                .map((id) => String(id || '').trim())
+                .filter((id) => mongoose.Types.ObjectId.isValid(id))
+        )
+    ).slice(0, MAX_BATCH_MENU_IDS);
+
+    if (!validIds.length) return {};
+
+    const objectIds = validIds.map((id) => new mongoose.Types.ObjectId(id));
+    const approvedRestaurants = await FoodRestaurant.find({
+        _id: { $in: objectIds },
+        status: 'approved',
+    })
+        .select('_id')
+        .lean();
+
+    const approvedIdSet = new Set(approvedRestaurants.map((r) => String(r._id)));
+    const approvedObjectIds = validIds
+        .filter((id) => approvedIdSet.has(id))
+        .map((id) => new mongoose.Types.ObjectId(id));
+
+    if (!approvedObjectIds.length) return {};
+
+    const foods = await FoodItem.find({
+        restaurantId: { $in: approvedObjectIds },
+        approvalStatus: 'approved',
+    })
+        .select('restaurantId categoryId categoryName category name image')
+        .sort({ createdAt: -1 })
+        .limit(5000)
+        .lean();
+
+    const categoryIds = Array.from(
+        new Set(
+            foods
+                .map((f) => (f?.categoryId ? String(f.categoryId) : ''))
+                .filter((id) => mongoose.Types.ObjectId.isValid(id))
+        )
+    );
+    const categoryDocs = categoryIds.length
+        ? await FoodCategory.find({ _id: { $in: categoryIds } }).select('name image').lean()
+        : [];
+    const categoryMap = new Map(categoryDocs.map((doc) => [String(doc._id), doc]));
+
+    const menusByRestaurant = new Map();
+
+    for (const food of foods) {
+        const restaurantKey = String(food.restaurantId);
+        if (!menusByRestaurant.has(restaurantKey)) {
+            menusByRestaurant.set(restaurantKey, new Map());
+        }
+        const sectionMap = menusByRestaurant.get(restaurantKey);
+
+        const categoryId = food?.categoryId ? String(food.categoryId) : '';
+        const categoryDoc = categoryMap.get(categoryId) || null;
+        const sectionName = (categoryDoc?.name || food?.categoryName || food?.category || 'Menu').trim() || 'Menu';
+        const groupKey = categoryId || `name:${sectionName.toLowerCase()}`;
+
+        if (!sectionMap.has(groupKey)) {
+            sectionMap.set(groupKey, {
+                name: sectionName,
+                image: categoryDoc?.image || food?.image || '',
+            });
+        } else if (!sectionMap.get(groupKey).image && food?.image) {
+            sectionMap.get(groupKey).image = food.image;
+        }
+    }
+
+    const result = {};
+    for (const [restaurantId, sectionMap] of menusByRestaurant.entries()) {
+        result[restaurantId] = {
+            sections: Array.from(sectionMap.values()),
+        };
+    }
+    return result;
+}
+
 export async function syncMenuItemApprovalStatus(restaurantId, itemId, status, rejectionReason = '') {
     // No-op in Option A (menu snapshots removed). Approval status lives only in food_items.
     // Kept to avoid breaking admin approval flows that call this helper.

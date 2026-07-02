@@ -12,8 +12,8 @@ const ExploreMoreSection = memo(({
   backendOrigin = ""
 }) => {
   return (
-    <section className="px-4 py-4">
-      <div className="relative rounded-[24px] overflow-hidden bg-[#1c1c1e] p-5">
+    <section className="px-4 py-4 md:py-6">
+      <div className="relative overflow-hidden rounded-[24px] bg-[#1c1c1e] p-5 md:p-6">
         
         <h2 className="relative z-10 text-[11px] font-bold text-[#FF0000] tracking-[0.1em] uppercase mb-5 text-center">
           {exploreMoreHeading || "Explore More"}
@@ -24,12 +24,12 @@ const ExploreMoreSection = memo(({
             <ExploreGridSkeleton count={3} className="grid-cols-3" />
           </div>
         ) : (
-          <div className="relative z-10 flex justify-around items-start gap-2">
+          <div className="relative z-10 flex flex-wrap items-start justify-center gap-4 md:justify-around md:gap-6">
             {finalExploreItems.map((item, index) => (
               <Link
                 key={item.id}
                 to={item.href}
-                className="flex flex-col items-center gap-2 group w-[30%]"
+                className="flex w-[30%] min-w-[88px] flex-col items-center gap-2 group md:w-auto md:min-w-[112px]"
               >
                 <div className="relative w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-gray-800 transition-transform duration-300 group-hover:-translate-y-1 group-active:scale-95 flex items-center justify-center overflow-hidden">
                   <OptimizedImage

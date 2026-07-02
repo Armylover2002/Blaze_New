@@ -8,6 +8,7 @@ import React, {
 import { customerApi } from "../services/customerApi";
 import { useAuth } from "@core/context/AuthContext";
 import { userAPI } from "@food/api";
+import { getCachedUserAddresses } from "@food/utils/userSessionCache";
 
 const LocationContext = createContext(undefined);
 // v2 key to force one-time refresh from Google Maps for users
@@ -296,14 +297,29 @@ export const LocationProvider = ({ children }) => {
       );
     });
 
-  const refreshAddresses = useCallback(async () => {
+  const refreshAddresses = useCallback(async (forceRefresh = false) => {
     if (!isAuthenticated) {
       setSavedAddresses([]);
       return [];
     }
 
+    const userId = user?._id?.toString() || user?.userId || user?.id || null;
+
+    if (!forceRefresh) {
+      const sessionCached = getCachedUserAddresses();
+      if (sessionCached?.length) {
+        const normalized = sessionCached.map((addr, idx) =>
+          mapSharedAddress(addr, idx, user || {}),
+        );
+        setSavedAddresses(normalized);
+        return normalized;
+      }
+    }
+
     try {
-      userAPI.getAddresses.invalidateCache?.();
+      if (forceRefresh) {
+        userAPI.getAddresses.invalidateCache?.();
+      }
       const addressesResponse = await userAPI.getAddresses();
       const sharedAddresses =
         addressesResponse?.data?.data?.addresses ||
@@ -340,7 +356,7 @@ export const LocationProvider = ({ children }) => {
         }
       }
     }
-  }, [isAuthenticated, user]);
+  }, [isAuthenticated, user?._id, user?.userId, user?.id]);
 
   // On mount: hydrate saved addresses from profile (only when customer is logged in)
   useEffect(() => {

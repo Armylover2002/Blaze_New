@@ -114,6 +114,7 @@ const RecommendedSection = lazy(() => import("@food/components/user/home/Recomme
 const RestaurantGrid = lazy(() => import("@food/components/user/home/RestaurantGrid"));
 const SortFilterSection = lazy(() => import("@food/components/user/home/SortFilterSection"));
 const ExploreMoreSection = lazy(() => import("@food/components/user/home/ExploreMoreSection"));
+const HomeDesktopHero = lazy(() => import("@food/components/user/home/HomeDesktopHero"));
 
 const MiniCart = lazy(() => import("@food/components/user/MiniCart"));
 const OrderTrackingCard = lazy(() => import("@food/components/user/OrderTrackingCard"));
@@ -174,6 +175,7 @@ export default function Home() {
   const [availabilityTick, setAvailabilityTick] = useState(Date.now());
   const [currentBannerIndex, setCurrentBannerIndex] = useState(0);
   const [activeTab, setActiveTab] = useState("food");
+  const [mountedTabs, setMountedTabs] = useState(() => new Set(["food"]));
   const [showToast, setShowToast] = useState(false);
   const [placeholderIndex, setPlaceholderIndex] = useState(0);
 
@@ -279,6 +281,12 @@ export default function Home() {
       ? "porter"
       : "food";
     if (activeTab !== targetTab) setActiveTab(targetTab);
+    setMountedTabs((prev) => {
+      if (prev.has(targetTab)) return prev;
+      const next = new Set(prev);
+      next.add(targetTab);
+      return next;
+    });
   }, [routerLocation.pathname]);
 
   // --- Handlers ---
@@ -319,8 +327,8 @@ export default function Home() {
 
   // --- Render ---
   return (
-    <div className="relative min-h-screen bg-white dark:bg-[#0a0a0a] pb-16 md:pb-6 overflow-x-clip">
-      <div className="md:hidden relative overflow-x-clip z-[50]">
+    <div className="relative min-h-screen overflow-x-clip bg-white pb-16 dark:bg-[#0a0a0a] md:pb-8">
+      <div className="relative z-[50] overflow-x-clip md:hidden">
         {!state.isBootstrapped ? (
           <div className="px-4 pt-6 pb-4">
             <div className="h-10 w-48 bg-slate-100 animate-pulse rounded-xl mb-6" />
@@ -358,16 +366,25 @@ export default function Home() {
         )}
       </div>
 
-      <AnimatePresence initial={false} mode="wait">
-        {activeTab === "food" ? (
-          <motion.div
-            key="food-content"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.16, ease: "easeOut" }}
-            className="bg-white dark:bg-[#0a0a0a]"
-          >
+      {activeTab === "food" && (
+        <Suspense fallback={<HeroBannerSkeleton className="hidden h-72 w-full md:block" />}>
+          <HomeDesktopHero
+            showBannerSkeleton={banners.loading}
+            heroBannerImages={banners.images?.length ? banners.images : activeBannerImages}
+            heroBannersData={activeBannerData}
+            currentBannerIndex={currentBannerIndex}
+            setCurrentBannerIndex={setCurrentBannerIndex}
+            heroShellRef={heroShellRef}
+            navigate={navigate}
+            backendOrigin={BACKEND_ORIGIN}
+            handleVegModeChange={handleVegModeChange}
+            isVegMode={Boolean(vegMode)}
+          />
+        </Suspense>
+      )}
+
+      <div className={activeTab === "food" ? "relative mx-auto w-full max-w-7xl md:px-4 lg:px-8" : "hidden"}>
+        <div className="bg-white dark:bg-[#0a0a0a]">
             <Suspense fallback={<CategoryChipRowSkeleton className="py-1" />}>
               <CategoryRail
                 displayCategories={categories.display}
@@ -382,9 +399,8 @@ export default function Home() {
               <RecommendedSection recommendedForYouRestaurants={meta.recommended} />
             </Suspense>
 
-
-            <Suspense fallback={<HeroBannerSkeleton className="h-full w-full px-4 mt-3" />}>
-              <section className="content-auto px-4 py-4 sm:py-6 lg:py-8">
+            <Suspense fallback={<HeroBannerSkeleton className="h-full w-full px-4 mt-3 md:hidden" />}>
+              <section className="content-auto px-4 py-4 sm:py-6 md:hidden lg:py-8">
                 <div className="overflow-hidden rounded-2xl h-48 sm:h-64 md:h-72 lg:h-[350px] shadow-lg border border-gray-100">
                   <BannerSection
                     showBannerSkeleton={banners.loading}
@@ -434,49 +450,36 @@ export default function Home() {
                 restaurantLoadMoreRef={restaurantLoadMoreRef}
               />
             </Suspense>
-          </motion.div>
-        ) : activeTab === "quick" ? (
-          <motion.div
-            key="quick-content"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.16, ease: "easeOut" }}
-            className="bg-transparent"
-          >
-            <QuickLocationProvider>
-              <QuickCartProvider>
-                <QuickWishlistProvider>
-                  <QuickCartAnimationProvider>
-                    <QuickProductDetailProvider>
-                      <Suspense fallback={<div className="h-screen w-full bg-white dark:bg-[#0a0a0a]" />}>
-                        <QuickCommerceHomePage
-                          embedded
-                        />
-                      </Suspense>
-                    </QuickProductDetailProvider>
-                  </QuickCartAnimationProvider>
-                </QuickWishlistProvider>
-              </QuickCartProvider>
-            </QuickLocationProvider>
-          </motion.div>
-        ) : (
-          <motion.div
-            key="porter-content"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.16, ease: "easeOut" }}
-            className="bg-transparent"
-          >
-            <PorterProvider>
-              <Suspense fallback={<div className="h-screen w-full bg-[#FAF7F2] dark:bg-[#0a0a0a]" />}>
-                <PorterHomePage embedded />
-              </Suspense>
-            </PorterProvider>
-          </motion.div>
-        )}
-      </AnimatePresence>
+        </div>
+      </div>
+
+      {mountedTabs.has("quick") && (
+        <div className={activeTab === "quick" ? "bg-transparent" : "hidden"}>
+          <QuickLocationProvider>
+            <QuickCartProvider>
+              <QuickWishlistProvider>
+                <QuickCartAnimationProvider>
+                  <QuickProductDetailProvider>
+                    <Suspense fallback={<div className="h-screen w-full bg-white dark:bg-[#0a0a0a]" />}>
+                      <QuickCommerceHomePage embedded />
+                    </Suspense>
+                  </QuickProductDetailProvider>
+                </QuickCartAnimationProvider>
+              </QuickWishlistProvider>
+            </QuickCartProvider>
+          </QuickLocationProvider>
+        </div>
+      )}
+
+      {mountedTabs.has("porter") && (
+        <div className={activeTab === "porter" ? "bg-transparent" : "hidden"}>
+          <PorterProvider>
+            <Suspense fallback={<div className="h-screen w-full bg-[#FAF7F2] dark:bg-[#0a0a0a]" />}>
+              <PorterHomePage embedded />
+            </Suspense>
+          </PorterProvider>
+        </div>
+      )}
 
       {/* Veg Mode Popups (Enable / Switch Off) */}
       <VegModePopups

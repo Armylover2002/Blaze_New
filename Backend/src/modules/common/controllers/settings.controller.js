@@ -1,35 +1,58 @@
 import { GlobalSettings } from '../models/settings.model.js';
 import { sendResponse } from '../../../utils/response.js';
 import { uploadImageBufferDetailed } from '../../../services/cloudinary.service.js';
+import { getCache, setCache, deleteCache } from '../../../utils/cacheManager.js';
+
+const SETTINGS_CACHE_KEY = 'global_settings_public';
+const SETTINGS_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+export const clearGlobalSettingsCache = () => {
+    deleteCache(SETTINGS_CACHE_KEY);
+};
+
+const buildSettingsPayload = (settings) => {
+    const rawSettings = settings.toObject ? settings.toObject() : settings;
+    const allowedModules = Object.keys(GlobalSettings.schema.paths)
+        .filter(p => p.startsWith('modules.'))
+        .map(p => p.replace('modules.', ''));
+    const cleanedModules = {};
+
+    allowedModules.forEach(mod => {
+        cleanedModules[mod] = (rawSettings.modules && rawSettings.modules[mod] !== undefined)
+            ? !!rawSettings.modules[mod]
+            : true;
+    });
+    rawSettings.modules = cleanedModules;
+    return rawSettings;
+};
 
 export async function getGlobalSettings(req, res, next) {
     try {
+        const isPublicRoute = req.path === '/public' || req.originalUrl?.includes('/public');
+        if (isPublicRoute) {
+            const cached = getCache(SETTINGS_CACHE_KEY);
+            if (cached) {
+                res.set('Cache-Control', 'public, max-age=300, stale-while-revalidate=60');
+                return sendResponse(res, 200, 'Global settings fetched successfully', cached);
+            }
+        }
+
         let settings = await GlobalSettings.findOne();
         if (!settings) {
-            // Create default settings if none exist
             settings = await GlobalSettings.create({
                 companyName: 'Appzeto',
                 email: 'admin@appzeto.com'
             });
         }
 
-        // Cleanup any extra modules that might be in the DB (taxi, hotel, etc.)
-        const rawSettings = settings.toObject();
-        // Dynamically get allowed modules from the schema (single source of truth)
-        const allowedModules = Object.keys(GlobalSettings.schema.paths)
-            .filter(p => p.startsWith('modules.'))
-            .map(p => p.replace('modules.', ''));
-        const cleanedModules = {};
-        
-        allowedModules.forEach(mod => {
-            // Ensure we always return a boolean for these keys
-            cleanedModules[mod] = (rawSettings.modules && rawSettings.modules[mod] !== undefined) 
-                ? !!rawSettings.modules[mod] 
-                : true;
-        });
-        rawSettings.modules = cleanedModules;
+        const payload = buildSettingsPayload(settings);
 
-        return sendResponse(res, 200, 'Global settings fetched successfully', rawSettings);
+        if (isPublicRoute) {
+            setCache(SETTINGS_CACHE_KEY, payload, SETTINGS_CACHE_TTL_MS);
+            res.set('Cache-Control', 'public, max-age=300, stale-while-revalidate=60');
+        }
+
+        return sendResponse(res, 200, 'Global settings fetched successfully', payload);
     } catch (error) {
         next(error);
     }
@@ -180,6 +203,7 @@ export async function updateGlobalSettings(req, res, next) {
         }
 
         await settings.save();
+        clearGlobalSettingsCache();
         return sendResponse(res, 200, 'Global settings updated successfully', settings);
     } catch (error) {
         next(error);

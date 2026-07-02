@@ -265,6 +265,13 @@ export const useQuickHomeData = ({ currentLocation }) => {
 
   const fetchDataSeqRef = useRef(0);
 
+  const locationKey = useMemo(() => {
+    if (!Number.isFinite(currentLocation?.latitude) || !Number.isFinite(currentLocation?.longitude)) {
+      return "";
+    }
+    return `${Number(currentLocation.latitude).toFixed(4)},${Number(currentLocation.longitude).toFixed(4)}`;
+  }, [currentLocation?.latitude, currentLocation?.longitude]);
+
   const getQuickCategoryImage = useCallback((category = {}) => {
     const candidate =
       category?.image || category?.icon || category?.thumbnail ||
@@ -438,7 +445,7 @@ export const useQuickHomeData = ({ currentLocation }) => {
     } finally {
       if (seq === fetchDataSeqRef.current) setIsLoading(false);
     }
-  }, [currentLocation, getQuickCategoryImage, buildHeaderCategory]);
+  }, [locationKey, getQuickCategoryImage, buildHeaderCategory]);
 
 
   useEffect(() => {
@@ -459,14 +466,10 @@ export const useQuickHomeData = ({ currentLocation }) => {
     const headerId = activeCategory._id;
 
     const fetchHeaderSections = async () => {
-      console.log(`[AUDIT] fetchHeaderSections triggered for category: ${headerId}`);
       if (globalQuickHomeCache.headerSections.has(headerId)) {
-        console.log(`[AUDIT] CACHE HIT: headerSections found for ${headerId}.`);
-        console.log(`[AUDIT] EXACT CACHED PAYLOAD (headerSections):`, globalQuickHomeCache.headerSections.get(headerId));
         setHeaderSections(globalQuickHomeCache.headerSections.get(headerId));
         return;
       }
-      console.log(`[AUDIT] CACHE MISS: headerSections NOT found for ${headerId}. Making API call...`);
       setLoadingHeaderSections(true);
       try {
         const res = await customerApi.getExperienceSections({ pageType: "header", headerId });
@@ -484,8 +487,6 @@ export const useQuickHomeData = ({ currentLocation }) => {
 
     const fetchCategoryProducts = async () => {
       if (globalQuickHomeCache.categoryProducts.has(headerId)) {
-        console.log(`[AUDIT] CACHE HIT: categoryProducts found for ${headerId}.`);
-        console.log(`[AUDIT] EXACT CACHED PAYLOAD (categoryProducts):`, globalQuickHomeCache.categoryProducts.get(headerId));
         setCategoryProducts(globalQuickHomeCache.categoryProducts.get(headerId));
         return;
       }
@@ -502,10 +503,7 @@ export const useQuickHomeData = ({ currentLocation }) => {
     };
 
     const fetchHeaderHeroConfig = async () => {
-      console.log(`[AUDIT] CURRENT CACHE KEYS (heroConfigs):`, Array.from(globalQuickHomeCache.heroConfigs.keys()));
       if (globalQuickHomeCache.heroConfigs.has(headerId)) {
-        console.log(`[AUDIT] CACHE HIT: heroConfigs found for ${headerId}.`);
-        console.log(`[AUDIT] EXACT CACHED PAYLOAD (heroConfigs):`, globalQuickHomeCache.heroConfigs.get(headerId));
         setHeroConfig(globalQuickHomeCache.heroConfigs.get(headerId));
         return;
       }

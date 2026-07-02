@@ -86,6 +86,16 @@ export const listApprovedRestaurantsController = async (req, res, next) => {
     }
 };
 
+export const listUnder250RestaurantsController = async (req, res, next) => {
+    try {
+        const { listUnder250Restaurants } = await import('../services/under250.service.js');
+        const data = await listUnder250Restaurants(req.query);
+        return sendResponse(res, 200, 'Under ₹250 restaurants fetched successfully', data);
+    } catch (error) {
+        next(error);
+    }
+};
+
 export const getApprovedRestaurantController = async (req, res, next) => {
     try {
         const restaurant = await getApprovedRestaurantByIdOrSlug(req.params.id);

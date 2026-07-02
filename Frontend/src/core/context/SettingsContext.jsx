@@ -5,8 +5,7 @@ import React, {
   useEffect,
   useCallback,
 } from "react";
-import axiosInstance from "@core/api/axios";
-import { getWithDedupe } from "@core/api/dedupe";
+import { loadBusinessSettings, getCachedSettings } from "@common/utils/businessSettings";
 
 const SettingsContext = createContext(undefined);
 
@@ -85,10 +84,14 @@ export const SettingsProvider = ({ children }) => {
     try {
       setLoading(true);
       setError(null);
-      // Use the Food module's public settings endpoint
-      const res = await getWithDedupe("/food/admin/business-settings/public", {}, { ttl: 60 * 1000 });
-      const data = res.data?.result || res.data;
-      const merged = { ...DEFAULT_SETTINGS, ...data };
+      const cached = getCachedSettings();
+      if (cached) {
+        const merged = { ...DEFAULT_SETTINGS, ...cached };
+        setSettings(merged);
+        applyThemeVariables(merged);
+      }
+      const data = await loadBusinessSettings();
+      const merged = { ...DEFAULT_SETTINGS, ...(data || {}) };
       setSettings(merged);
       applyThemeVariables(merged);
     } catch (err) {

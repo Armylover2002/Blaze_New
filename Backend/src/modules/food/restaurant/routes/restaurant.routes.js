@@ -5,6 +5,7 @@ import {
     saveOnboardingStepController,
     getOnboardingDraftController,
     listApprovedRestaurantsController,
+    listUnder250RestaurantsController,
     getApprovedRestaurantController,
     listPublicOffersController,
     getCurrentRestaurantController,
@@ -37,7 +38,7 @@ import {
     updateCategoryController,
     deleteCategoryController
 } from '../controllers/restaurantCategory.controller.js';
-import { getMenuController, updateMenuController, getPublicRestaurantMenuController } from '../controllers/restaurantMenu.controller.js';
+import { getMenuController, updateMenuController, getPublicRestaurantMenuController, getPublicMenusBatchController } from '../controllers/restaurantMenu.controller.js';
 import { getPublicRestaurantAddonsController } from '../controllers/publicAddons.controller.js';
 import * as feedbackExperienceController from '../../admin/controllers/feedbackExperience.controller.js';
 import {
@@ -92,7 +93,9 @@ router.post('/onboarding/step/:step', uploadFields, saveOnboardingStepController
 router.get('/onboarding/draft', getOnboardingDraftController);
 
 // Public: approved restaurants list (for user app)
+router.get('/menus/batch', cacheResponse(300, 'restaurant_menus_batch'), getPublicMenusBatchController);
 router.get('/restaurants', cacheResponse(300, 'restaurants'), listApprovedRestaurantsController);
+router.get('/restaurants/under-250', cacheResponse(300, 'restaurants_under_250'), listUnder250RestaurantsController);
 router.get('/restaurants/:id', cacheResponse(600, 'restaurant_detail'), getApprovedRestaurantController);
 router.get('/restaurants/:id/menu', cacheResponse(600, 'restaurant_menu'), getPublicRestaurantMenuController);
 router.get('/restaurants/:id/outlet-timings', cacheResponse(600, 'restaurant_timings'), getOutletTimingsByRestaurantIdController);
@@ -149,6 +152,8 @@ router.post(
     upload.single('file'),
     async (req, res, next) => {
         await invalidateCache('restaurant_menu:*');
+    await invalidateCache('restaurant_menus_batch:*');
+        await invalidateCache('restaurant_menus_batch:*');
         next();
     },
     uploadRestaurantMenuImageController
@@ -171,6 +176,8 @@ router.post(
     upload.array('files', 20),
     async (req, res, next) => {
         await invalidateCache('restaurant_menu:*');
+    await invalidateCache('restaurant_menus_batch:*');
+        await invalidateCache('restaurant_menus_batch:*');
         next();
     },
     uploadRestaurantMenuImagesController
@@ -186,6 +193,7 @@ router.delete('/categories/:id', authMiddleware, requireRestaurant, deleteCatego
 router.get('/menu', authMiddleware, requireRestaurant, getMenuController);
 router.patch('/menu', authMiddleware, requireRestaurant, async (req, res, next) => {
     await invalidateCache('restaurant_menu:*');
+    await invalidateCache('restaurant_menus_batch:*');
     next();
 }, updateMenuController);
 
@@ -198,10 +206,12 @@ router.get('/restaurants/:id/addons', cacheResponse(600, 'restaurant_addons'), g
 // Foods (restaurant creates/updates items -> stored in food_items collection)
 router.post('/foods', authMiddleware, requireRestaurant, async (req, res, next) => {
     await invalidateCache('restaurant_menu:*');
+    await invalidateCache('restaurant_menus_batch:*');
     next();
 }, createRestaurantFoodController);
 router.patch('/foods/:id', authMiddleware, requireRestaurant, async (req, res, next) => {
     await invalidateCache('restaurant_menu:*');
+    await invalidateCache('restaurant_menus_batch:*');
     next();
 }, updateRestaurantFoodController);
 

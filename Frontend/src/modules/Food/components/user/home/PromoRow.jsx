@@ -4,7 +4,7 @@ import vegPromoIcon from "@food/assets/category-icons/veg_promo.png";
 import pricePromoIcon from "@food/assets/category-icons/price_promo.png";
 import comboPromoIcon from "@food/assets/category-icons/combo_promo.png";
 
-export default function PromoRow({ handleVegModeChange, navigate, isVegMode, toggleRef }) {
+export default function PromoRow({ handleVegModeChange, navigate, isVegMode, toggleRef, variant = "mobile" }) {
   const promoCardsData = [
     {
       id: 'offers',
@@ -50,17 +50,25 @@ export default function PromoRow({ handleVegModeChange, navigate, isVegMode, tog
     },
   ];
 
+  const isDesktop = variant === "desktop";
+
   return (
-    <div className="grid grid-cols-4 gap-2.5 px-3.5 pt-4 pb-8 bg-white">
+    <div
+      className={
+        isDesktop
+          ? "grid h-full grid-cols-2 gap-3 p-4"
+          : "grid grid-cols-4 gap-2.5 px-3.5 pt-4 pb-8 bg-white"
+      }
+    >
       {promoCardsData.map((promo) => (
         <div
           key={promo.id}
           ref={promo.id === 'pure-veg' ? toggleRef : null}
-          className="rounded-[22px] flex flex-col items-center overflow-hidden cursor-pointer active:scale-95 group transition-all duration-300"
+          className={`rounded-[22px] flex flex-col items-center overflow-hidden cursor-pointer active:scale-95 group transition-all duration-300 ${isDesktop ? "min-h-[148px]" : ""}`}
           style={{
             background: promo.gradient,
             boxShadow: `0 6px 20px ${promo.shadowColor}, 0 2px 8px rgba(0,0,0,0.12)`,
-            minHeight: '168px',
+            minHeight: isDesktop ? "148px" : "168px",
             border: promo.id === 'pure-veg' && isVegMode ? '2.5px solid rgba(165,214,167,0.7)' : '2px solid rgba(255,255,255,0.10)',
           }}
           onClick={() => {

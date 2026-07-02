@@ -69,6 +69,11 @@ const ShoppingAnimation = memo(() => (
 
 import { useOrders } from "@food/context/OrdersContext";
 import { orderAPI } from "@food/api";
+import {
+  isOrderListCacheFresh,
+  getOrderListCache,
+  setOrderListCache,
+} from "@food/utils/orderListCache";
 
 const getOrderKey = (order) => order?.id || order?._id || order?.orderId || null;
 const getCustomerToken = () =>
@@ -169,6 +174,18 @@ function OrderTrackingCardInner({ hasBottomNav = true }) {
       setHasFetchedApi(true);
       return;
     }
+    if (isOrderListCacheFresh()) {
+      const { orders: cachedOrders } = getOrderListCache();
+      if (cachedOrders.length > 0) {
+        const fp = ordersFingerprint(cachedOrders);
+        if (fp !== lastApiFingerprintRef.current) {
+          lastApiFingerprintRef.current = fp;
+          setApiOrders(cachedOrders);
+        }
+        setHasFetchedApi(true);
+        return;
+      }
+    }
     try {
       const response = await orderAPI.getOrders({ limit: 10, page: 1 });
       let nextOrders = [];
@@ -191,6 +208,7 @@ function OrderTrackingCardInner({ hasBottomNav = true }) {
         lastApiFingerprintRef.current = fp;
         setApiOrders(list);
       }
+      setOrderListCache(list, fp);
     } catch (error) {
       if (lastApiFingerprintRef.current !== "") {
         lastApiFingerprintRef.current = "";

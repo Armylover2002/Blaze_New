@@ -168,7 +168,7 @@ const RecommendedSection = memo(({ recommendedForYouRestaurants }) => {
             Recommended for you
           </h3>
         </div>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
           {[1, 2, 3, 4, 5, 6].map((i) => (
             <div key={i} className="bg-white rounded-[12px] border border-gray-100 overflow-hidden shadow-sm h-full flex flex-col animate-pulse">
               <div className="h-32 sm:h-36 bg-gray-200 shrink-0" />
@@ -214,7 +214,7 @@ const RecommendedSection = memo(({ recommendedForYouRestaurants }) => {
         </h3>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4 lg:gap-5">
         {products.map((product, index) => (
             <motion.div
               key={`recommended-prod-${product._id || product.id || index}`}

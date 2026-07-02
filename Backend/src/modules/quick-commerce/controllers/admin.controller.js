@@ -6,7 +6,6 @@ import { QuickOrder } from '../models/order.model.js';
 import { Seller } from '../seller/models/seller.model.js';
 import { SellerOrder } from '../seller/models/sellerOrder.model.js';
 import { QuickZone } from '../models/quick_zone.model.js';
-import { ensureQuickCommerceSeedData } from '../services/seed.service.js';
 import { resolveQuickOrderCancellationReason } from '../utils/cancellation.helpers.js';
 import { resolveQuickOrderCustomer } from '../utils/customer.helpers.js';
 import { uploadImageBuffer } from '../../../services/cloudinary.service.js';
@@ -344,8 +343,6 @@ const toSellerRequest = (seller) => ({
 });
 
 export const getAdminStats = async (_req, res) => {
-  await ensureQuickCommerceSeedData();
-
   const [categories, products, orders, sellers, users, revenueAgg] = await Promise.all([
     QuickCategory.countDocuments({ isActive: true }),
     QuickProduct.countDocuments({ isActive: true }),
@@ -386,7 +383,6 @@ export const getAdminStats = async (_req, res) => {
 };
 
 export const getAdminCategories = async (_req, res) => {
-  await ensureQuickCommerceSeedData();
   const {
     type,
     search,
@@ -561,7 +557,6 @@ export const removeCategory = async (req, res) => {
 };
 
 export const getAdminProducts = async (req, res) => {
-  await ensureQuickCommerceSeedData();
   const {
     categoryId,
     category,
@@ -636,7 +631,6 @@ export const getAdminProducts = async (req, res) => {
 };
 
 export const getAdminProductById = async (req, res) => {
-  await ensureQuickCommerceSeedData();
   const productId = String(req.params.productId || '').trim();
 
   if (!mongoose.isValidObjectId(productId)) {

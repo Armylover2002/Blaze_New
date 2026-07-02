@@ -8,7 +8,9 @@ import { API_ENDPOINTS } from "@/services/api/config";
 import { searchAPI } from "@/services/api";
 
 const SETTINGS_KEY = 'global_business_settings';
+const SETTINGS_FETCH_TTL_MS = 5 * 60 * 1000; // 5 minutes — skip network when fresh
 let currentAppType = 'user'; // Default to user app
+let lastSettingsFetchAt = 0;
 
 /**
  * Detect app type from URL if not set
@@ -74,10 +76,16 @@ let inFlightSettingsPromise = null;
 /**
  * Load business settings from backend (public endpoint - no auth required)
  */
-export const loadBusinessSettings = async () => {
+export const loadBusinessSettings = async (options = {}) => {
+  const forceRefresh = options?.forceRefresh === true;
   try {
     const endpoint = API_ENDPOINTS.ADMIN.BUSINESS_SETTINGS_PUBLIC;
     if (!endpoint || (typeof endpoint === "string" && !endpoint.trim())) {
+      return cachedSettings;
+    }
+
+    const now = Date.now();
+    if (!forceRefresh && cachedSettings && now - lastSettingsFetchAt < SETTINGS_FETCH_TTL_MS) {
       return cachedSettings;
     }
 
@@ -86,12 +94,12 @@ export const loadBusinessSettings = async () => {
     }
 
     inFlightSettingsPromise = (async () => {
-      // Use the generic searchAPI or a dedicated public getter if available
-      const response = await apiClient.get(endpoint, { noCache: true });
+      const response = await apiClient.get(endpoint);
       const settings = response?.data?.data || response?.data;
 
       if (settings) {
         cachedSettings = settings;
+        lastSettingsFetchAt = Date.now();
         try {
           localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
         } catch (e) {}
@@ -99,7 +107,6 @@ export const loadBusinessSettings = async () => {
         updateTitle(settings.companyName);
         updateThemeColor(settings.themeColor);
         
-        // Auto update favicon based on current app type
         const favicon = getAppFavicon(currentAppType);
         if (favicon) updateFavicon(favicon);
 
@@ -159,6 +166,7 @@ export const updateTitle = (companyName) => {
 export const setCachedSettings = (settings) => {
   if (settings) {
     cachedSettings = settings;
+    lastSettingsFetchAt = Date.now();
     try {
       localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
     } catch (e) {}
@@ -180,6 +188,7 @@ export const setCachedSettings = (settings) => {
  */
 export const clearCache = () => {
   cachedSettings = null;
+  lastSettingsFetchAt = 0;
   try {
     localStorage.removeItem(SETTINGS_KEY);
   } catch (e) {}

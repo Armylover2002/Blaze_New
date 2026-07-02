@@ -12,10 +12,10 @@ const CategoryRail = memo(({
   backendOrigin = ""
 }) => {
   return (
-    <section className="mt-6 px-4" data-purpose="mind-categories">
-      <h3 className="text-lg font-bold text-gray-900 mb-4">What's on your mind?</h3>
+    <section className="mt-6 px-4 md:mt-8" data-purpose="mind-categories">
+      <h3 className="mb-4 text-lg font-bold text-gray-900 dark:text-white md:text-xl">What's on your mind?</h3>
       
-      <div className="flex overflow-x-auto space-x-4 custom-scrollbar pb-2">
+      <div className="flex gap-4 overflow-x-auto pb-2 custom-scrollbar md:grid md:grid-cols-4 md:overflow-visible lg:grid-cols-6 xl:grid-cols-8 md:gap-5 md:pb-0">
         {/* Offers Card */}
         <div 
           className="flex-shrink-0 flex flex-col items-center space-y-2 cursor-pointer group"

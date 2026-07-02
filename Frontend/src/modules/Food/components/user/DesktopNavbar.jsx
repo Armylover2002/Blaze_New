@@ -1,6 +1,6 @@
 import { Link, useLocation, useNavigate } from "react-router-dom"
 import { useEffect, useState, useRef } from "react"
-import { ChevronDown, ShoppingCart, Wallet, Search, Mic } from "lucide-react"
+import { ChevronDown, ShoppingCart, Wallet, Search, X } from "lucide-react"
 import { Button } from "@food/components/ui/button"
 import { Input } from "@food/components/ui/input"
 import { Switch } from "@food/components/ui/switch"
@@ -9,21 +9,27 @@ import { useCart } from "@food/context/CartContext"
 import { useLocationSelector, useSearchOverlay } from "./UserLayout"
 import { useProfile } from "@food/context/ProfileContext"
 import { FaLocationDot } from "react-icons/fa6"
-import { AnimatePresence, motion } from "framer-motion"
+import { motion } from "framer-motion"
 import { useAuth } from "@core/context/AuthContext"
-
-import { 
-    loadBusinessSettings, 
-    getCachedSettings, 
+import { cn } from "@/lib/utils"
+import {
+    loadBusinessSettings,
+    getCachedSettings,
     getCompanyName,
     getAppLogo,
     getAppFavicon,
-    updateBrowserFavicon 
+    updateBrowserFavicon,
 } from "@common/utils/businessSettings"
-const debugLog = (...args) => {}
-const debugWarn = (...args) => {}
+
 const debugError = (...args) => {}
 
+const NAV_TABS = [
+    { id: "delivery", label: "Delivery", shortLabel: "Delivery", to: "/food/user", match: "delivery" },
+    { id: "quick", label: "Quick", shortLabel: "Quick", to: "/quick", match: "quick" },
+    { id: "under250", label: "Under 250", shortLabel: "₹250", to: "/food/user/under-250", match: "under250" },
+    { id: "dining", label: "Dining", shortLabel: "Dining", to: "/food/user/dining", match: "dining" },
+    { id: "profile", label: "Profile", shortLabel: "Profile", to: null, match: "profile" },
+]
 
 export default function DesktopNavbar({ showLogo = true }) {
     const location = useLocation()
@@ -35,31 +41,20 @@ export default function DesktopNavbar({ showLogo = true }) {
     const { setSearchValue } = useSearchOverlay()
     const { vegMode, setVegMode } = useProfile()
     const [heroSearch, setHeroSearch] = useState("")
-    const [logoUrl, setLogoUrl] = useState(() => getAppLogo('user'))
+    const [logoUrl, setLogoUrl] = useState(() => getAppLogo("user"))
     const [companyName, setCompanyName] = useState(() => getCompanyName())
     const [hasScrolledPastBanner, setHasScrolledPastBanner] = useState(false)
     const navRef = useRef(null)
     const cartCount = getCartCount()
 
-
-    // Show area if available, otherwise show city
-    // Priority: area > city > "Select"
-    const areaName = userLocation?.area && userLocation?.area.trim() ? userLocation.area.trim() : null
+    const areaName = userLocation?.area?.trim() || null
     const cityName = userLocation?.city || null
     const stateName = userLocation?.state || null
-    // Main location name: Show area if available, otherwise show city, otherwise "Select"
     const mainLocationName = areaName || cityName || "Select"
-    // Secondary location: Show only city when area is available (as per design image)
     const secondaryLocation = areaName
-        ? (cityName || "")  // Show only city when area is available
+        ? (cityName || "")
         : (cityName && stateName ? `${cityName}, ${stateName}` : cityName || stateName || "")
 
-    const handleLocationClick = () => {
-        // Open location selector overlay
-        openLocationSelector()
-    }
-
-    // Check active routes - support both /user/* and /* paths
     const normalizedPath =
         location.pathname.length > 1
             ? location.pathname.replace(/\/+$/, "")
@@ -75,50 +70,62 @@ export default function DesktopNavbar({ showLogo = true }) {
         location.pathname.startsWith("/food/user/profile") ||
         location.pathname.startsWith("/food/profile") ||
         isSharedFoodProfile
-    const isDelivery = !isDining && !isUnder250 && !isProfile && !isQuick && (location.pathname === "/food/user" || location.pathname === "/food" || (location.pathname.startsWith("/food/user") && !location.pathname.includes("/dining") && !location.pathname.includes("/under-250") && !location.pathname.includes("/profile")))
+    const isDelivery =
+        !isDining &&
+        !isUnder250 &&
+        !isProfile &&
+        !isQuick &&
+        (location.pathname === "/food/user" ||
+            location.pathname === "/food" ||
+            (location.pathname.startsWith("/food/user") &&
+                !location.pathname.includes("/dining") &&
+                !location.pathname.includes("/under-250") &&
+                !location.pathname.includes("/profile")))
     const isBannerRoute =
         location.pathname === "/food/user/under-250" ||
         location.pathname === "/food/under-250"
     const searchPlaceholder = isQuick
-        ? 'Search for milk, bread, eggs...'
-        : "Search for restaurants, food..."
+        ? "Search milk, bread, eggs..."
+        : "Search restaurants, food..."
 
-    // Load business settings logo
+    const activeTab = isQuick
+        ? "quick"
+        : isUnder250
+            ? "under250"
+            : isDining
+                ? "dining"
+                : isProfile
+                    ? "profile"
+                    : "delivery"
+
+    const isTransparentNav = isBannerRoute && !hasScrolledPastBanner
+
     useEffect(() => {
         const loadLogo = async () => {
             try {
                 const cached = getCachedSettings()
                 if (cached) {
-                    const userLogo = getAppLogo('user')
-                    if (userLogo) {
-                        setLogoUrl(userLogo)
-                    }
-                    const userFav = getAppFavicon('user')
+                    const userLogo = getAppLogo("user")
+                    if (userLogo) setLogoUrl(userLogo)
+                    const userFav = getAppFavicon("user")
                     if (userFav) updateBrowserFavicon(userFav)
-                    if (cached.companyName) {
-                        setCompanyName(cached.companyName)
-                    }
+                    if (cached.companyName) setCompanyName(cached.companyName)
                 } else {
                     const settings = await loadBusinessSettings()
                     if (settings) {
-                        const userLogo = getAppLogo('user')
-                        if (userLogo) {
-                            setLogoUrl(userLogo)
-                        }
-                        const userFav = getAppFavicon('user')
+                        const userLogo = getAppLogo("user")
+                        if (userLogo) setLogoUrl(userLogo)
+                        const userFav = getAppFavicon("user")
                         if (userFav) updateBrowserFavicon(userFav)
-                        if (settings.companyName) {
-                            setCompanyName(settings.companyName)
-                        }
+                        if (settings.companyName) setCompanyName(settings.companyName)
                     }
                 }
             } catch (error) {
-                debugError('Error loading logo:', error)
+                debugError("Error loading logo:", error)
             }
         }
         loadLogo()
 
-        // Listen for business settings updates
         const handleSettingsUpdate = (e) => {
             const settings = e.detail || getCachedSettings()
             const userLogo = settings?.userLogo?.url || settings?.logo?.url
@@ -127,11 +134,8 @@ export default function DesktopNavbar({ showLogo = true }) {
             if (userFav) updateBrowserFavicon(userFav)
             if (settings?.companyName) setCompanyName(settings.companyName)
         }
-        window.addEventListener('businessSettingsUpdated', handleSettingsUpdate)
-
-        return () => {
-            window.removeEventListener('businessSettingsUpdated', handleSettingsUpdate)
-        }
+        window.addEventListener("businessSettingsUpdated", handleSettingsUpdate)
+        return () => window.removeEventListener("businessSettingsUpdated", handleSettingsUpdate)
     }, [])
 
     useEffect(() => {
@@ -159,73 +163,91 @@ export default function DesktopNavbar({ showLogo = true }) {
         handleScroll()
         window.addEventListener("scroll", handleScroll, { passive: true })
         window.addEventListener("resize", handleScroll)
-
         return () => {
             window.removeEventListener("scroll", handleScroll)
             window.removeEventListener("resize", handleScroll)
         }
     }, [isBannerRoute])
 
+    const handleSearchSubmit = () => {
+        if (!heroSearch.trim()) return
+        navigate(
+            isQuick
+                ? `/quick/search?q=${encodeURIComponent(heroSearch.trim())}`
+                : `/food/search?q=${encodeURIComponent(heroSearch.trim())}`,
+        )
+    }
+
+    const getTabHref = (tab) => {
+        if (tab.match === "profile") {
+            return isAuthenticated ? "/food/user/profile" : "/user/auth/login"
+        }
+        return tab.to
+    }
+
     return (
         <nav
             ref={navRef}
-            className={`hidden md:flex flex-col fixed top-0 left-0 right-0 z-50 py-2 transition-all duration-300 ${(isBannerRoute && !hasScrolledPastBanner)
-                ? "bg-transparent !bg-transparent border-0 shadow-none"
-                : "bg-white dark:bg-[#1a1a1a] border-b border-gray-200 dark:border-gray-800 shadow-sm"
-                }`}
+            className={cn(
+                "fixed top-0 left-0 right-0 z-50 hidden flex-col py-1.5 transition-all duration-300 md:flex lg:py-2",
+                isTransparentNav
+                    ? "border-0 bg-transparent shadow-none"
+                    : "border-b border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-[#1a1a1a]",
+            )}
         >
-            {/* Top Row: Location - Search - Icons */}
-            <div className={`w-full ${(isBannerRoute && !hasScrolledPastBanner) ? "border-b border-transparent" : "border-b border-gray-100 dark:border-gray-800"}`}>
-                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                    <div className="flex items-center justify-between h-16 gap-4">
-                        {/* Left: Logo & Location */}
-                        <div className="flex items-center gap-4 lg:gap-6 flex-shrink-0">
-                            {/* Logo */}
+            {/* Top row */}
+            <div
+                className={cn(
+                    "w-full",
+                    isTransparentNav
+                        ? "border-b border-transparent"
+                        : "border-b border-gray-100 dark:border-gray-800",
+                )}
+            >
+                <div className="mx-auto w-full max-w-7xl px-3 sm:px-4 lg:px-8">
+                    <div className="flex min-h-[3.5rem] flex-wrap items-center gap-2 py-1 md:min-h-[4rem] md:gap-3 lg:flex-nowrap lg:gap-4">
+                        {/* Logo + location */}
+                        <div className="flex min-w-0 flex-1 items-center gap-2 md:max-w-[42%] lg:max-w-none lg:flex-shrink-0 lg:gap-4 xl:gap-6">
                             {showLogo && (
-                                <Link to="/food/user" className="flex items-center justify-center flex-shrink-0">
+                                <Link to="/food/user" className="flex flex-shrink-0 items-center justify-center">
                                     {logoUrl ? (
                                         <img
                                             src={logoUrl}
                                             alt={companyName || "Logo"}
-                                            className="h-10 w-auto md:h-14 lg:h-16 object-contain"
+                                            className="h-8 w-auto object-contain md:h-10 lg:h-12 xl:h-14"
                                             onError={(e) => {
-                                                e.target.style.display = 'none'
+                                                e.currentTarget.style.display = "none"
                                             }}
                                         />
                                     ) : (
-                                        <span className="text-xl font-bold text-gray-900 dark:text-white">
-                                          {companyName || "Appzeto"}
+                                        <span className="text-base font-bold text-gray-900 dark:text-white md:text-lg lg:text-xl">
+                                            {companyName || "Appzeto"}
                                         </span>
                                     )}
                                 </Link>
                             )}
 
-                            {/* Location Selector */}
                             <Button
                                 variant="ghost"
-                                onClick={handleLocationClick}
+                                onClick={openLocationSelector}
                                 disabled={locationLoading}
-                                className="h-auto px-0 py-0 hover:bg-transparent transition-colors flex-shrink-0"
+                                className="h-auto min-w-0 flex-1 px-0 py-0 hover:bg-transparent lg:flex-shrink-0 lg:flex-none"
                             >
                                 {locationLoading ? (
-                                    <span className="text-sm font-bold text-black dark:text-white">
+                                    <span className="text-xs font-bold text-black dark:text-white md:text-sm">
                                         Loading...
                                     </span>
                                 ) : (
-                                    <div className="flex flex-col items-start min-w-0">
-                                        <div className="flex items-center gap-1.5 lg:gap-2">
-                                            <FaLocationDot
-                                                className="h-5 w-5 lg:h-6 lg:w-6 text-black dark:text-white flex-shrink-0"
-                                                fill="currentColor"
-                                                strokeWidth={2}
-                                            />
-                                            <span className="text-sm lg:text-base font-bold text-black dark:text-white whitespace-nowrap">
+                                    <div className="flex min-w-0 flex-col items-start">
+                                        <div className="flex min-w-0 items-center gap-1 md:gap-1.5 lg:gap-2">
+                                            <FaLocationDot className="h-4 w-4 flex-shrink-0 text-black dark:text-white md:h-5 md:w-5" />
+                                            <span className="truncate text-xs font-bold text-black dark:text-white md:max-w-[8rem] md:text-sm lg:max-w-[12rem] lg:text-base xl:max-w-none">
                                                 {mainLocationName}
                                             </span>
-                                            <ChevronDown className="h-4 w-4 lg:h-5 lg:w-5 text-black dark:text-white flex-shrink-0" strokeWidth={2.5} />
+                                            <ChevronDown className="h-3.5 w-3.5 flex-shrink-0 text-black dark:text-white md:h-4 md:w-4" strokeWidth={2.5} />
                                         </div>
                                         {secondaryLocation && (
-                                            <span className="text-xs lg:text-sm font-bold text-gray-600 dark:text-gray-400 mt-0.5 whitespace-nowrap">
+                                            <span className="mt-0.5 hidden truncate text-[11px] font-semibold text-gray-600 dark:text-gray-400 sm:block md:max-w-[10rem] lg:max-w-[14rem] lg:text-xs xl:max-w-none">
                                                 {secondaryLocation}
                                             </span>
                                         )}
@@ -234,13 +256,12 @@ export default function DesktopNavbar({ showLogo = true }) {
                             </Button>
                         </div>
 
-                        {/* Center: Search Bar & Veg Mode */}
-                        <div className="flex-1 max-w-3xl mx-4 flex items-center gap-4">
-                            {/* Search Bar */}
-                            <div className="relative flex-1">
-                                <div className="relative bg-gray-100 dark:bg-[#2a2a2a] rounded-lg transition-all duration-300 focus-within:ring-2 focus-within:ring-[#FF0000] focus-within:bg-white dark:focus-within:bg-[#1a1a1a] border border-transparent focus-within:border-[#FF0000]/20">
-                                    <div className="flex items-center px-3 py-2">
-                                        <Search className="h-4 w-4 text-gray-500 flex-shrink-0 mr-3" />
+                        {/* Search + veg mode */}
+                        <div className="order-3 flex w-full min-w-0 items-center gap-2 md:order-2 md:w-auto md:flex-1 md:max-w-none lg:mx-4 lg:max-w-3xl lg:gap-3 xl:gap-4">
+                            <div className="relative min-w-0 flex-1">
+                                <div className="rounded-lg border border-transparent bg-gray-100 transition-all duration-300 focus-within:border-[#FF0000]/20 focus-within:bg-white focus-within:ring-2 focus-within:ring-[#FF0000] dark:bg-[#2a2a2a] dark:focus-within:bg-[#1a1a1a]">
+                                    <div className="flex items-center px-2.5 py-1.5 md:px-3 md:py-2">
+                                        <Search className="mr-2 h-4 w-4 flex-shrink-0 text-gray-500" />
                                         <Input
                                             value={heroSearch}
                                             onChange={(e) => {
@@ -249,70 +270,63 @@ export default function DesktopNavbar({ showLogo = true }) {
                                                 setSearchValue(nextValue)
                                             }}
                                             onKeyDown={(e) => {
-                                                if (e.key === "Enter" && heroSearch.trim()) {
-                                                    navigate(
-                                                        isQuick
-                                                            ? `/quick/search?q=${encodeURIComponent(heroSearch.trim())}`
-                                                            : `/food/search?q=${encodeURIComponent(heroSearch.trim())}`
-                                                    )
-                                                }
+                                                if (e.key === "Enter") handleSearchSubmit()
                                             }}
-                                            className="h-6 p-0 border-0 bg-transparent text-sm font-medium placeholder:text-gray-500 focus-visible:ring-0 focus-visible:ring-offset-0"
+                                            className="h-6 min-w-0 border-0 bg-transparent p-0 text-xs font-medium placeholder:text-gray-500 focus-visible:ring-0 focus-visible:ring-offset-0 md:text-sm"
                                             placeholder={searchPlaceholder}
                                         />
                                         {heroSearch && (
                                             <Button
                                                 variant="ghost"
                                                 size="sm"
-                                                className="h-5 w-5 p-0 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-full ml-1"
+                                                className="ml-1 h-6 w-6 flex-shrink-0 rounded-full p-0 hover:bg-gray-200 dark:hover:bg-gray-700"
                                                 onClick={() => setHeroSearch("")}
+                                                aria-label="Clear search"
                                             >
-                                                <span className="sr-only">Clear</span>
-                                                <span aria-hidden="true">�</span>
+                                                <X className="h-3.5 w-3.5" />
                                             </Button>
                                         )}
                                     </div>
                                 </div>
                             </div>
 
-                            {/* VEG MODE Toggle - Moved here */}
-                            <div className="flex items-center gap-2 flex-shrink-0">
-                                <div className="flex flex-col items-end">
-                                    <span className="text-[10px] font-bold text-gray-700 dark:text-gray-300 leading-none">VEG</span>
-                                    <span className="text-[8px] font-bold text-gray-500 dark:text-gray-400 leading-none">MODE</span>
+                            <div className="flex flex-shrink-0 items-center gap-1.5 md:gap-2">
+                                <div className="hidden flex-col items-end lg:flex">
+                                    <span className="text-[10px] font-bold leading-none text-gray-700 dark:text-gray-300">VEG</span>
+                                    <span className="text-[8px] font-bold leading-none text-gray-500 dark:text-gray-400">MODE</span>
                                 </div>
                                 <Switch
                                     checked={vegMode}
                                     onCheckedChange={setVegMode}
-                                    className="data-[state=checked]:bg-green-600 data-[state=unchecked]:bg-gray-300 dark:data-[state=unchecked]:bg-gray-600 h-5 w-9"
+                                    className="h-5 w-9 data-[state=checked]:bg-green-600 data-[state=unchecked]:bg-gray-300 dark:data-[state=unchecked]:bg-gray-600"
+                                    aria-label="Toggle veg mode"
                                 />
                             </div>
                         </div>
 
-                        {/* Right: Wallet and Cart Icons */}
-                        <div className="flex items-center gap-2 lg:gap-3 flex-shrink-0">
-                            {/* Wallet Icon */}
+                        {/* Actions */}
+                        <div className="order-2 ml-auto flex flex-shrink-0 items-center gap-1 md:order-3 md:ml-0 md:gap-2 lg:gap-3">
                             <Link to="/food/user/wallet">
                                 <Button
                                     variant="ghost"
-                                    className="h-12 w-12 lg:h-14 lg:w-14 rounded-full p-0 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                                    className="h-9 w-9 rounded-full p-0 hover:bg-gray-100 dark:hover:bg-gray-800 md:h-10 md:w-10 lg:h-12 lg:w-12"
                                     title="Wallet"
                                 >
-                                    <Wallet className="!h-5 !w-5 lg:!h-6 lg:!w-6 text-gray-700 dark:text-gray-300" strokeWidth={2} />
+                                    <Wallet className="!h-4 !w-4 text-gray-700 dark:text-gray-300 md:!h-5 md:!w-5 lg:!h-6 lg:!w-6" strokeWidth={2} />
                                 </Button>
                             </Link>
-
-                            {/* Cart Icon */}
                             <Link to="/food/user/cart">
                                 <Button
                                     variant="ghost"
-                                    className="relative h-12 w-12 lg:h-14 lg:w-14 rounded-full p-0 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                                    className="relative h-9 w-9 rounded-full p-0 hover:bg-gray-100 dark:hover:bg-gray-800 md:h-10 md:w-10 lg:h-12 lg:w-12"
                                     title="Cart"
                                 >
-                                    <ShoppingCart className="!h-5 !w-5 lg:!h-6 lg:!w-6 text-gray-700 dark:text-gray-300" strokeWidth={2} />
+                                    <ShoppingCart className="!h-4 !w-4 text-gray-700 dark:text-gray-300 md:!h-5 md:!w-5 lg:!h-6 lg:!w-6" strokeWidth={2} />
                                     {cartCount > 0 && (
-                                        <span className="absolute -top-1 -right-1 w-6 h-6 bg-red-500 rounded-full flex items-center justify-center ring-2 ring-white dark:ring-gray-800">
-                                            <span className="text-xs font-bold text-white">{cartCount > 99 ? "99+" : cartCount}</span>
+                                        <span className="absolute -right-0.5 -top-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-800 md:h-6 md:w-6">
+                                            <span className="text-[10px] font-bold text-white md:text-xs">
+                                                {cartCount > 99 ? "99+" : cartCount}
+                                            </span>
                                         </span>
                                     )}
                                 </Button>
@@ -322,112 +336,54 @@ export default function DesktopNavbar({ showLogo = true }) {
                 </div>
             </div>
 
-            {/* Bottom Row: Navigation Tabs & Veg Mode */}
-            <div className={`w-full pb-3 ${(isBannerRoute && !hasScrolledPastBanner) ? "bg-transparent !bg-transparent" : "bg-white dark:bg-[#1a1a1a]"}`}>
-                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                    <div className="flex items-center justify-center h-12">
-                        {/* Navigation Tabs - Centered with spacing */}
-                        <div className="flex items-center space-x-24">
-                            {/* Delivery Tab */}
-                            <Link
-                                to="/food/user"
-                                className={`flex flex-col items-center gap-1 px-2 py-1 transition-colors relative group ${isDelivery
-                                    ? "text-[#FF0000] dark:text-[#FF0000]"
-                                    : "text-gray-600 dark:text-gray-400 hover:text-[#FF0000] dark:hover:text-[#FF0000]"
-                                    }`}
-                            >
-                                <span className="text-sm font-bold tracking-wide uppercase">Delivery</span>
-                                {isDelivery && (
-                                    <motion.div
-                                        layoutId="navIndicator"
-                                        className="absolute -bottom-3 left-0 right-0 h-0.5 bg-[#FF0000] dark:bg-[#FF0000]"
-                                        initial={{ opacity: 0 }}
-                                        animate={{ opacity: 1 }}
-                                        transition={{ duration: 0.3 }}
-                                    />
-                                )}
-                            </Link>
+            {/* Bottom nav tabs */}
+            <div
+                className={cn(
+                    "w-full pb-2 md:pb-2.5 lg:pb-3",
+                    isTransparentNav ? "bg-transparent" : "bg-white dark:bg-[#1a1a1a]",
+                )}
+            >
+                <div className="mx-auto w-full max-w-7xl px-3 sm:px-4 lg:px-8">
+                    <div className="flex h-10 items-center justify-center md:h-11 lg:h-12">
+                        <div className="scrollbar-hide flex w-full max-w-full items-center justify-start gap-4 overflow-x-auto md:justify-center md:gap-6 lg:gap-10 xl:gap-14">
+                            {NAV_TABS.map((tab) => {
+                                const isActive = activeTab === tab.match
+                                const href = getTabHref(tab)
+                                const isProfileTab = tab.match === "profile"
 
-                            {/* Quick Tab */}
-                            <Link
-                                to="/quick"
-                                className={`flex flex-col items-center gap-1 px-2 py-1 transition-colors relative group ${isQuick
-                                    ? "text-[#FF0000] dark:text-[#FF0000]"
-                                    : "text-gray-600 dark:text-gray-400 hover:text-[#FF0000] dark:hover:text-[#FF0000]"
-                                    }`}
-                            >
-                                <span className="text-sm font-bold tracking-wide uppercase">Quick</span>
-                                {isQuick && (
-                                    <motion.div
-                                        layoutId="navIndicator"
-                                        className="absolute -bottom-3 left-0 right-0 h-0.5 bg-[#FF0000] dark:bg-[#FF0000]"
-                                        initial={{ opacity: 0 }}
-                                        animate={{ opacity: 1 }}
-                                        transition={{ duration: 0.3 }}
-                                    />
-                                )}
-                            </Link>
-
-                            {/* Under 250 Tab */}
-                            <Link
-                                to="/food/user/under-250"
-                                className={`flex flex-col items-center gap-1 px-2 py-1 transition-colors relative group ${isUnder250
-                                    ? "text-[#FF0000] dark:text-[#FF0000]"
-                                    : "text-gray-600 dark:text-gray-400 hover:text-[#FF0000] dark:hover:text-[#FF0000]"
-                                    }`}
-                            >
-                                <span className="text-sm font-bold tracking-wide uppercase">Under 250</span>
-                                {isUnder250 && (
-                                    <motion.div
-                                        layoutId="navIndicator"
-                                        className="absolute -bottom-3 left-0 right-0 h-0.5 bg-[#FF0000] dark:bg-[#FF0000]"
-                                        initial={{ opacity: 0 }}
-                                        animate={{ opacity: 1 }}
-                                        transition={{ duration: 0.3 }}
-                                    />
-                                )}
-                            </Link>
-
-                            {/* Dining Tab */}
-                            <Link
-                                to="/food/user/dining"
-                                className={`flex flex-col items-center gap-1 px-2 py-1 transition-colors relative group ${isDining
-                                    ? "text-[#FF0000] dark:text-[#FF0000]"
-                                    : "text-gray-600 dark:text-gray-400 hover:text-[#FF0000] dark:hover:text-[#FF0000]"
-                                    }`}
-                            >
-                                <span className="text-sm font-bold tracking-wide uppercase">Dining</span>
-                                {isDining && (
-                                    <motion.div
-                                        layoutId="navIndicator"
-                                        className="absolute -bottom-3 left-0 right-0 h-0.5 bg-[#FF0000] dark:bg-[#FF0000]"
-                                        initial={{ opacity: 0 }}
-                                        animate={{ opacity: 1 }}
-                                        transition={{ duration: 0.3 }}
-                                    />
-                                )}
-                            </Link>
-
-                            {/* Profile Tab */}
-                            <Link
-                                to={isAuthenticated ? "/food/user/profile" : "/user/auth/login"}
-                                state={!isAuthenticated ? { redirectTo: "/food/user/profile" } : undefined}
-                                className={`flex flex-col items-center gap-1 px-2 py-1 transition-colors relative group ${isProfile
-                                    ? "text-red-600 dark:text-red-500"
-                                    : "text-gray-600 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-500"
-                                    }`}
-                            >
-                                <span className="text-sm font-bold tracking-wide uppercase">Profile</span>
-                                {isProfile && (
-                                    <motion.div
-                                        layoutId="navIndicator"
-                                        className="absolute -bottom-3 left-0 right-0 h-0.5 bg-red-600 dark:bg-red-500"
-                                        initial={{ opacity: 0 }}
-                                        animate={{ opacity: 1 }}
-                                        transition={{ duration: 0.3 }}
-                                    />
-                                )}
-                            </Link>
+                                return (
+                                    <Link
+                                        key={tab.id}
+                                        to={href}
+                                        state={!isAuthenticated && isProfileTab ? { redirectTo: "/food/user/profile" } : undefined}
+                                        className={cn(
+                                            "relative flex flex-shrink-0 flex-col items-center px-1 py-1 transition-colors",
+                                            isActive
+                                                ? isProfileTab
+                                                    ? "text-red-600 dark:text-red-500"
+                                                    : "text-[#FF0000]"
+                                                : "text-gray-600 hover:text-[#FF0000] dark:text-gray-400 dark:hover:text-[#FF0000]",
+                                        )}
+                                    >
+                                        <span className="text-[11px] font-bold uppercase tracking-wide md:text-xs lg:text-sm">
+                                            <span className="lg:hidden">{tab.shortLabel}</span>
+                                            <span className="hidden lg:inline">{tab.label}</span>
+                                        </span>
+                                        {isActive && (
+                                            <motion.div
+                                                layoutId="navIndicator"
+                                                className={cn(
+                                                    "absolute -bottom-2 left-0 right-0 h-0.5",
+                                                    isProfileTab ? "bg-red-600 dark:bg-red-500" : "bg-[#FF0000]",
+                                                )}
+                                                initial={{ opacity: 0 }}
+                                                animate={{ opacity: 1 }}
+                                                transition={{ duration: 0.3 }}
+                                            />
+                                        )}
+                                    </Link>
+                                )
+                            })}
                         </div>
                     </div>
                 </div>
@@ -435,5 +391,3 @@ export default function DesktopNavbar({ showLogo = true }) {
         </nav>
     )
 }
-
-
