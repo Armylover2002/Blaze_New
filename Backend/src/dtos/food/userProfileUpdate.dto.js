@@ -7,6 +7,36 @@ const isoDate = z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/, 'Invalid date format (expected YYYY-MM-DD)');
 
+// Loose per-item schema; canonical normalization/validation happens in the
+// service layer (shared with the address CRUD path). We accept coordinate and
+// pincode aliases here so existing clients keep working.
+const addressItemSchema = z
+    .object({
+        _id: z.string().optional(),
+        label: z.string().max(30).optional(),
+        address: z.string().max(300).optional(),
+        street: z.string().max(300).optional(),
+        additionalDetails: z.string().max(500).optional(),
+        city: z.string().max(120).optional(),
+        state: z.string().max(120).optional(),
+        zipCode: z.string().max(20).optional(),
+        pincode: z.string().max(20).optional(),
+        phone: z.string().max(30).optional(),
+        latitude: z.number().optional(),
+        longitude: z.number().optional(),
+        isDefault: z.boolean().optional(),
+        location: z
+            .object({
+                type: z.string().optional(),
+                coordinates: z.array(z.number()).optional(),
+                lat: z.number().optional(),
+                lng: z.number().optional()
+            })
+            .partial()
+            .optional()
+    })
+    .passthrough();
+
 const schema = z.object({
     name: z.string().max(200).optional(),
     email: z.string().email().max(200).optional(),
@@ -15,7 +45,8 @@ const schema = z.object({
     profileImage: z.string().max(2000).optional(),
     dateOfBirth: isoDate.optional(),
     anniversary: isoDate.optional(),
-    gender: genderEnum.optional()
+    gender: genderEnum.optional(),
+    addresses: z.array(addressItemSchema).max(50).optional()
 });
 
 export const validateUserProfileUpdateDto = (body) => {

@@ -8,6 +8,12 @@ const userAddressSchema = new mongoose.Schema(
             default: 'Home',
             index: true
         },
+        // Full human-readable / reverse-geocoded address (formatted string).
+        address: {
+            type: String,
+            default: '',
+            trim: true
+        },
         street: {
             type: String,
             required: true,
