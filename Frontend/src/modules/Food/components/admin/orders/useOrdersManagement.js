@@ -300,7 +300,7 @@ export function useOrdersManagement(orders, statusKey, title) {
         : (order.date || new Date().toLocaleDateString())
 
       const settings = getCachedSettings() || await loadBusinessSettings()
-      const companyName = settings?.companyName || "Dukaanwallah"
+      const companyName = settings?.companyName || "Blaze"
       const logoUrl = settings?.logo?.url || undefined
       const logoDataUrl = await imageUrlToDataUrl(logoUrl)
 

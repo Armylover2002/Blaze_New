@@ -235,9 +235,9 @@ export default function HomeHeader({
     >
       <header
         className={cn(
-          "sticky top-0 z-50 px-3 py-2.5 outline-none transition-colors duration-300 sm:px-4 sm:py-3",
+          "px-3 py-2.5 outline-none transition-colors duration-300 sm:px-4 sm:py-3",
           isLightChrome
-            ? "border-b border-gray-100 bg-white/90 shadow-sm backdrop-blur-md"
+            ? "border-b border-gray-100 bg-white"
             : "border-b-0 border-none",
         )}
         style={!isLightChrome ? { backgroundColor: "transparent" } : undefined}
@@ -460,7 +460,7 @@ export default function HomeHeader({
           </div>
 
           {isFood && (
-            <div className="sticky top-[58px] z-40 bg-white/90 px-3 py-2 backdrop-blur-sm sm:top-[64px] sm:px-4 sm:py-3">
+            <div className="px-3 py-2 sm:px-4 sm:py-3">
               <div className="relative flex w-full items-center">
                 <div className="pointer-events-none absolute inset-y-0 left-0 z-10 flex items-center pl-3">
                   <Search className="h-4 w-4 sm:h-5 sm:w-5" style={{ color: theme.accent }} strokeWidth={2} />
@@ -509,20 +509,6 @@ export default function HomeHeader({
             </div>
           )}
 
-          {isFood && bannerComponent && (
-            <div className="relative z-10 mt-0 w-full px-3 py-2 sm:px-4">
-              <div
-                className="relative overflow-hidden rounded-2xl shadow-sm"
-                style={{
-                  background: vegMode
-                    ? "linear-gradient(135deg, #2e7d32 0%, #388e3c 100%)"
-                    : "linear-gradient(135deg, #FF0000 0%, #CC0000 100%)",
-                }}
-              >
-                {bannerComponent}
-              </div>
-            </div>
-          )}
         </>
       )}
     </motion.div>

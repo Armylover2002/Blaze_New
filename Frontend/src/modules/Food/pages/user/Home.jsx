@@ -328,7 +328,7 @@ export default function Home() {
   // --- Render ---
   return (
     <div className="relative min-h-screen overflow-x-clip bg-white pb-16 dark:bg-[#0a0a0a] md:pb-8">
-      <div className="relative z-[50] overflow-x-clip md:hidden">
+      <div className="sticky top-0 z-[50] overflow-x-clip md:hidden bg-white dark:bg-[#0a0a0a]">
         {!state.isBootstrapped ? (
           <div className="px-4 pt-6 pb-4">
             <div className="h-10 w-48 bg-slate-100 animate-pulse rounded-xl mb-6" />
@@ -347,24 +347,36 @@ export default function Home() {
             vegMode={vegMode}
             onVegModeChange={handleVegModeChange}
             headerVideoUrl={landing.videoUrl}
-            bannerComponent={
-              <Suspense fallback={<HeroBannerSkeleton className="h-[130px] w-full" />}>
-                <div className="h-[130px] sm:h-36 md:h-44 mt-3 relative z-10 w-full">
-                  <BannerSection
-                    showBannerSkeleton={banners.loading}
-                    heroBannerImages={activeBannerImages}
-                    heroBannersData={activeBannerData}
-                    currentBannerIndex={currentBannerIndex}
-                    setCurrentBannerIndex={setCurrentBannerIndex}
-                    heroShellRef={heroShellRef}
-                    navigate={navigate}
-                  />
-                </div>
-              </Suspense>
-            }
           />
         )}
       </div>
+
+      {state.isBootstrapped && activeTab === "food" && (
+        <div className="relative z-10 w-full px-3 py-2 sm:px-4 md:hidden">
+          <div
+            className="relative overflow-hidden rounded-2xl shadow-sm"
+            style={{
+              background: vegMode
+                ? "linear-gradient(135deg, #2e7d32 0%, #388e3c 100%)"
+                : "linear-gradient(135deg, #FF0000 0%, #CC0000 100%)",
+            }}
+          >
+            <Suspense fallback={<HeroBannerSkeleton className="h-[130px] w-full" />}>
+              <div className="h-[130px] sm:h-36 md:h-44 mt-3 relative z-10 w-full">
+                <BannerSection
+                  showBannerSkeleton={banners.loading}
+                  heroBannerImages={activeBannerImages}
+                  heroBannersData={activeBannerData}
+                  currentBannerIndex={currentBannerIndex}
+                  setCurrentBannerIndex={setCurrentBannerIndex}
+                  heroShellRef={heroShellRef}
+                  navigate={navigate}
+                />
+              </div>
+            </Suspense>
+          </div>
+        </div>
+      )}
 
       {activeTab === "food" && (
         <Suspense fallback={<HeroBannerSkeleton className="hidden h-72 w-full md:block" />}>

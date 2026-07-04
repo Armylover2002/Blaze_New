@@ -248,9 +248,8 @@ export async function createRestaurantFood(restaurantId, body = {}) {
                 id: String(doc._id)
             }
         });
-    } catch (e) {
-        // eslint-disable-next-line no-console
-        console.error('Failed to notify admins of new food approval request:', e);
+    } catch (err) {
+        console.error('Failed to notify admins of new food item:', err);
     }
 
     return doc.toObject();

@@ -532,6 +532,13 @@ export const adminAPI = {
       { status: status !== false },
       { contextModule: "admin" },
     ),
+  /** Toggle restaurant listing visibility (admin). */
+  toggleRestaurantListing: (id, isListed) =>
+    apiClient.patch(
+      `/food/admin/restaurants/${String(id)}/visibility`,
+      { isListed: Boolean(isListed) },
+      { contextModule: "admin" },
+    ),
   /** Update restaurant location (admin). Body includes lat/lng + address fields. */
   updateRestaurantLocation: (id, body) =>
     apiClient.patch(

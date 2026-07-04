@@ -111,6 +111,18 @@ export async function approveFoodItem(id, performer = null) {
         { new: true }
     ).lean();
     if (updated?.restaurantId) {
+        try {
+            const { FoodRestaurant } = await import('../../restaurant/models/restaurant.model.js');
+            const restaurant = await FoodRestaurant.findByIdAndUpdate(updated.restaurantId, {
+                $inc: { productCount: 1 }
+            });
+            if (restaurant && (restaurant.productCount || 0) === 0) {
+                await FoodRestaurant.findByIdAndUpdate(updated.restaurantId, { isListed: true });
+            }
+        } catch (err) {
+            console.error('Failed to update restaurant product count on food approval:', err);
+        }
+
         // Single DB update; makes user-facing menu reflect approval immediately.
         await syncMenuItemApprovalStatus(updated.restaurantId, updated._id, 'approved', '');
         
