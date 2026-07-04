@@ -3,7 +3,23 @@ import { useNavigate, useSearchParams, useLocation } from "react-router-dom"
 import { Input } from "@food/components/ui/input"
 import { Button } from "@food/components/ui/button"
 import { Label } from "@food/components/ui/label"
-import { Image as ImageIcon, Upload, Clock, Calendar as CalendarIcon, Sparkles, X, LogOut, ChevronLeft } from "lucide-react"
+import { Image as ImageIcon, Upload, Clock, Calendar as CalendarIcon, X, CheckCircle2, Store, MapPin, FileText, Truck } from "lucide-react"
+import RestaurantOnboardingShell from "@food/components/restaurant/RestaurantOnboardingShell"
+import OnboardingLocationSection from "@food/components/restaurant/OnboardingLocationSection"
+import {
+  ONBOARDING_SECTION,
+  ONBOARDING_SECTION_TITLE,
+  ONBOARDING_SECTION_DESC,
+  ONBOARDING_LABEL,
+  ONBOARDING_HINT,
+  ONBOARDING_INPUT,
+  ONBOARDING_CHIP_ACTIVE,
+  ONBOARDING_CHIP_INACTIVE,
+  ONBOARDING_DAY_ACTIVE,
+  ONBOARDING_DAY_INACTIVE,
+} from "@food/components/restaurant/onboardingStyles"
+import { loadBusinessSettings, getAppLogo, getRestaurantLoginBanner } from "@common/utils/businessSettings"
+import loginBg from "@food/assets/loginbanner.png"
 import { Popover, PopoverContent, PopoverTrigger } from "@food/components/ui/popover"
 import { Calendar } from "@food/components/ui/calendar"
 import {
@@ -19,16 +35,31 @@ import { MobileTimePicker } from "@mui/x-date-pickers/MobileTimePicker"
 import { LocalizationProvider } from "@mui/x-date-pickers/LocalizationProvider"
 import { AdapterDateFns } from "@mui/x-date-pickers/AdapterDateFns"
 import { determineStepToShow } from "@food/utils/onboardingUtils"
+import {
+  saveOnboardingDraft,
+  loadOnboardingDraft,
+  clearOnboardingDraft,
+  syncOnboardingFileCache,
+  clearOnboardingFileCache,
+  restoreDraftImage,
+  getOnboardingFileCache,
+} from "@food/utils/onboardingDraftStorage"
 import { toast } from "sonner"
 import { useCompanyName } from "@food/hooks/useCompanyName"
-import { getGoogleMapsApiKey } from "@food/utils/googleMapsApiKey"
-import { clearModuleAuth, clearAuthData, getRestaurantPendingPhone } from "@food/utils/auth"
+import { clearModuleAuth, clearAuthData, getRestaurantPendingPhone, setAuthData } from "@food/utils/auth"
+import { persistRestaurantAuthFromPayload } from "@food/utils/restaurantApproval"
 import { ImageSourcePicker } from "@food/components/ImageSourcePicker"
-import { convertBase64ToFile, isFlutterBridgeAvailable, openCamera } from "@food/utils/imageUploadUtils"
+import { isFlutterBridgeAvailable, openCamera } from "@food/utils/imageUploadUtils"
 const debugLog = (...args) => { }
 const debugWarn = (...args) => { }
 const debugError = (...args) => { }
 
+
+const scrollOnboardingToTop = () => {
+  window.scrollTo({ top: 0, left: 0, behavior: "instant" })
+  const main = document.getElementById("onboarding-main-scroll")
+  if (main) main.scrollTo({ top: 0, left: 0, behavior: "instant" })
+}
 
 const daysOfWeek = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 const ESTIMATED_DELIVERY_TIME_OPTIONS = [
@@ -43,7 +74,6 @@ const ESTIMATED_DELIVERY_TIME_OPTIONS = [
   "50-60 mins",
 ]
 
-const ONBOARDING_STORAGE_KEY = "restaurant_onboarding_data"
 const PAN_NUMBER_REGEX = /^[A-Z]{5}[0-9]{4}[A-Z]$/
 const GST_NUMBER_REGEX = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/
 const FSSAI_NUMBER_REGEX = /^\d{14}$/
@@ -51,7 +81,6 @@ const BANK_ACCOUNT_NUMBER_REGEX = /^\d{9,18}$/
 const IFSC_CODE_REGEX = /^[A-Z0-9]{11}$/
 const ACCOUNT_HOLDER_NAME_REGEX = /^[A-Za-z ]+$/
 const GST_LEGAL_NAME_REGEX = /^[A-Za-z ]+$/
-const FEATURED_DISH_NAME_REGEX = /^[A-Za-z ]+$/
 const NAME_REGEX = /^[A-Za-z ]+$/
 const OWNER_EMAIL_REGEX = /^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$/
 const PHONE_NUMBER_REGEX = /^\d{10,12}$/
@@ -61,17 +90,6 @@ const LOCAL_IMAGE_FILE_ACCEPT = ".jpg,.jpeg,.png,.webp,.heic,.heif"
 const GALLERY_IMAGE_ACCEPT =
   ".jpg,.jpeg,.png,.webp,.heic,.heif,image/jpeg,image/png,image/webp,image/heic,image/heif"
 const ONBOARDING_DRAFT_FILE_MAX_SIZE = 2.5 * 1024 * 1024
-let onboardingFileCache = {
-  step2: {
-    menuImages: [],
-    profileImage: null,
-  },
-  step3: {
-    panImage: null,
-    gstImage: null,
-    fssaiImage: null,
-  },
-}
 
 const isUploadableFile = (value) => {
   if (!value || typeof value !== "object") return false
@@ -182,155 +200,6 @@ const buildOnboardingStepFormData = (stepNum, { step1, step2, step3 }) => {
   return formData
 }
 
-const fileToDataUrl = (file) =>
-  new Promise((resolve, reject) => {
-    try {
-      const reader = new FileReader()
-      reader.onload = () => resolve(reader.result)
-      reader.onerror = () => reject(new Error("Failed to read image"))
-      reader.readAsDataURL(file)
-    } catch (error) {
-      reject(error)
-    }
-  })
-
-const DB_NAME = "RestaurantOnboardingDB"
-const STORE_NAME = "onboarding_files"
-
-let cachedDB = null
-const initDB = () => {
-  return new Promise((resolve) => {
-    if (cachedDB) {
-      return resolve(cachedDB)
-    }
-    if (typeof indexedDB === 'undefined' || !indexedDB) {
-      return resolve(null)
-    }
-    const timeoutId = setTimeout(() => resolve(null), 2000)
-    try {
-      const request = indexedDB.open(DB_NAME, 1)
-      request.onupgradeneeded = (e) => {
-        const db = e.target.result
-        if (!db.objectStoreNames.contains(STORE_NAME)) {
-          db.createObjectStore(STORE_NAME)
-        }
-      }
-      request.onsuccess = (e) => {
-        clearTimeout(timeoutId)
-        cachedDB = e.target.result
-        resolve(cachedDB)
-      }
-      request.onerror = () => {
-        clearTimeout(timeoutId)
-        resolve(null)
-      }
-    } catch (e) {
-      clearTimeout(timeoutId)
-      resolve(null)
-    }
-  })
-}
-
-const saveFileToDB = async (key, file) => {
-  if (!file) return removeFileFromDB(key)
-  const db = await initDB()
-  if (!db) return
-  return new Promise((resolve) => {
-    try {
-      const transaction = db.transaction(STORE_NAME, "readwrite")
-      const store = transaction.objectStore(STORE_NAME)
-      store.put(file, key)
-      transaction.oncomplete = () => resolve()
-      transaction.onerror = () => resolve()
-    } catch (e) {
-      resolve()
-    }
-  })
-}
-
-const getFileFromDB = async (key) => {
-  const db = await initDB()
-  if (!db) return null
-  return new Promise((resolve) => {
-    try {
-      const transaction = db.transaction(STORE_NAME, "readonly")
-      const store = transaction.objectStore(STORE_NAME)
-      const request = store.get(key)
-      request.onsuccess = () => resolve(request.result)
-      request.onerror = () => resolve(null)
-    } catch (e) {
-      resolve(null)
-    }
-  })
-}
-
-const removeFileFromDB = async (key) => {
-  const db = await initDB()
-  if (!db) return
-  try {
-    const transaction = db.transaction(STORE_NAME, "readwrite")
-    transaction.objectStore(STORE_NAME).delete(key)
-  } catch (e) {
-    debugError("Error removing file from DB:", e)
-  }
-}
-
-const serializeDraftImage = async (value, fallbackPrefix) => {
-  if (!value) {
-    await removeFileFromDB(fallbackPrefix)
-    return null
-  }
-
-  if (isUploadableFile(value)) {
-    await saveFileToDB(fallbackPrefix, value)
-    return {
-      kind: "db-file",
-      dbKey: fallbackPrefix,
-      name: value.name || `${fallbackPrefix}-${Date.now()}.jpg`,
-      mimeType: value.type || "image/jpeg",
-      lastModified: Number(value.lastModified || Date.now()),
-    }
-  }
-
-  if (typeof value === "string" && value.startsWith("http")) return value
-  if (value?.url && typeof value.url === "string") return value
-
-  return null
-}
-
-const restoreDraftImage = async (value, fallbackPrefix) => {
-  if (!value) return null
-
-  if (value?.kind === "db-file" && value?.dbKey) {
-    try {
-      const file = await getFileFromDB(value.dbKey)
-      if (file && (file instanceof File || file instanceof Blob)) {
-        return file instanceof File ? file : new File([file], value.name || `${fallbackPrefix}.jpg`, { type: value.mimeType || file.type || "image/jpeg" })
-      }
-    } catch {
-      return null
-    }
-  }
-
-  if (value?.kind === "draft-file" && value?.dataUrl) {
-    try {
-      return convertBase64ToFile(
-        value.dataUrl,
-        value.mimeType || "image/jpeg",
-        fallbackPrefix,
-        value.name || "",
-      )
-    } catch {
-      return null
-    }
-  }
-
-  if (typeof value === "string" && value.startsWith("http")) return value
-  if (value?.url && typeof value.url === "string") return value
-
-  return null
-}
-
 const getVerifiedPhoneFromStoredRestaurant = () => {
   try {
     const pending = getRestaurantPendingPhone() || localStorage.getItem("restaurant_pendingPhone")
@@ -393,104 +262,30 @@ const normalizeZoneIdValue = (value) => {
   return String(value?._id || value?.id || value || "")
 }
 
+const getZoneDisplayName = (zone) =>
+  zone?.name || zone?.zoneName || zone?.serviceLocation || ""
+
 const getTodayLocalYMD = () => formatDateToLocalYMD(new Date())
 
-// Helper functions for localStorage
-const saveOnboardingToLocalStorage = async (step1, step2, step3, step4, currentStep) => {
+const finishRegistrationAndGoPending = async (registerResponse, ownerPhone, navigate) => {
+  persistRestaurantAuthFromPayload(
+    registerResponse?.data?.data || registerResponse?.data,
+    setAuthData,
+  )
+  sessionStorage.removeItem("restaurantReonboard")
+  await clearOnboardingDraft()
+  clearOnboardingFileCache()
+  const phone = normalizePhoneDigits(ownerPhone)
   try {
-    const serializedMenuImages = await Promise.all(
-      (step2.menuImages || []).map((img, index) =>
-        serializeDraftImage(img, `menu-image-${index + 1}`),
-      ),
-    )
-
-    const serializableStep2 = {
-      ...step2,
-      menuImages: serializedMenuImages.filter(Boolean),
-      profileImage: await serializeDraftImage(step2.profileImage, "restaurant-profile"),
-    }
-
-    const serializableStep3 = {
-      ...step3,
-      panImage: await serializeDraftImage(step3.panImage, "pan-image"),
-      gstImage: await serializeDraftImage(step3.gstImage, "gst-image"),
-      fssaiImage: await serializeDraftImage(step3.fssaiImage, "fssai-image"),
-    }
-
-    const dataToSave = {
-      step1: {
-        ...step1,
-        ownerPhone:
-          resolveVerifiedOwnerPhone(step1.ownerPhone, getVerifiedPhoneFromStoredRestaurant()) ||
-          step1.ownerPhone,
-      },
-      step2: serializableStep2,
-      step3: serializableStep3,
-      step4: step4 || {},
-      currentStep,
-      timestamp: Date.now(),
-    }
-    localStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify(dataToSave))
-  } catch (error) {
-    debugError("Failed to save onboarding data to localStorage:", error)
+    localStorage.setItem("restaurant_pendingPhone", phone)
+  } catch {
+    // Ignore storage failures
   }
-}
-
-const loadOnboardingFromLocalStorage = () => {
-  try {
-    const stored = localStorage.getItem(ONBOARDING_STORAGE_KEY)
-    if (stored) {
-      return JSON.parse(stored)
-    }
-  } catch (error) {
-    debugError("Failed to load onboarding data from localStorage:", error)
-  }
-  return null
-}
-
-const clearOnboardingFromLocalStorage = () => {
-  try {
-    localStorage.removeItem(ONBOARDING_STORAGE_KEY)
-    localStorage.removeItem("restaurant_pendingPhone")
-    const docKeys = [
-      "restaurant-profile",
-      "pan-image",
-      "gst-image",
-      "fssai-image",
-      ...Array.from({ length: 20 }, (_, i) => `menu-image-${i + 1}`)
-    ]
-    docKeys.forEach(key => removeFileFromDB(key))
-  } catch (error) {
-    debugError("Failed to clear onboarding data from localStorage:", error)
-  }
-}
-
-const syncOnboardingFileCache = (step2, step3) => {
-  onboardingFileCache = {
-    step2: {
-      menuImages: (step2?.menuImages || []).filter((img) => isUploadableFile(img)),
-      profileImage: isUploadableFile(step2?.profileImage) ? step2.profileImage : null,
-    },
-    step3: {
-      panImage: isUploadableFile(step3?.panImage) ? step3.panImage : null,
-      gstImage: isUploadableFile(step3?.gstImage) ? step3.gstImage : null,
-      fssaiImage: isUploadableFile(step3?.fssaiImage) ? step3.fssaiImage : null,
-    },
-  }
-}
-
-const clearOnboardingFileCache = () => {
-  onboardingFileCache = {
-    step2: {
-      menuImages: [],
-      profileImage: null,
-    },
-    step3: {
-      panImage: null,
-      gstImage: null,
-      fssaiImage: null,
-    },
-  }
+  toast.success("Registration submitted. Awaiting admin approval.", { duration: 4000 })
+  navigate("/food/restaurant/pending-verification", {
+    replace: true,
+    state: { phone },
+  })
 }
 
 // Helper function to convert "HH:mm" string to Date object
@@ -572,32 +367,6 @@ const isPointInPolygon = (lat, lng, polygon) => {
   return inside
 }
 
-/**
- * Calculate the center of a zone polygon to serve as a geofencing fallback.
- */
-const getZoneCenter = (zone) => {
-  if (!zone || !Array.isArray(zone.coordinates) || zone.coordinates.length === 0) return null
-  let latSum = 0
-  let lngSum = 0
-  let count = 0
-  zone.coordinates.forEach((coord) => {
-    const lat = Number(coord?.latitude || coord?.lat || (Array.isArray(coord) && coord.length >= 2 ? coord[1] : NaN))
-    const lng = Number(coord?.longitude || coord?.lng || (Array.isArray(coord) && coord.length >= 2 ? coord[0] : NaN))
-    if (Number.isFinite(lat) && Number.isFinite(lng)) {
-      latSum += lat
-      lngSum += lng
-      count++
-    }
-  })
-  if (count > 0) {
-    return {
-      latitude: Number((latSum / count).toFixed(6)),
-      longitude: Number((lngSum / count).toFixed(6)),
-    }
-  }
-  return null
-}
-
 function TimeSelector({ label, value, onChange }) {
   const timeValue = stringToTime(value)
 
@@ -611,10 +380,10 @@ function TimeSelector({ label, value, onChange }) {
   }
 
   return (
-    <div className="border border-gray-200 rounded-md px-3 py-2 bg-gray-50/60">
-      <div className="flex items-center gap-2 mb-2">
-        <Clock className="w-4 h-4 text-gray-800" />
-        <span className="text-xs font-medium text-gray-900">{label}</span>
+    <div className="rounded-xl border border-slate-200 bg-slate-50/80 px-4 py-3 transition-colors focus-within:border-[#FF0000]/30 focus-within:ring-2 focus-within:ring-[#FF0000]/10">
+      <div className="mb-2 flex items-center gap-2">
+        <Clock className="h-4 w-4 text-[#FF0000]" />
+        <span className="text-xs font-semibold uppercase tracking-wider text-slate-700">{label}</span>
       </div>
       <MobileTimePicker
         value={timeValue}
@@ -637,7 +406,7 @@ function TimeSelector({ label, value, onChange }) {
                   borderColor: "#d1d5db",
                 },
                 "&.Mui-focused fieldset": {
-                  borderColor: "#000",
+                  borderColor: "#FF0000",
                 },
               },
               "& .MuiInputBase-input": {
@@ -665,13 +434,51 @@ export default function RestaurantOnboarding() {
   const location = useLocation()
   const [searchParams, setSearchParams] = useSearchParams()
   const [step, setStep] = useState(1)
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState("")
   const [isLoggingOut, setIsLoggingOut] = useState(false)
   const [feeConfig, setFeeConfig] = useState(undefined)
   const [fetchingFees, setFetchingFees] = useState(false)
   const [isReonboardBypass, setIsReonboardBypass] = useState(false)
+  const [logoUrl, setLogoUrl] = useState(() => getAppLogo("restaurant"))
+  const [bannerUrl, setBannerUrl] = useState(() => {
+    const banner = getRestaurantLoginBanner()
+    return banner?.url && banner?.active ? banner.url : loginBg
+  })
+
+  useEffect(() => {
+    const fetchSettings = async () => {
+      try {
+        await loadBusinessSettings()
+        const logo = getAppLogo("restaurant")
+        if (logo) setLogoUrl(logo)
+        const banner = getRestaurantLoginBanner()
+        if (banner?.url && banner?.active) {
+          setBannerUrl(banner.url)
+        } else {
+          setBannerUrl(loginBg)
+        }
+      } catch (err) {
+        debugWarn("Failed to load business settings:", err)
+      }
+    }
+    fetchSettings()
+
+    const handleSettingsUpdate = async () => {
+      await loadBusinessSettings()
+      const logo = getAppLogo("restaurant")
+      if (logo) setLogoUrl(logo)
+      const banner = getRestaurantLoginBanner()
+      if (banner?.url && banner?.active) {
+        setBannerUrl(banner.url)
+      } else {
+        setBannerUrl(loginBg)
+      }
+    }
+    window.addEventListener("businessSettingsUpdated", handleSettingsUpdate)
+    return () => window.removeEventListener("businessSettingsUpdated", handleSettingsUpdate)
+  }, [])
 
   useEffect(() => {
     const fetchFees = async () => {
@@ -698,14 +505,14 @@ export default function RestaurantOnboarding() {
       await restaurantAPI.logout()
       clearModuleAuth("restaurant")
       clearAuthData()
-      clearOnboardingFromLocalStorage()
+      await clearOnboardingDraft()
       clearOnboardingFileCache()
       window.dispatchEvent(new Event("restaurantAuthChanged"))
       navigate("/food/restaurant/login", { replace: true })
     } catch (error) {
       debugError("Logout failed:", error)
       clearModuleAuth("restaurant")
-      clearOnboardingFromLocalStorage()
+      await clearOnboardingDraft()
       clearOnboardingFileCache()
       navigate("/food/restaurant/login", { replace: true })
     } finally {
@@ -738,6 +545,7 @@ export default function RestaurantOnboarding() {
       ownerPhone: verified,
       primaryContactNumber: verified,
       zoneId: "",
+      zoneName: "",
       ref: "",
       location: {
         formattedAddress: "",
@@ -784,17 +592,10 @@ export default function RestaurantOnboarding() {
 
   const [step4, setStep4] = useState({
     estimatedDeliveryTime: "",
-    featuredDish: "",
-    featuredPrice: "",
-    offer: "",
   })
   const previewUrlCacheRef = useRef(new Map())
-  const locationSearchInputRef = useRef(null)
-  const placesAutocompleteRef = useRef(null)
-  const mapsScriptLoadedRef = useRef(false)
-  // Track whether user picked from Places suggestion (has lat/lng) or typed manually
-  const [locationPickedFromSuggestion, setLocationPickedFromSuggestion] = useState(false)
   const hasRestoredDraftStepRef = useRef(false)
+  const draftHydratedRef = useRef(false)
   const onboardingDraftRef = useRef(null)
   const menuImagesInputRef = useRef(null)
   const profileImageInputRef = useRef(null)
@@ -816,7 +617,12 @@ export default function RestaurantOnboarding() {
     nextParams.set("step", String(normalizedStep))
     setStep(normalizedStep)
     setSearchParams(nextParams, { replace: shouldReplace })
+    requestAnimationFrame(() => scrollOnboardingToTop())
   }
+
+  useEffect(() => {
+    scrollOnboardingToTop()
+  }, [step])
 
   const getPreviewImageUrl = (value) => {
     if (!value) return null
@@ -963,6 +769,7 @@ export default function RestaurantOnboarding() {
           ownerPhone: verifiedPhone,
           primaryContactNumber: verifiedPhone,
           zoneId: "",
+          zoneName: "",
           ref: "",
           location: {
             formattedAddress: "",
@@ -1008,9 +815,6 @@ export default function RestaurantOnboarding() {
 
         let initialStep4 = {
           estimatedDeliveryTime: "",
-          featuredDish: "",
-          featuredPrice: "",
-          offer: "",
         }
 
         // 2. Overlay Server Data
@@ -1035,6 +839,12 @@ export default function RestaurantOnboarding() {
             ownerEmail: serverData.ownerEmail || "",
             ownerPhone: serverData.ownerPhone || verifiedPhone,
             zoneId: normalizeZoneIdValue(serverData.zoneId) || "",
+            zoneName:
+              serverData.zoneName ||
+              getZoneDisplayName(
+                typeof serverData.zoneId === "object" ? serverData.zoneId : null,
+              ) ||
+              "",
             primaryContactNumber: serverData.primaryContactNumber || verifiedPhone,
             ref: "",
             location: {
@@ -1081,16 +891,20 @@ export default function RestaurantOnboarding() {
 
           initialStep4 = {
             estimatedDeliveryTime: serverData.estimatedDeliveryTime || "",
-            featuredDish: serverData.featuredDish || "",
-            featuredPrice: serverData.featuredPrice || "",
-            offer: serverData.offer || "",
           }
         } else if (!isReonboard) {
           setIsEditing(true)
         }
 
-        // 3. Overlay Local Progress from localStorage / IndexedDB
-        const localData = loadOnboardingFromLocalStorage()
+        // 3. Overlay session draft (survives refresh, cleared on tab close / login)
+        let localData = loadOnboardingDraft()
+        if (localData?.step1?.ownerPhone && verifiedPhone) {
+          const storedPhone = getDisplayPhone(localData.step1.ownerPhone)
+          const currentPhone = getDisplayPhone(verifiedPhone)
+          if (storedPhone && currentPhone && storedPhone !== currentPhone) {
+            localData = null
+          }
+        }
         if (localData) {
           if (localData.step1) {
             const serverStep1 = { ...initialStep1 }
@@ -1112,6 +926,7 @@ export default function RestaurantOnboarding() {
                 serverStep1.primaryContactNumber,
               ),
               zoneId: normalizeZoneIdValue(localData.step1.zoneId) || serverStep1.zoneId,
+              zoneName: pickNonEmpty(localData.step1.zoneName, serverStep1.zoneName),
               location: {
                 ...serverStep1.location,
                 ...(localData.step1.location || {}),
@@ -1144,12 +959,12 @@ export default function RestaurantOnboarding() {
               )
             )
             const filteredMenuImages = restoredMenuImages.filter(Boolean)
-            const cachedMenuImages = onboardingFileCache.step2.menuImages || []
+            const cachedMenuImages = getOnboardingFileCache().step2.menuImages || []
             const restoredProfileImage = await restoreDraftImage(
               localData.step2.profileImage,
               "restaurant-profile",
             )
-            const cachedProfileImage = onboardingFileCache.step2.profileImage || null
+            const cachedProfileImage = getOnboardingFileCache().step2.profileImage || null
 
             const localMenuImages = [...filteredMenuImages, ...cachedMenuImages]
             const serverMenuImages = (initialStep2.menuImages || []).filter(hasValidMenuImageAsset)
@@ -1196,10 +1011,10 @@ export default function RestaurantOnboarding() {
                 typeof localData.step3.gstRegistered === "boolean"
                   ? localData.step3.gstRegistered
                   : serverStep3.gstRegistered,
-              panImage: onboardingFileCache.step3.panImage || restoredPanImage || serverStep3.panImage,
-              gstImage: onboardingFileCache.step3.gstImage || restoredGstImage || serverStep3.gstImage,
+              panImage: getOnboardingFileCache().step3.panImage || restoredPanImage || serverStep3.panImage,
+              gstImage: getOnboardingFileCache().step3.gstImage || restoredGstImage || serverStep3.gstImage,
               fssaiImage:
-                onboardingFileCache.step3.fssaiImage || restoredFssaiImage || serverStep3.fssaiImage,
+                getOnboardingFileCache().step3.fssaiImage || restoredFssaiImage || serverStep3.fssaiImage,
               ifscCode: (pickNonEmpty(localData.step3.ifscCode, serverStep3.ifscCode) || "").toUpperCase(),
             }
           }
@@ -1295,6 +1110,7 @@ export default function RestaurantOnboarding() {
         setIsEditing(true)
         debugError("Error during onboarding initialization:", err)
       } finally {
+        draftHydratedRef.current = true
         setLoading(false)
       }
     }
@@ -1346,14 +1162,27 @@ export default function RestaurantOnboarding() {
     }
   }, [])
 
-  // Save to localStorage whenever step data changes
+  // Save draft to sessionStorage whenever step data changes (after initial hydration).
   useEffect(() => {
+    if (!draftHydratedRef.current) return
+
     let active = true
 
-      ; (async () => {
-        await saveOnboardingToLocalStorage(step1, step2, step3, step4, step)
-        if (!active) return
-      })()
+    ;(async () => {
+      await saveOnboardingDraft(
+        {
+          ...step1,
+          ownerPhone:
+            resolveVerifiedOwnerPhone(step1.ownerPhone, getVerifiedPhoneFromStoredRestaurant()) ||
+            step1.ownerPhone,
+        },
+        step2,
+        step3,
+        step4,
+        step,
+      )
+      if (!active) return
+    })()
 
     return () => {
       active = false
@@ -1422,6 +1251,12 @@ export default function RestaurantOnboarding() {
     }
     if (!step1.zoneId?.trim()) {
       errors.push("Service zone is required")
+    }
+    if (
+      step1.zoneId &&
+      (!step1.location?.latitude || !step1.location?.longitude)
+    ) {
+      errors.push("Please pin your restaurant location inside the selected service zone")
     }
     if (!step1.location?.addressLine1?.trim()) {
       errors.push("Building/Floor/Street address is required")
@@ -1507,11 +1342,6 @@ export default function RestaurantOnboarding() {
     const errors = []
     if (!step4.estimatedDeliveryTime || !step4.estimatedDeliveryTime.trim()) {
       errors.push("Estimated delivery time is required")
-    }
-    if (!step4.featuredDish || !step4.featuredDish.trim()) {
-      errors.push("Featured dish name is required")
-    } else if (!FEATURED_DISH_NAME_REGEX.test(step4.featuredDish.trim())) {
-      errors.push("Featured dish name must contain only letters")
     }
     return errors
   }
@@ -1704,94 +1534,6 @@ export default function RestaurantOnboarding() {
     // Validate current step before proceeding
     let validationErrors = []
     if (step === 1) {
-      // If coordinates are missing, let's try to geocode the address
-      if (!step1.location?.latitude || !step1.location?.longitude) {
-        try {
-          const apiKey = await getGoogleMapsApiKey()
-          if (apiKey) {
-            const queryAddress = [
-              step1.location?.formattedAddress,
-              step1.location?.addressLine1,
-              step1.location?.area,
-              step1.location?.city,
-              step1.location?.state,
-              step1.location?.pincode
-            ].filter(Boolean).join(", ")
-
-            if (queryAddress.trim()) {
-              const res = await fetch(
-                `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(queryAddress)}&key=${apiKey}`
-              )
-              const data = await res.json()
-              if (data?.results?.[0]?.geometry?.location) {
-                const { lat, lng } = data.results[0].geometry.location
-                const latVal = Number(lat.toFixed(6))
-                const lngVal = Number(lng.toFixed(6))
-
-                const comps = data.results[0].address_components || []
-                const getComp = (types) => comps.find((c) => types.some((t) => c.types?.includes(t)))?.long_name || ""
-                const pCode = getComp(["postal_code"])
-                const area = getComp(["sublocality_level_1", "sublocality", "neighborhood"]) || getComp(["locality"])
-                const city = getComp(["locality"]) || getComp(["administrative_area_level_2"])
-                const state = getComp(["administrative_area_level_1"])
-
-                setStep1((prev) => ({
-                  ...prev,
-                  location: {
-                    ...prev.location,
-                    latitude: latVal,
-                    longitude: lngVal,
-                    area: prev.location.area || area,
-                    city: prev.location.city || city,
-                    state: prev.location.state || state,
-                    pincode: prev.location.pincode || pCode,
-                  }
-                }))
-
-                step1.location = {
-                  ...step1.location,
-                  latitude: latVal,
-                  longitude: lngVal,
-                  area: step1.location.area || area,
-                  city: step1.location.city || city,
-                  state: step1.location.state || state,
-                  pincode: step1.location.pincode || pCode,
-                }
-                setLocationPickedFromSuggestion(true)
-              }
-            }
-          }
-        } catch (e) {
-          debugWarn("Failed to geocode address on Next:", e)
-        }
-      }
-
-      // If coordinates are STILL missing, let's fall back to the selected zone's center!
-      if (!step1.location?.latitude || !step1.location?.longitude) {
-        if (step1.zoneId) {
-          const selectedZone = zones.find((z) => String(z._id || z.id) === step1.zoneId)
-          if (selectedZone) {
-            const center = getZoneCenter(selectedZone)
-            if (center) {
-              setStep1((prev) => ({
-                ...prev,
-                location: {
-                  ...prev.location,
-                  latitude: center.latitude,
-                  longitude: center.longitude
-                }
-              }))
-              step1.location = {
-                ...step1.location,
-                latitude: center.latitude,
-                longitude: center.longitude
-              }
-              toast.info("Using center coordinates of selected zone for geocoding fallback.")
-            }
-          }
-        }
-      }
-
       validationErrors = validateStep1()
     } else if (step === 2) {
       validationErrors = validateStep2()
@@ -1803,9 +1545,6 @@ export default function RestaurantOnboarding() {
         step4,
         errors: validationErrors,
         estimatedDeliveryTime: step4.estimatedDeliveryTime,
-        featuredDish: step4.featuredDish,
-        featuredPrice: step4.featuredPrice,
-        offer: step4.offer
       })
     }
 
@@ -1828,17 +1567,14 @@ export default function RestaurantOnboarding() {
         const formData = buildOnboardingStepFormData(1, { step1, step2, step3 })
         await restaurantAPI.saveOnboardingStep(1, formData)
         goToStep(2)
-        window.scrollTo({ top: 0, behavior: "instant" })
       } else if (step === 2) {
         const formData = buildOnboardingStepFormData(2, { step1, step2, step3 })
         await restaurantAPI.saveOnboardingStep(2, formData)
         goToStep(3)
-        window.scrollTo({ top: 0, behavior: "instant" })
       } else if (step === 3) {
         const formData = buildOnboardingStepFormData(3, { step1, step2, step3 })
         await restaurantAPI.saveOnboardingStep(3, formData)
         goToStep(4)
-        window.scrollTo({ top: 0, behavior: "instant" })
       } else if (step === 4) {
         const { mergedStep1, mergedStep2, mergedStep3 } = getMergedStepsForSubmit()
 
@@ -1938,8 +1674,6 @@ export default function RestaurantOnboarding() {
 
         // Step 4
         formData.append("estimatedDeliveryTime", step4.estimatedDeliveryTime || "")
-        formData.append("featuredDish", step4.featuredDish || "")
-        formData.append("offer", step4.offer || "")
 
         // Check if onboarding fee config exists, is active, and is greater than 0
         if (requiresOnboardingFee) {
@@ -1961,22 +1695,12 @@ export default function RestaurantOnboarding() {
             formData.append("razorpayPaymentId", `mock_pay_${Date.now()}`);
             formData.append("razorpaySignature", `mock_sig_${Date.now()}`);
 
-            await restaurantAPI.register(formData);
-
-            sessionStorage.removeItem("restaurantReonboard");
-            clearOnboardingFromLocalStorage();
-            clearOnboardingFileCache();
-            try {
-              localStorage.setItem("restaurant_pendingPhone", normalizePhoneDigits(mergedStep1.ownerPhone));
-            } catch { }
-
-            toast.success("Registration submitted. Awaiting admin approval.", { duration: 4000 });
-            navigate("/food/restaurant/pending-verification", {
-              replace: true,
-              state: {
-                phone: normalizePhoneDigits(mergedStep1.ownerPhone),
-              },
-            });
+            const registerResponse = await restaurantAPI.register(formData);
+            await finishRegistrationAndGoPending(
+              registerResponse,
+              mergedStep1.ownerPhone,
+              navigate,
+            );
           } else {
             // Open real Razorpay modal
             setSaving(false); // Enable interactive UI since payment is in progress
@@ -1999,22 +1723,12 @@ export default function RestaurantOnboarding() {
                   formData.append("razorpayPaymentId", response.razorpay_payment_id);
                   formData.append("razorpaySignature", response.razorpay_signature);
 
-                  await restaurantAPI.register(formData);
-
-                  sessionStorage.removeItem("restaurantReonboard");
-                  clearOnboardingFromLocalStorage();
-                  clearOnboardingFileCache();
-                  try {
-                    localStorage.setItem("restaurant_pendingPhone", normalizePhoneDigits(mergedStep1.ownerPhone));
-                  } catch { }
-
-                  toast.success("Registration submitted. Awaiting admin approval.", { duration: 4000 });
-                  navigate("/food/restaurant/pending-verification", {
-                    replace: true,
-                    state: {
-                      phone: normalizePhoneDigits(mergedStep1.ownerPhone),
-                    },
-                  });
+                  const registerResponse = await restaurantAPI.register(formData);
+                  await finishRegistrationAndGoPending(
+                    registerResponse,
+                    mergedStep1.ownerPhone,
+                    navigate,
+                  );
                 } catch (err) {
                   const msg =
                     err?.response?.data?.message ||
@@ -2040,22 +1754,12 @@ export default function RestaurantOnboarding() {
             await initRazorpayPayment(rzpOptions);
           }
         } else {
-          await restaurantAPI.register(formData);
-
-          sessionStorage.removeItem("restaurantReonboard");
-          clearOnboardingFromLocalStorage();
-          clearOnboardingFileCache();
-          try {
-            localStorage.setItem("restaurant_pendingPhone", normalizePhoneDigits(mergedStep1.ownerPhone));
-          } catch { }
-
-          toast.success("Registration submitted. Awaiting admin approval.", { duration: 4000 });
-          navigate("/food/restaurant/pending-verification", {
-            replace: true,
-            state: {
-              phone: normalizePhoneDigits(mergedStep1.ownerPhone),
-            },
-          });
+          const registerResponse = await restaurantAPI.register(formData);
+          await finishRegistrationAndGoPending(
+            registerResponse,
+            mergedStep1.ownerPhone,
+            navigate,
+          );
         }
       }
     } catch (err) {
@@ -2083,76 +1787,129 @@ export default function RestaurantOnboarding() {
     })
   }
 
+  const handleZoneChange = (newZoneId) => {
+    const selectedZone = zones.find((z) => String(z._id || z.id) === String(newZoneId))
+    setStep1((prev) => ({
+      ...prev,
+      zoneId: newZoneId,
+      zoneName: getZoneDisplayName(selectedZone),
+      location: {
+        formattedAddress: "",
+        addressLine1: "",
+        addressLine2: "",
+        area: "",
+        city: "",
+        state: "",
+        pincode: "",
+        landmark: "",
+        latitude: "",
+        longitude: "",
+      },
+    }))
+  }
+
+  const handleLocationChange = (payload) => {
+    if (payload?.outsideZone) {
+      setStep1((prev) => ({
+        ...prev,
+        location: {
+          ...prev.location,
+          latitude: "",
+          longitude: "",
+          formattedAddress: "",
+        },
+      }))
+      return
+    }
+
+    setStep1((prev) => ({
+      ...prev,
+      location: {
+        ...prev.location,
+        formattedAddress: payload.formattedAddress ?? prev.location.formattedAddress,
+        addressLine1: payload.addressLine1 ?? prev.location.addressLine1,
+        area: payload.area ?? prev.location.area,
+        city: payload.city ?? prev.location.city,
+        state: payload.state ?? prev.location.state,
+        pincode: payload.pincode ?? prev.location.pincode,
+        latitude: payload.latitude ?? prev.location.latitude,
+        longitude: payload.longitude ?? prev.location.longitude,
+      },
+    }))
+  }
+
   const renderStep1 = () => (
-    <div className="space-y-6">
-      <section className="bg-white p-4 sm:p-6 rounded-md">
-        <h2 className="text-lg font-semibold text-black mb-4">Restaurant information</h2>
-        <div className="space-y-3">
+    <div className="space-y-5 lg:space-y-6">
+      <section className={ONBOARDING_SECTION}>
+        <h2 className={ONBOARDING_SECTION_TITLE}>Restaurant information</h2>
+        <div className="space-y-4">
           <div>
-            <Label className="text-xs text-gray-700">Restaurant name*</Label>
+            <Label className={ONBOARDING_LABEL}>Restaurant name*</Label>
             <Input
               value={step1.restaurantName || ""}
               onChange={(e) => {
                 const val = e.target.value.replace(/[^A-Za-z ]/g, "")
                 setStep1({ ...step1, restaurantName: val })
               }}
-              className="mt-1 bg-white text-sm text-black placeholder-black"
+              className={ONBOARDING_INPUT}
               placeholder="Customers will see this name"
               disabled={!isEditing}
             />
           </div>
           <div>
-            <Label className="text-xs text-gray-700">Pure veg restaurant?*</Label>
-            <div className="mt-2 flex flex-wrap items-center gap-2">
+            <Label className={ONBOARDING_LABEL}>Pure veg restaurant?*</Label>
+            <div className="mt-2.5 flex flex-wrap items-center gap-2">
               <button
                 type="button"
                 onClick={() => isEditing && setStep1({ ...step1, pureVegRestaurant: true })}
-                className={`px-3 py-1.5 text-xs rounded-full border ${step1.pureVegRestaurant === true
-                    ? "bg-green-600 text-white border-green-600"
-                    : "bg-white text-gray-700 border-gray-200"
-                  } ${!isEditing ? "opacity-70 cursor-not-allowed" : ""}`}
+                className={`cursor-pointer rounded-full border px-4 py-2 text-xs font-semibold transition-all duration-200 ${
+                  step1.pureVegRestaurant === true
+                    ? "border-emerald-600 bg-emerald-600 text-white shadow-sm shadow-emerald-600/20"
+                    : ONBOARDING_CHIP_INACTIVE
+                } ${!isEditing ? "cursor-not-allowed opacity-70" : ""}`}
               >
                 Yes, Pure Veg
               </button>
               <button
                 type="button"
                 onClick={() => isEditing && setStep1({ ...step1, pureVegRestaurant: false })}
-                className={`px-3 py-1.5 text-xs rounded-full border ${step1.pureVegRestaurant === false
-                    ? "bg-gray-900 text-white border-gray-900"
-                    : "bg-white text-gray-700 border-gray-200"
-                  } ${!isEditing ? "opacity-70 cursor-not-allowed" : ""}`}
+                className={`cursor-pointer rounded-full border px-4 py-2 text-xs font-semibold transition-all duration-200 ${
+                  step1.pureVegRestaurant === false
+                    ? ONBOARDING_CHIP_ACTIVE
+                    : ONBOARDING_CHIP_INACTIVE
+                } ${!isEditing ? "cursor-not-allowed opacity-70" : ""}`}
               >
                 No, Mixed Menu
               </button>
             </div>
-            <p className="text-[11px] text-gray-500 mt-1">
+            <p className={`${ONBOARDING_HINT} mt-2`}>
               This helps users filter restaurants by dietary preference.
             </p>
           </div>
         </div>
       </section>
 
-      <section className="bg-white p-4 sm:p-6 rounded-md">
-        <h2 className="text-lg font-semibold text-black mb-4">Owner details</h2>
-        <p className="text-sm text-gray-600 mb-4">
+      <section className={ONBOARDING_SECTION}>
+        <h2 className={ONBOARDING_SECTION_TITLE}>Owner details</h2>
+        <p className={ONBOARDING_SECTION_DESC}>
           These details will be used for all business communications and updates.
         </p>
         <div className="space-y-4">
           <div>
-            <Label className="text-xs text-gray-700">Full name*</Label>
+            <Label className={ONBOARDING_LABEL}>Full name*</Label>
             <Input
               value={step1.ownerName || ""}
               onChange={(e) => {
                 const val = e.target.value.replace(/[^A-Za-z ]/g, "")
                 setStep1({ ...step1, ownerName: val })
               }}
-              className="mt-1 bg-white text-sm text-black placeholder-black"
+              className={ONBOARDING_INPUT}
               placeholder="Owner full name"
               disabled={!isEditing}
             />
           </div>
           <div>
-            <Label className="text-xs text-gray-700">Email address*</Label>
+            <Label className={ONBOARDING_LABEL}>Email address*</Label>
             <Input
               type="email"
               value={step1.ownerEmail || ""}
@@ -2163,7 +1920,7 @@ export default function RestaurantOnboarding() {
                   ownerEmail: String(e.target.value || "").trim().toLowerCase(),
                 }))
               }
-              className="mt-1 bg-white text-sm text-black placeholder-black"
+              className={ONBOARDING_INPUT}
               placeholder="owner@example.com"
               inputMode="email"
               pattern={OWNER_EMAIL_REGEX.source}
@@ -2171,18 +1928,18 @@ export default function RestaurantOnboarding() {
             />
           </div>
           <div>
-            <Label className="text-xs text-gray-700">Phone number*</Label>
+            <Label className={ONBOARDING_LABEL}>Phone number*</Label>
             <Input
               type="tel"
               value={step1.ownerPhone || verifiedPhoneNumber || ""}
               readOnly={Boolean(verifiedPhoneNumber)}
               maxLength={10}
-              className="mt-1 bg-gray-50 text-sm text-black placeholder-black cursor-not-allowed"
+              className="mt-1.5 cursor-not-allowed bg-slate-100 text-sm text-slate-700"
               placeholder="Owner phone number"
               disabled={Boolean(verifiedPhoneNumber)}
             />
             {verifiedPhoneNumber ? (
-              <p className="text-[11px] text-gray-500 mt-1">
+              <p className={`${ONBOARDING_HINT} mt-2`}>
                 This is your OTP-verified number and cannot be changed.
               </p>
             ) : null}
@@ -2190,10 +1947,10 @@ export default function RestaurantOnboarding() {
         </div>
       </section>
 
-      <section className="bg-white p-4 sm:p-6 rounded-md space-y-4">
-        <h2 className="text-lg font-semibold text-black">Restaurant contact & location</h2>
+      <section className={`${ONBOARDING_SECTION} space-y-4`}>
+        <h2 className={ONBOARDING_SECTION_TITLE}>Restaurant contact & location</h2>
         <div>
-          <Label className="text-xs text-gray-700">Primary contact number*</Label>
+          <Label className={ONBOARDING_LABEL}>Primary contact number*</Label>
           <Input
             type="tel"
             value={step1.primaryContactNumber || ""}
@@ -2213,84 +1970,28 @@ export default function RestaurantOnboarding() {
             }}
             maxLength={10}
             inputMode="numeric"
-            className="mt-1 bg-white text-sm text-black placeholder-black"
+            className={ONBOARDING_INPUT}
             placeholder="Primary contact number (10 digits)"
             disabled={!isEditing}
           />
-          <p className="text-[11px] text-gray-500 mt-1">
+          <p className={`${ONBOARDING_HINT} mt-2`}>
             Customers, delivery partners and {companyName} may call on this number for order
             support.
           </p>
         </div>
-        <div className="space-y-3">
-          <p className="text-sm text-gray-700">
+        <div className="space-y-4">
+          <p className="text-sm font-medium text-slate-700">
             Add your restaurant's location for order pick-up.
           </p>
-          <div>
-            <Label className="text-xs text-gray-700">Service zone*</Label>
-            <select
-              value={step1.zoneId || ""}
-              onChange={(e) => setStep1({ ...step1, zoneId: e.target.value })}
-              className="mt-1 w-full h-9 rounded-md border border-input bg-white px-3 text-sm"
-              disabled={zonesLoading || !isEditing}
-            >
-              <option value="">{zonesLoading ? "Loading zones..." : "Select a zone"}</option>
-              {zones.map((z) => {
-                const id = String(z?._id || z?.id || "")
-                const label = z?.name || z?.zoneName || z?.serviceLocation || id
-                return (
-                  <option key={id} value={id}>
-                    {label}
-                  </option>
-                )
-              })}
-            </select>
-            <p className="text-[11px] text-gray-500 mt-1">
-              Choose the service zone where your restaurant will be available.
-            </p>
-          </div>
-          <div>
-            <Label className="text-xs text-gray-700">Search location</Label>
-            <Input
-              ref={locationSearchInputRef}
-              className="mt-1 bg-white text-sm text-black! dark:text-white! placeholder:text-gray-500 dark:placeholder:text-gray-400 caret-black dark:caret-white"
-              style={{ color: "#000", WebkitTextFillColor: "#000" }}
-              placeholder="Start typing your restaurant address..."
-              onChange={(e) => {
-                // Jab user manually type kare (suggestion nahi aaya) toh
-                // typed text ko formattedAddress mein save karo fallback ke liye
-                const typed = e.target.value
-                setLocationPickedFromSuggestion(false)
-                if (typed) {
-                  setStep1((prev) => ({
-                    ...prev,
-                    location: {
-                      ...prev.location,
-                      formattedAddress: typed,
-                    }
-                  }))
-                }
-              }}
-            />
-            {/* Warning: manual entry ke baad suggestion nahi chuna */}
-            {step1.location?.formattedAddress &&
-              !locationPickedFromSuggestion &&
-              !step1.location?.latitude && (
-                <p className="text-[11px] text-amber-600 mt-1 flex items-center gap-1">
-                  <span>⚠️</span>
-                  <span>Please select a suggestion from the dropdown for accurate location. Manual entry may cause delivery issues.</span>
-                </p>
-              )}
-            {locationPickedFromSuggestion && (
-              <p className="text-[11px] text-green-600 mt-1 flex items-center gap-1">
-                <span>✅</span>
-                <span>Location confirmed from suggestion.</span>
-              </p>
-            )}
-            <p className="text-[11px] text-gray-500 mt-1">
-              Select a suggestion to auto-fill area/city/state/pincode and coordinates.
-            </p>
-          </div>
+          <OnboardingLocationSection
+            zoneId={step1.zoneId}
+            zones={zones}
+            zonesLoading={zonesLoading}
+            isEditing={isEditing}
+            location={step1.location}
+            onZoneChange={handleZoneChange}
+            onLocationChange={handleLocationChange}
+          />
           <Input
             value={step1.location?.addressLine1 || ""}
             onChange={(e) =>
@@ -2299,7 +2000,7 @@ export default function RestaurantOnboarding() {
                 location: { ...step1.location, addressLine1: e.target.value },
               })
             }
-            className="bg-white text-sm"
+            className={ONBOARDING_INPUT}
             placeholder="Shop no. / building no. (optional)"
           />
           <Input
@@ -2310,7 +2011,7 @@ export default function RestaurantOnboarding() {
                 location: { ...step1.location, addressLine2: e.target.value },
               })
             }
-            className="bg-white text-sm"
+            className={ONBOARDING_INPUT}
             placeholder="Floor / tower (optional)"
           />
           <Input
@@ -2321,7 +2022,7 @@ export default function RestaurantOnboarding() {
                 location: { ...step1.location, landmark: e.target.value },
               })
             }
-            className="bg-white text-sm"
+            className={ONBOARDING_INPUT}
             placeholder="Nearby landmark (optional)"
           />
           <Input
@@ -2332,7 +2033,7 @@ export default function RestaurantOnboarding() {
                 location: { ...step1.location, area: e.target.value },
               })
             }
-            className="bg-white text-sm"
+            className={ONBOARDING_INPUT}
             placeholder="Area / Sector / Locality*"
           />
           <Input
@@ -2343,10 +2044,10 @@ export default function RestaurantOnboarding() {
                 location: { ...step1.location, city: e.target.value.replace(/[^A-Za-z ]/g, "") },
               })
             }
-            className="bg-white text-sm"
+            className={ONBOARDING_INPUT}
             placeholder="City"
           />
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Input
               value={step1.location?.state || ""}
               onChange={(e) =>
@@ -2355,7 +2056,7 @@ export default function RestaurantOnboarding() {
                   location: { ...step1.location, state: e.target.value.replace(/[^A-Za-z ]/g, "") },
                 })
               }
-              className="bg-white text-sm"
+              className={ONBOARDING_INPUT}
               placeholder="State"
             />
             <Input
@@ -2366,11 +2067,11 @@ export default function RestaurantOnboarding() {
                   location: { ...step1.location, pincode: e.target.value.replace(/\D/g, "").slice(0, 6) },
                 })
               }
-              className="bg-white text-sm"
+              className={ONBOARDING_INPUT}
               placeholder="Pincode"
             />
           </div>
-          <p className="text-[11px] text-gray-500 mt-1">
+          <p className={ONBOARDING_HINT}>
             Please ensure that this address is the same as mentioned on your FSSAI license.
           </p>
         </div>
@@ -2378,165 +2079,8 @@ export default function RestaurantOnboarding() {
     </div>
   )
 
-  // Initialize Google Places Autocomplete for Step 1 location search.
+  // Load zones once on mount so step 4 summary can resolve the selected zone name.
   useEffect(() => {
-    if (step !== 1 || loading || !isEditing) return
-
-    let cancelled = false
-
-    const init = async () => {
-      // Wait for the ref to be attached after loading finishes
-      for (let i = 0; i < 60; i++) {
-        if (locationSearchInputRef.current) break
-        await new Promise((r) => setTimeout(r, 50))
-      }
-      if (!locationSearchInputRef.current || cancelled) return
-
-      const loadMaps = async () => {
-        if (mapsScriptLoadedRef.current && window.google?.maps?.places?.Autocomplete) return true
-        if (window.google?.maps?.places?.Autocomplete) {
-          mapsScriptLoadedRef.current = true
-          return true
-        }
-        const apiKey = await getGoogleMapsApiKey()
-        if (!apiKey) return false
-
-        const existing = document.getElementById("restaurant-onboarding-maps-script")
-        if (existing) {
-          for (let i = 0; i < 30; i += 1) {
-            if (window.google?.maps?.places?.Autocomplete) {
-              mapsScriptLoadedRef.current = true
-              return true
-            }
-            await new Promise((r) => setTimeout(r, 100))
-          }
-          return false
-        }
-
-        await new Promise((resolve, reject) => {
-          const script = document.createElement("script")
-          script.id = "restaurant-onboarding-maps-script"
-          script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places&v=weekly`
-          script.async = true
-          script.defer = true
-          script.onload = resolve
-          script.onerror = reject
-          document.head.appendChild(script)
-        })
-        mapsScriptLoadedRef.current = true
-        return !!window.google?.maps?.places?.Autocomplete
-      }
-
-      const parsePlace = (place) => {
-        const formattedAddress = place?.formatted_address || ""
-        const comps = Array.isArray(place?.address_components) ? place.address_components : []
-        const get = (types) => comps.find((c) => types.some((t) => c.types?.includes(t)))?.long_name || ""
-        const area =
-          get(["sublocality_level_1", "sublocality", "neighborhood"]) ||
-          get(["locality"])
-        const city =
-          get(["locality"]) ||
-          get(["administrative_area_level_2"])
-        const state = get(["administrative_area_level_1"])
-        const pincode = get(["postal_code"])
-        const lat = place?.geometry?.location?.lat?.()
-        const lng = place?.geometry?.location?.lng?.()
-        return {
-          formattedAddress,
-          area,
-          city,
-          state,
-          pincode,
-          latitude: Number.isFinite(lat) ? Number(lat.toFixed(6)) : "",
-          longitude: Number.isFinite(lng) ? Number(lng.toFixed(6)) : "",
-        }
-      }
-
-      const ok = await loadMaps()
-      if (!ok || cancelled || !locationSearchInputRef.current) return
-
-      // Clean up any previous instance before re-attaching
-      if (placesAutocompleteRef.current) {
-        window.google?.maps?.event?.clearInstanceListeners?.(placesAutocompleteRef.current)
-        placesAutocompleteRef.current = null
-      }
-
-      placesAutocompleteRef.current = new window.google.maps.places.Autocomplete(
-        locationSearchInputRef.current,
-        {
-          fields: ["formatted_address", "address_components", "geometry"],
-          componentRestrictions: { country: "in" },
-        }
-      )
-
-      placesAutocompleteRef.current.addListener("place_changed", () => {
-        const place = placesAutocompleteRef.current.getPlace()
-        const parsed = parsePlace(place)
-
-        // Immediate Geofencing Check
-        setStep1((prev) => {
-          if (prev.zoneId && parsed.latitude && parsed.longitude) {
-            // Access latest zones from state
-            const selectedZone = zones.find((z) => String(z._id || z.id) === prev.zoneId)
-            if (
-              selectedZone &&
-              Array.isArray(selectedZone.coordinates) &&
-              selectedZone.coordinates.length >= 3
-            ) {
-              const isInside = isPointInPolygon(
-                Number(parsed.latitude),
-                Number(parsed.longitude),
-                selectedZone.coordinates,
-              )
-              if (!isInside) {
-                toast.error("Selected address is outside the selected zone")
-                // Clear search input if outside
-                if (locationSearchInputRef.current) {
-                  locationSearchInputRef.current.value = ""
-                }
-                setLocationPickedFromSuggestion(false)
-                return prev
-              }
-            }
-          }
-
-          // Mark as picked from suggestion (has coordinates)
-          setLocationPickedFromSuggestion(true)
-
-          return {
-            ...prev,
-            location: {
-              ...prev.location,
-              formattedAddress: parsed.formattedAddress || prev.location.formattedAddress,
-              addressLine1: prev.location.addressLine1 || parsed.formattedAddress || "",
-              area: parsed.area || prev.location.area,
-              city: parsed.city || prev.location.city,
-              state: parsed.state || prev.location.state,
-              pincode: parsed.pincode || prev.location.pincode,
-              latitude: parsed.latitude !== "" ? parsed.latitude : prev.location.latitude,
-              longitude: parsed.longitude !== "" ? parsed.longitude : prev.location.longitude,
-            },
-          }
-        })
-      })
-    }
-
-    init().catch((err) => {
-      debugWarn("Failed to load Google Places for onboarding:", err)
-    })
-
-    return () => {
-      cancelled = true
-      if (placesAutocompleteRef.current) {
-        window.google?.maps?.event?.clearInstanceListeners?.(placesAutocompleteRef.current)
-      }
-      placesAutocompleteRef.current = null
-    }
-  }, [step, loading, isEditing, zones])
-
-  // Load zones for onboarding dropdown (public endpoint).
-  useEffect(() => {
-    if (step !== 1) return
     let cancelled = false
     setZonesLoading(true)
     zoneAPI.getPublicZones()
@@ -2551,37 +2095,45 @@ export default function RestaurantOnboarding() {
         if (!cancelled) setZonesLoading(false)
       })
     return () => { cancelled = true }
-  }, [step])
+  }, [])
+
+  // Backfill zone name when zones load after zoneId was restored from draft/local storage.
+  useEffect(() => {
+    if (!step1.zoneId?.trim() || step1.zoneName?.trim() || zones.length === 0) return
+    const selectedZone = zones.find((z) => String(z._id || z.id) === String(step1.zoneId))
+    const resolvedName = getZoneDisplayName(selectedZone)
+    if (resolvedName) {
+      setStep1((prev) => ({ ...prev, zoneName: resolvedName }))
+    }
+  }, [zones, step1.zoneId, step1.zoneName])
 
   const renderStep2 = () => (
-    <div className="space-y-6">
-      {/* Images section */}
-      <section className="bg-white p-4 sm:p-6 rounded-md space-y-5">
-        <h2 className="text-lg font-semibold text-black">Menu & photos</h2>
-        <p className="text-xs text-gray-500">
+    <div className="space-y-5 lg:space-y-6">
+      <section className={`${ONBOARDING_SECTION} space-y-5`}>
+        <h2 className={ONBOARDING_SECTION_TITLE}>Menu & photos</h2>
+        <p className={ONBOARDING_HINT}>
           Add clear photos of your printed menu and a primary profile image. This helps customers
           understand what you serve.
         </p>
 
-        {/* Menu images */}
         <div className="space-y-2">
-          <Label className="text-xs font-medium text-gray-700">Menu images</Label>
-          <div className="mt-1 border border-dashed border-gray-300 rounded-md bg-gray-50/70 px-4 py-3 flex items-center justify-between flex-col gap-3">
+          <Label className={ONBOARDING_LABEL}>Menu images</Label>
+          <div className="mt-1 flex flex-col items-center justify-between gap-4 rounded-xl border-2 border-dashed border-slate-200 bg-slate-50/70 px-4 py-5 sm:flex-row">
             <div className="flex items-center gap-3">
-              <div className="h-10 w-10 rounded-md bg-white flex items-center justify-center">
-                <ImageIcon className="w-5 h-5 text-gray-700" />
+              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-white shadow-sm">
+                <ImageIcon className="h-5 w-5 text-[#FF0000]" />
               </div>
               <div className="flex flex-col">
-                <span className="text-xs font-medium text-gray-900">Upload menu images</span>
-                <span className="text-[11px] text-gray-500">
-                  JPG, PNG, WebP ? You can select multiple files
+                <span className="text-sm font-semibold text-slate-900">Upload menu images</span>
+                <span className={ONBOARDING_HINT}>
+                  JPG, PNG, WebP — You can select multiple files
                 </span>
               </div>
             </div>
             <Button
               type="button"
               variant="outline"
-              className="w-full text-xs"
+              className="w-full cursor-pointer rounded-full border-slate-200 text-xs sm:w-auto"
               onClick={() =>
                 openOnboardingImagePicker({
                   title: "Add menu image",
@@ -2642,9 +2194,9 @@ export default function RestaurantOnboarding() {
                 return (
                   <div
                     key={idx}
-                    className="relative aspect-4/5 rounded-md overflow-hidden bg-gray-100"
+                    className="relative aspect-4/5 overflow-hidden rounded-xl bg-slate-100 ring-1 ring-slate-200"
                   >
-                    <div className="absolute top-1 right-1 z-30">
+                    <div className="absolute right-1 top-1 z-30">
                       <button
                         type="button"
                         onClick={(e) => {
@@ -2655,7 +2207,7 @@ export default function RestaurantOnboarding() {
                             menuImages: prev.menuImages.filter((_, i) => i !== idx),
                           }));
                         }}
-                        className="bg-red-500 text-white rounded-full p-1 shadow-md hover:bg-red-600 transition-colors"
+                        className="cursor-pointer rounded-full bg-red-500 p-1.5 text-white shadow-md transition-colors hover:bg-red-600"
                       >
                         <X className="w-3 h-3" />
                       </button>
@@ -2685,10 +2237,10 @@ export default function RestaurantOnboarding() {
 
         {/* Profile image */}
         <div className="space-y-2">
-          <Label className="text-xs font-medium text-gray-700">Restaurant profile image</Label>
+          <Label className={ONBOARDING_LABEL}>Restaurant profile image</Label>
           <div className="flex items-center gap-4">
             <div className="relative">
-              <div className="h-16 w-16 rounded-full bg-gray-100 flex items-center justify-center overflow-hidden border border-gray-200">
+              <div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-2xl border-2 border-slate-200 bg-slate-100 shadow-sm">
                 {step2.profileImage ? (
                   (() => {
                     const imageSrc = getPreviewImageUrl(step2.profileImage)
@@ -2718,27 +2270,25 @@ export default function RestaurantOnboarding() {
                       profileImage: null,
                     }));
                   }}
-                  className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full p-1 shadow-md hover:bg-red-600 transition-colors z-10"
+                  className="absolute -right-1 -top-1 z-10 cursor-pointer rounded-full bg-red-500 p-1 text-white shadow-md transition-colors hover:bg-red-600"
                 >
                   <X className="w-3 h-3" />
                 </button>
               )}
             </div>
-            <div className="flex-1 flex-col flex items-center justify-between gap-3">
+            <div className="flex flex-1 flex-col items-center justify-between gap-3">
               <div className="flex flex-col">
-                <span className="text-xs font-medium text-gray-900">Upload profile image</span>
-                <span className="text-[11px] text-gray-500">
+                <span className="text-xs font-semibold text-slate-900">Upload profile image</span>
+                <span className={ONBOARDING_HINT}>
                   This will be shown on your listing card and restaurant page.
                 </span>
               </div>
-
             </div>
-
           </div>
           <Button
             type="button"
             variant="outline"
-            className="w-full text-xs"
+            className="w-full cursor-pointer rounded-full border-slate-200 text-xs"
             onClick={() =>
               openOnboardingImagePicker({
                 title: "Upload profile image",
@@ -2777,11 +2327,9 @@ export default function RestaurantOnboarding() {
         </div>
       </section>
 
-      {/* Operational details */}
-      <section className="bg-white p-4 sm:p-6 rounded-md space-y-5">
-        {/* Timings with popover time selectors */}
+      <section className={`${ONBOARDING_SECTION} space-y-5`}>
         <div className="space-y-3">
-          <Label className="text-xs text-gray-700">Delivery timings</Label>
+          <Label className={ONBOARDING_LABEL}>Delivery timings</Label>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <TimeSelector
               label="Opening time"
@@ -2802,14 +2350,14 @@ export default function RestaurantOnboarding() {
 
         {/* Open days in a calendar-like grid */}
         <div className="space-y-2">
-          <Label className="text-xs text-gray-700 flex items-center gap-1.5">
-            <CalendarIcon className="w-3.5 h-3.5 text-gray-800" />
+          <Label className={`${ONBOARDING_LABEL} flex items-center gap-1.5`}>
+            <CalendarIcon className="h-3.5 w-3.5 text-[#FF0000]" />
             <span>Open days</span>
           </Label>
-          <p className="text-[11px] text-gray-500">
+          <p className={ONBOARDING_HINT}>
             Select the days your restaurant accepts delivery orders.
           </p>
-          <div className="mt-1 grid grid-cols-7 gap-1.5 sm:gap-2">
+          <div className="mt-2 grid grid-cols-7 gap-1.5 sm:gap-2">
             {daysOfWeek.map((day) => {
               const active = step2.openDays.includes(day)
               return (
@@ -2817,8 +2365,9 @@ export default function RestaurantOnboarding() {
                   key={day}
                   type="button"
                   onClick={() => toggleDay(day)}
-                  className={`aspect-square flex items-center justify-center rounded-md text-[11px] font-medium ${active ? "bg-black text-white" : "bg-gray-100 text-gray-800"
-                    }`}
+                  className={`flex aspect-square cursor-pointer items-center justify-center rounded-xl border text-[11px] font-semibold transition-all duration-200 ${
+                    active ? ONBOARDING_DAY_ACTIVE : ONBOARDING_DAY_INACTIVE
+                  }`}
                 >
                   {day.charAt(0)}
                 </button>
@@ -2831,12 +2380,12 @@ export default function RestaurantOnboarding() {
   )
 
   const renderStep3 = () => (
-    <div className="space-y-6">
-      <section className="bg-white p-4 sm:p-6 rounded-md space-y-4">
-        <h2 className="text-lg font-semibold text-black">PAN details</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+    <div className="space-y-5 lg:space-y-6">
+      <section className={`${ONBOARDING_SECTION} space-y-4`}>
+        <h2 className={ONBOARDING_SECTION_TITLE}>PAN details</h2>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
-            <Label className="text-xs text-gray-700">PAN number</Label>
+            <Label className={ONBOARDING_LABEL}>PAN number</Label>
             <Input
               value={step3.panNumber || ""}
               onChange={(e) => {
@@ -2846,12 +2395,12 @@ export default function RestaurantOnboarding() {
                   .slice(0, 10)
                 setStep3({ ...step3, panNumber: normalized })
               }}
-              className="mt-1 bg-white text-sm text-black placeholder-black"
+              className={ONBOARDING_INPUT}
               placeholder="ABCDE1234F"
             />
           </div>
           <div>
-            <Label className="text-xs text-gray-700">PAN Card Holder Name</Label>
+            <Label className={ONBOARDING_LABEL}>PAN Card Holder Name</Label>
             <Input
               value={step3.nameOnPan || ""}
               onChange={(e) =>
@@ -2860,16 +2409,16 @@ export default function RestaurantOnboarding() {
                   nameOnPan: e.target.value.replace(/[^A-Za-z ]/g, ""),
                 })
               }
-              className="mt-1 bg-white text-sm text-black placeholder-black"
+              className={ONBOARDING_INPUT}
             />
           </div>
         </div>
         <div>
-          <Label className="text-xs text-gray-700">PAN image</Label>
+          <Label className={ONBOARDING_LABEL}>PAN image</Label>
           <Button
             type="button"
             variant="outline"
-            className="mt-2 w-full text-xs"
+            className="mt-2 w-full cursor-pointer rounded-full border-slate-200 text-xs"
             onClick={() =>
               openOnboardingImagePicker({
                 title: "Upload PAN image",
@@ -2893,7 +2442,7 @@ export default function RestaurantOnboarding() {
             }
           />
           {step3.panImage && (
-            <div className="mt-3 relative aspect-4/3 rounded-md overflow-hidden bg-gray-100">
+            <div className="relative mt-3 aspect-4/3 overflow-hidden rounded-xl bg-slate-100 ring-1 ring-slate-200">
               {getPreviewImageUrl(step3.panImage) ? (
                 <img
                   src={getPreviewImageUrl(step3.panImage)}
@@ -2912,7 +2461,7 @@ export default function RestaurantOnboarding() {
                   e.stopPropagation()
                   setStep3((prev) => ({ ...prev, panImage: null }))
                 }}
-                className="absolute top-2 right-2 bg-red-500 text-white rounded-full p-1 shadow-md hover:bg-red-600 transition-colors"
+                className="absolute right-2 top-2 cursor-pointer rounded-full bg-red-500 p-1 shadow-md transition-colors hover:bg-red-600"
               >
                 <X className="w-3 h-3" />
               </button>
@@ -2921,23 +2470,25 @@ export default function RestaurantOnboarding() {
         </div>
       </section>
 
-      <section className="bg-white p-4 sm:p-6 rounded-md space-y-4">
-        <h2 className="text-lg font-semibold text-black">GST details</h2>
-        <div className="flex gap-4 items-center text-sm">
-          <span className="text-gray-700">GST registered?</span>
+      <section className={`${ONBOARDING_SECTION} space-y-4`}>
+        <h2 className={ONBOARDING_SECTION_TITLE}>GST details</h2>
+        <div className="flex flex-wrap items-center gap-3 text-sm">
+          <span className="font-medium text-slate-700">GST registered?</span>
           <button
             type="button"
             onClick={() => setStep3({ ...step3, gstRegistered: true })}
-            className={`px-3 py-1.5 text-xs rounded-full ${step3.gstRegistered ? "bg-black text-white" : "bg-gray-100 text-gray-800"
-              }`}
+            className={`cursor-pointer rounded-full border px-4 py-2 text-xs font-semibold transition-all duration-200 ${
+              step3.gstRegistered ? ONBOARDING_CHIP_ACTIVE : ONBOARDING_CHIP_INACTIVE
+            }`}
           >
             Yes
           </button>
           <button
             type="button"
             onClick={() => setStep3({ ...step3, gstRegistered: false })}
-            className={`px-3 py-1.5 text-xs rounded-full ${!step3.gstRegistered ? "bg-black text-white" : "bg-gray-100 text-gray-800"
-              }`}
+            className={`cursor-pointer rounded-full border px-4 py-2 text-xs font-semibold transition-all duration-200 ${
+              !step3.gstRegistered ? ONBOARDING_CHIP_ACTIVE : ONBOARDING_CHIP_INACTIVE
+            }`}
           >
             No
           </button>
@@ -2952,7 +2503,7 @@ export default function RestaurantOnboarding() {
                   gstNumber: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 15),
                 })
               }
-              className="bg-white text-sm"
+              className={ONBOARDING_INPUT}
               placeholder="GST number (15 characters)"
             />
             <Input
@@ -2963,19 +2514,19 @@ export default function RestaurantOnboarding() {
                   gstLegalName: e.target.value.replace(/[^A-Za-z ]/g, ""),
                 })
               }
-              className="bg-white text-sm"
+              className={ONBOARDING_INPUT}
               placeholder="Legal name"
             />
             <Input
               value={step3.gstAddress || ""}
               onChange={(e) => setStep3({ ...step3, gstAddress: e.target.value })}
-              className="bg-white text-sm"
+              className={ONBOARDING_INPUT}
               placeholder="Registered address"
             />
             <Button
               type="button"
               variant="outline"
-              className="w-full text-xs"
+              className="w-full cursor-pointer rounded-full border-slate-200 text-xs"
               onClick={() =>
                 openOnboardingImagePicker({
                   title: "Upload GST certificate",
@@ -2999,7 +2550,7 @@ export default function RestaurantOnboarding() {
               }
             />
             {step3.gstImage && (
-              <div className="mt-3 relative aspect-4/3 rounded-md overflow-hidden bg-gray-100">
+              <div className="relative mt-3 aspect-4/3 overflow-hidden rounded-xl bg-slate-100 ring-1 ring-slate-200">
                 {getPreviewImageUrl(step3.gstImage) ? (
                   <img
                     src={getPreviewImageUrl(step3.gstImage)}
@@ -3018,7 +2569,7 @@ export default function RestaurantOnboarding() {
                     e.stopPropagation()
                     setStep3((prev) => ({ ...prev, gstImage: null }))
                   }}
-                  className="absolute top-2 right-2 bg-red-500 text-white rounded-full p-1 shadow-md hover:bg-red-600 transition-colors"
+                  className="absolute right-2 top-2 cursor-pointer rounded-full bg-red-500 p-1 shadow-md transition-colors hover:bg-red-600"
                 >
                   <X className="w-3 h-3" />
                 </button>
@@ -3028,27 +2579,30 @@ export default function RestaurantOnboarding() {
         )}
       </section>
 
-      <section className="bg-white p-4 sm:p-6 rounded-md space-y-4">
-        <h2 className="text-lg font-semibold text-black">FSSAI details</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <Input
-            value={step3.fssaiNumber || ""}
-            onChange={(e) =>
-              setStep3({ ...step3, fssaiNumber: e.target.value.replace(/\D/g, "").slice(0, 14) })
-            }
-            className="bg-white text-sm"
-            placeholder="FSSAI number (14 digits)"
-          />
+      <section className={`${ONBOARDING_SECTION} space-y-4`}>
+        <h2 className={ONBOARDING_SECTION_TITLE}>FSSAI details</h2>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
-            <Label className="text-xs text-gray-700 mb-1 block">FSSAI expiry date</Label>
+            <Label className={ONBOARDING_LABEL}>FSSAI number</Label>
+            <Input
+              value={step3.fssaiNumber || ""}
+              onChange={(e) =>
+                setStep3({ ...step3, fssaiNumber: e.target.value.replace(/\D/g, "").slice(0, 14) })
+              }
+              className={ONBOARDING_INPUT}
+              placeholder="FSSAI number (14 digits)"
+            />
+          </div>
+          <div>
+            <Label className={`${ONBOARDING_LABEL} mb-1 block`}>FSSAI expiry date</Label>
             <Popover open={isFssaiCalendarOpen} onOpenChange={setIsFssaiCalendarOpen}>
               <PopoverTrigger asChild>
                 <button
                   type="button"
                   onClick={() => setIsFssaiCalendarOpen(true)}
-                  className="w-full px-3 py-2 border border-gray-200 rounded-md bg-white text-sm text-left flex items-center justify-between hover:bg-gray-50"
+                  className="flex w-full cursor-pointer items-center justify-between rounded-xl border border-slate-200 bg-slate-50/80 px-3 py-2.5 text-left text-sm transition-colors hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0000]/20"
                 >
-                  <span className={step3.fssaiExpiry ? "text-gray-900" : "text-gray-500"}>
+                  <span className={step3.fssaiExpiry ? "text-slate-900" : "text-slate-500"}>
                     {step3.fssaiExpiry
                       ? parseLocalYMDDate(step3.fssaiExpiry)?.toLocaleDateString("en-US", {
                         year: "numeric",
@@ -3057,7 +2611,7 @@ export default function RestaurantOnboarding() {
                       })
                       : "Select expiry date"}
                   </span>
-                  <CalendarIcon className="w-4 h-4 text-gray-500" />
+                  <CalendarIcon className="h-4 w-4 text-[#FF0000]" />
                 </button>
               </PopoverTrigger>
               <PopoverContent className="w-auto p-0 z-100" align="start">
@@ -3086,7 +2640,7 @@ export default function RestaurantOnboarding() {
         <Button
           type="button"
           variant="outline"
-          className="w-full text-xs"
+          className="w-full cursor-pointer rounded-full border-slate-200 text-xs"
           onClick={() =>
             openOnboardingImagePicker({
               title: "Upload FSSAI image",
@@ -3110,7 +2664,7 @@ export default function RestaurantOnboarding() {
           }
         />
         {step3.fssaiImage && (
-          <div className="mt-3 relative aspect-4/3 rounded-md overflow-hidden bg-gray-100">
+          <div className="relative mt-3 aspect-4/3 overflow-hidden rounded-xl bg-slate-100 ring-1 ring-slate-200">
             {getPreviewImageUrl(step3.fssaiImage) ? (
               <img
                 src={getPreviewImageUrl(step3.fssaiImage)}
@@ -3129,7 +2683,7 @@ export default function RestaurantOnboarding() {
                 e.stopPropagation()
                 setStep3((prev) => ({ ...prev, fssaiImage: null }))
               }}
-              className="absolute top-2 right-2 bg-red-500 text-white rounded-full p-1 shadow-md hover:bg-red-600 transition-colors"
+              className="absolute right-2 top-2 cursor-pointer rounded-full bg-red-500 p-1 text-white shadow-md transition-colors hover:bg-red-600"
             >
               <X className="w-3 h-3" />
             </button>
@@ -3137,15 +2691,15 @@ export default function RestaurantOnboarding() {
         )}
       </section>
 
-      <section className="bg-white p-4 sm:p-6 rounded-md space-y-4">
-        <h2 className="text-lg font-semibold text-black">Bank account details</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <section className={`${ONBOARDING_SECTION} space-y-4`}>
+        <h2 className={ONBOARDING_SECTION_TITLE}>Bank account details</h2>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Input
             value={step3.accountNumber || ""}
             onChange={(e) =>
               setStep3({ ...step3, accountNumber: e.target.value.replace(/\D/g, "").slice(0, 18) })
             }
-            className="bg-white text-sm"
+            className={ONBOARDING_INPUT}
             placeholder="Account number"
           />
           <Input
@@ -3156,11 +2710,11 @@ export default function RestaurantOnboarding() {
                 confirmAccountNumber: e.target.value.replace(/\D/g, "").slice(0, 18),
               })
             }
-            className="bg-white text-sm"
+            className={ONBOARDING_INPUT}
             placeholder="Re-enter account number"
           />
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Input
             value={step3.ifscCode || ""}
             onChange={(e) =>
@@ -3169,14 +2723,14 @@ export default function RestaurantOnboarding() {
                 ifscCode: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 11),
               })
             }
-            className="bg-white text-sm"
+            className={ONBOARDING_INPUT}
             placeholder="IFSC code"
           />
           <Select
             value={step3.accountType || ""}
             onValueChange={(value) => setStep3({ ...step3, accountType: value })}
           >
-            <SelectTrigger className="bg-white text-sm">
+            <SelectTrigger className={`${ONBOARDING_INPUT} mt-0`}>
               <SelectValue placeholder="Select account type" />
             </SelectTrigger>
             <SelectContent>
@@ -3193,28 +2747,110 @@ export default function RestaurantOnboarding() {
               accountHolderName: e.target.value.replace(/[^A-Za-z ]/g, ""),
             })
           }
-          className="bg-white text-sm"
+          className={ONBOARDING_INPUT}
           placeholder="Account holder name"
         />
       </section>
     </div>
   )
 
-  const renderStep4 = () => (
-    <div className="space-y-6">
-      <section className="bg-white p-4 sm:p-6 rounded-md space-y-4">
-        <h2 className="text-lg font-semibold text-black">Restaurant Display Information</h2>
-        <p className="text-sm text-gray-600">
-          Add information that will be displayed to customers on the home page
-        </p>
+  const selectedZoneLabel = zones.find((z) => String(z._id || z.id) === String(step1.zoneId))
+  const selectedZoneName =
+    step1.zoneName?.trim() ||
+    getZoneDisplayName(selectedZoneLabel) ||
+    onboardingDraftRef.current?.zoneName ||
+    "—"
 
+  const renderStep4 = () => (
+    <div className="space-y-5 lg:space-y-6">
+      <section className="overflow-hidden rounded-2xl border border-[#FF0000]/15 bg-gradient-to-br from-[#FF0000]/5 via-white to-orange-50 p-5 sm:p-6 lg:p-8">
+        <p className="text-xs font-bold uppercase tracking-[0.2em] text-[#FF0000]">Final step</p>
+        <h2 className="mt-2 text-xl font-black text-slate-900 sm:text-2xl">You&apos;re almost live on {companyName}</h2>
+        <p className={`${ONBOARDING_SECTION_DESC} mt-2 max-w-xl`}>
+          Review your details below, set how long deliveries usually take, then submit for admin approval.
+        </p>
+      </section>
+
+      <section className={`${ONBOARDING_SECTION} space-y-4`}>
+        <h2 className={ONBOARDING_SECTION_TITLE}>Application summary</h2>
+        <p className={ONBOARDING_SECTION_DESC}>
+          Quick snapshot of what you&apos;ve submitted in the previous steps.
+        </p>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="rounded-xl border border-slate-100 bg-slate-50/80 p-4">
+            <div className="mb-2 flex items-center gap-2 text-[#FF0000]">
+              <Store className="h-4 w-4" />
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-600">Restaurant</span>
+            </div>
+            <p className="font-bold text-slate-900">{step1.restaurantName || "—"}</p>
+            <p className="mt-1 text-xs text-slate-500">{step1.ownerName || "—"}</p>
+          </div>
+          <div className="rounded-xl border border-slate-100 bg-slate-50/80 p-4">
+            <div className="mb-2 flex items-center gap-2 text-[#FF0000]">
+              <MapPin className="h-4 w-4" />
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-600">Zone & area</span>
+            </div>
+            <p className="font-bold text-slate-900">{selectedZoneName}</p>
+            <p className="mt-1 text-xs text-slate-500">{step1.location?.area || step1.location?.city || "—"}</p>
+          </div>
+          <div className="rounded-xl border border-slate-100 bg-slate-50/80 p-4">
+            <div className="mb-2 flex items-center gap-2 text-[#FF0000]">
+              <Clock className="h-4 w-4" />
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-600">Delivery hours</span>
+            </div>
+            <p className="font-bold text-slate-900">
+              {step2.openingTime && step2.closingTime
+                ? `${step2.openingTime} – ${step2.closingTime}`
+                : "—"}
+            </p>
+            <p className="mt-1 text-xs text-slate-500">
+              {(step2.openDays || []).length
+                ? `${step2.openDays.join(", ")} open`
+                : "No days selected"}
+            </p>
+          </div>
+          <div className="rounded-xl border border-slate-100 bg-slate-50/80 p-4">
+            <div className="mb-2 flex items-center gap-2 text-[#FF0000]">
+              <FileText className="h-4 w-4" />
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-600">Documents</span>
+            </div>
+            <ul className="space-y-1.5 text-xs text-slate-600">
+              <li className="flex items-center gap-1.5">
+                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+                PAN {step3.panNumber ? "added" : "pending"}
+              </li>
+              <li className="flex items-center gap-1.5">
+                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+                FSSAI {step3.fssaiNumber ? "added" : "pending"}
+              </li>
+              <li className="flex items-center gap-1.5">
+                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+                Bank details {step3.accountNumber ? "added" : "pending"}
+              </li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section className={`${ONBOARDING_SECTION} space-y-4`}>
+        <div className="flex items-start gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#FF0000]/10">
+            <Truck className="h-5 w-5 text-[#FF0000]" />
+          </div>
+          <div>
+            <h2 className={ONBOARDING_SECTION_TITLE}>Estimated delivery time</h2>
+            <p className={ONBOARDING_SECTION_DESC}>
+              Shown to customers on your listing. Pick the usual time from order to doorstep.
+            </p>
+          </div>
+        </div>
         <div>
-          <Label className="text-xs text-gray-700">Estimated Delivery Time*</Label>
+          <Label className={ONBOARDING_LABEL}>Estimated delivery time*</Label>
           <Select
             value={step4.estimatedDeliveryTime || ""}
             onValueChange={(value) => setStep4({ ...step4, estimatedDeliveryTime: value })}
           >
-            <SelectTrigger className="mt-1 bg-white text-sm">
+            <SelectTrigger className={ONBOARDING_INPUT}>
               <SelectValue placeholder="Select estimated timing" />
             </SelectTrigger>
             <SelectContent>
@@ -3232,60 +2868,53 @@ export default function RestaurantOnboarding() {
             </SelectContent>
           </Select>
         </div>
+      </section>
 
-        <div>
-          <Label className="text-xs text-gray-700">Featured Dish Name*</Label>
-          <Input
-            value={step4.featuredDish || ""}
-            onChange={(e) =>
-              setStep4({
-                ...step4,
-                featuredDish: e.target.value.replace(/[^A-Za-z ]/g, ""),
-              })
-            }
-            className="mt-1 bg-white text-sm"
-            placeholder="e.g., Butter Chicken Special"
-          />
-        </div>
-
-        <div>
-          <Label className="text-xs text-gray-700">Special Offer/Promotion</Label>
-          <Input
-            value={step4.offer || ""}
-            onChange={(e) => setStep4({ ...step4, offer: e.target.value })}
-            className="mt-1 bg-white text-sm"
-            placeholder="e.g., Flat 50 Rs. OFF on Order Above Rs.199"
-          />
-          <p className="text-[11px] text-gray-500 mt-1">
-            Optional. Leave this blank if you do not want to highlight an offer.
-          </p>
-        </div>
+      <section className={`${ONBOARDING_SECTION} space-y-3`}>
+        <h2 className={ONBOARDING_SECTION_TITLE}>What happens next?</h2>
+        <ol className="space-y-3 text-sm text-slate-600">
+          <li className="flex gap-3">
+            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#FF0000]/10 text-xs font-bold text-[#FF0000]">1</span>
+            <span>Your application is sent to the {companyName} team for verification.</span>
+          </li>
+          <li className="flex gap-3">
+            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#FF0000]/10 text-xs font-bold text-[#FF0000]">2</span>
+            <span>We review your documents, location, and menu details.</span>
+          </li>
+          <li className="flex gap-3">
+            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#FF0000]/10 text-xs font-bold text-[#FF0000]">3</span>
+            <span>Once approved, your restaurant dashboard and orders go live.</span>
+          </li>
+        </ol>
       </section>
 
       {fetchingFees && !feeConfig && (
-        <section className="bg-white border border-gray-200 p-4 sm:p-6 rounded-md">
-          <p className="text-sm text-gray-600">Loading onboarding fee details...</p>
+        <section className={`${ONBOARDING_SECTION} border-slate-200`}>
+          <div className="flex items-center gap-3">
+            <div className="h-5 w-5 animate-spin rounded-full border-2 border-slate-200 border-t-[#FF0000]" />
+            <p className="text-sm font-medium text-slate-600">Loading onboarding fee details...</p>
+          </div>
         </section>
       )}
 
       {requiresOnboardingFee && (
-        <section className="bg-amber-50 border border-amber-200 p-4 sm:p-6 rounded-md space-y-3">
-          <h2 className="text-lg font-semibold text-amber-900">Onboarding fee</h2>
-          <p className="text-sm text-amber-800">
+        <section className="space-y-4 rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 to-orange-50 p-5 sm:p-6 lg:p-8 shadow-sm">
+          <h2 className="text-lg font-bold text-amber-900 sm:text-xl">Onboarding fee</h2>
+          <p className="text-sm leading-relaxed text-amber-800">
             Admin has set a one-time onboarding fee for restaurant registration. Payment is required before your application can be submitted for approval.
           </p>
-          <div className="rounded-md bg-white border border-amber-100 p-4 flex items-center justify-between gap-4">
+          <div className="flex flex-col items-stretch justify-between gap-4 rounded-xl border border-amber-100 bg-white p-5 sm:flex-row sm:items-center">
             <div>
-              <p className="text-xs text-gray-500 uppercase tracking-wide font-semibold">Amount payable</p>
-              <p className="text-2xl font-bold text-gray-900">₹{Number(feeConfig.price).toLocaleString("en-IN")}</p>
+              <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Amount payable</p>
+              <p className="text-3xl font-black text-slate-900">₹{Number(feeConfig.price).toLocaleString("en-IN")}</p>
             </div>
-            <div className="text-right">
-              <p className="text-xs text-gray-500">Payment method</p>
-              <p className="text-sm font-medium text-gray-800">Secure online payment</p>
+            <div className="sm:text-right">
+              <p className="text-xs font-semibold text-slate-500">Payment method</p>
+              <p className="text-sm font-bold text-slate-800">Secure online payment</p>
             </div>
           </div>
-          <p className="text-xs text-amber-700">
-            When you click <span className="font-semibold">Finish</span>, you will be redirected to complete this payment. Your registration will be submitted only after successful payment.
+          <p className="text-xs leading-relaxed text-amber-700">
+            When you click <span className="font-bold">Finish</span>, you will be redirected to complete this payment. Your registration will be submitted only after successful payment.
           </p>
         </section>
       )}
@@ -3299,66 +2928,35 @@ export default function RestaurantOnboarding() {
     return renderStep4()
   }
 
+  const handleBack = () => {
+    if (step > 1) {
+      goToStep(step - 1)
+    } else {
+      handleLogout()
+    }
+  }
+
   return (
     <LocalizationProvider dateAdapter={AdapterDateFns}>
-      <div className="min-h-screen bg-gray-100 flex flex-col">
-        <header className="px-4 py-4 sm:px-6 sm:py-5 bg-white flex items-center justify-between border-b">
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => {
-                if (step > 1) {
-                  goToStep(step - 1)
-                  window.scrollTo({ top: 0, behavior: "instant" })
-                } else {
-                  handleLogout()
-                }
-              }}
-              className="p-1 hover:bg-gray-100 rounded-full transition-colors"
-              aria-label={step > 1 ? "Go back" : "Close onboarding"}
-            >
-              {step > 1 ? (
-                <ChevronLeft className="w-5 h-5 text-gray-600" />
-              ) : (
-                <X className="w-5 h-5 text-gray-600" />
-              )}
-            </button>
-            <div className="text-sm font-semibold text-black">Restaurant onboarding</div>
-          </div>
-          <div className="flex items-center gap-3">
-            {!loading && !isEditing && (
-              <Button
-                onClick={() => setIsEditing(true)}
-                variant="outline"
-                size="sm"
-                className="text-xs bg-blue-50 border-blue-300 text-blue-700 hover:bg-blue-100 flex items-center gap-1.5"
-                title="Edit Details"
-              >
-                <Sparkles className="w-3 h-3" />
-                Edit Details
-              </Button>
-            )}
-            <div className="flex items-center gap-3">
-              <div className="text-[10px] text-gray-500 font-bold uppercase tracking-wider text-right">
-                Step {step} of 4
-              </div>
-              <Button
-                onClick={handleLogout}
-                disabled={isLoggingOut}
-                variant="ghost"
-                size="icon"
-                className="h-9 w-9 text-red-600 hover:text-red-700 hover:bg-red-50"
-                title="Logout"
-              >
-                <LogOut className="w-4 h-4" />
-              </Button>
-            </div>
-          </div>
-
-        </header>
-
-        <main
-          className="flex-1 px-4 sm:px-6 py-4 space-y-4"
-          style={{ paddingBottom: keyboardInset ? `${keyboardInset + 20}px` : undefined }}
+      <RestaurantOnboardingShell
+        step={step}
+        companyName={companyName}
+        bannerUrl={bannerUrl}
+        logoUrl={logoUrl}
+        loading={loading}
+        saving={saving}
+        error={error}
+        keyboardInset={keyboardInset}
+        isEditing={isEditing}
+        isLoggingOut={isLoggingOut}
+        requiresOnboardingFee={requiresOnboardingFee}
+        feeConfig={feeConfig}
+        onBack={handleBack}
+        onLogout={handleLogout}
+        onEnableEdit={() => setIsEditing(true)}
+        onNext={handleNext}
+      >
+        <div
           onFocusCapture={(e) => {
             const target = e.target
             if (!(target instanceof HTMLElement)) return
@@ -3368,58 +2966,18 @@ export default function RestaurantOnboarding() {
             }, 250)
           }}
         >
-          {loading ? (
-            <p className="text-sm text-gray-600">Loading...</p>
-          ) : (
-            <div className={!isEditing ? "pointer-events-none select-none" : ""}>
-              {renderStep()}
-            </div>
-          )}
-        </main>
+          {renderStep()}
+        </div>
+      </RestaurantOnboardingShell>
 
-        <ImageSourcePicker
-          isOpen={sourcePicker.isOpen}
-          onClose={closeImageSourcePicker}
-          onFileSelect={sourcePicker.onSelectFile}
-          title={sourcePicker.title}
-          fileNamePrefix={sourcePicker.fileNamePrefix}
-          galleryInputRef={sourcePicker.fallbackInputRef}
-        />
-
-        {error && (
-          <div className="px-4 sm:px-6 pb-2 text-xs text-red-600">
-            {error}
-          </div>
-        )}
-
-        <footer className={`px-4 sm:px-6 py-3 bg-white ${keyboardInset ? "hidden" : ""}`}>
-          <div className="flex justify-between items-center">
-            <Button
-              variant="ghost"
-              disabled={step === 1 || saving}
-              onClick={() => { goToStep(step - 1); window.scrollTo({ top: 0, behavior: "instant" }) }}
-              className="text-sm text-gray-700 bg-transparent"
-            >
-              Back
-            </Button>
-            <Button
-              onClick={handleNext}
-              disabled={saving || (step === 4 && !isEditing)}
-              className={`text-sm bg-black text-white px-6 ${(step === 4 && !isEditing) ? "opacity-50 cursor-not-allowed" : ""}`}
-            >
-              {step === 4
-                ? saving
-                  ? "Saving..."
-                  : requiresOnboardingFee
-                    ? `Pay ₹${Number(feeConfig.price).toLocaleString("en-IN")} & Finish`
-                    : "Finish"
-                : saving
-                  ? "Saving..."
-                  : "Continue"}
-            </Button>
-          </div>
-        </footer>
-      </div>
+      <ImageSourcePicker
+        isOpen={sourcePicker.isOpen}
+        onClose={closeImageSourcePicker}
+        onFileSelect={sourcePicker.onSelectFile}
+        title={sourcePicker.title}
+        fileNamePrefix={sourcePicker.fileNamePrefix}
+        galleryInputRef={sourcePicker.fallbackInputRef}
+      />
     </LocalizationProvider>
   )
 }

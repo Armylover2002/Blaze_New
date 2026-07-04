@@ -77,7 +77,9 @@ export async function updateGlobalSettings(req, res, next) {
             adminLogoUrl, adminFaviconUrl, userLogoUrl, userFaviconUrl, deliveryLogoUrl, deliveryFaviconUrl, restaurantLogoUrl, restaurantFaviconUrl, sellerLogoUrl, sellerFaviconUrl, loginBannerUrl,
             sellerLoginBannerUrl, restaurantLoginBannerUrl,
             sellerLoginBannerActive, restaurantLoginBannerActive,
-            themeColor, modules 
+            themeColor, modules,
+            facebook, instagram, twitter, linkedin, youtube,
+            socialLinks
         } = data;
         
         console.log("Updating global settings with data:", data);
@@ -150,6 +152,21 @@ export async function updateGlobalSettings(req, res, next) {
 
         if (themeColor !== undefined) {
             settings.themeColor = themeColor;
+        }
+
+        const incomingSocial = socialLinks || {};
+        const hasSocialUpdate = ['facebook', 'instagram', 'twitter', 'linkedin', 'youtube'].some(
+            (key) => data[key] !== undefined || incomingSocial[key] !== undefined
+        );
+        if (hasSocialUpdate) {
+            settings.socialLinks = {
+                facebook: String(data.facebook ?? incomingSocial.facebook ?? settings.socialLinks?.facebook ?? '').trim(),
+                instagram: String(data.instagram ?? incomingSocial.instagram ?? settings.socialLinks?.instagram ?? '').trim(),
+                twitter: String(data.twitter ?? incomingSocial.twitter ?? settings.socialLinks?.twitter ?? '').trim(),
+                linkedin: String(data.linkedin ?? incomingSocial.linkedin ?? settings.socialLinks?.linkedin ?? '').trim(),
+                youtube: String(data.youtube ?? incomingSocial.youtube ?? settings.socialLinks?.youtube ?? '').trim(),
+            };
+            settings.markModified('socialLinks');
         }
 
         // Strictly define modules and ensure persistence

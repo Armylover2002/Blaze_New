@@ -47,7 +47,7 @@ export const upsertAdminPageController = async (req, res, next) => {
             const result = await upsertAboutPage(req.body ?? {}, updatedBy);
             return sendResponse(res, 200, 'Page updated successfully', result.data);
         }
-        if (['terms', 'privacy', 'refund', 'shipping', 'cancellation'].includes(key)) {
+        if (['terms', 'privacy', 'support', 'refund', 'shipping', 'cancellation'].includes(key)) {
             const result = await upsertLegalPage(key, req.body ?? {}, updatedBy, role);
             return sendResponse(res, 200, 'Page updated successfully', result.data);
         }

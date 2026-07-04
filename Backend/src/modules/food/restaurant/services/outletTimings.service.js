@@ -34,6 +34,56 @@ const defaultTimings = () =>
         closingTime: '22:00'
     }));
 
+const SHORT_DAYS_MAP = {
+    Mon: 'Monday',
+    Tue: 'Tuesday',
+    Wed: 'Wednesday',
+    Thu: 'Thursday',
+    Fri: 'Friday',
+    Sat: 'Saturday',
+    Sun: 'Sunday'
+};
+
+/** Build per-day outlet timings from onboarding delivery schedule (openDays + times). */
+export function buildOutletTimingsArrayFromSchedule(openDays, openingTime, closingTime) {
+    const rawDays = Array.isArray(openDays)
+        ? openDays
+        : typeof openDays === 'string'
+            ? openDays.split(',').map((d) => d.trim()).filter(Boolean)
+            : [];
+
+    const normalizedOpenDays = rawDays
+        .map((d) => SHORT_DAYS_MAP[d] || d)
+        .filter(Boolean);
+
+    const openTime = normalizeTime(openingTime, '');
+    const closeTime = normalizeTime(closingTime, '');
+
+    return DAY_NAMES.map((day) => {
+        const isOpen = normalizedOpenDays.includes(day);
+        return {
+            day,
+            isOpen,
+            openingTime: openTime,
+            closingTime: closeTime
+        };
+    });
+}
+
+export async function syncOutletTimingsFromOpenDays(restaurantId, openDays, openingTime, closingTime) {
+    if (!restaurantId || !mongoose.Types.ObjectId.isValid(String(restaurantId))) {
+        throw new ValidationError('Invalid restaurant id');
+    }
+
+    const timings = buildOutletTimingsArrayFromSchedule(openDays, openingTime, closingTime);
+
+    await FoodRestaurantOutletTimings.findOneAndUpdate(
+        { restaurantId },
+        { $set: { timings } },
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+}
+
 const toClientShape = (doc) => {
     const timings = Array.isArray(doc?.timings) ? doc.timings : [];
     const map = {};

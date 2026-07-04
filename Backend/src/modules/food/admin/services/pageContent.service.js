@@ -17,11 +17,30 @@ const decodeHtmlEntities = (value) => {
         .replace(/&apos;/g, "'");
 };
 
+const normalizeFaqs = (faqs = []) => {
+    if (!Array.isArray(faqs)) return [];
+    return faqs
+        .map((item, idx) => ({
+            question: decodeHtmlEntities(String(item?.question || '')).trim(),
+            answer: decodeHtmlEntities(String(item?.answer || '')).trim(),
+            order: Number.isFinite(Number(item?.order)) ? Number(item.order) : idx,
+        }))
+        .filter((item) => item.question || item.answer)
+        .sort((a, b) => a.order - b.order);
+};
+
 const normalizeLegalForResponse = (legal) => {
     if (!legal || typeof legal !== 'object') return legal;
     const title = legal.title ?? '';
     const content = decodeHtmlEntities(legal.content ?? '');
-    return { ...legal, title, content };
+    return {
+        ...legal,
+        title,
+        content,
+        contactNumber: String(legal.contactNumber ?? '').trim(),
+        email: String(legal.email ?? '').trim(),
+        faqs: normalizeFaqs(legal.faqs),
+    };
 };
 
 const normalizeAboutForResponse = (about) => {
@@ -51,11 +70,18 @@ export const upsertLegalPage = async (key, payload, updatedBy, role = 'user') =>
     const k = normalizeKey(key);
     const r = String(role || 'user').toLowerCase();
     
-    if (!['terms', 'privacy', 'refund', 'shipping', 'cancellation'].includes(k)) {
+    if (!['terms', 'privacy', 'support', 'refund', 'shipping', 'cancellation'].includes(k)) {
         throw new ValidationError('Invalid page key');
     }
     const title = String(payload?.title || '').trim();
     const content = decodeHtmlEntities(String(payload?.content || '')).trim();
+    const legal = { title, content };
+
+    if (k === 'support') {
+        legal.contactNumber = String(payload?.contactNumber || '').trim();
+        legal.email = String(payload?.email || '').trim().toLowerCase();
+        legal.faqs = normalizeFaqs(payload?.faqs);
+    }
 
     const doc = await FoodPageContent.findOneAndUpdate(
         { key: k, role: r },
@@ -63,7 +89,7 @@ export const upsertLegalPage = async (key, payload, updatedBy, role = 'user') =>
             $set: {
                 key: k,
                 role: r,
-                legal: { title, content },
+                legal,
                 about: undefined,
                 updatedBy: updatedBy || null,
                 updatedByRole: 'ADMIN'

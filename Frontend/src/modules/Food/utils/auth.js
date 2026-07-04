@@ -3,6 +3,8 @@
  * Decode and extract information from JWT tokens
  */
 
+import { clearOnboardingDraft } from "@food/utils/onboardingDraftStorage"
+
 /**
  * Decode JWT token without verification (client-side only)
  * @param {string} token - JWT token
@@ -132,6 +134,30 @@ export function getCurrentUser(module) {
 }
 
 /**
+ * Refresh cached restaurant profile after server-side approval/status changes.
+ */
+export function syncRestaurantStoredUser(restaurant) {
+  if (!restaurant) return;
+  const token = getModuleToken("restaurant");
+  if (!token) return;
+  const refreshToken = getModuleRefreshToken("restaurant");
+  setAuthData("restaurant", token, restaurant, refreshToken);
+}
+
+export function updateStoredModuleUser(module, user) {
+  if (!module || !user) return;
+  try {
+    localStorage.setItem(`${module}_user`, JSON.stringify(user));
+  } catch {
+    // Ignore storage failures
+  }
+}
+
+export function isRestaurantPendingApproval(user) {
+  return String(user?.status || "").toLowerCase() === "pending";
+}
+
+/**
  * Check if user is authenticated for a specific module
  * @param {string} module - Module name (admin, restaurant, delivery, user)
  * @returns {boolean} - True if authenticated
@@ -232,6 +258,8 @@ export function clearRestaurantSessionCache() {
   ];
 
   keys.forEach((key) => localStorage.removeItem(key));
+
+  void clearOnboardingDraft();
 }
 
 export function setRestaurantPendingPhone(phone) {

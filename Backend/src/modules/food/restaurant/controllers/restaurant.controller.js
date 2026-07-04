@@ -44,7 +44,12 @@ export const registerRestaurantController = async (req, res, next) => {
         }
 
         const restaurant = await registerRestaurant(validated, req.files, authUserId);
-        return sendResponse(res, 201, 'Restaurant registered successfully', { restaurant });
+        const { issueRestaurantSession } = await import('../../../../core/auth/auth.service.js');
+        const session = await issueRestaurantSession(restaurant);
+        return sendResponse(res, 201, 'Restaurant registered successfully', {
+            restaurant,
+            ...session,
+        });
     } catch (error) {
         next(error);
     }

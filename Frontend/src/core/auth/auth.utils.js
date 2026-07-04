@@ -3,6 +3,8 @@
  * Decode and extract information from JWT tokens
  */
 
+import { clearOnboardingDraft } from "@food/utils/onboardingDraftStorage"
+
 /**
  * Decode JWT token without verification (client-side only)
  * @param {string} token - JWT token
@@ -191,6 +193,8 @@ export function clearRestaurantSessionCache() {
   ];
 
   keys.forEach((key) => localStorage.removeItem(key));
+
+  void clearOnboardingDraft();
 }
 
 export function setRestaurantPendingPhone(phone) {

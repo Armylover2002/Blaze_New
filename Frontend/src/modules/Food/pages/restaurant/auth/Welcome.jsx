@@ -7,6 +7,7 @@ import loginBanner2 from "@food/assets/restaurant/loginbanner2.png"
 import loginBanner3 from "@food/assets/restaurant/loginbanner3.png"
 import loginBanner4 from "@food/assets/restaurant/loginbanner4.png"
 import { useCompanyName } from "@food/hooks/useCompanyName"
+import RestaurantAuthFooter from "@food/components/restaurant/RestaurantAuthFooter"
 
 // Carousel data with images and taglines
 const carouselData = [
@@ -303,15 +304,7 @@ export default function RestaurantWelcome() {
           Partner with Appzeto
         </Button> */}
 
-        {/* Terms and Conditions */}
-        <div className="text-center mt-2">
-          <p className="text-white/70 text-xs md:text-sm">
-            By continuing, you agree to our
-          </p>
-          <p className="text-white/70 text-xs md:text-sm underline mt-1">
-            Terms of Service | Privacy Policy | Code of Conduct
-          </p>
-        </div>
+        <RestaurantAuthFooter className="mt-2" variant="dark" />
       </div>
     </div>
   )

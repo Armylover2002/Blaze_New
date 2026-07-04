@@ -6,12 +6,15 @@ import { AuthPageGuard } from "@core/guards/RouteGuard"
 import Loader from "@food/components/Loader"
 import ErrorBoundary from "@food/components/ErrorBoundary"
 import RestaurantLayout from "./RestaurantLayout"
+import RestaurantApprovalGuard from "./RestaurantApprovalGuard"
 import { Outlet } from "react-router-dom"
 
 const LayoutWrapper = () => (
-  <RestaurantLayout>
-    <Outlet />
-  </RestaurantLayout>
+  <RestaurantApprovalGuard>
+    <RestaurantLayout>
+      <Outlet />
+    </RestaurantLayout>
+  </RestaurantApprovalGuard>
 )
 
 
@@ -23,6 +26,7 @@ const OrdersMain = lazy(() => import("@food/pages/restaurant/OrdersMain"))
 const RestaurantOnboarding = lazy(() => import("@food/pages/restaurant/Onboarding"))
 const TermsAndConditionsPage = lazy(() => import("@food/pages/restaurant/TermsAndConditionsPage"))
 const PrivacyPolicyPage = lazy(() => import("@food/pages/restaurant/PrivacyPolicyPage"))
+const SupportPolicyPage = lazy(() => import("@food/pages/restaurant/SupportPolicyPage"))
 const MenuCategoriesPage = lazy(() => import("@food/pages/restaurant/MenuCategoriesPage"))
 const CreateCouponsPage = lazy(() => import("@food/pages/restaurant/CreateCouponsPage"))
 const RestaurantStatus = lazy(() => import("@food/pages/restaurant/RestaurantStatus"))
@@ -130,6 +134,7 @@ export default function RestaurantRouter() {
         <Route path="onboarding" element={<RestaurantOnboarding />} />
         <Route path="terms" element={<TermsAndConditionsPage />} />
         <Route path="privacy" element={<PrivacyPolicyPage />} />
+        <Route path="support" element={<SupportPolicyPage />} />
         <Route path="wallet" element={<Navigate to="/food/restaurant" replace />} />
         <Route path="business-plan" element={<Navigate to="/food/restaurant" replace />} />
         <Route path="*" element={<Navigate to="/food/restaurant" replace />} />

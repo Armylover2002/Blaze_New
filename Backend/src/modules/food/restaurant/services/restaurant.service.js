@@ -2,8 +2,7 @@ import { FoodRestaurant } from '../models/restaurant.model.js';
 import { FoodRestaurantWallet } from '../models/restaurantWallet.model.js';
 import { FoodReferralSettings } from '../../admin/models/referralSettings.model.js';
 import { FoodReferralLog } from '../../admin/models/referralLog.model.js';
-import { FoodRestaurantOutletTimings } from '../models/outletTimings.model.js';
-import { attachOutletTimingsToRestaurants } from './outletTimings.service.js';
+import { attachOutletTimingsToRestaurants, syncOutletTimingsFromOpenDays } from './outletTimings.service.js';
 import { uploadImageBuffer } from '../../../../services/cloudinary.service.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
 import mongoose from 'mongoose';
@@ -829,15 +828,17 @@ export const saveOnboardingStep = async (stepNum, payload, files) => {
                     ? payload.cuisines.split(',').map((c) => c.trim()).filter(Boolean)
                     : []);
 
+            const openDaysArray = Array.isArray(payload.openDays)
+                ? payload.openDays
+                : (typeof payload.openDays === 'string'
+                    ? payload.openDays.split(',').map((d) => d.trim()).filter(Boolean)
+                    : []);
+
             Object.assign(restaurant, {
                 cuisines,
                 openingTime: normalizedOpeningTime || undefined,
                 closingTime: normalizedClosingTime || undefined,
-                openDays: Array.isArray(payload.openDays)
-                    ? payload.openDays
-                    : (typeof payload.openDays === 'string'
-                        ? payload.openDays.split(',').map((d) => d.trim()).filter(Boolean)
-                        : []),
+                openDays: openDaysArray,
                 onboardingStep: 3,
                 ...images
             });
@@ -845,6 +846,13 @@ export const saveOnboardingStep = async (stepNum, payload, files) => {
                 restaurant.menuImages = menuImages;
             }
             await restaurant.save();
+
+            await syncOutletTimingsFromOpenDays(
+                restaurant._id,
+                openDaysArray,
+                normalizedOpeningTime,
+                normalizedClosingTime
+            );
         }
 
         if (step === 3) {
@@ -928,8 +936,6 @@ export const registerRestaurant = async (payload, files, authUserId) => {
         ifscCode,
         accountHolderName,
         accountType,
-        featuredDish,
-        offer,
         ref,
         razorpayOrderId,
         razorpayPaymentId,
@@ -1064,8 +1070,6 @@ export const registerRestaurant = async (payload, files, authUserId) => {
             ifscCode,
             accountHolderName,
             accountType,
-            featuredDish: featuredDish || '',
-            offer: offer || '',
             ...images
         };
         if (menuImages && menuImages.length > 0) {
@@ -1240,23 +1244,11 @@ export const registerRestaurant = async (payload, files, authUserId) => {
         }
         // --- End Referral Handling ---
 
-        const daysOfWeek = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
-        const shortDaysMap = { Mon: "Monday", Tue: "Tuesday", Wed: "Wednesday", Thu: "Thursday", Fri: "Friday", Sat: "Saturday", Sun: "Sunday" };
-        const normalizedOpenDays = (openDays || []).map(d => shortDaysMap[d] || d);
-        const timingsArray = daysOfWeek.map(day => {
-            const isOpen = normalizedOpenDays.includes(day);
-            return {
-                day,
-                isOpen,
-                openingTime: normalizedOpeningTime || '',
-                closingTime: normalizedClosingTime || ''
-            };
-        });
-
-        await FoodRestaurantOutletTimings.findOneAndUpdate(
-            { restaurantId: restaurant._id },
-            { $set: { timings: timingsArray } },
-            { upsert: true, new: true }
+        await syncOutletTimingsFromOpenDays(
+            restaurant._id,
+            openDays || restaurant.openDays,
+            normalizedOpeningTime,
+            normalizedClosingTime
         );
 
         try {

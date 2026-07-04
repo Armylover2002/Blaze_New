@@ -36,6 +36,7 @@ import { PocketDetailsV2 } from './pages/pocket/PocketDetailsV2';
 import { ProfileDetailsV2 } from './pages/profile/ProfileDetailsV2';
 import TermsAndConditionsV2 from './pages/TermsAndConditionsV2';
 import PrivacyPolicyV2 from './pages/PrivacyPolicyV2';
+import SupportInfoV2 from './pages/SupportInfoV2';
 import NotificationsV2 from './pages/NotificationsV2';
 import SubscriptionV2 from './pages/SubscriptionV2';
 
@@ -71,6 +72,7 @@ const DeliveryV2Router = () => {
         <Route path="signup/documents" element={<SignupStep2 />} />
         <Route path="verification" element={<PendingVerification />} />
         <Route path="terms" element={<TermsAndConditionsV2 />} />
+        <Route path="support" element={<SupportInfoV2 />} />
 
         {/* Protected Core Routes */}
         <Route path="/" element={<ProtectedRoute><DeliveryHomeV2 tab="feed" /></ProtectedRoute>} />
@@ -91,6 +93,7 @@ const DeliveryV2Router = () => {
         <Route path="/help/id-card" element={<ProtectedRoute><ShowIdCardV2 /></ProtectedRoute>} />
         <Route path="/profile/terms" element={<ProtectedRoute><TermsAndConditionsV2 /></ProtectedRoute>} />
         <Route path="/profile/privacy" element={<ProtectedRoute><PrivacyPolicyV2 /></ProtectedRoute>} />
+        <Route path="/profile/support" element={<ProtectedRoute><SupportInfoV2 /></ProtectedRoute>} />
         
         {/* Financial Deep-Pages */}
         <Route path="/pocket/payout" element={<ProtectedRoute><PayoutV2 /></ProtectedRoute>} />
