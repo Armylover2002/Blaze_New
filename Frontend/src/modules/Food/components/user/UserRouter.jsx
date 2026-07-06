@@ -74,6 +74,7 @@ const AuthCallback = lazy(() => import("@food/pages/user/auth/AuthCallback"))
 // Help
 const Help = lazy(() => import("@food/pages/user/help/Help"))
 const OrderHelp = lazy(() => import("@food/pages/user/help/OrderHelp"))
+const SupportInfo = lazy(() => import("@food/pages/user/profile/SupportInfo"))
 
 // Notifications
 const Notifications = lazy(() => import("@food/pages/user/Notifications"))
@@ -275,6 +276,7 @@ export default function UserRouter() {
 
           {/* Help */}
           <Route path="help" element={<Help />} />
+          <Route path="support" element={<SupportInfo />} />
           <Route path="help/orders/:orderId" element={<OrderHelp />} />
 
           {/* Notifications - Protected (user auth) */}

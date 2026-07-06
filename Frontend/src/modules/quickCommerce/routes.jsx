@@ -34,7 +34,7 @@ import { CartAnimationProvider } from "./user/context/CartAnimationContext"
 function QuickCommerceInnerRoutes() {
   const location = useLocation();
   return (
-    <QuickErrorBoundary key={location.pathname}>
+    <QuickErrorBoundary resetKey={location.pathname}>
       <Suspense fallback={<Loader />}>
         <Routes>
         <Route element={<UserLayout />}>

@@ -6,6 +6,7 @@ import { restaurantAPI } from "@food/api"
 import { useCompanyName } from "@food/hooks/useCompanyName"
 import { loadBusinessSettings, getAppLogo, getRestaurantLoginBanner } from "@common/utils/businessSettings"
 import loginBg from "@food/assets/loginbanner.png"
+import RestaurantAuthFooter from "@food/components/restaurant/RestaurantAuthFooter"
 
 const DEFAULT_COUNTRY_CODE = "+91"
 const countryCodes = [
@@ -280,18 +281,9 @@ export default function RestaurantLogin() {
               </Button>
             </div>
 
-            <div className={`text-center pt-4 pb-2 lg:pb-0 ${keyboardInset ? "hidden" : ""}`}>
-              <p className="text-slate-400 text-xs font-medium">
-                By logging in, you agree to our <br />
-                <button
-                  type="button"
-                  onClick={() => navigate("/food/restaurant/terms")}
-                  className="bg-transparent border-0 p-0 text-[#FF0000] font-bold hover:underline cursor-pointer"
-                >
-                  Terms & Conditions
-                </button>
-              </p>
-            </div>
+            <RestaurantAuthFooter
+              className={`pt-4 pb-2 lg:pb-0 ${keyboardInset ? "hidden" : ""}`}
+            />
           </div>
         </div>
 

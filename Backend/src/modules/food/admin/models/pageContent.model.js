@@ -12,10 +12,22 @@ const featureSchema = new mongoose.Schema(
     { _id: false }
 );
 
+const faqItemSchema = new mongoose.Schema(
+    {
+        question: { type: String, default: '' },
+        answer: { type: String, default: '' },
+        order: { type: Number, default: 0 }
+    },
+    { _id: false }
+);
+
 const legalPageSchema = new mongoose.Schema(
     {
         title: { type: String, default: '' },
-        content: { type: String, default: '' } // stored as HTML string
+        content: { type: String, default: '' },
+        contactNumber: { type: String, default: '' },
+        email: { type: String, default: '' },
+        faqs: { type: [faqItemSchema], default: [] }
     },
     { _id: false }
 );
@@ -38,7 +50,7 @@ const pageContentSchema = new mongoose.Schema(
             type: String,
             required: true,
             index: true,
-            enum: ['terms', 'privacy', 'refund', 'shipping', 'cancellation', 'about']
+            enum: ['terms', 'privacy', 'support', 'refund', 'shipping', 'cancellation', 'about']
         },
         role: {
             type: String,

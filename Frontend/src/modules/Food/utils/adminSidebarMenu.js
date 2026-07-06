@@ -291,6 +291,8 @@ export const adminSidebarMenu = [
       { type: "link", label: "About Us", permissionKey: "about", path: "/admin/food/pages-social-media/about", icon: "Globe" },
       { type: "link", label: "Terms & Conditions", permissionKey: "terms", path: "/admin/food/pages-social-media/terms", icon: "FileText" },
       { type: "link", label: "Privacy Policy", permissionKey: "privacy", path: "/admin/food/pages-social-media/privacy", icon: "Lock" },
+      { type: "link", label: "Support", permissionKey: "support", path: "/admin/food/pages-social-media/support", icon: "LifeBuoy" },
+      { type: "link", label: "Social Media", permissionKey: "social_media", path: "/admin/food/pages-social-media/social-media", icon: "Share2" },
       { type: "link", label: "Refund Policy", permissionKey: "refund", path: "/admin/food/pages-social-media/refund", icon: "Receipt" },
       { type: "link", label: "Shipping Policy", permissionKey: "shipping", path: "/admin/food/pages-social-media/shipping", icon: "Truck" },
       { type: "link", label: "Cancellation Policy", permissionKey: "cancellation", path: "/admin/food/pages-social-media/cancellation", icon: "X" },

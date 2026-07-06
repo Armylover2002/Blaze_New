@@ -1,6 +1,13 @@
 import { createContext, useContext, useState, useEffect, useMemo, useCallback } from "react"
 import { authAPI, userAPI } from "@food/api"
 import { clearUserSession } from "@food/utils/auth"
+import {
+  getCachedUserProfile,
+  setCachedUserProfile,
+  getCachedUserAddresses,
+  setCachedUserAddresses,
+  invalidateUserSessionCache,
+} from "@food/utils/userSessionCache"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -49,6 +56,8 @@ export function ProfileProvider({ children }) {
 
   const [userProfile, setUserProfile] = useState(() => {
     if (!hasUserSession) return null
+    const cached = getCachedUserProfile()
+    if (cached) return cached
     const userStr = localStorage.getItem("user_user")
     if (userStr) {
       try {
@@ -68,10 +77,21 @@ export function ProfileProvider({ children }) {
     return null
   })
   
-  const [loading, setLoading] = useState(true)
-
-  const [addresses, setAddresses] = useState([])
-
+  const [loading, setLoading] = useState(() => {
+    if (!hasUserSession) return false
+    return !getCachedUserProfile()
+  })
+  const [addresses, setAddresses] = useState(() => {
+    if (!hasUserSession) return []
+    const cached = getCachedUserAddresses()
+    if (cached?.length) return cached
+    try {
+      const saved = localStorage.getItem("userAddresses")
+      return saved ? JSON.parse(saved) : []
+    } catch {
+      return []
+    }
+  })
   const [paymentMethods, setPaymentMethods] = useState(() => {
     if (!hasUserSession) return []
     const saved = localStorage.getItem("userPaymentMethods")
@@ -143,7 +163,7 @@ export function ProfileProvider({ children }) {
 
   // Fetch user profile and addresses from API on mount and when authentication changes
   useEffect(() => {
-    const fetchUserProfile = async () => {
+    const fetchUserProfile = async (forceRefresh = false) => {
       // Check if user is authenticated
       const isAuthenticated = Boolean(getUserSessionToken())
       
@@ -155,6 +175,7 @@ export function ProfileProvider({ children }) {
         setDishFavorites([])
         setVegMode(false)
         clearUserSession()
+        invalidateUserSessionCache()
         USER_SESSION_PREFERENCE_KEYS.forEach((key) => {
           localStorage.removeItem(key)
         })
@@ -162,43 +183,56 @@ export function ProfileProvider({ children }) {
         return
       }
 
+      const cachedProfile = forceRefresh ? null : getCachedUserProfile()
+      const cachedAddresses = forceRefresh ? null : getCachedUserAddresses()
+      if (cachedProfile) {
+        setUserProfile(cachedProfile)
+      }
+      if (cachedAddresses) {
+        setAddresses(dedupeAddressesByLabel(cachedAddresses))
+      }
+      if (cachedProfile && cachedAddresses) {
+        setLoading(false)
+        return
+      }
+
       try {
-        setLoading(true)
-        
-        // Fetch user profile
-        const response = await authAPI.getCurrentUser()
-        const userData = response?.data?.data?.user || response?.data?.user || response?.data
-        
-        if (userData) {
-          setUserProfile(userData)
-          // Update localStorage
-          localStorage.setItem("user_user", JSON.stringify(userData))
-          localStorage.setItem("userProfile", JSON.stringify(userData))
+        if (!cachedProfile) setLoading(true)
+
+        if (!cachedProfile) {
+          const response = await authAPI.getCurrentUser()
+          const userData = response?.data?.data?.user || response?.data?.user || response?.data
+
+          if (userData) {
+            setUserProfile(userData)
+            setCachedUserProfile(userData)
+            localStorage.setItem("user_user", JSON.stringify(userData))
+            localStorage.setItem("userProfile", JSON.stringify(userData))
+          }
         }
 
-        // Fetch addresses
-        try {
-          const addressesResponse = await userAPI.getAddresses()
-          const addressesData = addressesResponse?.data?.data?.addresses || addressesResponse?.data?.addresses || []
-          const normalizedAddresses = dedupeAddressesByLabel(addressesData)
-          setAddresses(normalizedAddresses)
-          localStorage.setItem("userAddresses", JSON.stringify(normalizedAddresses))
-        } catch (addressError) {
-          debugError("Error fetching addresses:", addressError)
-          // Try to load from localStorage as fallback
-          const saved = localStorage.getItem("userAddresses")
-          if (saved) {
-            try {
-              setAddresses(dedupeAddressesByLabel(JSON.parse(saved)))
-            } catch (e) {
-              debugError("Error parsing saved addresses:", e)
+        if (!cachedAddresses) {
+          try {
+            const addressesResponse = await userAPI.getAddresses()
+            const addressesData = addressesResponse?.data?.data?.addresses || addressesResponse?.data?.addresses || []
+            const normalizedAddresses = dedupeAddressesByLabel(addressesData)
+            setAddresses(normalizedAddresses)
+            setCachedUserAddresses(normalizedAddresses)
+            localStorage.setItem("userAddresses", JSON.stringify(normalizedAddresses))
+          } catch (addressError) {
+            debugError("Error fetching addresses:", addressError)
+            const saved = localStorage.getItem("userAddresses")
+            if (saved) {
+              try {
+                setAddresses(dedupeAddressesByLabel(JSON.parse(saved)))
+              } catch (e) {
+                debugError("Error parsing saved addresses:", e)
+              }
             }
           }
         }
       } catch (error) {
-        // Silently handle error - use existing profile from localStorage
         debugError("Error fetching user profile:", error)
-        // Try to load from localStorage as fallback
         const saved = localStorage.getItem("userAddresses")
         if (saved) {
           try {
@@ -216,7 +250,8 @@ export function ProfileProvider({ children }) {
     
     // Listen for auth changes
     const handleAuthChange = () => {
-      fetchUserProfile()
+      invalidateUserSessionCache()
+      fetchUserProfile(true)
     }
     
     window.addEventListener("userAuthChanged", handleAuthChange)
@@ -226,12 +261,15 @@ export function ProfileProvider({ children }) {
     }
   }, [])
 
-  const refreshAddresses = useCallback(async () => {
-    userAPI.getAddresses.invalidateCache?.()
+  const refreshAddresses = useCallback(async (forceRefresh = false) => {
+    if (forceRefresh) {
+      userAPI.getAddresses.invalidateCache?.()
+    }
     const addressesResponse = await userAPI.getAddresses()
     const addressesData = addressesResponse?.data?.data?.addresses || addressesResponse?.data?.addresses || []
     const normalizedAddresses = dedupeAddressesByLabel(addressesData)
     setAddresses(normalizedAddresses)
+    setCachedUserAddresses(normalizedAddresses)
     syncAddressesToStorage(normalizedAddresses)
     return normalizedAddresses
   }, [])

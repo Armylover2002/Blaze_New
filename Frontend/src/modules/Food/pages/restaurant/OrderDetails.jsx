@@ -20,6 +20,7 @@ import {
   Unlock,
   Star,
   Phone,
+  X,
 } from "lucide-react"
 import ResendNotificationButton from "@food/components/restaurant/ResendNotificationButton"
 const debugLog = (...args) => {}
@@ -50,10 +51,11 @@ const formatMoney = (value) => `₹${Number(value || 0).toFixed(2)}`
 const formatDiscount = (value) => `-₹${Math.abs(Number(value || 0)).toFixed(2)}`
 
 
-export default function OrderDetails() {
+export default function OrderDetails({ orderId: propOrderId, isSidebar = false, onClose }) {
   const navigate = useNavigate()
   const goBack = useRestaurantBackNavigation()
-  const { orderId } = useParams()
+  const params = useParams()
+  const orderId = propOrderId || params.orderId
   
   // State for order data
   const [orderData, setOrderData] = useState(null)
@@ -275,6 +277,8 @@ export default function OrderDetails() {
 
   // Lenis smooth scrolling
   useEffect(() => {
+    if (isSidebar) return;
+
     const lenis = new Lenis({
       duration: 1.2,
       easing: (t) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
@@ -291,7 +295,7 @@ export default function OrderDetails() {
     return () => {
       lenis.destroy()
     }
-  }, [])
+  }, [isSidebar])
 
   const handleCopyOrderId = () => {
     if (!orderData?.id) return
@@ -618,7 +622,7 @@ export default function OrderDetails() {
   // Loading state
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-100 flex items-center justify-center">
+      <div className={`${isSidebar ? 'h-full min-h-[400px]' : 'min-h-screen'} bg-gray-100 flex items-center justify-center`}>
         <div className="text-center">
           <Loader2 className="w-8 h-8 animate-spin text-gray-600 mx-auto mb-4" />
           <p className="text-gray-600">Loading order details...</p>
@@ -630,17 +634,19 @@ export default function OrderDetails() {
   // Error state
   if (error && !orderData) {
     return (
-      <div className="min-h-screen bg-gray-100 flex items-center justify-center">
+      <div className={`${isSidebar ? 'h-full min-h-[400px]' : 'min-h-screen'} bg-gray-100 flex items-center justify-center`}>
         <div className="bg-white rounded-lg shadow-lg p-8 max-w-md w-full mx-4 text-center">
           <XCircle className="w-16 h-16 text-red-500 mx-auto mb-4" />
           <h2 className="text-2xl font-bold text-gray-900 mb-2">Order Not Found</h2>
           <p className="text-gray-600 mb-6">{error}</p>
-          <button
-            onClick={() => navigate('/restaurant/orders')}
-            className="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold py-2 px-6 rounded-lg transition-colors"
-          >
-            Back to Orders
-          </button>
+          {!isSidebar && (
+            <button
+              onClick={() => navigate('/restaurant/orders')}
+              className="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold py-2 px-6 rounded-lg transition-colors"
+            >
+              Back to Orders
+            </button>
+          )}
         </div>
       </div>
     )
@@ -649,34 +655,46 @@ export default function OrderDetails() {
   // No order data
   if (!orderData) {
     return (
-      <div className="min-h-screen bg-gray-100 flex items-center justify-center">
+      <div className={`${isSidebar ? 'h-full min-h-[400px]' : 'min-h-screen'} bg-gray-100 flex items-center justify-center`}>
         <div className="bg-white rounded-lg shadow-lg p-8 max-w-md w-full mx-4 text-center">
           <XCircle className="w-16 h-16 text-red-500 mx-auto mb-4" />
           <h2 className="text-2xl font-bold text-gray-900 mb-2">Order Not Found</h2>
           <p className="text-gray-600 mb-6">The order you're looking for doesn't exist.</p>
-          <button
-            onClick={() => navigate('/restaurant/orders')}
-            className="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold py-2 px-6 rounded-lg transition-colors"
-          >
-            Back to Orders
-          </button>
+          {!isSidebar && (
+            <button
+              onClick={() => navigate('/restaurant/orders')}
+              className="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold py-2 px-6 rounded-lg transition-colors"
+            >
+              Back to Orders
+            </button>
+          )}
         </div>
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-gray-100">
+    <div className={`${isSidebar ? 'h-full flex flex-col overflow-hidden' : 'min-h-screen'} bg-gray-100`}>
       {/* Header */}
-      <div className="bg-white  px-4 py-3 sticky top-0 z-50">
+      <div className={`bg-white px-4 py-3 ${isSidebar ? 'shrink-0 border-b border-gray-200' : 'sticky top-0 z-50'}`}>
         <div className="flex items-center gap-3">
-          <button
-            onClick={goBack}
-            className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors"
-            aria-label="Go back"
-          >
-            <ArrowLeft className="w-6 h-6 text-gray-900" />
-          </button>
+          {isSidebar ? (
+            <button
+              onClick={onClose}
+              className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors"
+              aria-label="Close"
+            >
+              <X className="w-6 h-6 text-gray-900" />
+            </button>
+          ) : (
+            <button
+              onClick={goBack}
+              className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors"
+              aria-label="Go back"
+            >
+              <ArrowLeft className="w-6 h-6 text-gray-900" />
+            </button>
+          )}
           <div className="flex-1 min-w-0">
             <h1 className="text-base font-bold text-gray-900">Order details</h1>
             <p className="text-xs text-gray-600 truncate">
@@ -704,7 +722,7 @@ export default function OrderDetails() {
       </div>
 
       {/* Main Content */}
-      <div className="px-4 py-4 space-y-4">
+      <div className={`px-4 py-4 space-y-4 ${isSidebar ? 'flex-1 overflow-y-auto scrollbar-hide' : ''}`}>
         {/* Order Summary Card */}
         <div className="bg-white rounded-lg p-4">
           {/* Status and Order ID Row */}

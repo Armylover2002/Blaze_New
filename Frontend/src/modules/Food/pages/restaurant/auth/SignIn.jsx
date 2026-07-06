@@ -40,7 +40,12 @@ export default function RestaurantSignIn() {
     window.addEventListener('businessSettingsUpdated', handleSettingsUpdate)
     return () => window.removeEventListener('businessSettingsUpdated', handleSettingsUpdate)
   }, [])
-  const [email, setEmail] = useState("")
+  const [email, setEmail] = useState(() => {
+    if (typeof window !== "undefined") {
+      return sessionStorage.getItem("restaurantLoginEmail") || ""
+    }
+    return ""
+  })
   const [password, setPassword] = useState("")
   const [remember, setRemember] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
@@ -184,7 +189,12 @@ export default function RestaurantSignIn() {
                   type="email"
                   placeholder="test.restaurant@gmail.com"
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  onChange={(e) => {
+                    setEmail(e.target.value)
+                    if (typeof window !== "undefined") {
+                      sessionStorage.setItem("restaurantLoginEmail", e.target.value)
+                    }
+                  }}
                   className="h-11 pl-9 border-gray-300 rounded-md shadow-sm focus-visible:ring-primary-orange focus-visible:ring-2 transition-colors placeholder:text-gray-400"
                   required
                 />

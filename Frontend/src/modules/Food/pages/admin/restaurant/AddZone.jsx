@@ -1,15 +1,15 @@
-import { useState, useEffect, useRef, useCallback } from "react"
+import { useState, useEffect, useRef } from "react"
 import { useNavigate, useParams } from "react-router-dom"
-import { MapPin, ArrowLeft, Save, X, Hand, Shapes, Search } from "lucide-react"
+import { MapPin, ArrowLeft, Save, X, Shapes, Search, LocateFixed } from "lucide-react"
 import { adminAPI } from "@food/api"
 import { getGoogleMapsApiKey } from "@food/utils/googleMapsApiKey"
+import { generateCityZoneFromCurrentLocation } from "@food/utils/cityZoneBoundary"
 import { Loader } from "@googlemaps/js-api-loader"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
 
 const MIN_POINTS = 3;
-const MAX_POINTS = 10;
 
 // Order points by angle around their centroid so polygon edges never self-intersect,
 // while KEEPING every clicked point (unlike a convex hull).
@@ -39,6 +39,7 @@ export default function AddZone() {
   const mapRef = useRef(null)
   const mapInstanceRef = useRef(null)
   const polygonRef = useRef(null)
+  const polylineRef = useRef(null)
   const pathMarkersRef = useRef([])
   
   const mapClickListenerRef = useRef(null)
@@ -58,6 +59,8 @@ export default function AddZone() {
   
   const [coordinates, setCoordinates] = useState([])
   const [isDrawing, setIsDrawing] = useState(false)
+  const [autoGenerating, setAutoGenerating] = useState(false)
+  const [autoGenerateMessage, setAutoGenerateMessage] = useState({ type: "", text: "" })
   const [locationSearch, setLocationSearch] = useState("")
   const [existingZones, setExistingZones] = useState([])
   const autocompleteInputRef = useRef(null)
@@ -81,6 +84,9 @@ export default function AddZone() {
       }
       if (polygonRef.current) {
         polygonRef.current.setMap(null);
+      }
+      if (polylineRef.current) {
+        polylineRef.current.setMap(null);
       }
       pathMarkersRef.current?.forEach(m => m.setMap(null));
       existingZonesPolygonsRef.current?.forEach(p => p?.setMap(null));
@@ -249,10 +255,6 @@ export default function AddZone() {
     // Setup map click listener for drawing points
     mapClickListenerRef.current = google.maps.event.addListener(map, 'click', (event) => {
       if (!isDrawingRef.current) return;
-      if (drawPointsRef.current.length >= MAX_POINTS) {
-        alert(`You can add at most ${MAX_POINTS} points. Click "Finish Drawing" to complete.`);
-        return;
-      }
       drawPointsRef.current.push(event.latLng);
       renderDrawingPolygon(google, map);
     });
@@ -359,31 +361,31 @@ export default function AddZone() {
 
   const renderDrawingPolygon = (google, map) => {
     const points = drawPointsRef.current;
-    if (polygonRef.current) { 
-      polygonRef.current.setMap(null); 
-      polygonRef.current = null; 
+    if (polygonRef.current) {
+      polygonRef.current.setMap(null);
+      polygonRef.current = null;
+    }
+    if (polylineRef.current) {
+      polylineRef.current.setMap(null);
+      polylineRef.current = null;
     }
 
-    const ordered = points.length >= 3
-      ? orderPointsRadially(points)
-      : points.map(p => ({ lat: p.lat(), lng: p.lng() }));
+    const path = points.map(p => ({ lat: p.lat(), lng: p.lng() }));
 
-    if (ordered.length >= 2) {
-      polygonRef.current = new google.maps.Polygon({
-        paths: ordered, 
-        fillColor: "#9333ea", 
-        fillOpacity: 0.35,
-        strokeColor: "#9333ea", 
+    // Polyline preview (no fill) so clicks inside the shape still reach the map
+    if (path.length >= 2) {
+      polylineRef.current = new google.maps.Polyline({
+        path,
+        strokeColor: "#9333ea",
         strokeWeight: 2,
-        clickable: false, 
-        editable: false, 
+        clickable: false,
         zIndex: 1,
       });
-      polygonRef.current.setMap(map);
+      polylineRef.current.setMap(map);
     }
 
     renderVertexMarkers(google, map, points);
-    setCoordinates(ordered.map(p => ({
+    setCoordinates(path.map(p => ({
       latitude: parseFloat(p.lat.toFixed(6)),
       longitude: parseFloat(p.lng.toFixed(6)),
     })));
@@ -400,6 +402,7 @@ export default function AddZone() {
     }
 
     if (polygonRef.current) { polygonRef.current.setMap(null); polygonRef.current = null; }
+    if (polylineRef.current) { polylineRef.current.setMap(null); polylineRef.current = null; }
     pathMarkersRef.current?.forEach(m => m.setMap(null));
     pathMarkersRef.current = [];
 
@@ -505,12 +508,105 @@ export default function AddZone() {
     }
   };
 
-  const clearDrawing = () => {
+  const clearActivePolygon = () => {
     drawPointsRef.current = [];
     if (polygonRef.current) { polygonRef.current.setMap(null); polygonRef.current = null; }
+    if (polylineRef.current) { polylineRef.current.setMap(null); polylineRef.current = null; }
     pathMarkersRef.current?.forEach(m => m.setMap(null));
     pathMarkersRef.current = [];
+  };
+
+  const clearDrawing = () => {
+    clearActivePolygon();
     setCoordinates([]);
+  };
+
+  const exitDrawingMode = () => {
+    isDrawingRef.current = false;
+    setIsDrawing(false);
+    if (mapInstanceRef.current) {
+      mapInstanceRef.current.setOptions({ draggableCursor: null });
+    }
+    existingZonesPolygonsRef.current.forEach(p => p?.setOptions?.({ clickable: true }));
+  };
+
+  const applyGeneratedPolygon = (coords, locationMeta) => {
+    const google = window.google;
+    const map = mapInstanceRef.current;
+    if (!google || !map) {
+      alert("Map is still loading. Please wait and try again.");
+      return;
+    }
+
+    if (!coords || coords.length < MIN_POINTS) {
+      alert("Generated zone boundary is invalid. Please draw the zone manually.");
+      return;
+    }
+
+    exitDrawingMode();
+    clearActivePolygon();
+
+    setCoordinates(coords);
+    drawEditablePolygon(google, map, coords);
+
+    const bounds = new google.maps.LatLngBounds();
+    coords.forEach(coord => {
+      bounds.extend(new google.maps.LatLng(coord.latitude, coord.longitude));
+    });
+    map.fitBounds(bounds);
+
+    if (locationMeta?.formattedAddress) {
+      setLocationSearch(locationMeta.formattedAddress);
+    }
+
+    setFormData(prev => {
+      const next = { ...prev };
+      if (locationMeta?.country && prev.country === "India") {
+        next.country = locationMeta.country === "India" ? "India" : prev.country;
+      }
+      if (locationMeta?.zoneName && !prev.zoneName.trim()) {
+        next.zoneName = locationMeta.zoneName;
+      }
+      return next;
+    });
+  };
+
+  const handleAutoGenerateFromLocation = async () => {
+    if (mapLoading || autoGenerating) return;
+
+    setAutoGenerateMessage({ type: "", text: "" });
+
+    if (!window.google?.maps) {
+      setAutoGenerateMessage({
+        type: "error",
+        text: "Google Maps is not ready yet. Please wait for the map to load.",
+      });
+      return;
+    }
+
+    try {
+      setAutoGenerating(true);
+      setAutoGenerateMessage({
+        type: "info",
+        text: "Detecting your location and fetching the city boundary...",
+      });
+
+      const result = await generateCityZoneFromCurrentLocation();
+      applyGeneratedPolygon(result.coordinates, result.location);
+
+      const cityLabel = result.location.city || result.location.zoneName || "your city";
+      setAutoGenerateMessage({
+        type: "success",
+        text: `City zone generated for ${cityLabel}. You can edit the boundary on the map before saving.`,
+      });
+    } catch (error) {
+      const message =
+        error?.message ||
+        "Failed to auto-generate the city zone. Please draw the zone manually.";
+      setAutoGenerateMessage({ type: "error", text: message });
+    } finally {
+      setAutoGenerating(false);
+    }
   };
 
   const handleInputChange = (field, value) => {
@@ -698,7 +794,25 @@ export default function AddZone() {
             <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-6">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-lg font-semibold text-slate-900">Draw Zone on Map</h2>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={handleAutoGenerateFromLocation}
+                    disabled={mapLoading || autoGenerating || loading}
+                    className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {autoGenerating ? (
+                      <>
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
+                        <span>Generating...</span>
+                      </>
+                    ) : (
+                      <>
+                        <LocateFixed className="w-4 h-4" />
+                        <span>Auto Generate City Zone</span>
+                      </>
+                    )}
+                  </button>
                   <button
                     type="button"
                     onClick={toggleDrawingMode}
@@ -736,11 +850,29 @@ export default function AddZone() {
                     className="w-full pl-10 pr-4 py-2.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
+                {autoGenerateMessage.text && (
+                  <p
+                    className={`text-xs mt-2 ${
+                      autoGenerateMessage.type === "error"
+                        ? "text-red-600"
+                        : autoGenerateMessage.type === "success"
+                          ? "text-emerald-700"
+                          : "text-slate-600"
+                    }`}
+                  >
+                    {autoGenerateMessage.text}
+                  </p>
+                )}
+                {isDrawing && (
+                  <p className="text-xs text-slate-600 mt-2">
+                    Click on the map to add points (minimum {MIN_POINTS}), then click <strong>Stop Drawing</strong>.
+                  </p>
+                )}
                 {coordinates.length > 0 && (
                   <p className="text-xs text-slate-600 mt-2">
                     Points drawn: <strong>{coordinates.length}</strong>
-                    {coordinates.length < 3 && (
-                      <span className="text-red-600 ml-2">(Minimum 3 points required)</span>
+                    {coordinates.length < MIN_POINTS && (
+                      <span className="text-red-600 ml-2">(Minimum {MIN_POINTS} points required)</span>
                     )}
                   </p>
                 )}

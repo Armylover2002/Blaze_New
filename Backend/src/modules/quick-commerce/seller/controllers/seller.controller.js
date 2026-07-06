@@ -419,14 +419,17 @@ const backfillSellerOrdersFromParentOrders = async (sellerId) => {
 
   if (!missingDocs.length) return;
 
-  await Promise.all(
-    missingDocs.map((doc) =>
-      SellerOrder.findOneAndUpdate(
-        { sellerId: doc.sellerId, orderId: doc.orderId },
-        { $set: doc },
-        { upsert: true, new: true, setDefaultsOnInsert: true },
-      ),
-    ),
+  // Single batched round-trip instead of one upsert per missing order.
+  // The returned docs were not used, so bulkWrite is behaviourally equivalent.
+  await SellerOrder.bulkWrite(
+    missingDocs.map((doc) => ({
+      updateOne: {
+        filter: { sellerId: doc.sellerId, orderId: doc.orderId },
+        update: { $set: doc },
+        upsert: true,
+        setDefaultsOnInsert: true,
+      },
+    })),
   );
 };
 
@@ -702,10 +705,14 @@ const reconcileSellerDeliveredOrders = async (sellerId) => {
 
   if (!updates.length) return;
 
-  await Promise.all(
-    updates.map((u) =>
-      SellerOrder.updateOne({ _id: u.id, sellerId }, { $set: u.patch }),
-    ),
+  // Batch the status patches into a single round-trip.
+  await SellerOrder.bulkWrite(
+    updates.map((u) => ({
+      updateOne: {
+        filter: { _id: u.id, sellerId },
+        update: { $set: u.patch },
+      },
+    })),
   );
 
   // Best-effort: also ensure Order Payment transactions exist for newly-delivered legs.
@@ -720,24 +727,24 @@ const reconcileSellerDeliveredOrders = async (sellerId) => {
       .select("orderId customer pricing deliveredAt updatedAt createdAt")
       .lean();
 
-    await Promise.all(
-      deliveredOrders
-        .map((o) => {
-          const receivable =
-            Number(o?.pricing?.receivable) ||
-            Math.max(
-              0,
-              num(o?.pricing?.subtotal) - num(o?.pricing?.commission),
-            );
-          if (!Number.isFinite(receivable) || receivable <= 0) return null;
+    const paymentOps = deliveredOrders
+      .map((o) => {
+        const receivable =
+          Number(o?.pricing?.receivable) ||
+          Math.max(
+            0,
+            num(o?.pricing?.subtotal) - num(o?.pricing?.commission),
+          );
+        if (!Number.isFinite(receivable) || receivable <= 0) return null;
 
-          return SellerTransaction.findOneAndUpdate(
-            {
+        return {
+          updateOne: {
+            filter: {
               sellerId,
               type: "Order Payment",
               orderId: String(o.orderId || "").trim(),
             },
-            {
+            update: {
               $set: {
                 amount: receivable,
                 status: "Settled",
@@ -753,11 +760,16 @@ const reconcileSellerDeliveredOrders = async (sellerId) => {
                 reason: "",
               },
             },
-            { upsert: true, new: true, setDefaultsOnInsert: true },
-          );
-        })
-        .filter(Boolean),
-    );
+            upsert: true,
+            setDefaultsOnInsert: true,
+          },
+        };
+      })
+      .filter(Boolean);
+
+    if (paymentOps.length) {
+      await SellerTransaction.bulkWrite(paymentOps);
+    }
   }
 };
 
@@ -1183,7 +1195,7 @@ export const getSellerProductByIdController = async (req, res) => {
 
     const product = await populateProductQuery(
       SellerProduct.findOne({ _id: productId, sellerId }),
-    );
+    ).lean();
 
     if (!product) {
       return sendError(res, 404, "Product not found");
@@ -1676,12 +1688,6 @@ export const updateSellerProfileController = async (req, res) => {
         "",
       );
     }
-    if (files?.upiQrImage?.[0]) {
-      seller.bankInfo.upiQrImage = await uploadImageBuffer(
-        files.upiQrImage[0].buffer,
-        "seller/upi-qr",
-      );
-    }
 
     seller.documents = seller.documents || {};
     if (
@@ -1746,12 +1752,6 @@ export const updateSellerProfileController = async (req, res) => {
         "",
       );
     }
-    if (files?.fssaiImage?.[0]) {
-      seller.documents.fssaiImage = await uploadImageBuffer(
-        files.fssaiImage[0].buffer,
-        "seller/fssai",
-      );
-    }
     if (
       req.body?.medicalLicenseNumber !== undefined ||
       documentsBody.medicalLicenseNumber !== undefined
@@ -1768,12 +1768,6 @@ export const updateSellerProfileController = async (req, res) => {
       seller.documents.medicalLicenseImage = str(
         documentsBody.medicalLicenseImage ?? req.body.medicalLicenseImage,
         "",
-      );
-    }
-    if (files?.medicalLicenseImage?.[0]) {
-      seller.documents.medicalLicenseImage = await uploadImageBuffer(
-        files.medicalLicenseImage[0].buffer,
-        "seller/medical-license",
       );
     }
     if (
@@ -1802,12 +1796,33 @@ export const updateSellerProfileController = async (req, res) => {
         "",
       );
     }
-    if (files?.shopLicenseImage?.[0]) {
-      seller.documents.shopLicenseImage = await uploadImageBuffer(
-        files.shopLicenseImage[0].buffer,
-        "seller/shop-license",
-      );
+    // Upload independent document images concurrently to reduce request latency.
+    const [
+      uploadedUpiQrImage,
+      uploadedFssaiImage,
+      uploadedMedicalLicenseImage,
+      uploadedShopLicenseImage,
+    ] = await Promise.all([
+      files?.upiQrImage?.[0]?.buffer
+        ? uploadImageBuffer(files.upiQrImage[0].buffer, "seller/upi-qr")
+        : Promise.resolve(""),
+      files?.fssaiImage?.[0]?.buffer
+        ? uploadImageBuffer(files.fssaiImage[0].buffer, "seller/fssai")
+        : Promise.resolve(""),
+      files?.medicalLicenseImage?.[0]?.buffer
+        ? uploadImageBuffer(files.medicalLicenseImage[0].buffer, "seller/medical-license")
+        : Promise.resolve(""),
+      files?.shopLicenseImage?.[0]?.buffer
+        ? uploadImageBuffer(files.shopLicenseImage[0].buffer, "seller/shop-license")
+        : Promise.resolve(""),
+    ]);
+
+    if (uploadedUpiQrImage) seller.bankInfo.upiQrImage = uploadedUpiQrImage;
+    if (uploadedFssaiImage) seller.documents.fssaiImage = uploadedFssaiImage;
+    if (uploadedMedicalLicenseImage) {
+      seller.documents.medicalLicenseImage = uploadedMedicalLicenseImage;
     }
+    if (uploadedShopLicenseImage) seller.documents.shopLicenseImage = uploadedShopLicenseImage;
     if (
       req.body?.shopLicenseExpiry !== undefined ||
       documentsBody.shopLicenseExpiry !== undefined
@@ -2053,24 +2068,25 @@ export const getSellerOrdersController = async (req, res) => {
       existingSellerOrders.map((so) => [String(so.parentOrderId), so]),
     );
 
-    const items = await Promise.all(
-      parentOrders.map(async (po) => {
-        let so = existingMap.get(String(po._id));
-        const parentStatus = String(po?.orderStatus || "").toLowerCase();
+    // Collect every required mutation first, then apply them all in a single
+    // bulkWrite (previously this issued up to 2 writes PER row on every list
+    // read). Missing seller-order docs are built for upsert; status-drift rows
+    // get patched. Behaviour and final DB state are identical to the per-row
+    // findOneAndUpdate approach.
+    const bulkOps = [];
+    const parentsNeedingBuild = [];
 
-        if (!so) {
-          const doc = await buildSellerOrderFromParentOrder(po, sellerId);
-          if (doc) {
-            so = await SellerOrder.findOneAndUpdate(
-              { parentOrderId: po._id, sellerId },
-              { $set: doc },
-              { upsert: true, new: true, setDefaultsOnInsert: true },
-            ).lean();
-          }
-        } else if (parentStatus === "delivered" && so.status !== "delivered") {
-          so = await SellerOrder.findOneAndUpdate(
-            { _id: so._id },
-            {
+    for (const po of parentOrders) {
+      const so = existingMap.get(String(po._id));
+      const parentStatus = String(po?.orderStatus || "").toLowerCase();
+
+      if (!so) {
+        parentsNeedingBuild.push(po);
+      } else if (parentStatus === "delivered" && so.status !== "delivered") {
+        bulkOps.push({
+          updateOne: {
+            filter: { _id: so._id },
+            update: {
               $set: {
                 status: "delivered",
                 workflowStatus: "DELIVERED",
@@ -2078,23 +2094,56 @@ export const getSellerOrdersController = async (req, res) => {
                   po.deliveryState?.deliveredAt || po.updatedAt || new Date(),
               },
             },
-            { new: true },
-          ).lean();
-        } else if (
-          parentStatus.startsWith("cancel") &&
-          so.status !== "cancelled"
-        ) {
-          so = await SellerOrder.findOneAndUpdate(
-            { _id: so._id },
-            { $set: { status: "cancelled", workflowStatus: "CANCELLED" } },
-            { new: true },
-          ).lean();
-        }
-        return so;
-      }),
+          },
+        });
+      } else if (parentStatus.startsWith("cancel") && so.status !== "cancelled") {
+        bulkOps.push({
+          updateOne: {
+            filter: { _id: so._id },
+            update: { $set: { status: "cancelled", workflowStatus: "CANCELLED" } },
+          },
+        });
+      }
+    }
+
+    if (parentsNeedingBuild.length) {
+      const buildResults = await Promise.all(
+        parentsNeedingBuild.map(async (po) => ({
+          po,
+          doc: await buildSellerOrderFromParentOrder(po, sellerId),
+        })),
+      );
+      for (const { po, doc } of buildResults) {
+        if (!doc) continue;
+        bulkOps.push({
+          updateOne: {
+            filter: { parentOrderId: po._id, sellerId },
+            update: { $set: doc },
+            upsert: true,
+            setDefaultsOnInsert: true,
+          },
+        });
+      }
+    }
+
+    let finalSellerOrders = existingSellerOrders;
+    if (bulkOps.length) {
+      await SellerOrder.bulkWrite(bulkOps);
+      // Re-read fresh state once so the response reflects created/updated docs.
+      finalSellerOrders = await SellerOrder.find({
+        parentOrderId: { $in: parentIds },
+        sellerId,
+      }).lean();
+    }
+
+    const finalMap = new Map(
+      finalSellerOrders.map((so) => [String(so.parentOrderId), so]),
     );
 
-    const filteredItems = items.filter(Boolean);
+    // Preserve original ordering (follows parentOrders) and null-filtering.
+    const filteredItems = parentOrders
+      .map((po) => finalMap.get(String(po._id)))
+      .filter(Boolean);
 
     const quickOrderMap = new Map(
       parentOrders.map((order) => [String(order.orderId), order]),

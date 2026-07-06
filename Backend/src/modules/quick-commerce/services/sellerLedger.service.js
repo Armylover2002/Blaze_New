@@ -200,7 +200,11 @@ export const recordSellerLedgerEntry = async ({
 };
 
 export const getSellerUnsettledCreditSummary = async (sellerId) => {
-  const txns = await SellerTransaction.find({ sellerId }).lean();
+  // Only type/status/amount are needed; projecting them avoids pulling the
+  // unbounded financeAudit array on every balance summary read.
+  const txns = await SellerTransaction.find({ sellerId })
+    .select('type status amount')
+    .lean();
 
   const orderCredits = (txns || [])
     .filter((txn) => txn.type === LEDGER_TYPES.ORDER_PAYMENT || txn.type === LEDGER_TYPES.ORDER_CREDIT)

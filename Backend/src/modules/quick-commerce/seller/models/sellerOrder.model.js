@@ -115,5 +115,10 @@ const sellerOrderSchema = new mongoose.Schema(
 sellerOrderSchema.index({ sellerId: 1, createdAt: -1 });
 sellerOrderSchema.index({ sellerId: 1, orderType: 1, createdAt: -1 });
 sellerOrderSchema.index({ sellerId: 1, orderId: 1 }, { unique: true });
+// Bare orderId lookups (admin/order/return flows) cannot use the {sellerId, orderId}
+// compound because its prefix is sellerId, so a dedicated index is required.
+sellerOrderSchema.index({ orderId: 1 });
+// Seller dashboards filter by status (e.g. "delivered") and sort by createdAt.
+sellerOrderSchema.index({ sellerId: 1, status: 1, createdAt: -1 });
 
 export const SellerOrder = mongoose.model('SellerOrder', sellerOrderSchema, 'quick_seller_orders');

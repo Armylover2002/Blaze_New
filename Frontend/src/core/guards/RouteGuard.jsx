@@ -1,5 +1,5 @@
 import { Navigate, useLocation } from 'react-router-dom'
-import { isModuleAuthenticated } from '@food/utils/auth'
+import { getCurrentUser, isModuleAuthenticated, isRestaurantPendingApproval } from '@food/utils/auth'
 
 /**
  * MODULE ROUTE MAP
@@ -158,6 +158,12 @@ function detectWrongPortal(pathname, allowedModule) {
  */
 export function AuthPageGuard({ children, module, home }) {
   if (isModuleAuthenticated(module)) {
+    if (module === 'restaurant') {
+      const user = getCurrentUser('restaurant')
+      if (isRestaurantPendingApproval(user)) {
+        return <Navigate to="/food/restaurant/pending-verification" replace />
+      }
+    }
     return <Navigate to={home} replace />
   }
   return <>{children}</>

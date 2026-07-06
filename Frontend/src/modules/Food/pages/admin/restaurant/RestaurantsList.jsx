@@ -323,6 +323,8 @@ export default function RestaurantsList() {
             zone: zoneLabelFromRestaurant(restaurant),
             approvalStatus: normalizeApprovalStatus(restaurant),
             isActive: restaurant.isActive !== false,
+            isListed: restaurant.isListed || false,
+            productCount: restaurant.productCount || 0,
             rating: restaurant.ratings?.average || restaurant.rating || 0,
             logo: getPrimaryRestaurantImage(restaurant, PLACEHOLDER_40),
             originalData: restaurant,
@@ -1409,6 +1411,34 @@ export default function RestaurantsList() {
     setDeleteConfirmDialog(null)
   }
 
+  const handleToggleVisibility = async (restaurant) => {
+    if (!canEdit) {
+      toast.error("Permission denied")
+      return
+    }
+    if (restaurant.productCount <= 0) {
+      toast.error("Cannot list a restaurant with 0 products.");
+      return;
+    }
+    try {
+      const restaurantId = restaurant._id || restaurant.id;
+      const newStatus = !restaurant.isListed;
+      await adminAPI.toggleRestaurantListing(restaurantId, newStatus);
+      
+      setRestaurants(prev => 
+        prev.map(r => 
+          (r.id === restaurant.id || r._id === restaurant._id)
+            ? { ...r, isListed: newStatus }
+            : r
+        )
+      );
+      toast.success(`Restaurant is now ${newStatus ? 'visible' : 'invisible'}`);
+    } catch (err) {
+      debugError("Error toggling visibility:", err);
+      toast.error(err.response?.data?.message || "Failed to toggle visibility");
+    }
+  }
+
   // Handle export functionality
   const handleExport = () => {
     const dataToExport = filteredRestaurants.length > 0 ? filteredRestaurants : restaurants
@@ -1594,6 +1624,7 @@ export default function RestaurantsList() {
                         <ArrowUpDown className={`w-3 h-3 ${sortConfig.key === 'status' ? 'text-blue-600' : 'text-slate-400'}`} />
                       </div>
                     </th>
+                    <th className="px-6 py-4 text-center text-[10px] font-bold text-slate-700 uppercase tracking-wider">Visibility</th>
                     <th className="px-6 py-4 text-center text-[10px] font-bold text-slate-700 uppercase tracking-wider">Action</th>
                   </tr>
                 </thead>
@@ -1669,6 +1700,24 @@ export default function RestaurantsList() {
                               Outlet: {restaurant.isActive ? "Active" : "Inactive"}
                             </span>
                           </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-center">
+                          <button
+                            onClick={() => handleToggleVisibility(restaurant)}
+                            disabled={!canEdit || restaurant.productCount <= 0}
+                            title={restaurant.productCount <= 0 ? "Cannot make visible. Restaurant has no products." : "Toggle Visibility"}
+                            className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 ${
+                              !canEdit || restaurant.productCount <= 0 ? 'opacity-50 cursor-not-allowed' : ''
+                            }`}
+                          >
+                            <span aria-hidden="true" className={`absolute mx-auto h-full w-9 rounded-full transition-colors ${restaurant.isListed ? 'bg-green-500' : 'bg-slate-200'}`} />
+                            <span
+                              aria-hidden="true"
+                              className={`pointer-events-none absolute left-0 inline-block h-4 w-4 transform rounded-full border border-slate-200 bg-white shadow ring-0 transition-transform duration-200 ease-in-out ${
+                                restaurant.isListed ? 'translate-x-4' : 'translate-x-0.5'
+                              }`}
+                            />
+                          </button>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-center">
                           <div className="flex items-center justify-center gap-2">

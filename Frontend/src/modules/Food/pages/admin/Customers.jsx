@@ -565,7 +565,6 @@ export default function Customers() {
                       className="h-4 w-4 rounded border-[#EDE8E0] text-[#FF0000] focus:ring-[#FF0000]"
                     />
                   </th>
-                  <th className="px-6 py-4 text-left text-[10px] font-bold text-[#5C5247] uppercase tracking-wider">Sl</th>
                   <th className="px-6 py-4 text-left text-[10px] font-bold text-[#5C5247] uppercase tracking-wider">Name</th>
                   <th className="px-6 py-4 text-left text-[10px] font-bold text-[#5C5247] uppercase tracking-wider">Contact Information</th>
                   <th className="px-6 py-4 text-left text-[10px] font-bold text-[#5C5247] uppercase tracking-wider">Total Order</th>
@@ -579,13 +578,13 @@ export default function Customers() {
               <tbody className="bg-white divide-y divide-[#EDE8E0]/70">
                 {loading ? (
                   <tr>
-                    <td colSpan={10} className="px-6 py-8 text-center">
+                    <td colSpan={9} className="px-6 py-8 text-center">
                       <div className="text-sm text-[#9E8F7E]">Loading customers...</div>
                     </td>
                   </tr>
                 ) : filteredCustomers.length === 0 ? (
                   <tr>
-                    <td colSpan={10} className="px-6 py-8 text-center">
+                    <td colSpan={9} className="px-6 py-8 text-center">
                       <div className="text-sm text-[#9E8F7E]">No customers found</div>
                     </td>
                   </tr>
@@ -599,9 +598,6 @@ export default function Customers() {
                           onChange={() => toggleCustomerSelection(getCustomerId(customer))}
                           className="h-4 w-4 rounded border-[#EDE8E0] text-[#FF0000] focus:ring-[#FF0000]"
                         />
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className="text-sm font-medium text-[#5C5247]">{index + 1}</span>
                       </td>
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-3">

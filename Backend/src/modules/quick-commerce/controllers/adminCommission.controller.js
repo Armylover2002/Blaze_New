@@ -9,9 +9,12 @@ export const getSellerCommissionBootstrap = async (req, res) => {
             Seller.find({ approved: true }).select('_id name shopName').lean()
         ]);
 
+        // O(1) seller lookups instead of a linear scan per commission row.
+        const sellerById = new Map(sellers.map((s) => [String(s._id), s]));
+
         // Map commission to include seller details for UI
         const mappedCommissions = commissions.map((comm, index) => {
-            const seller = sellers.find(s => String(s._id) === String(comm.sellerId));
+            const seller = sellerById.get(String(comm.sellerId));
             return {
                 ...comm,
                 sl: index + 1,

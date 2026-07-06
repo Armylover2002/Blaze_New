@@ -250,6 +250,15 @@ const restaurantSchema = new mongoose.Schema(
     menu: {
       sections: { type: Array, default: [] },
     },
+    isListed: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    productCount: {
+      type: Number,
+      default: 0,
+    },
     status: {
       type: String,
       enum: ["onboarding", "pending", "approved", "rejected"],

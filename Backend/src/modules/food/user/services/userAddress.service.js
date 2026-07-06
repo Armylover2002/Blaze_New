@@ -10,6 +10,32 @@ const toGeoPoint = ({ latitude, longitude }) => {
     return { type: 'Point', coordinates: [lng, lat] };
 };
 
+/**
+ * Build a GeoJSON point from any of the accepted coordinate shapes:
+ *  - { latitude, longitude }
+ *  - { location: { coordinates: [lng, lat] } }
+ *  - { location: { lat, lng } }
+ * Returns undefined when no valid coordinates are present.
+ */
+const resolveGeoPoint = (dto = {}) => {
+    const direct = toGeoPoint(dto);
+    if (direct) return direct;
+
+    const loc = dto.location;
+    if (loc && typeof loc === 'object') {
+        if (Array.isArray(loc.coordinates) && loc.coordinates.length === 2) {
+            const [lng, lat] = loc.coordinates.map(Number);
+            if (Number.isFinite(lat) && Number.isFinite(lng)) {
+                return { type: 'Point', coordinates: [lng, lat] };
+            }
+        }
+        if (loc.lat !== undefined && loc.lng !== undefined) {
+            return toGeoPoint({ latitude: loc.lat, longitude: loc.lng });
+        }
+    }
+    return undefined;
+};
+
 const normalizeLabel = (label) => {
     const v = String(label || '').trim();
     if (v === 'Work') return 'Office';
@@ -17,6 +43,33 @@ const normalizeLabel = (label) => {
     if (v === 'office' || v === 'Office') return 'Office';
     if (v === 'other' || v === 'Other') return 'Other';
     return 'Other';
+};
+
+const str = (v) => String(v ?? '').trim();
+
+/**
+ * Canonical normalization for a saved address. Guarantees a single, consistent
+ * shape regardless of which client/path (address CRUD or profile update) writes
+ * it, so we never persist duplicate/inconsistent field variants.
+ *
+ * Accepted input aliases:
+ *  - pincode  -> zipCode
+ *  - latitude/longitude OR location.coordinates OR location.{lat,lng} -> location
+ */
+export const normalizeAddressInput = (dto = {}) => {
+    const normalized = {
+        label: normalizeLabel(dto.label),
+        address: str(dto.address),
+        street: str(dto.street),
+        additionalDetails: str(dto.additionalDetails),
+        city: str(dto.city),
+        state: str(dto.state),
+        zipCode: str(dto.zipCode || dto.pincode),
+        phone: str(dto.phone)
+    };
+    const location = resolveGeoPoint(dto);
+    if (location) normalized.location = location;
+    return normalized;
 };
 
 export const listAddresses = async (userId) => {
@@ -29,14 +82,7 @@ export const addAddress = async (userId, dto) => {
     if (!user) throw new ValidationError('User not found');
 
     const address = {
-        label: normalizeLabel(dto.label),
-        street: dto.street,
-        additionalDetails: dto.additionalDetails || '',
-        city: dto.city,
-        state: dto.state,
-        zipCode: dto.zipCode || '',
-        phone: dto.phone || '',
-        location: toGeoPoint(dto),
+        ...normalizeAddressInput(dto),
         isDefault: false
     };
 
@@ -45,6 +91,7 @@ export const addAddress = async (userId, dto) => {
     if (existingIdx >= 0) {
         const existing = user.addresses[existingIdx];
         existing.label = address.label;
+        existing.address = address.address;
         existing.street = address.street;
         existing.additionalDetails = address.additionalDetails;
         existing.city = address.city;
@@ -78,13 +125,16 @@ export const updateAddress = async (userId, addressId, dto) => {
     if (!address) throw new ValidationError('Address not found');
 
     if (dto.label !== undefined) address.label = normalizeLabel(dto.label);
-    if (dto.street !== undefined) address.street = dto.street;
-    if (dto.additionalDetails !== undefined) address.additionalDetails = dto.additionalDetails || '';
-    if (dto.city !== undefined) address.city = dto.city;
-    if (dto.state !== undefined) address.state = dto.state;
-    if (dto.zipCode !== undefined) address.zipCode = dto.zipCode || '';
-    if (dto.phone !== undefined) address.phone = dto.phone || '';
-    const location = toGeoPoint(dto);
+    if (dto.address !== undefined) address.address = str(dto.address);
+    if (dto.street !== undefined) address.street = str(dto.street);
+    if (dto.additionalDetails !== undefined) address.additionalDetails = str(dto.additionalDetails);
+    if (dto.city !== undefined) address.city = str(dto.city);
+    if (dto.state !== undefined) address.state = str(dto.state);
+    if (dto.zipCode !== undefined || dto.pincode !== undefined) {
+        address.zipCode = str(dto.zipCode ?? dto.pincode);
+    }
+    if (dto.phone !== undefined) address.phone = str(dto.phone);
+    const location = resolveGeoPoint(dto);
     if (location) address.location = location;
 
     await user.save();

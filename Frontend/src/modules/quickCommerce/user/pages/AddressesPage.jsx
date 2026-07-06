@@ -65,6 +65,7 @@ const mapProfileToAddresses = (profile) => {
         type: capitalize(addr.label || "home"),
         name: profile?.name ?? addr?.name ?? "",
         address: buildDisplayAddress(addr),
+        street: addr.street || "",
         city: addr.city || "",
         state: addr.state || "",
         pincode: addr.pincode || addr.zipCode || "",
@@ -594,7 +595,7 @@ const AddressesPage = () => {
             type: (addr.type || "home").toLowerCase(),
             name: addr.name || profileName,
             phone: addr.phone || profilePhone,
-            address: addr.address || "",
+            address: addr.street || addr.address || "",
             landmark: addr.landmark || "",
             city: addr.city || "",
             state: addr.state || "",
@@ -633,14 +634,24 @@ const AddressesPage = () => {
         setSaving(true);
         try {
             const rawLabel = addForm.type === "work" ? "Office" : capitalize(addForm.type);
+            const pincode = addForm.pincode?.trim() || "";
+            const fullAddress =
+                currentAddress?.trim() ||
+                [address, addForm.landmark?.trim(), city, state, pincode]
+                    .filter(Boolean)
+                    .join(", ");
             const nextAddressItem = {
                 label: rawLabel,
+                address: fullAddress,
                 street: address,
                 additionalDetails: addForm.landmark?.trim() || "",
                 city: city,
                 state: state,
-                zipCode: addForm.pincode?.trim() || "",
+                zipCode: pincode,
+                pincode: pincode,
                 phone: addForm.phone?.trim() || "",
+                latitude: mapPosition[0],
+                longitude: mapPosition[1],
                 location: {
                     type: "Point",
                     coordinates: [mapPosition[1], mapPosition[0]],

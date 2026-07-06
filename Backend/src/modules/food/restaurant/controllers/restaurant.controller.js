@@ -44,7 +44,12 @@ export const registerRestaurantController = async (req, res, next) => {
         }
 
         const restaurant = await registerRestaurant(validated, req.files, authUserId);
-        return sendResponse(res, 201, 'Restaurant registered successfully', { restaurant });
+        const { issueRestaurantSession } = await import('../../../../core/auth/auth.service.js');
+        const session = await issueRestaurantSession(restaurant);
+        return sendResponse(res, 201, 'Restaurant registered successfully', {
+            restaurant,
+            ...session,
+        });
     } catch (error) {
         next(error);
     }
@@ -81,6 +86,16 @@ export const listApprovedRestaurantsController = async (req, res, next) => {
     try {
         const data = await listApprovedRestaurants(req.query);
         return sendResponse(res, 200, 'Restaurants fetched successfully', data);
+    } catch (error) {
+        next(error);
+    }
+};
+
+export const listUnder250RestaurantsController = async (req, res, next) => {
+    try {
+        const { listUnder250Restaurants } = await import('../services/under250.service.js');
+        const data = await listUnder250Restaurants(req.query);
+        return sendResponse(res, 200, 'Under ₹250 restaurants fetched successfully', data);
     } catch (error) {
         next(error);
     }

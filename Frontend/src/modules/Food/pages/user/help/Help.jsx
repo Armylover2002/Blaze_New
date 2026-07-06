@@ -374,10 +374,13 @@ export default function Help() {
                 Still Need Help?
               </CardTitle>
               <CardDescription className="text-sm md:text-base">
-                Our support team is here to assist you 24/7
+                Our support team is here to assist you 24/7. View the latest contact details and FAQs on the support page.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4 md:space-y-5 lg:space-y-6 p-4 md:p-5 lg:p-6">
+              <Link to="/food/user/support">
+                <Button className="w-full md:w-auto">View Support Page</Button>
+              </Link>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-5 lg:gap-6">
                 <div className="flex items-start gap-3 p-4 bg-white rounded-lg">
                   <div className="p-2 bg-red-100 rounded-lg">

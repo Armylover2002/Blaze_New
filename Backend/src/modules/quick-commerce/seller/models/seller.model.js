@@ -291,5 +291,9 @@ sellerSchema.index({ phoneDigits: 1 }, { unique: true, sparse: true });
 sellerSchema.index({ phoneLast10: 1 });
 sellerSchema.index({ email: 1 }, { unique: true, sparse: true });
 sellerSchema.index({ location: "2dsphere" });
+// Admin seller-requests grid filters by approvalStatus and sorts by createdAt.
+sellerSchema.index({ approvalStatus: 1, createdAt: -1 });
+// Sellers are resolved by delivery zone in fanout/zone flows.
+sellerSchema.index({ "shopInfo.zoneId": 1 });
 
 export const Seller = mongoose.model('Seller', sellerSchema, 'quick_sellers');

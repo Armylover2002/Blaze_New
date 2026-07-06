@@ -3,15 +3,28 @@ import { logger } from '../../../utils/logger.js';
 import { matchProductVariant } from './variant.helpers.js';
 
 const recalculateParentStock = async (productId) => {
-  const updated = await QuickProduct.findById(productId).select('variants').lean();
-  if (!updated) return;
-  const variants = Array.isArray(updated.variants) ? updated.variants : [];
-  if (!variants.length) return;
-  const totalStock = variants.reduce(
-    (sum, variant) => sum + Math.max(0, Number(variant?.stock) || 0),
-    0,
+  // Atomic pipeline update: recompute the parent stock as the sum of variant
+  // stocks (floored at 0) directly from the current document state. This is a
+  // single round-trip and is race-free (no read-modify-write), so concurrent
+  // stock adjustments to the same product can't clobber each other.
+  await QuickProduct.updateOne(
+    { _id: productId, variants: { $exists: true, $ne: [] } },
+    [
+      {
+        $set: {
+          stock: {
+            $sum: {
+              $map: {
+                input: { $ifNull: ['$variants', []] },
+                as: 'variant',
+                in: { $max: [0, { $ifNull: ['$$variant.stock', 0] }] },
+              },
+            },
+          },
+        },
+      },
+    ],
   );
-  await QuickProduct.updateOne({ _id: productId }, { $set: { stock: totalStock } });
 };
 
 const applyVariantStockDelta = async (productId, variantName, delta) => {
@@ -72,24 +85,55 @@ export const adjustQuickProductStock = async (
   await QuickProduct.updateOne({ _id: productId }, { $inc: { stock: delta } });
 };
 
-export const decrementQuickOrderItemsStock = async (items = []) => {
-  for (const item of items) {
-    await adjustQuickProductStock(item.productId, -Number(item.quantity || 0), {
-      variantName: item.variantName || '',
-      variantKey: item.variantKey || '',
-      variantSku: item.variantSku || '',
-    });
+/**
+ * Runs stock adjustments grouped by productId: items for the SAME product are
+ * processed sequentially (preserving inc -> parent-recalc ordering per product),
+ * while DIFFERENT products are processed in parallel. This removes the previous
+ * fully-sequential N+1 (one item at a time) without introducing races between
+ * variants of the same product.
+ */
+const runGroupedStockAdjustments = async (adjustments) => {
+  const groups = new Map();
+  for (const adjustment of adjustments) {
+    if (!adjustment?.productId) continue;
+    const key = String(adjustment.productId);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(adjustment);
   }
+
+  await Promise.all(
+    Array.from(groups.values()).map(async (group) => {
+      for (const { productId, delta, options } of group) {
+        await adjustQuickProductStock(productId, delta, options);
+      }
+    }),
+  );
+};
+
+export const decrementQuickOrderItemsStock = async (items = []) => {
+  await runGroupedStockAdjustments(
+    items.map((item) => ({
+      productId: item.productId,
+      delta: -Number(item.quantity || 0),
+      options: {
+        variantName: item.variantName || '',
+        variantKey: item.variantKey || '',
+        variantSku: item.variantSku || '',
+      },
+    })),
+  );
 };
 
 export const restoreQuickOrderItemsStock = async (orderItems = []) => {
-  for (const item of orderItems) {
-    const productId = item.itemId || item.productId;
-    if (!productId) continue;
-    await adjustQuickProductStock(productId, Number(item.quantity || 0), {
-      variantName: item.variantName || item.notes || '',
-      variantKey: item.variantKey || '',
-      variantSku: item.variantSku || '',
-    });
-  }
+  await runGroupedStockAdjustments(
+    orderItems.map((item) => ({
+      productId: item.itemId || item.productId,
+      delta: Number(item.quantity || 0),
+      options: {
+        variantName: item.variantName || item.notes || '',
+        variantKey: item.variantKey || '',
+        variantSku: item.variantSku || '',
+      },
+    })),
+  );
 };

@@ -156,7 +156,9 @@ export default defineConfig({
   },
   server: {
     host: '0.0.0.0',
-    port: 5173,
+    port: Number(process.env.PORT) || 5173,
+    // Allow any host (Render, Vercel, Netlify, custom domains, etc.)
+    allowedHosts: true,
     proxy: {
       // Backend API (default 5000)
       '/api/v1': {
@@ -164,6 +166,11 @@ export default defineConfig({
         changeOrigin: true,
       },
     },
+  },
+  preview: {
+    host: '0.0.0.0',
+    port: Number(process.env.PORT) || 4173,
+    allowedHosts: true,
   },
 })
 

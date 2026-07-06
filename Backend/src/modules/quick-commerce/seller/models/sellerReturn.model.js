@@ -348,5 +348,9 @@ sellerReturnSchema.index({ sellerId: 1, orderId: 1 }, { unique: true });
 sellerReturnSchema.index({ orderId: 1, userId: 1, returnStatus: 1 });
 sellerReturnSchema.index({ 'dispatch.deliveryPartnerId': 1, returnStatus: 1 });
 sellerReturnSchema.index({ 'dispatch.status': 1, returnStatus: 1 });
+// Admin returns grid + pickup queue filter by returnStatus and sort by returnRequestedAt.
+sellerReturnSchema.index({ returnStatus: 1, returnRequestedAt: -1 });
+// Refund reconciliation sweep filters by refundStatus (+ refundMethod).
+sellerReturnSchema.index({ refundStatus: 1, refundMethod: 1 });
 
 export const SellerReturn = mongoose.model('SellerReturn', sellerReturnSchema, 'quick_seller_returns');

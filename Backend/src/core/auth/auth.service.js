@@ -13,7 +13,7 @@ import { FoodUserWallet } from "../../modules/food/user/models/userWallet.model.
 import { createOrUpdateOtp, verifyOtp } from "../otp/otp.service.js";
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from "./token.util.js";
 import { FoodRefreshToken } from "../refreshTokens/refreshToken.model.js";
-import { ValidationError, AuthError } from "./errors.js";
+import { ValidationError, AuthError, ForbiddenError } from "./errors.js";
 import { config } from "../../config/env.js";
 import { logger } from "../../utils/logger.js";
 import { sendAdminResetOtpEmail } from "../../utils/email.js";
@@ -27,6 +27,81 @@ const ROLES = {
   DELIVERY_PARTNER: "DELIVERY_PARTNER",
   ADMIN: "ADMIN",
   SELLER: "SELLER",
+};
+
+const ACCOUNT_DEACTIVATED_MESSAGE =
+  "Your account has been deactivated. Please contact support.";
+const ACCOUNT_DELETED_MESSAGE =
+  "Your account has been deleted/deactivated. Please contact support.";
+const ACCOUNT_BLOCKED_MESSAGE =
+  "Your account has been blocked. Please contact support.";
+
+const getPhoneCandidates = (phone) => {
+  const raw = String(phone || "").trim();
+  const digits = raw.replace(/\D/g, "");
+  const last10 = digits.slice(-10);
+
+  return Array.from(new Set([
+    raw,
+    digits,
+    last10,
+    digits ? `+${digits}` : "",
+    last10 ? `+91${last10}` : "",
+    last10 ? `91${last10}` : "",
+    last10 ? `+91 ${last10}` : "",
+  ].filter(Boolean)));
+};
+
+const findExistingFoodUserByIdentifier = async (identifier) => {
+  const isEmail = String(identifier || "").includes("@");
+  if (isEmail) {
+    const emailLower = String(identifier).trim().toLowerCase();
+    return FoodUser.findOne({ email: emailLower })
+      .select("isActive isDeleted isBlocked accountStatus phone email")
+      .lean();
+  }
+
+  const candidates = getPhoneCandidates(identifier);
+  const last10 = String(identifier || "").replace(/\D/g, "").slice(-10);
+  const orClauses = [{ phone: { $in: candidates } }];
+  if (last10) {
+    orClauses.push({ phone: { $regex: new RegExp(`${last10}$`) } });
+  }
+
+  return FoodUser.findOne({ $or: orClauses })
+    .select("isActive isDeleted isBlocked accountStatus phone email")
+    .lean();
+};
+
+const assertUserEligibleForOtp = (user) => {
+  if (!user) return;
+
+  if (user.isDeleted === true || user.accountStatus === "deleted") {
+    logger.warn("OTP request blocked for deleted user account", {
+      userId: user._id,
+      phone: user.phone,
+      email: user.email,
+    });
+    throw new ForbiddenError(ACCOUNT_DELETED_MESSAGE);
+  }
+
+  if (user.isBlocked === true) {
+    logger.warn("OTP request blocked for blocked user account", {
+      userId: user._id,
+      phone: user.phone,
+      email: user.email,
+    });
+    throw new ForbiddenError(ACCOUNT_BLOCKED_MESSAGE);
+  }
+
+  if (user.isActive === false) {
+    logger.warn("OTP request blocked for inactive user account", {
+      userId: user._id,
+      phone: user.phone,
+      email: user.email,
+    });
+    throw new ForbiddenError(ACCOUNT_DEACTIVATED_MESSAGE);
+  }
 };
 
 const normalizeRolePermissions = (permissions) => {
@@ -99,6 +174,9 @@ export const requestUserOtp = async (phone) => {
     }
   }
 
+  const existingUser = await findExistingFoodUserByIdentifier(phone);
+  assertUserEligibleForOtp(existingUser);
+
   const otp = await createOrUpdateOtp(phone);
   const shouldExposeOtp =
     config.nodeEnv !== "production" || config.useDefaultOtp || isEmail;
@@ -163,12 +241,8 @@ export const verifyUserOtpAndLogin = async (
     if (needsSave) await userDoc.save();
   }
 
-  // Block login for deactivated or deleted users
-  if (userDoc.isActive === false || userDoc.isDeleted === true || userDoc.accountStatus === 'deleted') {
-    throw new AuthError(
-      "Your account has been deleted/deactivated. Please contact support.",
-    );
-  }
+  // Block login for deactivated, blocked, or deleted users (defense in depth).
+  assertUserEligibleForOtp(userDoc);
 
   // Update FCM token if provided
   if (fcmToken) {
@@ -439,16 +513,11 @@ export const verifyRestaurantOtpAndLogin = async (phone, otp, fcmToken, platform
     }
   }
 
-  // Block login for deleted or deactivated restaurants
-  if (restaurant.isDeleted === true || restaurant.accountStatus === 'deleted' || restaurant.isActive === false) {
+  // Block login for deleted restaurants
+  if (restaurant.isDeleted === true || restaurant.accountStatus === "deleted") {
     throw new AuthError(
       "Your account has been deleted/deactivated. Please contact support.",
     );
-  }
-
-  // Block login for pending restaurants
-  if (restaurant.status === "pending") {
-    throw new AuthError("Your restaurant registration is pending approval.");
   }
 
   // For rejected restaurants — return rejection info so frontend can show modal
@@ -459,6 +528,29 @@ export const verifyRestaurantOtpAndLogin = async (phone, otp, fcmToken, platform
       phone,
       needsRegistration: false,
     };
+  }
+
+  // Pending approval — issue a session so the partner can poll status without re-login
+  if (restaurant.status === "pending") {
+    return {
+      ...(await issueRestaurantSession(restaurant)),
+      isPendingApproval: true,
+    };
+  }
+
+  // Block deactivated restaurants that are not awaiting first-time approval
+  if (restaurant.isActive === false) {
+    throw new AuthError(
+      "Your account has been deleted/deactivated. Please contact support.",
+    );
+  }
+
+  return issueRestaurantSession(restaurant);
+};
+
+export const issueRestaurantSession = async (restaurant) => {
+  if (!restaurant?._id) {
+    throw new ValidationError("Restaurant is required");
   }
 
   const payload = { userId: restaurant._id.toString(), role: ROLES.RESTAURANT };
@@ -473,11 +565,15 @@ export const verifyRestaurantOtpAndLogin = async (phone, otp, fcmToken, platform
     expiresAt,
   });
 
+  const user =
+    typeof restaurant.toObject === "function" ? restaurant.toObject() : restaurant;
+
   return {
     accessToken,
     refreshToken,
-    user: restaurant,
+    user,
     needsRegistration: false,
+    isPendingApproval: user?.status === "pending",
   };
 };
 
@@ -491,24 +587,6 @@ export const requestDeliveryOtp = async (phone) => {
     config.nodeEnv !== "production" || config.useDefaultOtp;
   return shouldExposeOtp ? { otp } : {};
 };
-
-const getPhoneCandidates = (phone) => {
-  const raw = String(phone || "").trim();
-  const digits = raw.replace(/\D/g, "");
-  const last10 = digits.slice(-10);
-
-  return Array.from(new Set([
-    raw,
-    digits,
-    last10,
-    digits ? `+${digits}` : "",
-    last10 ? `+91${last10}` : "",
-    last10 ? `91${last10}` : "",
-  ].filter(Boolean)));
-};
-
-
-
 
 
 

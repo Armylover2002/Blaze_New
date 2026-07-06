@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { Facebook, Twitter, Instagram, Youtube, Mail, MapPin, Phone } from 'lucide-react';
-import Logo from '@/assets/dukaanwallah.jpeg';
+import Logo from '@/assets/Logo.jpeg';
 import { useSettings } from '@core/context/SettingsContext';
 import { shiftHex } from '../../utils/headerTheme';
 
@@ -199,7 +199,7 @@ const Footer = () => {
 
                 <div className="border-t border-white/10 mt-12 pt-8 text-center text-sm md:flex md:justify-between md:text-left md:mt-24 md:pt-12">
                     <p className="md:text-base text-white/60">
-                        &copy; {currentYear} Dukaanwallah. All rights reserved.
+                        &copy; {currentYear} Blaze. All rights reserved.
                     </p>
                     <div className="flex gap-6 justify-center md:justify-end mt-4 md:mt-0 md:gap-12">
                         <a href="#" className="hover:text-red-300 md:text-base text-white/60 transition-all">Privacy Policy</a>

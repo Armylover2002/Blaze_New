@@ -2,6 +2,50 @@ import { FoodUser } from '../../../../core/users/user.model.js';
 import { AuthError, ValidationError } from '../../../../core/auth/errors.js';
 import { FoodUserWallet } from '../models/userWallet.model.js';
 import { uploadImageBuffer } from '../../../../services/cloudinary.service.js';
+import mongoose from 'mongoose';
+import { normalizeAddressInput } from './userAddress.service.js';
+
+/**
+ * Normalize an incoming addresses array into the canonical persisted shape.
+ * Items missing the required street/city/state are skipped so we never persist
+ * partial/inconsistent entries. Exactly one address is guaranteed default.
+ */
+const normalizeAddressesList = (addresses) => {
+    if (!Array.isArray(addresses)) return undefined;
+
+    const normalized = addresses
+        .map((item) => {
+            const base = normalizeAddressInput(item);
+            // street is required by the schema; fall back to the formatted
+            // address when a caller only provided the full string.
+            if (!base.street && base.address) base.street = base.address;
+            // Preserve existing subdocument identity on edits.
+            if (item?._id && mongoose.Types.ObjectId.isValid(item._id)) {
+                base._id = item._id;
+            }
+            return {
+                ...base,
+                isDefault: !!item?.isDefault
+            };
+        })
+        .filter((a) => a.street && a.city && a.state);
+
+    if (normalized.length && !normalized.some((a) => a.isDefault)) {
+        normalized[0].isDefault = true;
+    } else if (normalized.length) {
+        // Collapse to a single default (first one wins) to avoid inconsistency.
+        let seen = false;
+        normalized.forEach((a) => {
+            if (a.isDefault && !seen) {
+                seen = true;
+            } else {
+                a.isDefault = false;
+            }
+        });
+    }
+
+    return normalized;
+};
 
 const parseIsoDateOrNull = (value) => {
     if (value === undefined) return undefined;
@@ -46,6 +90,11 @@ export const updateCurrentUserProfile = async (userId, body) => {
     if (dob !== undefined) user.dateOfBirth = dob;
     const ann = parseIsoDateOrNull(body.anniversary);
     if (ann !== undefined) user.anniversary = ann;
+
+    if (body.addresses !== undefined) {
+        const nextAddresses = normalizeAddressesList(body.addresses);
+        if (nextAddresses !== undefined) user.addresses = nextAddresses;
+    }
 
     await user.save();
     return { user: user.toObject() };

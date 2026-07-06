@@ -4,6 +4,7 @@ import { ArrowLeft, ShieldCheck, Timer, RefreshCw, X } from "lucide-react"
 import loginBg from "@food/assets/loginbanner.png"
 import { Button } from "@food/components/ui/button"
 import { restaurantAPI } from "@food/api"
+import { clearOnboardingDraft } from "@food/utils/onboardingDraftStorage"
 import {
   setAuthData as setRestaurantAuthData,
   setRestaurantPendingPhone,
@@ -310,6 +311,21 @@ export default function RestaurantOTP() {
         sessionStorage.removeItem("restaurantAuthData")
         sessionStorage.removeItem("restaurantLoginPhone")
 
+        if (data?.isPendingApproval || String(restaurant?.status || "").toLowerCase() === "pending") {
+          navigate("/food/restaurant/pending-verification", {
+            replace: true,
+            state: {
+              phone:
+                restaurant?.ownerPhone ||
+                restaurant?.primaryContactNumber ||
+                normalizedPhone ||
+                phone ||
+                "",
+            },
+          })
+          return
+        }
+
         setTimeout(async () => {
           if (authData?.isSignUp) {
             navigate("/food/restaurant/onboarding", { replace: true })
@@ -598,10 +614,9 @@ export default function RestaurantOTP() {
             <div className="px-6 pb-6 pt-2 flex flex-col gap-2.5">
               <button
                 type="button"
-                onClick={() => {
-                  localStorage.removeItem("restaurant_onboarding_data");
-                  localStorage.removeItem("restaurant_pendingPhone");
-                  sessionStorage.setItem("restaurantReonboard", "true");
+                onClick={async () => {
+                  await clearOnboardingDraft()
+                  sessionStorage.setItem("restaurantReonboard", "true")
                   if (rejectionModalData.phone) {
                     localStorage.setItem("restaurant_pendingPhone", rejectionModalData.phone);
                   }

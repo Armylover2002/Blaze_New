@@ -11,14 +11,46 @@ import { useLocation } from "@food/hooks/useLocation"
 import { useZone } from "@food/hooks/useZone"
 import { useCart } from "@food/context/CartContext"
 import PageNavbar from "@food/components/user/PageNavbar"
+import Under250DesktopHero from "@food/components/user/under-250/Under250DesktopHero"
 import offerImage from "@food/assets/offerimage.png"
 import AddToCartAnimation from "@food/components/user/AddToCartAnimation"
 import OptimizedImage from "@food/components/OptimizedImage"
 import api from "@food/api"
 import { restaurantAPI, adminAPI } from "@food/api"
 import { isModuleAuthenticated } from "@food/utils/auth"
-import { flattenMenuItems, getMenuFromResponse } from "@food/utils/menuItems"
 import { calculateDistance, formatDistance } from "@food/utils/common"
+
+const enrichRestaurantDistance = (restaurant, userLocation) => {
+  const userLat = Number(userLocation?.latitude)
+  const userLng = Number(userLocation?.longitude)
+  const restaurantLocation = restaurant?.location
+  const restaurantLat = Number(
+    restaurantLocation?.latitude ??
+    (Array.isArray(restaurantLocation?.coordinates) ? restaurantLocation.coordinates[1] : null)
+  )
+  const restaurantLng = Number(
+    restaurantLocation?.longitude ??
+    (Array.isArray(restaurantLocation?.coordinates) ? restaurantLocation.coordinates[0] : null)
+  )
+  const distanceInKm = (
+    Number.isFinite(userLat) &&
+    Number.isFinite(userLng) &&
+    Number.isFinite(restaurantLat) &&
+    Number.isFinite(restaurantLng)
+  )
+    ? calculateDistance(userLat, userLng, restaurantLat, restaurantLng)
+    : null
+  const fallbackDistance =
+    typeof restaurant?.distance === "number"
+      ? formatDistance(restaurant.distance)
+      : (restaurant?.distance || "")
+
+  return {
+    ...restaurant,
+    distance: distanceInKm !== null ? formatDistance(distanceInKm) : fallbackDistance,
+    distanceInKm,
+  }
+}
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -92,6 +124,10 @@ export default function Under250() {
   const [currentBannerIndex, setCurrentBannerIndex] = useState(0)
   const [under250Restaurants, setUnder250Restaurants] = useState([])
   const [loadingRestaurants, setLoadingRestaurants] = useState(true)
+  const under250RestaurantsWithDistance = useMemo(
+    () => under250Restaurants.map((restaurant) => enrichRestaurantDistance(restaurant, location)),
+    [under250Restaurants, location?.latitude, location?.longitude],
+  )
   const [hasScrolledPastBanner, setHasScrolledPastBanner] = useState(false)
   const bannerShellRef = useRef(null)
   const stickyHeaderRef = useRef(null)
@@ -157,7 +193,7 @@ export default function Under250() {
 
   // Sort and filter restaurants based on selected sort and filters
   const sortedAndFilteredRestaurants = useMemo(() => {
-    let filtered = under250Restaurants.map(r => ({ ...r, menuItems: [...(r.menuItems || [])] }))
+    let filtered = under250RestaurantsWithDistance.map(r => ({ ...r, menuItems: [...(r.menuItems || [])] }))
 
     // Apply category filter
     if (activeCategory) {
@@ -227,7 +263,7 @@ export default function Under250() {
     }
 
     return filtered
-  }, [under250Restaurants, selectedSort, under30MinsFilter, activeCategory, categories])
+  }, [under250RestaurantsWithDistance, selectedSort, under30MinsFilter, activeCategory, categories])
 
   // Fetch under-250 banner from public API
   useEffect(() => {
@@ -335,111 +371,34 @@ export default function Under250() {
     isBannerSwipingRef.current = false
   }, [bannerImages.length, resetBannerAutoSlide])
 
-  // Fetch restaurants with dishes under ?250 from backend
+  // Fetch restaurants with dishes under ₹250 (single batched API call)
   useEffect(() => {
+    let cancelled = false
+
     const fetchRestaurantsUnder250 = async () => {
       try {
         setLoadingRestaurants(true)
-        const response = await restaurantAPI.getRestaurants(zoneId ? { zoneId } : {})
+        const response = await restaurantAPI.getUnder250Restaurants(zoneId ? { zoneId } : {})
+        if (cancelled) return
+
         const restaurantsRaw = Array.isArray(response?.data?.data?.restaurants)
           ? response.data.data.restaurants
           : []
-        const userLat = Number(location?.latitude)
-        const userLng = Number(location?.longitude)
 
-        const restaurantsWithUnder250Dishes = await Promise.all(
-          restaurantsRaw.map(async (restaurant, index) => {
-            const restaurantId = restaurant?.restaurantId || restaurant?._id
-            if (!restaurantId) return null
-
-            try {
-              const menuResponse = await restaurantAPI.getMenuByRestaurantId(restaurantId)
-              const menu = getMenuFromResponse(menuResponse)
-              const menuItems = flattenMenuItems(menu)
-                .filter((item) => Number(item?.price || 0) <= 250 && item?.isAvailable !== false)
-                .map((item) => {
-                  const foodType = String(item?.foodType || "").toLowerCase()
-                  const isVeg = foodType.includes("veg") && !foodType.includes("non")
-                  return {
-                    ...item,
-                    id: String(item?.id || item?._id || `${restaurantId}-${item?.name || "dish"}`),
-                    price: Number(item?.price || 0),
-                    isVeg,
-                    image:
-                      item?.image ||
-                      restaurant?.coverImages?.[0]?.url ||
-                      restaurant?.coverImages?.[0] ||
-                      restaurant?.menuImages?.[0]?.url ||
-                      restaurant?.menuImages?.[0] ||
-                      restaurant?.profileImage?.url ||
-                      "",
-                  }
-                })
-
-              if (menuItems.length === 0) return null
-
-              const deliveryMinutes =
-                Number(restaurant?.estimatedDeliveryTimeMinutes) ||
-                Number(restaurant?.estimatedDeliveryTime) ||
-                null
-              const restaurantLocation = restaurant?.location
-              const restaurantLat = Number(
-                restaurantLocation?.latitude ??
-                (Array.isArray(restaurantLocation?.coordinates) ? restaurantLocation.coordinates[1] : null)
-              )
-              const restaurantLng = Number(
-                restaurantLocation?.longitude ??
-                (Array.isArray(restaurantLocation?.coordinates) ? restaurantLocation.coordinates[0] : null)
-              )
-              const distanceInKm = (
-                Number.isFinite(userLat) &&
-                Number.isFinite(userLng) &&
-                Number.isFinite(restaurantLat) &&
-                Number.isFinite(restaurantLng)
-              )
-                ? calculateDistance(userLat, userLng, restaurantLat, restaurantLng)
-                : null
-              const fallbackDistance =
-                typeof restaurant?.distance === "number"
-                  ? formatDistance(restaurant.distance)
-                  : (restaurant?.distance || "")
-
-              return {
-                id: String(restaurantId),
-                restaurantId: String(restaurantId),
-                slug:
-                  restaurant?.slug ||
-                  String(restaurant?.restaurantName || restaurant?.name || "")
-                    .toLowerCase()
-                    .replace(/\s+/g, "-"),
-                name: restaurant?.restaurantName || restaurant?.name || "Restaurant",
-                rating: Number(restaurant?.rating || 0),
-                totalRatings: Number(restaurant?.totalRatings || restaurant?.ratingCount || 0),
-                deliveryTime:
-                  restaurant?.estimatedDeliveryTime ||
-                  (deliveryMinutes ? `${deliveryMinutes} mins` : "30 mins"),
-                distance: distanceInKm !== null ? formatDistance(distanceInKm) : fallbackDistance,
-                distanceInKm,
-                originalIndex: index,
-                menuItems,
-              }
-            } catch {
-              return null
-            }
-          })
-        )
-
-        setUnder250Restaurants(restaurantsWithUnder250Dishes.filter(Boolean))
+        setUnder250Restaurants(restaurantsRaw)
       } catch (error) {
-        debugError('Error fetching restaurants under 250:', error)
-        setUnder250Restaurants([])
+        if (!cancelled) {
+          debugError('Error fetching restaurants under 250:', error)
+          setUnder250Restaurants([])
+        }
       } finally {
-        setLoadingRestaurants(false)
+        if (!cancelled) setLoadingRestaurants(false)
       }
     }
 
     fetchRestaurantsUnder250()
-  }, [zoneId, isOutOfService, location?.latitude, location?.longitude])
+    return () => { cancelled = true }
+  }, [zoneId])
 
   // Fetch categories from backend (no static fallback list)
   useEffect(() => {
@@ -847,11 +806,11 @@ export default function Under250() {
         </div>
       </div>
 
-      {/* Banner Section */}
+      {/* Banner Section - mobile only */}
       <div
         ref={bannerShellRef}
         data-banner-shell="true"
-        className="relative w-full overflow-hidden h-[clamp(240px,42vw,520px)] md:-mt-40"
+        className="relative h-[clamp(240px,42vw,520px)] w-full overflow-hidden md:hidden"
       >
         {/* Banner Image */}
         {bannerImages.length > 0 && (
@@ -903,17 +862,31 @@ export default function Under250() {
         )}
       </div>
 
+      <Under250DesktopHero
+        bannerImages={bannerImages}
+        currentBannerIndex={currentBannerIndex}
+        onSelectBanner={(index) => {
+          setCurrentBannerIndex(index)
+          resetBannerAutoSlide()
+        }}
+        loadingBanner={loadingBanner}
+        restaurantCount={under250RestaurantsWithDistance.length}
+        rupeeSymbol={RUPEE_SYMBOL}
+      />
+
       {/* Content Section */}
-      <div className="relative max-w-7xl mx-auto px-3 sm:px-4 md:px-6 lg:px-8 xl:px-12 space-y-0 pt-2 sm:pt-3 md:pt-4 lg:pt-6 pb-6 md:pb-8 lg:pb-10">
+      <div className="relative mx-auto max-w-7xl space-y-0 px-3 pb-6 pt-2 sm:px-4 sm:pt-3 md:px-6 md:pb-8 md:pt-4 lg:px-8 lg:pb-10 lg:pt-6">
 
         <section className="space-y-1 sm:space-y-1.5">
+          <h2 className="hidden px-2 text-lg font-bold text-gray-900 dark:text-white md:block md:px-0 md:text-xl">
+            Browse by category
+          </h2>
           <div
-            className="flex gap-3 sm:gap-4 md:gap-5 lg:gap-6 overflow-x-auto md:overflow-x-visible overflow-y-visible scrollbar-hide scroll-smooth px-2 sm:px-3 py-2 sm:py-3 md:py-4"
+            className="flex gap-3 overflow-x-auto overflow-y-visible scroll-smooth px-2 py-2 scrollbar-hide sm:gap-4 sm:px-3 sm:py-3 md:grid md:grid-cols-4 md:gap-4 md:overflow-visible md:px-0 md:py-4 lg:grid-cols-6 xl:grid-cols-8"
             style={{
               scrollbarWidth: "none",
               msOverflowStyle: "none",
               touchAction: "pan-x pan-y pinch-zoom",
-              overflowY: "hidden",
             }}
           >
             {/* All Button */}
@@ -959,8 +932,8 @@ export default function Under250() {
                           placeholder="blur"
                         />
                       </div>
-                      <span className={`text-xs sm:text-sm md:text-base font-semibold text-gray-800 dark:text-gray-200 text-center pb-1 ${isActive ? 'text-[#FF0000]' : ''}`}>
-                        {category.name.length > 7 ? `${category.name.slice(0, 7)}...` : category.name}
+                      <span className={`max-w-full truncate pb-1 text-center text-xs font-semibold text-gray-800 dark:text-gray-200 sm:text-sm md:text-sm ${isActive ? 'text-[#FF0000]' : ''}`}>
+                        {category.name}
                       </span>
                     </motion.div>
                 </div>
@@ -969,7 +942,7 @@ export default function Under250() {
           </div>
         </section>
 
-        <section className="py-2 sm:py-3 md:py-4">
+        <section className="sticky top-0 z-30 border-b border-gray-100 bg-white/95 py-2 backdrop-blur-sm sm:py-3 md:top-[8.75rem] md:py-4 dark:border-gray-800 dark:bg-[#0a0a0a]/95">
           <div className="flex items-center gap-2 md:gap-3">
             <Button
               variant="outline"
@@ -1005,7 +978,7 @@ export default function Under250() {
         ) : sortedAndFilteredRestaurants.length === 0 ? (
           <div className="flex justify-center items-center py-12">
             <div className="text-gray-500 dark:text-gray-400">
-              {under250Restaurants.length === 0
+              {under250RestaurantsWithDistance.length === 0
                 ? `No restaurants with dishes under ${RUPEE_SYMBOL}250 found.`
                 : "No restaurants match the selected filters."}
             </div>
@@ -1014,16 +987,23 @@ export default function Under250() {
           sortedAndFilteredRestaurants.map((restaurant) => {
             const restaurantSlug = restaurant.slug || restaurant.name.toLowerCase().replace(/\s+/g, "-")
             return (
-              <section key={restaurant.id} className="pt-4 sm:pt-6 md:pt-8 lg:pt-10">
+              <section key={restaurant.id} className="border-b border-gray-100 pt-4 sm:pt-6 md:pt-8 lg:pt-10 dark:border-gray-800 last:border-b-0">
                 {/* Restaurant Header */}
-                <div className="flex items-start justify-between mb-3 md:mb-4 lg:mb-6">
+                <div className="mb-3 flex items-start justify-between md:mb-4 lg:mb-6">
                   <div className="flex-1">
-                    <h3 className="text-lg sm:text-xl md:text-2xl lg:text-3xl xl:text-4xl font-bold text-gray-900 dark:text-white mb-1 md:mb-2">
+                    <h3 className="mb-1 text-lg font-bold text-gray-900 dark:text-white sm:text-xl md:text-2xl lg:text-3xl">
                       {restaurant.name}
                     </h3>
-                    <div className="flex items-center gap-2 text-sm md:text-base lg:text-lg text-gray-500 dark:text-gray-400">
-                      <Clock className="h-4 w-4 md:h-5 md:w-5 lg:h-6 lg:w-6" strokeWidth={1.5} />
+                    <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400 md:text-base">
+                      <Clock className="h-4 w-4 md:h-5 md:w-5" strokeWidth={1.5} />
                       <span className="font-medium">{restaurant.deliveryTime}</span>
+                      {restaurant.distance && (
+                        <>
+                          <span className="text-gray-300">|</span>
+                          <MapPin className="h-4 w-4 md:h-5 md:w-5" strokeWidth={1.5} />
+                          <span className="font-medium">{restaurant.distance}</span>
+                        </>
+                      )}
                     </div>
                   </div>
                   <div className="flex flex-col items-end">
@@ -1056,7 +1036,7 @@ export default function Under250() {
                         return (
                           <motion.div
                             key={item.id}
-                            className="flex-shrink-0 w-[200px] sm:w-[220px] md:w-full bg-white dark:bg-[#1a1a1a] rounded-lg md:rounded-xl border border-gray-200 dark:border-gray-800 overflow-hidden cursor-pointer"
+                            className="w-[200px] flex-shrink-0 cursor-pointer overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-gray-800 dark:bg-[#1a1a1a] sm:w-[220px] md:w-full md:rounded-xl"
                             onClick={() => handleItemClick(item, restaurant)}
                             initial={{ opacity: 0, y: 20 }}
                             whileInView={{ opacity: 1, y: 0 }}

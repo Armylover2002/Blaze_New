@@ -99,8 +99,10 @@ export async function createOrUpdateFeeSettings(req, res, next) {
 
 export async function getPublicBillingSettings(req, res, next) {
   try {
-    const { feeSettings } = await billingService.getFeeSettings();
-    const activeRules = await billingService.getActiveDeliveryCommissionRules();
+    const [{ feeSettings }, activeRules] = await Promise.all([
+      billingService.getFeeSettings(),
+      billingService.getActiveDeliveryCommissionRules(),
+    ]);
     
     // Inject active commission rules into public settings response
     const enrichedSettings = {

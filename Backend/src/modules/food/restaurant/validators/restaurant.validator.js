@@ -102,8 +102,6 @@ const restaurantRegisterSchema = z.object({
     accountHolderName: z.string().optional(),
     accountType: z.string().optional(),
         estimatedDeliveryTime: z.string().optional(),
-    featuredDish: z.string().optional(),
-    offer: z.string().optional(),
     razorpayOrderId: z.string().optional(),
     razorpayPaymentId: z.string().optional(),
     razorpaySignature: z.string().optional(),
