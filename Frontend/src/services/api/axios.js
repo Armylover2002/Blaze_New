@@ -67,14 +67,12 @@ function getAccessToken(config) {
   const module = getModuleFromConfig(config);
   const key = `${module}_accessToken`;
   try {
-    // 1. Try module-specific token first
     const moduleToken = localStorage.getItem(key);
     if (moduleToken) return moduleToken;
     
-    // 2. Fallback to generic token only for non-admin modules
-    if (module !== "admin") {
-      return localStorage.getItem("accessToken") || null;
-    }
+    if (module === "admin") return localStorage.getItem("adminToken") || null;
+    if (module === "user") return localStorage.getItem("accessToken") || null;
+    
     return null;
   } catch {
     return null;
@@ -83,14 +81,11 @@ function getAccessToken(config) {
 
 function getRefreshToken(module) {
   try {
-    // 1. Try module-specific refresh token
     const moduleRefreshToken = localStorage.getItem(`${module}_refreshToken`);
     if (moduleRefreshToken) return moduleRefreshToken;
     
-    // 2. Fallback to generic refresh token only for non-admin modules
-    if (module !== "admin") {
-      return localStorage.getItem("refreshToken") || null;
-    }
+    if (module === "user") return localStorage.getItem("refreshToken") || null;
+    
     return null;
   } catch {
     return null;
@@ -207,11 +202,11 @@ apiClient.interceptors.response.use(
         try {
           localStorage.setItem(`${module}_accessToken`, newAccessToken);
           
-          // Also sync legacy and global keys for consistency across the app
           if (module === "admin") {
             localStorage.setItem("adminToken", newAccessToken);
+          } else if (module === "user") {
+            localStorage.setItem("accessToken", newAccessToken);
           }
-          localStorage.setItem("accessToken", newAccessToken);
 
           // Dispatch a custom event specifically for the module that refreshed
           window.dispatchEvent(new CustomEvent("authRefreshed", { 

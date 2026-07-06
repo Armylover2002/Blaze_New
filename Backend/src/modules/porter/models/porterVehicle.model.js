@@ -20,11 +20,7 @@ const porterVehicleSchema = new mongoose.Schema(
             required: true,
             trim: true,
             index: true,
-        },
-        icon: {
-            type: String,
-            default: 'Truck',
-            trim: true,
+            enum: ['bike', 'electric_bike', 'scooter', 'electric_scooter', 'bicycle', 'mini_truck', 'pickup', 'van', 'tempo', 'truck'],
         },
         iconUrl: {
             type: String,
@@ -60,21 +56,12 @@ const porterVehicleSchema = new mongoose.Schema(
             type: [{ type: String, enum: ['food', 'quick', 'parcel'] }],
             default: [],
         },
-        assignedDrivers: {
-            type: Number,
-            default: 0,
-            min: 0,
-        },
-        count: {
-            type: Number,
-            default: 0,
-            min: 0,
-        },
         displayOrder: {
             type: Number,
             default: 0,
             index: true,
         },
+
         isDeleted: {
             type: Boolean,
             default: false,
@@ -99,10 +86,12 @@ const porterVehicleSchema = new mongoose.Schema(
     },
 );
 
-porterVehicleSchema.index({ category: 1, status: 1 });
-porterVehicleSchema.index({ status: 1, displayOrder: 1 });
-porterVehicleSchema.index({ isDeleted: 1, status: 1, name: 1 });
-porterVehicleSchema.index({ vehicleCode: 1 }, { unique: true, partialFilterExpression: { isDeleted: false } });
+porterVehicleSchema.index({ status: 1 });
+porterVehicleSchema.index({ displayOrder: 1 });
+porterVehicleSchema.index({ category: 1 }, { unique: true, partialFilterExpression: { isDeleted: false } });
+porterVehicleSchema.index({ supportedServices: 1 });
+porterVehicleSchema.index({ vehicleCode: 1 }, { unique: true });
+porterVehicleSchema.index({ isDeleted: 1, createdAt: -1 });
 
 export const PorterVehicle = mongoose.models.PorterVehicle
     || mongoose.model('PorterVehicle', porterVehicleSchema, 'porter_vehicles');

@@ -33,9 +33,15 @@ export default function DeliverySignIn() {
   const location = useLocation()
   const searchParams = new URLSearchParams(location.search)
   const referralCode = searchParams.get("ref") || ""
-  const [formData, setFormData] = useState({
-    phone: "",
-    countryCode: "+91",
+  const [formData, setFormData] = useState(() => {
+    let initialPhone = "";
+    if (typeof window !== "undefined") {
+      initialPhone = sessionStorage.getItem("deliveryLoginPhone") || "";
+    }
+    return {
+      phone: initialPhone,
+      countryCode: "+91",
+    };
   })
   const [logoUrl, setLogoUrl] = useState(() => getAppLogo('delivery'))
 
@@ -185,6 +191,9 @@ export default function DeliverySignIn() {
       ...formData,
       phone: value,
     })
+    if (typeof window !== "undefined") {
+      sessionStorage.setItem("deliveryLoginPhone", value)
+    }
   }
 
   const handleCountryCodeChange = (value) => {

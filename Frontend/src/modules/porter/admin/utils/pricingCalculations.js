@@ -8,7 +8,7 @@ function roundAmount(n, roundOff = true) {
 }
 
 export function calculateCouponDiscount(subtotal, coupon) {
-  if (!coupon || !coupon.active) return 0;
+  if (!coupon || coupon.status !== "active") return 0;
   if (subtotal < (coupon.minOrderValue || 0)) return 0;
   let discount = 0;
   if (coupon.discountType === "percentage") {

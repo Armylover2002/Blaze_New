@@ -23,7 +23,9 @@ const cache = {
   hero: { data: new Map(), expiry: 0 },
   experience: { data: new Map(), expiry: 0 },
   offerSections: { data: null, expiry: 0 },
-  categories: { data: null, treeInfo: null, expiry: 0 }
+  categories: { data: null, treeInfo: null, expiry: 0 },
+  coupons: { data: null, expiry: 0 },
+  offers: { data: null, expiry: 0 },
 };
 
 const isExpired = (expiry) => Date.now() > expiry;
@@ -61,6 +63,10 @@ export const clearContentCache = () => {
   cache.categories.data = null;
   cache.categories.treeInfo = null;
   cache.categories.expiry = 0;
+  cache.coupons.data = null;
+  cache.coupons.expiry = 0;
+  cache.offers.data = null;
+  cache.offers.expiry = 0;
 };
 
 const toIdString = (value) => {
@@ -489,10 +495,12 @@ export const expireStaleQuickCoupons = async () => {
 };
 
 export const getQuickCoupons = async () => {
+  if (cache.coupons.data && !isExpired(cache.coupons.expiry)) {
+    return cache.coupons.data;
+  }
+
   const collection = getCollection('quick_coupons');
   if (!collection) return [];
-
-  await expireStaleQuickCoupons();
 
   const coupons = await collection
     .find({
@@ -504,9 +512,13 @@ export const getQuickCoupons = async () => {
     .sort({ updatedAt: -1, createdAt: -1 })
     .toArray();
 
-  return coupons
+  const result = coupons
     .filter((coupon) => isQuickCouponCurrentlyValid(coupon))
     .map((coupon) => enrichQuickCoupon(coupon));
+
+  cache.coupons.data = result;
+  cache.coupons.expiry = Date.now() + CACHE_TTL;
+  return result;
 };
 
 export const getAdminQuickCoupons = async (params = {}) => {
@@ -576,6 +588,7 @@ export const createAdminQuickCoupon = async (data) => {
   };
 
   const result = await collection.insertOne(coupon);
+  clearContentCache();
   return { ...coupon, _id: result.insertedId };
 };
 
@@ -604,6 +617,7 @@ export const updateAdminQuickCoupon = async (id, data) => {
     { $set: update },
     { returnDocument: 'after' }
   );
+  clearContentCache();
   return result;
 };
 
@@ -616,6 +630,7 @@ export const deleteAdminQuickCoupon = async (id) => {
   if (!objId) throw new Error('Invalid coupon ID');
 
   await collection.deleteOne({ _id: objId });
+  clearContentCache();
   return true;
 };
 
@@ -636,13 +651,22 @@ export const toggleAdminQuickCouponStatus = async (id) => {
 
   const newStatus = !existing.isActive;
   await collection.updateOne({ _id: objId }, { $set: { isActive: newStatus, updatedAt: new Date() } });
+  clearContentCache();
   return { ...existing, isActive: newStatus };
 };
 
 export const getQuickOffers = async () => {
+  if (cache.offers.data && !isExpired(cache.offers.expiry)) {
+    return cache.offers.data;
+  }
+
   const collection = getCollection('quick_offers');
   if (!collection) return [];
-  return collection.find(normalizeStatusQuery()).sort({ updatedAt: -1, createdAt: -1 }).toArray();
+
+  const result = await collection.find(normalizeStatusQuery()).sort({ updatedAt: -1, createdAt: -1 }).toArray();
+  cache.offers.data = result;
+  cache.offers.expiry = Date.now() + CACHE_TTL;
+  return result;
 };
 
 export const getQuickOfferSections = async (query = {}) => {

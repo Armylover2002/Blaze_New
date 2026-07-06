@@ -152,10 +152,12 @@ export const porterAdminApi = {
     return unwrap(response).stats || {};
   },
   createBanner: async (body, file = null) => {
+    const allowedKeys = ['title', 'type', 'target', 'priority', 'startDate', 'endDate', 'status'];
     const formData = new FormData();
-    Object.entries(body || {}).forEach(([key, value]) => {
-      if (value === undefined || value === null) return;
-      formData.append(key, String(value));
+    allowedKeys.forEach((key) => {
+      if (body?.[key] !== undefined && body?.[key] !== null && body?.[key] !== '') {
+        formData.append(key, String(body[key]));
+      }
     });
     if (file) formData.append('image', file);
     const response = await axiosInstance.post('/porter/admin/banners', formData, {
@@ -164,10 +166,12 @@ export const porterAdminApi = {
     return unwrap(response).banner;
   },
   updateBanner: async (id, body, file = null) => {
+    const allowedKeys = ['title', 'type', 'target', 'priority', 'startDate', 'endDate', 'status'];
     const formData = new FormData();
-    Object.entries(body || {}).forEach(([key, value]) => {
-      if (value === undefined || value === null) return;
-      formData.append(key, String(value));
+    allowedKeys.forEach((key) => {
+      if (body?.[key] !== undefined && body?.[key] !== null && body?.[key] !== '') {
+        formData.append(key, String(body[key]));
+      }
     });
     if (file) formData.append('image', file);
     const response = await axiosInstance.put(`/porter/admin/banners/${id}`, formData, {

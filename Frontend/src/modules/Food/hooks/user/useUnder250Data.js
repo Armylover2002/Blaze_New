@@ -11,7 +11,7 @@ export const useUnder250Data = (zoneId) => {
     try {
       setLoading(true);
       const [restRes] = await Promise.all([
-        restaurantAPI.getRestaurantsUnder250(zoneId),
+        restaurantAPI.getUnder250Restaurants(zoneId ? { zoneId } : {}),
       ]);
 
       if (restRes.data?.success) setRestaurants(restRes.data.data.restaurants || []);

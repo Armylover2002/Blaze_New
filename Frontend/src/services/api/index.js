@@ -101,7 +101,7 @@ export const api = {
 let userMeInFlight = null;
 let userMeCached = null;
 let userMeCacheTime = 0;
-const USER_ME_CACHE_MS = 3000;
+const USER_ME_CACHE_MS = 60 * 1000;
 
 const getUserMeOnce = () => {
   const now = Date.now();
@@ -530,6 +530,13 @@ export const adminAPI = {
     apiClient.patch(
       `/food/admin/restaurants/${String(id)}/status`,
       { status: status !== false },
+      { contextModule: "admin" },
+    ),
+  /** Toggle restaurant listing visibility (admin). */
+  toggleRestaurantListing: (id, isListed) =>
+    apiClient.patch(
+      `/food/admin/restaurants/${String(id)}/visibility`,
+      { isListed: Boolean(isListed) },
       { contextModule: "admin" },
     ),
   /** Update restaurant location (admin). Body includes lat/lng + address fields. */
@@ -1507,15 +1514,63 @@ export const restaurantAPI = {
     }
     return apiClient.post("/food/restaurant/register", formData);
   },
+  /** Save an onboarding step incrementally (multipart FormData). */
+  saveOnboardingStep: (step, formData) => {
+    if (!step || !formData || !(formData instanceof FormData)) {
+      return Promise.reject(new Error("Step and FormData are required"));
+    }
+    return apiClient.post(`/food/restaurant/onboarding/step/${step}`, formData);
+  },
+  /** Fetch in-progress onboarding draft by verified phone. */
+  getOnboardingDraft: (phone) => {
+    if (!phone) return Promise.reject(new Error("Phone is required"));
+    const digits = String(phone).replace(/\D/g, "").slice(-15);
+    return apiClient.get("/food/restaurant/onboarding/draft", {
+      params: { phone: digits },
+    });
+  },
   /** Public: list approved restaurants for user app */
   getRestaurants: (params = {}, config = {}) =>
     getPublicRestaurantsOnce(params, config),
+  /** Public: restaurants with dishes priced at or below ₹250 (single batched query) */
+  getUnder250Restaurants: (params = {}, config = {}) =>
+    getPublicUnder250RestaurantsOnce(params, config),
+  /** @deprecated use getUnder250Restaurants */
+  getRestaurantsUnder250: (zoneId, config = {}) =>
+    getPublicUnder250RestaurantsOnce(
+      zoneId ? { zoneId } : {},
+      config,
+    ),
   /** Public: get single approved restaurant by id or slug */
   getRestaurantById: (id, config = {}) =>
     apiClient.get(`/food/restaurant/restaurants/${String(id)}`, { ...config }),
   /** Public: get approved menu by restaurant id or slug */
   getMenuByRestaurantId: (id, config = {}) =>
     getPublicRestaurantMenuOnce(id, config),
+  /** Public: batch fetch lightweight menu sections for multiple restaurants */
+  getMenusBatch: (ids = [], config = {}) => {
+    const safeIds = (Array.isArray(ids) ? ids : [])
+      .map((id) => String(id || "").trim())
+      .filter(Boolean)
+      .slice(0, 50);
+    if (!safeIds.length) {
+      return Promise.resolve({ data: { success: true, data: { menus: {} } } });
+    }
+    const { noCache, ...axiosConfig } = config || {};
+    if (noCache) {
+      return apiClient.get("/food/restaurant/menus/batch", {
+        params: { ids: safeIds.join(",") },
+        ...axiosConfig,
+      });
+    }
+    const key = `menus-batch:${stableStringify(safeIds.sort())}`;
+    return publicMenusBatchCache.getOrCreate(key, () =>
+      apiClient.get("/food/restaurant/menus/batch", {
+        params: { ids: safeIds.join(",") },
+        ...axiosConfig,
+      }),
+    );
+  },
   /** Public: get outlet timings by restaurant id */
   getOutletTimingsByRestaurantId: (id, config = {}) =>
     getPublicRestaurantOutletTimingsOnce(id, config),
@@ -1618,10 +1673,12 @@ function createInFlightCache({ ttlMs }) {
 
 // Public user-app endpoints can be called by multiple components/effects on refresh (and React StrictMode in dev).
 // A small in-flight + short TTL cache collapses duplicate requests without changing functionality.
-const publicRestaurantsCache = createInFlightCache({ ttlMs: 3000 });
-const publicRestaurantMenuCache = createInFlightCache({ ttlMs: 3000 });
-const publicRestaurantOutletTimingsCache = createInFlightCache({ ttlMs: 3000 });
-const publicGenericGetCache = createInFlightCache({ ttlMs: 3000 });
+const publicRestaurantsCache = createInFlightCache({ ttlMs: 60 * 1000 });
+const publicRestaurantMenuCache = createInFlightCache({ ttlMs: 60 * 1000 });
+const publicRestaurantOutletTimingsCache = createInFlightCache({ ttlMs: 60 * 1000 });
+const publicGenericGetCache = createInFlightCache({ ttlMs: 60 * 1000 });
+const publicMenusBatchCache = createInFlightCache({ ttlMs: 60 * 1000 });
+const publicUnder250RestaurantsCache = createInFlightCache({ ttlMs: 60 * 1000 });
 
 export const publicGetOnce = (url, config = {}) => {
   const safeUrl = typeof url === "string" ? url.trim() : "";
@@ -1669,6 +1726,34 @@ const getPublicRestaurantsOnce = (params = {}, config = {}) => {
   return publicRestaurantsCache.getOrCreate(key, () =>
     apiClient.get("/food/restaurant/restaurants", {
       params: { limit: 1000, ...normalizedParams },
+      ...axiosConfig,
+    }),
+  );
+};
+
+const getPublicUnder250RestaurantsOnce = (params = {}, config = {}) => {
+  const { noCache, ...axiosConfig } = config || {};
+  const normalizedParams = { ...(params || {}) };
+  if (!normalizedParams.zoneId && typeof window !== "undefined") {
+    const storedZoneId = window.localStorage?.getItem("userZoneId");
+    if (storedZoneId) {
+      normalizedParams.zoneId = storedZoneId;
+    }
+  }
+  if (noCache) {
+    return apiClient.get("/food/restaurant/restaurants/under-250", {
+      params: normalizedParams,
+      ...axiosConfig,
+    });
+  }
+  const keyParams = { ...normalizedParams };
+  if (keyParams && typeof keyParams === "object") {
+    delete keyParams._ts;
+  }
+  const key = `under-250:${stableStringify(keyParams)}`;
+  return publicUnder250RestaurantsCache.getOrCreate(key, () =>
+    apiClient.get("/food/restaurant/restaurants/under-250", {
+      params: normalizedParams,
       ...axiosConfig,
     }),
   );
@@ -2288,7 +2373,7 @@ export const userAPI = {
     let inFlight = null;
     let cached = null;
     let cacheTime = 0;
-    const CACHE_MS = 3000;
+    const CACHE_MS = 60 * 1000;
     const fn = () => {
       const now = Date.now();
       if (cached && now - cacheTime < CACHE_MS) return Promise.resolve(cached);

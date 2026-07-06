@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   ChefHat, MapPin, Phone, 
   ChevronDown, ChevronUp, Package, 
-  Navigation, UserRound
+  Navigation, UserRound, Clock
 } from 'lucide-react';
 import { ActionSlider } from '@/modules/DeliveryV2/components/ui/ActionSlider';
 import { uploadAPI } from '@food/api';
@@ -92,7 +92,7 @@ export const PickupActionModal = ({
     : order?.restaurantAddress || order?.restaurant_address || order?.restaurantLocation?.address || 'Address not available';
   const restaurantPhone = isQuickOrder
     ? order?.storePhone || order?.sellerPhone || order?.seller?.phone || ''
-    : order?.restaurantPhone || order?.restaurant_phone || order?.restaurantId?.phone || '';
+    : order?.restaurantPhone || order?.restaurant_phone || order?.restaurantId?.phone || order?.restaurant?.phone || '';
   const items = order.items || [];
   const restaurantLogo = isQuickOrder
     ? order?.storeImage || order?.seller?.logo || order?.seller?.image || order?.seller?.profileImage || 'https://cdn-icons-png.flaticon.com/512/3170/3170733.png'
@@ -159,60 +159,78 @@ export const PickupActionModal = ({
         </div>
 
         {/* Restaurant Header */}
-        <div className={`flex items-start justify-between border-b border-gray-50 ${
-          compactReturnReached ? 'mb-3 pb-2' : 'mb-4 pb-3'
+        <div className={`flex items-start justify-between border-b border-gray-100 ${
+          compactReturnReached ? 'mb-4 pb-3' : 'mb-5 pb-5'
         }`}>
-          <div className="flex gap-3 min-w-0 flex-1">
+          <div className="flex gap-4 min-w-0 flex-1">
             {!compactReturnReached && (
-              <div className="w-14 h-14 bg-white rounded-2xl flex items-center justify-center shadow-lg shadow-black/5 overflow-hidden border border-gray-100 shrink-0">
+              <div className="w-16 h-16 bg-white rounded-2xl flex items-center justify-center shadow-[0_4px_12px_rgba(0,0,0,0.05)] overflow-hidden border border-gray-100 shrink-0">
                 <img src={restaurantLogo} alt="Logo" className="w-full h-full object-cover" />
               </div>
             )}
-            <div className="min-w-0">
-              <h3 className={`text-gray-950 font-bold truncate ${compactReturnReached ? 'text-lg' : 'text-xl'}`}>{primaryName}</h3>
-              {isReturnPickup && (
-                <div className="mt-1 inline-flex items-center rounded-full border border-red-200 bg-red-50 px-2.5 py-0.5 text-[9px] font-bold uppercase tracking-widest text-red-700">
-                  Return Pickup
-                </div>
-              )}
-              {mixedOrder && (
-                <div className="mt-2 inline-flex items-center rounded-full border border-red-100 bg-red-50 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-red-600">
-                  Mixed Order
-                </div>
-              )}
-              <p className="text-gray-500 text-[10px] font-bold uppercase tracking-widest flex items-center gap-1 mt-1.5">
-                {isAtPickup ? (
-                  <span className="text-green-600">Reached Location √</span>
-                ) : (
-                  <span className="text-red-500">
-                    {(distanceToTarget / 1000).toFixed(1)} km • {eta || '--'} min to {primaryDestinationLabel}
-                  </span>
+            <div className="min-w-0 flex-1 pt-0.5">
+              <div className="flex flex-wrap gap-2 items-center mb-1">
+                <h3 className={`text-gray-950 font-extrabold truncate ${compactReturnReached ? 'text-lg' : 'text-xl'}`}>{primaryName}</h3>
+                {isReturnPickup && (
+                  <div className="inline-flex items-center rounded-lg border border-red-200 bg-red-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest text-red-700">
+                    Return Pickup
+                  </div>
                 )}
-              </p>
+                {mixedOrder && (
+                  <div className="inline-flex items-center rounded-lg border border-purple-200 bg-purple-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest text-purple-700">
+                    Mixed Order
+                  </div>
+                )}
+              </div>
+              <div className="flex items-center">
+                {isAtPickup ? (
+                  <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-green-700 bg-green-50/80 border border-green-100 px-2 py-1 rounded-md w-max">
+                     <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span> Reached Location
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-3 text-xs font-bold text-gray-500">
+                    <span className="flex items-center gap-1 text-red-500 bg-red-50 px-2 py-1 rounded-md border border-red-100">
+                       <Navigation className="w-3 h-3" />
+                       {(distanceToTarget / 1000).toFixed(1)} km
+                    </span>
+                    <span className="flex items-center gap-1 text-amber-600 bg-amber-50 px-2 py-1 rounded-md border border-amber-100">
+                       <Clock className="w-3 h-3" />
+                       {eta || '--'} min
+                    </span>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
           <div className="flex gap-2 shrink-0">
-            {primaryPhone && (
-              <button
-                onClick={() => window.location.href = `tel:${primaryPhone}`}
-                className={`w-9 h-9 rounded-full flex items-center justify-center border ${
-                  isReturnPickup
-                    ? 'bg-red-50 text-red-600 border-red-100'
-                    : 'bg-green-50 text-green-600 border-green-100'
-                }`}
-              >
-                <Phone className="w-4 h-4" />
-              </button>
-            )}
+            <button
+              onClick={() => {
+                if (primaryPhone) window.location.href = `tel:${primaryPhone}`;
+                else toast.error('Phone number not available');
+              }}
+              className={`w-10 h-10 rounded-full flex items-center justify-center border ${
+                isReturnPickup
+                  ? 'bg-red-50 text-red-600 border-red-100'
+                  : 'bg-green-50 text-green-600 border-green-100'
+              }`}
+            >
+              <Phone className="w-4 h-4" />
+            </button>
             <button 
               onClick={() => window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(primaryAddress)}`, '_blank')}
-              className={`w-9 h-9 rounded-full flex items-center justify-center text-white shadow-lg ${
+              className={`w-10 h-10 rounded-full flex items-center justify-center text-white shadow-lg ${
                 isReturnPickup ? 'bg-red-600' : 'bg-gray-900'
               }`}
             >
               <Navigation className="w-4 h-4" />
             </button>
+          </div>
+        </div>
+
+        <div className="mb-4 overflow-hidden">
+          <div className="inline-flex items-center rounded-lg bg-gray-100 px-3 py-1.5 text-xs font-bold uppercase tracking-widest text-gray-800 font-mono border border-gray-200 shadow-sm whitespace-nowrap">
+            ID: {order?.orderId || order?._id}
           </div>
         </div>
 

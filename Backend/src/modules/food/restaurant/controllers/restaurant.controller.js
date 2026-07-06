@@ -14,13 +14,15 @@ import {
     getRestaurantComplaints,
     deleteRestaurantAccount,
     getRestaurantCODDeposits,
-    processRestaurantCODDeposit
+    processRestaurantCODDeposit,
+    saveOnboardingStep,
+    getOnboardingDraftByPhone
 } from '../services/restaurant.service.js';
 import { 
     getRestaurantReferralStats, 
     getRestaurantReferralDetails 
 } from '../services/restaurantReferral.service.js';
-import { validateRestaurantRegisterDto } from '../validators/restaurant.validator.js';
+import { validateRestaurantRegisterDto, validateOnboardingStepDto } from '../validators/restaurant.validator.js';
 import { sendResponse } from '../../../../utils/response.js';
 
 export const registerRestaurantController = async (req, res, next) => {
@@ -42,7 +44,39 @@ export const registerRestaurantController = async (req, res, next) => {
         }
 
         const restaurant = await registerRestaurant(validated, req.files, authUserId);
-        return sendResponse(res, 201, 'Restaurant registered successfully', { restaurant });
+        const { issueRestaurantSession } = await import('../../../../core/auth/auth.service.js');
+        const session = await issueRestaurantSession(restaurant);
+        return sendResponse(res, 201, 'Restaurant registered successfully', {
+            restaurant,
+            ...session,
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
+export const saveOnboardingStepController = async (req, res, next) => {
+    try {
+        const stepNum = req.params.step;
+        const validated = validateOnboardingStepDto(stepNum, req.body);
+        const restaurant = await saveOnboardingStep(stepNum, validated, req.files);
+        return sendResponse(res, 200, 'Onboarding step saved successfully', { restaurant });
+    } catch (error) {
+        next(error);
+    }
+};
+
+export const getOnboardingDraftController = async (req, res, next) => {
+    try {
+        const phone = req.query.phone;
+        if (!phone) {
+            return res.status(400).json({ success: false, message: 'Phone is required' });
+        }
+        const restaurant = await getOnboardingDraftByPhone(phone);
+        if (!restaurant) {
+            return res.status(404).json({ success: false, message: 'No onboarding draft found' });
+        }
+        return sendResponse(res, 200, 'Onboarding draft fetched successfully', { restaurant });
     } catch (error) {
         next(error);
     }
@@ -52,6 +86,16 @@ export const listApprovedRestaurantsController = async (req, res, next) => {
     try {
         const data = await listApprovedRestaurants(req.query);
         return sendResponse(res, 200, 'Restaurants fetched successfully', data);
+    } catch (error) {
+        next(error);
+    }
+};
+
+export const listUnder250RestaurantsController = async (req, res, next) => {
+    try {
+        const { listUnder250Restaurants } = await import('../services/under250.service.js');
+        const data = await listUnder250Restaurants(req.query);
+        return sendResponse(res, 200, 'Under ₹250 restaurants fetched successfully', data);
     } catch (error) {
         next(error);
     }

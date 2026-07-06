@@ -1,21 +1,7 @@
 import { api, restaurantAPI } from "@food/api"
-const debugLog = (...args) => {}
-const debugWarn = (...args) => {}
+import { loadOnboardingDraft } from "@food/utils/onboardingDraftStorage"
+
 const debugError = (...args) => {}
-
-
-const getOnboardingStorageKey = () => {
-    try {
-      const userStr = localStorage.getItem("restaurant_user")
-      if (userStr) {
-        const user = JSON.parse(userStr)
-        const userId = user._id || user.id
-        if (userId) return `restaurant_onboarding_data_${userId}`
-      }
-    } catch (e) {}
-    return "restaurant_onboarding_data"
-}
-const ONBOARDING_STORAGE_KEY = getOnboardingStorageKey()
 
 const hasUsableLocation = (location) => {
   if (!location || typeof location !== "object") return false
@@ -187,6 +173,11 @@ export const isRestaurantOnboardingComplete = (restaurant) => {
     return false
   }
 
+  // In-progress onboarding is not complete
+  if (restaurant?.status === "onboarding") {
+    return false
+  }
+
   // Approved restaurants should never be forced into onboarding again.
   if (restaurant?.status === "approved") {
     return true
@@ -278,15 +269,14 @@ export const checkOnboardingStatus = async () => {
     // No onboarding data, start from step 1
     return 1
   } catch (err) {
-    // If API call fails, check localStorage
+    // If API call fails, check session draft storage
     try {
-      const localData = localStorage.getItem(getOnboardingStorageKey())
-      if (localData) {
-        const parsed = JSON.parse(localData)
+      const parsed = loadOnboardingDraft()
+      if (parsed) {
         return parsed.currentStep || 1
       }
     } catch (localErr) {
-      debugError("Failed to check localStorage:", localErr)
+      debugError("Failed to check onboarding draft storage:", localErr)
     }
     // Default to step 1 if everything fails
     return 1

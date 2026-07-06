@@ -1,7 +1,7 @@
 import { Outlet, useLocation, useNavigate } from "react-router-dom"
 import { useEffect, useState, createContext, useContext } from "react"
 import { ProfileProvider } from "@food/context/ProfileContext"
-import { loadBusinessSettings, setAppType } from "@common/utils/businessSettings"
+import { setAppType } from "@common/utils/businessSettings"
 import LocationPrompt from "./LocationPrompt"
 import { CartProvider } from "@food/context/CartContext"
 import { OrdersProvider } from "@food/context/OrdersContext"
@@ -111,9 +111,7 @@ export default function UserLayout({ children }) {
   const location = useLocation()
 
   useEffect(() => {
-    // Initialize user app settings and favicon
     setAppType('user')
-    loadBusinessSettings()
   }, [])
 
   useEffect(() => {
@@ -172,10 +170,10 @@ export default function UserLayout({ children }) {
                   {/* <Navbar /> */}
                   {/* Desktop Navbar - Hidden on mobile, visible on medium+ screens */}
                   <div className="hidden md:block">
-                    {showFoodBottomNav && <DesktopNavbar showLogo={!isUnder250} />}
+                    {showFoodBottomNav && <DesktopNavbar showLogo={true} />}
                   </div>
                   <LocationPrompt />
-                  <main className={showFoodBottomNav ? "md:pt-40" : ""}>
+                  <main className={showFoodBottomNav ? "md:pt-[8.75rem]" : ""}>
                     {children || <Outlet />}
                   </main>
                   {showFoodBottomNav && <BottomNavigation />}

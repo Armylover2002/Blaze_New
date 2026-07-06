@@ -4,7 +4,7 @@ import { ChevronDown } from 'lucide-react';
 import { ActionSlider } from '@/modules/DeliveryV2/components/ui/ActionSlider';
 import { useDeliveryStore } from '@/modules/DeliveryV2/store/useDeliveryStore';
 import { getHaversineDistance } from '@/modules/DeliveryV2/utils/geo';
-import { normalizePickupPoints, isMixedOrder, isReturnPickupTrip, getReturnPickupStopLabels } from '@/modules/DeliveryV2/utils/orderRouting';
+import { normalizePickupPoints, isMixedOrder, isReturnPickupTrip, getReturnPickupStopLabels, formatDeliveryAddressText } from '@/modules/DeliveryV2/utils/orderRouting';
 import { RenderNewOrder } from './renderers/NewOrderRenderers';
 
 /**

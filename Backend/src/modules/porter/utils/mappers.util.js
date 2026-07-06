@@ -1,86 +1,62 @@
+import { normalizeBannerType, normalizeBannerTarget } from '../validators/banner.validator.js';
+
 const toId = (doc) => (doc?._id ? String(doc._id) : doc?.id ? String(doc.id) : '');
 
-export const mapZone = (doc = {}, stats = {}) => ({
+const generateFallbackZoneCode = (name = '', id = '') => {
+    let prefix = name.replace(/[^a-zA-Z]/g, '').substring(0, 3).toUpperCase();
+    if (prefix.length < 3) prefix = prefix.padEnd(3, 'X');
+    const suffix = id.substring(id.length - 3).toUpperCase();
+    return `${prefix}${suffix}`;
+};
+
+export const mapZone = (doc = {}) => ({
     id: toId(doc),
+    zoneCode: doc.zoneCode || generateFallbackZoneCode(doc.name, toId(doc)),
     name: doc.name || '',
-    city: doc.city || '',
-    pincode: doc.pincode || '',
+    country: doc.country || 'India',
+    unit: doc.unit || 'kilometer',
     status: doc.status || 'inactive',
-    coverageKm: Number(doc.coverageKm || 0),
-    description: doc.description || '',
-    polygon: doc.polygon || (Array.isArray(doc.coordinates) && doc.coordinates.length
-        ? `${doc.coordinates.length}-point polygon`
-        : 'No area selected'),
-    coordinates: Array.isArray(doc.coordinates)
-        ? doc.coordinates.map((c) => ({
-            lat: Number(c.lat ?? c.latitude),
-            lng: Number(c.lng ?? c.longitude),
+    coordinates: Array.isArray(doc.geometry?.coordinates?.[0])
+        ? doc.geometry.coordinates[0].map(([lng, lat]) => ({
+            lat: Number(lat),
+            lng: Number(lng),
         }))
         : [],
     displayOrder: Number(doc.displayOrder || 0),
-    orders: Number(stats.orders || 0),
-    drivers: Number(stats.drivers || 0),
-    vehicles: Number(stats.vehicles || 0),
     createdAt: doc.createdAt,
     updatedAt: doc.updatedAt,
 });
 
-export const mapVehicle = (doc = {}, pricing = null) => {
-    const base = {
+
+export const mapVehicle = (doc = {}) => {
+    return {
         id: toId(doc),
         vehicleCode: doc.vehicleCode || '',
         name: doc.name || '',
         category: doc.category || '',
-        icon: doc.icon || 'Truck',
-        iconUrl: doc.iconUrl || '',
-        image: doc.iconUrl || doc.image || '',
         description: doc.description || '',
+        iconUrl: doc.iconUrl || '',
         minWeight: Number(doc.minWeight || 0),
         maxWeight: Number(doc.maxWeight || 0),
-        status: doc.status || 'inactive',
         supportedServices: Array.isArray(doc.supportedServices) ? doc.supportedServices : [],
-        assignedDrivers: Number(doc.assignedDrivers || 0),
-        count: Number(doc.count || 0),
+        status: doc.status || 'inactive',
         displayOrder: Number(doc.displayOrder || 0),
-        pricingConfigured: false,
-        enableDistanceCharges: true,
-        basePrice: 0,
-        baseDistance: 2,
-        distancePrice: 10,
-        serviceTax: 5,
-        commissionType: 'Percentage',
-        commissionValue: 10,
         createdAt: doc.createdAt,
         updatedAt: doc.updatedAt,
     };
-
-    if (!pricing) return base;
-
-    const configured = pricing.pricingConfigured !== false
-        && pricing.basePrice != null
-        && Number(pricing.basePrice) >= 0;
-
-    return {
-        ...base,
-        pricingConfigured: configured,
-        enableDistanceCharges: pricing.enableDistanceCharges !== false,
-        basePrice: Number(pricing.basePrice || 0),
-        baseDistance: Number(pricing.baseDistance || 0),
-        distancePrice: Number(pricing.distancePrice || 0),
-        serviceTax: Number(pricing.serviceTax || 0),
-        commissionType: pricing.commissionType || 'Percentage',
-        commissionValue: Number(pricing.commissionValue || 0),
-        description: pricing.description || base.description,
-        status: pricing.status || base.status,
-        pricingId: toId(pricing),
-        vehicleId: toId(doc),
-    };
 };
+
+export const mapPublicVehicle = (doc = {}) => ({
+    id: toId(doc),
+    name: doc.name || '',
+    iconUrl: doc.iconUrl || '',
+    maxWeight: Number(doc.maxWeight || 0),
+    description: doc.description || '',
+});
 
 export const mapPricing = (doc = {}, vehicle = null) => ({
     id: toId(doc),
     vehicleId: toId(doc.vehicleId || vehicle),
-    zoneId: doc.zoneId ? String(doc.zoneId) : null,
     enableDistanceCharges: doc.enableDistanceCharges !== false,
     basePrice: Number(doc.basePrice || 0),
     baseDistance: Number(doc.baseDistance || 0),
@@ -90,13 +66,118 @@ export const mapPricing = (doc = {}, vehicle = null) => ({
     commissionValue: Number(doc.commissionValue || 0),
     status: doc.status || 'active',
     description: doc.description || '',
-    pricingConfigured: doc.pricingConfigured !== false,
-    vehicle: vehicle ? { id: toId(vehicle), name: vehicle.name, category: vehicle.category } : null,
+    pricingConfigured: true,
+    vehicle: vehicle ? {
+        id: toId(vehicle),
+        name: vehicle.name || '',
+        category: vehicle.category || '',
+        iconUrl: vehicle.iconUrl || '',
+    } : null,
     createdAt: doc.createdAt,
     updatedAt: doc.updatedAt,
 });
 
-export const mapCoupon = (doc = {}) => ({
+export const mapVehiclePricingRow = (vehicleDoc = {}, pricingDoc = null) => {
+    const vehicle = {
+        id: toId(vehicleDoc),
+        name: vehicleDoc.name || '',
+        category: vehicleDoc.category || '',
+        iconUrl: vehicleDoc.iconUrl || '',
+    };
+
+    if (!pricingDoc) {
+        return {
+            id: null,
+            vehicleId: vehicle.id,
+            enableDistanceCharges: true,
+            basePrice: null,
+            baseDistance: null,
+            distancePrice: null,
+            serviceTax: null,
+            commissionType: null,
+            commissionValue: null,
+            status: null,
+            description: '',
+            pricingConfigured: false,
+            vehicle,
+            name: vehicle.name,
+            category: vehicle.category,
+            iconUrl: vehicle.iconUrl,
+        };
+    }
+
+    return {
+        id: toId(pricingDoc),
+        vehicleId: toId(pricingDoc.vehicleId),
+        enableDistanceCharges: pricingDoc.enableDistanceCharges !== false,
+        basePrice: Number(pricingDoc.basePrice || 0),
+        baseDistance: Number(pricingDoc.baseDistance || 0),
+        distancePrice: Number(pricingDoc.distancePrice || 0),
+        serviceTax: Number(pricingDoc.serviceTax || 0),
+        commissionType: pricingDoc.commissionType || 'Percentage',
+        commissionValue: Number(pricingDoc.commissionValue || 0),
+        status: pricingDoc.status || 'active',
+        description: pricingDoc.description || '',
+        pricingConfigured: true,
+        vehicle,
+        name: vehicle.name,
+        category: vehicle.category,
+        iconUrl: vehicle.iconUrl,
+        createdAt: pricingDoc.createdAt,
+        updatedAt: pricingDoc.updatedAt,
+    };
+};
+
+export const buildRelationMaps = (zones = [], vehicles = []) => {
+    const zoneMap = {};
+    const vehicleMap = {};
+
+    zones.forEach((zone) => {
+        zoneMap[toId(zone)] = { id: toId(zone), name: zone.name || '' };
+    });
+
+    vehicles.forEach((vehicle) => {
+        vehicleMap[toId(vehicle)] = {
+            id: toId(vehicle),
+            name: vehicle.name || '',
+            category: vehicle.category || '',
+        };
+    });
+
+    return { zoneMap, vehicleMap };
+};
+
+const mapCouponZoneRefs = (zoneIds = [], zoneMap = {}, legacyZones = []) => {
+    if (zoneIds?.length) {
+        return zoneIds.map((zoneId) => {
+            const key = toId(zoneId);
+            return zoneMap[key] || { id: key, name: '' };
+        });
+    }
+
+    if (Array.isArray(legacyZones) && legacyZones.length && !legacyZones.includes('All Zones')) {
+        return legacyZones.map((name) => ({ id: '', name: String(name) }));
+    }
+
+    return [];
+};
+
+const mapCouponVehicleRefs = (vehicleIds = [], vehicleMap = {}, legacyVehicleTypes = []) => {
+    if (vehicleIds?.length) {
+        return vehicleIds.map((vehicleId) => {
+            const key = toId(vehicleId);
+            return vehicleMap[key] || { id: key, name: '', category: '' };
+        });
+    }
+
+    if (Array.isArray(legacyVehicleTypes) && legacyVehicleTypes.length && !legacyVehicleTypes.includes('All')) {
+        return legacyVehicleTypes.map((name) => ({ id: '', name: String(name), category: '' }));
+    }
+
+    return [];
+};
+
+export const mapCoupon = (doc = {}, zoneMap = {}, vehicleMap = {}) => ({
     id: toId(doc),
     code: doc.code || '',
     name: doc.name || '',
@@ -112,40 +193,85 @@ export const mapCoupon = (doc = {}) => ({
     validUntil: doc.validUntil,
     firstOrderOnly: Boolean(doc.firstOrderOnly),
     newCustomerOnly: Boolean(doc.newCustomerOnly),
-    active: doc.active !== false,
     autoApply: Boolean(doc.autoApply),
-    zones: Array.isArray(doc.zones) ? doc.zones : ['All Zones'],
-    vehicleTypes: Array.isArray(doc.vehicleTypes) ? doc.vehicleTypes : ['All'],
-    customerSegment: doc.customerSegment || 'All Customers',
+    zones: mapCouponZoneRefs(doc.zoneIds, zoneMap, doc.zones),
+    vehicles: mapCouponVehicleRefs(doc.vehicleIds, vehicleMap, doc.vehicleTypes),
     status: doc.status || 'inactive',
-    image: doc.image?.url || doc.image || null,
-    banner: doc.banner?.url || doc.banner || null,
     campaignRevenue: Number(doc.campaignRevenue || 0),
     totalDiscountGiven: Number(doc.totalDiscountGiven || 0),
     createdAt: doc.createdAt,
     updatedAt: doc.updatedAt,
 });
 
-export const mapBanner = (doc = {}) => ({
-    id: toId(doc),
-    title: doc.title || '',
-    subtitle: doc.subtitle || '',
-    type: doc.redirectType || doc.type || 'promotional',
-    target: doc.redirectValue || doc.target || 'Home',
-    redirectType: doc.redirectType || doc.type || 'promotional',
-    redirectValue: doc.redirectValue || doc.target || 'Home',
-    priority: Number(doc.priority || 0),
-    displayOrder: Number(doc.displayOrder ?? doc.priority ?? 0),
-    image: doc.image?.url || doc.image || '',
-    imagePublicId: doc.image?.publicId || null,
-    link: doc.link || doc.linkUrl || '',
-    linkUrl: doc.link || doc.linkUrl || '',
-    startDate: doc.startDate,
-    endDate: doc.endDate,
-    status: doc.status || 'inactive',
-    createdAt: doc.createdAt,
-    updatedAt: doc.updatedAt,
-});
+export const mapBanner = (doc = {}) => {
+    const now = Date.now();
+    const startDate = doc.startDate ? new Date(doc.startDate) : null;
+    const endDate = doc.endDate ? new Date(doc.endDate) : null;
+    let status = doc.status || 'inactive';
+
+    if (endDate && endDate.getTime() < now) {
+        status = 'expired';
+    } else if (startDate && startDate.getTime() > now && status !== 'inactive') {
+        status = 'scheduled';
+    } else if (status === 'scheduled' && startDate && endDate && startDate.getTime() <= now && endDate.getTime() >= now) {
+        status = 'active';
+    }
+
+    const type = normalizeBannerType(doc.type || doc.redirectType);
+    const target = normalizeBannerTarget(doc.target || doc.redirectValue);
+
+    return {
+        id: toId(doc),
+        title: doc.title || '',
+        type,
+        target,
+        priority: Number(doc.priority || 1),
+        image: doc.image?.url || (typeof doc.image === 'string' ? doc.image : ''),
+        startDate: doc.startDate,
+        endDate: doc.endDate,
+        status,
+        createdAt: doc.createdAt,
+        updatedAt: doc.updatedAt,
+    };
+};
+
+export const mapPublicBanner = (doc = {}) => {
+    const mapped = mapBanner(doc);
+    return {
+        id: mapped.id,
+        title: mapped.title,
+        subtitle: doc.subtitle || '',
+        image: mapped.image,
+        redirectType: doc.redirectType || mapped.type || 'promotional',
+        redirectValue: doc.redirectValue || mapped.target || '',
+    };
+};
+
+export const mapPublicCoupon = (doc = {}) => {
+    let applicableVehicles = [];
+    if (doc.vehicleIds && doc.vehicleIds.length > 0) {
+        applicableVehicles = doc.vehicleIds.map(v => (v.name || v)).filter(Boolean);
+    }
+
+    return {
+        id: toId(doc),
+        code: doc.code || '',
+        name: doc.name || '',
+        description: doc.description || '',
+        discountType: String(doc.discountType).toLowerCase() === 'flat' ? 'Flat' : 'Percentage',
+        discountValue: Number(doc.discountValue || 0),
+        maxDiscount: Number(doc.maxDiscount || 0),
+        minOrderValue: Number(doc.minOrderValue || 0),
+        perUserLimit: Number(doc.perUserLimit || 1),
+        validFrom: doc.validFrom,
+        validUntil: doc.validUntil,
+        firstOrderOnly: Boolean(doc.firstOrderOnly),
+        newCustomerOnly: Boolean(doc.newCustomerOnly),
+        autoApply: Boolean(doc.autoApply),
+        status: doc.status || 'inactive',
+        applicableVehicles,
+    };
+};
 
 export const mapPorterUser = (doc = {}, extras = {}) => ({
     id: toId(doc),
@@ -154,12 +280,15 @@ export const mapPorterUser = (doc = {}, extras = {}) => ({
     email: doc.email || '',
     phone: doc.phone ? (doc.countryCode ? `${doc.countryCode} ${doc.phone}` : doc.phone) : '',
     zone: extras.zone || '',
-    address: extras.address || [
-        doc.address?.street,
-        doc.address?.city,
-        doc.address?.state,
-        doc.address?.zipCode,
-    ].filter(Boolean).join(', '),
+    address: extras.address || (() => {
+        const main = [doc.address?.street, doc.address?.city, doc.address?.state, doc.address?.zipCode].filter(Boolean).join(', ');
+        if (main) return main;
+        if (doc.addresses && doc.addresses.length > 0) {
+            const addr = doc.addresses[0];
+            return [addr.street, addr.city, addr.state, addr.zipCode].filter(Boolean).join(', ');
+        }
+        return '';
+    })(),
     totalOrders: Number(extras.totalOrders || 0),
     completedOrders: Number(extras.completedOrders || 0),
     cancelledOrders: Number(extras.cancelledOrders || 0),

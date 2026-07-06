@@ -4,13 +4,18 @@ import { Routes, Route, Navigate, Link, useLocation, useNavigate } from "react-r
 import { Phone, Lock, ArrowRight, ArrowLeft, ShieldCheck, Loader2, UserRound } from "lucide-react"
 import { toast } from "sonner"
 import { authAPI, userAPI } from "@food/api"
-import { isModuleAuthenticated, setAuthData } from "@food/utils/auth"
+import { isModuleAuthenticated, setAuthData, clearModuleAuth } from "@food/utils/auth"
 import { loadBusinessSettings, getCachedSettings, getAppLogo, getCompanyName, setAppType } from "@common/utils/businessSettings"
 
 export default function UnifiedOTPFastLogin() {
   const RESEND_COOLDOWN_SECONDS = 60
   const [loginType, setLoginType] = useState("phone") // "phone" | "email"
-  const [phoneNumber, setPhoneNumber] = useState("")
+  const [phoneNumber, setPhoneNumber] = useState(() => {
+    if (typeof window !== "undefined") {
+      return sessionStorage.getItem("loginPhoneNumber") || ""
+    }
+    return ""
+  })
   const [emailAddress, setEmailAddress] = useState("")
   const [otp, setOtp] = useState("")
   const [step, setStep] = useState(1)
@@ -24,6 +29,7 @@ export default function UnifiedOTPFastLogin() {
   const [showNameInput, setShowNameInput] = useState(false)
   const [name, setName] = useState("")
   const [nameError, setNameError] = useState("")
+  const [tempAuthData, setTempAuthData] = useState(null)
   const [logoUrl, setLogoUrl] = useState(() => getAppLogo('user'))
   const [companyName, setCompanyName] = useState(() => getCompanyName())
   const location = useLocation()
@@ -59,6 +65,10 @@ export default function UnifiedOTPFastLogin() {
     setShowNameInput(false)
     setName("")
     setNameError("")
+    if (tempAuthData) {
+      clearModuleAuth("user")
+      setTempAuthData(null)
+    }
   }
 
   const normalizedPhone = () => {
@@ -212,8 +222,7 @@ export default function UnifiedOTPFastLogin() {
       const needsName = data.isNewUser === true || !hasName
 
       if (needsName) {
-        setAuthData("user", accessToken, user, refreshToken)
-        window.dispatchEvent(new Event("userAuthChanged"))
+        setTempAuthData({ accessToken, user, refreshToken })
         setShowNameInput(true)
         setLoading(false)
         submitting.current = false
@@ -261,6 +270,9 @@ export default function UnifiedOTPFastLogin() {
     setNameError("")
 
     try {
+      if (tempAuthData?.accessToken) {
+         setAuthData("user", tempAuthData.accessToken, tempAuthData.user, tempAuthData.refreshToken)
+      }
       const response = await userAPI.updateProfile({ name: trimmedName })
       const updatedUser =
         response?.data?.data?.user ||
@@ -280,6 +292,9 @@ export default function UnifiedOTPFastLogin() {
       toast.success("Profile saved successfully!")
       navigate(redirectTo, { replace: true })
     } catch (err) {
+      if (tempAuthData?.accessToken) {
+         clearModuleAuth("user")
+      }
       const status = err?.response?.status
       let msg = err?.response?.data?.message || err?.response?.data?.error || err?.message || "Failed to save your name."
       if (status === 401) {
@@ -326,7 +341,16 @@ export default function UnifiedOTPFastLogin() {
         {/* Back Button */}
         <button 
           type="button"
-          onClick={() => navigate("/")} 
+          onClick={() => {
+            if (showNameInput) {
+               setStep(1);
+               clearNameFlow();
+            } else if (step === 2) {
+               setStep(1);
+            } else {
+               navigate("/");
+            }
+          }} 
           className="absolute top-6 left-6 z-20 p-2 bg-white/20 hover:bg-white/30 active:scale-95 rounded-full backdrop-blur-sm transition-all cursor-pointer"
         >
           <ArrowLeft className="w-5 h-5 text-white" strokeWidth={3} />
@@ -375,68 +399,31 @@ export default function UnifiedOTPFastLogin() {
           <form onSubmit={showNameInput ? handleSubmitName : step === 1 ? handleSendOTP : handleVerifyOTP} className="space-y-5">
             {step === 1 ? (
               <div className="space-y-6">
-                {/* Clean, tabbed UI switcher */}
-                <div className="flex border-b border-gray-100 dark:border-gray-800 mb-2">
-                  <button
-                    type="button"
-                    onClick={() => setLoginType("phone")}
-                    className={`flex-1 pb-3 text-sm font-black transition-all border-b-2 cursor-pointer text-center ${
-                      loginType === "phone"
-                        ? "border-primary-orange text-primary-orange"
-                        : "border-transparent text-gray-400 hover:text-gray-600"
-                    }`}
-                  >
-                    Phone Number
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setLoginType("email")}
-                    className={`flex-1 pb-3 text-sm font-black transition-all border-b-2 cursor-pointer text-center ${
-                      loginType === "email"
-                        ? "border-primary-orange text-primary-orange"
-                        : "border-transparent text-gray-400 hover:text-gray-600"
-                    }`}
-                  >
-                    Email Address
-                  </button>
-                </div>
-
                 <div className="space-y-4">
-                  {loginType === "phone" ? (
-                    <div className="relative group">
-                      <div className="absolute inset-y-0 left-0 pl-1 flex items-center pointer-events-none">
-                        <Phone className="w-5 h-5 text-gray-400 group-focus-within:text-primary-orange transition-colors" />
-                      </div>
-                      <div className="absolute left-8 inset-y-0 flex items-center pointer-events-none">
-                         <span className="text-sm font-bold text-gray-900 dark:text-white border-r border-gray-200 dark:border-gray-800 pr-3">+91</span>
-                      </div>
-                      <input
-                        type="tel"
-                        required
-                        autoFocus
-                        value={phoneNumber}
-                        onChange={(e) => setPhoneNumber(e.target.value.replace(/\D/g, "").slice(0, 10))}
-                        maxLength={10}
-                        className="block w-full pl-20 pr-4 py-3 bg-transparent text-gray-900 dark:text-white border-b-2 border-gray-100 dark:border-gray-800 focus:border-primary-orange outline-none transition-all placeholder:text-gray-300 font-bold text-lg"
-                        placeholder="Phone number"
-                      />
+                  <div className="flex items-center border-b-2 border-gray-100 dark:border-gray-800 focus-within:border-primary-orange transition-all py-2 group">
+                    <div className="pl-1 flex items-center pointer-events-none">
+                      <Phone className="w-5 h-5 text-gray-400 group-focus-within:text-primary-orange transition-colors" />
                     </div>
-                  ) : (
-                    <div className="relative group">
-                      <div className="absolute inset-y-0 left-0 pl-1 flex items-center pointer-events-none">
-                        <UserRound className="w-5 h-5 text-gray-400 group-focus-within:text-primary-orange transition-colors" />
-                      </div>
-                      <input
-                        type="email"
-                        required
-                        autoFocus
-                        value={emailAddress}
-                        onChange={(e) => setEmailAddress(e.target.value)}
-                        className="block w-full pl-10 pr-4 py-3 bg-transparent text-gray-900 dark:text-white border-b-2 border-gray-100 dark:border-gray-800 focus:border-primary-orange outline-none transition-all placeholder:text-gray-300 font-bold text-lg"
-                        placeholder="Email address"
-                      />
+                    <div className="flex items-center pointer-events-none pl-2">
+                       <span className="text-lg font-bold text-gray-900 dark:text-white border-r border-gray-200 dark:border-gray-800 pr-3">+91</span>
                     </div>
-                  )}
+                    <input
+                      type="tel"
+                      required
+                      autoFocus
+                      value={phoneNumber}
+                      onChange={(e) => {
+                        const val = e.target.value.replace(/\D/g, "").slice(0, 10)
+                        setPhoneNumber(val)
+                        if (typeof window !== "undefined") {
+                          sessionStorage.setItem("loginPhoneNumber", val)
+                        }
+                      }}
+                      maxLength={10}
+                      className="block w-full pl-3 pr-4 py-1 bg-transparent text-gray-900 dark:text-white outline-none placeholder:text-gray-300 font-bold text-lg"
+                      placeholder="Phone number"
+                    />
+                  </div>
                 </div>
                 <p className="text-[11px] text-gray-400 text-center leading-relaxed">
                   We will send success notifications and order updates via verification code
@@ -451,7 +438,7 @@ export default function UnifiedOTPFastLogin() {
                   <div className="flex-1">
                     <p className="text-[10px] uppercase font-black text-gray-400 tracking-widest leading-none mb-1">Verified Account</p>
                     <p className="text-sm font-black text-gray-900 dark:text-white">
-                      {loginType === "email" ? emailAddress : `+91 ${phoneNumber}`}
+                      +91 {phoneNumber}
                     </p>
                   </div>
                   <button type="button" onClick={handleEditNumber} className="text-xs text-primary-orange font-black underline cursor-pointer">
@@ -497,7 +484,7 @@ export default function UnifiedOTPFastLogin() {
                       <div className="flex-1">
                           <p className="text-[10px] uppercase font-black text-gray-400 tracking-widest leading-none mb-1">Sent to</p>
                           <p className="text-sm font-black text-gray-900 dark:text-white">
-                            {loginType === "email" ? emailAddress : `+91 ${phoneNumber}`}
+                            +91 {phoneNumber}
                           </p>
                       </div>
                       <button type="button" onClick={handleEditNumber} className="text-xs text-primary-orange font-black underline cursor-pointer">Edit</button>
@@ -588,12 +575,14 @@ export default function UnifiedOTPFastLogin() {
           </form>
         </div>
 
-        <div className="mt-6 text-center space-y-2">
-           <p className="text-[10px] text-gray-400 font-bold uppercase tracking-[0.2em] leading-relaxed">
-             By continuing, you agree to our <br />
-             <Link to="/food/user/profile/terms" className="text-gray-900 dark:text-white underline cursor-pointer hover:text-primary-orange transition-colors">Terms of Service</Link> & <Link to="/food/user/profile/privacy" className="text-gray-900 dark:text-white underline cursor-pointer hover:text-primary-orange transition-colors">Privacy Policy</Link>
-           </p>
-        </div>
+        {step === 1 && (
+          <div className="mt-6 text-center space-y-2">
+             <p className="text-[10px] text-gray-400 font-bold uppercase tracking-[0.2em] leading-relaxed">
+               By continuing, you agree to our <br />
+               <Link to="/food/user/profile/terms" className="text-gray-900 dark:text-white underline cursor-pointer hover:text-primary-orange transition-colors">Terms And Condition</Link> & <Link to="/food/user/profile/privacy" className="text-gray-900 dark:text-white underline cursor-pointer hover:text-primary-orange transition-colors">Privacy Policy</Link>
+             </p>
+          </div>
+        )}
       </div>
     </div>
   )

@@ -1,6 +1,6 @@
 import axiosInstance from './axios';
 
-const DEFAULT_CACHE_TTL_MS = 30 * 1000; // 30 seconds
+const DEFAULT_CACHE_TTL_MS = 60 * 1000; // 60 seconds
 const apiCache = new Map();
 const inFlightRequests = new Map();
 

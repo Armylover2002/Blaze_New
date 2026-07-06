@@ -281,35 +281,35 @@ export const useFoodHomeData = ({
       setLoadingMenuCategories(true);
       try {
         const categoryMap = new Map();
-        for (let i = 0; i < restaurantIds.length; i += 4) {
-          const batch = restaurantIds.slice(i, i + 4);
-          const res = await Promise.all(batch.map(async id => {
-            if (menuUnionCacheRef.current.has(id)) return menuUnionCacheRef.current.get(id);
-            try {
-              const r = await restaurantAPI.getMenuByRestaurantId(id);
-              const m = r.data?.data?.menu || null;
-              menuUnionCacheRef.current.set(id, m);
-              return m;
-            } catch { return null; }
-          }));
+        const uncachedIds = restaurantIds.filter((id) => !menuUnionCacheRef.current.has(id));
+
+        if (uncachedIds.length > 0) {
+          const batchRes = await restaurantAPI.getMenusBatch(uncachedIds);
           if (requestSeq !== menuUnionRequestSeqRef.current) return;
-          
-          res.forEach(menu => {
-            if (!menu?.sections) return;
-            menu.sections.forEach(section => {
-              const slug = slugifyCategory(section.name);
-              if (!slug) return;
-              if (!categoryMap.has(slug)) {
-                categoryMap.set(slug, {
-                  id: slug,
-                  name: section.name,
-                  slug,
-                  image: normalizeImageUrl(section.items?.[0]?.image) || "",
-                });
-              }
-            });
+
+          const menus = batchRes.data?.data?.menus || batchRes.data?.menus || {};
+          Object.entries(menus).forEach(([id, menu]) => {
+            menuUnionCacheRef.current.set(id, menu);
           });
         }
+
+        restaurantIds.forEach((id) => {
+          const menu = menuUnionCacheRef.current.get(id);
+          if (!menu?.sections) return;
+          menu.sections.forEach((section) => {
+            const slug = slugifyCategory(section.name);
+            if (!slug) return;
+            if (!categoryMap.has(slug)) {
+              categoryMap.set(slug, {
+                id: slug,
+                name: section.name,
+                slug,
+                image: normalizeImageUrl(section.image || section.items?.[0]?.image) || "",
+              });
+            }
+          });
+        });
+
         setMenuCategories(Array.from(categoryMap.values()));
       } finally {
         if (requestSeq === menuUnionRequestSeqRef.current) setLoadingMenuCategories(false);

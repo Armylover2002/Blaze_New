@@ -1,13 +1,6 @@
 import mongoose from 'mongoose';
 import { actionPerformerSchema } from '../../../core/models/actionPerformer.schema.js';
 
-const coordinateSchema = new mongoose.Schema(
-    {
-        lat: { type: Number, required: true },
-        lng: { type: Number, required: true },
-    },
-    { _id: false },
-);
 
 const porterZoneSchema = new mongoose.Schema(
     {
@@ -15,49 +8,40 @@ const porterZoneSchema = new mongoose.Schema(
             type: String,
             required: true,
             trim: true,
+            unique: true,
+        },
+        zoneCode: {
+            type: String,
+            unique: true,
             index: true,
         },
-        city: {
+        country: {
             type: String,
-            required: true,
+            default: 'India',
             trim: true,
             index: true,
         },
-        pincode: {
+        unit: {
             type: String,
-            required: true,
-            trim: true,
-            index: true,
+            default: 'kilometer',
+            enum: ['kilometer', 'mile'],
         },
+
         status: {
             type: String,
             enum: ['active', 'inactive'],
             default: 'active',
             index: true,
         },
-        coverageKm: {
-            type: Number,
-            default: 0,
-            min: 0,
-        },
-        description: {
-            type: String,
-            default: '',
-            trim: true,
-        },
-        polygon: {
-            type: String,
-            default: '',
-            trim: true,
-        },
-        coordinates: {
-            type: [coordinateSchema],
-            default: [],
-            validate: {
-                validator(v) {
-                    return !Array.isArray(v) || v.length === 0 || v.length >= 3;
-                },
-                message: 'Zone must have at least 3 coordinates when defined.',
+        geometry: {
+            type: {
+                type: String,
+                enum: ['Polygon'],
+                required: true,
+            },
+            coordinates: {
+                type: [[[Number]]], // Array of arrays of arrays of numbers: [[[lng, lat]]]
+                required: true,
             },
         },
         displayOrder: {
@@ -89,9 +73,41 @@ const porterZoneSchema = new mongoose.Schema(
     },
 );
 
-porterZoneSchema.index({ status: 1, city: 1 });
+porterZoneSchema.index({ geometry: '2dsphere' });
+porterZoneSchema.index({ status: 1, country: 1 });
 porterZoneSchema.index({ status: 1, displayOrder: 1 });
 porterZoneSchema.index({ isDeleted: 1, status: 1, createdAt: -1 });
+porterZoneSchema.index({ isDeleted: 1, createdAt: -1 });
+
+porterZoneSchema.pre('save', async function (next) {
+    if (this.isNew) {
+        if (!this.zoneCode) {
+            let prefix = this.name.replace(/[^a-zA-Z]/g, '').substring(0, 3).toUpperCase();
+            if (prefix.length < 3) prefix = prefix.padEnd(3, 'X');
+            
+            // Find the highest counter for this prefix
+            const lastZone = await this.constructor.findOne(
+                { zoneCode: new RegExp(`^${prefix}\\d+$`) },
+                { zoneCode: 1 }
+            ).sort({ zoneCode: -1 });
+
+            let sequence = 1;
+            if (lastZone && lastZone.zoneCode) {
+                const lastSeq = parseInt(lastZone.zoneCode.substring(prefix.length), 10);
+                if (!isNaN(lastSeq)) {
+                    sequence = lastSeq + 1;
+                }
+            }
+            this.zoneCode = `${prefix}${String(sequence).padStart(3, '0')}`;
+        }
+
+        if (!this.displayOrder) {
+            const maxOrderZone = await this.constructor.findOne({}, { displayOrder: 1 }).sort({ displayOrder: -1 });
+            this.displayOrder = maxOrderZone && maxOrderZone.displayOrder ? maxOrderZone.displayOrder + 1 : 1;
+        }
+    }
+    next();
+});
 
 export const PorterZone = mongoose.models.PorterZone
     || mongoose.model('PorterZone', porterZoneSchema, 'porter_zones');

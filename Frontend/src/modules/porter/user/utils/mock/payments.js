@@ -6,12 +6,6 @@ export const PAYMENT_METHODS = [
   { id: "netbanking", label: "Net Banking", subtitle: "All major banks", icon: "🏦" },
 ];
 
-export const OFFERS = [
-  { id: "o1", title: "Free insurance up to ₹5,000", subtitle: "On all parcel bookings this week", icon: "🛡️" },
-  { id: "o2", title: "Zero surge on EV Van", subtitle: "Go green & save on delivery", icon: "⚡" },
-  { id: "o3", title: "Refer & earn ₹100", subtitle: "Share Blaze Porter with friends", icon: "🎁" },
-];
-
 export const EMERGENCY_CONTACTS = [
   { id: "ec1", name: "Mom", phone: "+91 98765 11111", relation: "Family" },
   { id: "ec2", name: "Office Security", phone: "+91 98765 22222", relation: "Workplace" },

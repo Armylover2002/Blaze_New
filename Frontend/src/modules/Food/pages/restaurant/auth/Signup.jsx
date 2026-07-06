@@ -16,6 +16,7 @@ import {
 import loginBg from "@food/assets/loginbanner.png"
 import { useCompanyName } from "@food/hooks/useCompanyName"
 import { loadBusinessSettings, getAppLogo, getRestaurantLoginBanner } from "@common/utils/businessSettings"
+import RestaurantAuthFooter from "@food/components/restaurant/RestaurantAuthFooter"
 
 
 const countryCodes = [
@@ -366,6 +367,8 @@ export default function RestaurantSignup() {
               Login
             </button>
           </div>
+
+          <RestaurantAuthFooter className="mt-8 w-full max-w-lg" />
 
           {/* Demo credentials / info bar */}
           <div className="mt-8 w-full max-w-lg rounded-lg border border-red-100 bg-red-50 px-4 py-3 text-xs sm:text-sm text-gray-800 flex items-start gap-3">

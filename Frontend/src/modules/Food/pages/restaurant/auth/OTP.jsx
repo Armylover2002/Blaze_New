@@ -4,6 +4,7 @@ import { ArrowLeft, ShieldCheck, Timer, RefreshCw, X } from "lucide-react"
 import loginBg from "@food/assets/loginbanner.png"
 import { Button } from "@food/components/ui/button"
 import { restaurantAPI } from "@food/api"
+import { clearOnboardingDraft } from "@food/utils/onboardingDraftStorage"
 import {
   setAuthData as setRestaurantAuthData,
   setRestaurantPendingPhone,
@@ -272,10 +273,21 @@ export default function RestaurantOTP() {
       const normalizedPhone = data?.phone || phone
 
       if (needsRegistration) {
-        setRestaurantPendingPhone(normalizedPhone)
+        const displayPhone = String(normalizedPhone || phone || "")
+          .replace(/\D/g, "")
+          .slice(-10)
+        setRestaurantPendingPhone(normalizedPhone || phone)
         sessionStorage.removeItem("restaurantAuthData")
         sessionStorage.removeItem("restaurantLoginPhone")
-        navigate("/food/restaurant/onboarding", { replace: true })
+        const resumeStep = Number(data?.resumeStep)
+        const onboardingPath =
+          resumeStep >= 2 && resumeStep <= 4
+            ? `/food/restaurant/onboarding?step=${resumeStep}`
+            : "/food/restaurant/onboarding"
+        navigate(onboardingPath, {
+          replace: true,
+          state: { verifiedPhone: displayPhone },
+        })
         return
       }
 
@@ -298,6 +310,21 @@ export default function RestaurantOTP() {
         window.dispatchEvent(new Event("restaurantAuthChanged"))
         sessionStorage.removeItem("restaurantAuthData")
         sessionStorage.removeItem("restaurantLoginPhone")
+
+        if (data?.isPendingApproval || String(restaurant?.status || "").toLowerCase() === "pending") {
+          navigate("/food/restaurant/pending-verification", {
+            replace: true,
+            state: {
+              phone:
+                restaurant?.ownerPhone ||
+                restaurant?.primaryContactNumber ||
+                normalizedPhone ||
+                phone ||
+                "",
+            },
+          })
+          return
+        }
 
         setTimeout(async () => {
           if (authData?.isSignUp) {
@@ -587,10 +614,9 @@ export default function RestaurantOTP() {
             <div className="px-6 pb-6 pt-2 flex flex-col gap-2.5">
               <button
                 type="button"
-                onClick={() => {
-                  localStorage.removeItem("restaurant_onboarding_data");
-                  localStorage.removeItem("restaurant_pendingPhone");
-                  sessionStorage.setItem("restaurantReonboard", "true");
+                onClick={async () => {
+                  await clearOnboardingDraft()
+                  sessionStorage.setItem("restaurantReonboard", "true")
                   if (rejectionModalData.phone) {
                     localStorage.setItem("restaurant_pendingPhone", rejectionModalData.phone);
                   }

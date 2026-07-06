@@ -348,7 +348,7 @@ export async function getRestaurants(query) {
             .sort({ createdAt: -1 })
             .skip(skip)
             .limit(limit)
-            .select('restaurantId restaurantName location area city profileImage coverImages menuImages status ownerName ownerPhone zoneId commissionPercentage')
+            .select('restaurantId restaurantName location area city profileImage coverImages menuImages status ownerName ownerPhone zoneId commissionPercentage isListed productCount')
             .populate('zoneId', 'name zoneName')
             .lean(),
         FoodRestaurant.countDocuments(filter)
@@ -2453,6 +2453,23 @@ export async function updateRestaurantStatus(id, body = {}) {
     ).lean();
 }
 
+export async function toggleRestaurantListing(id, isListed) {
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+        throw new ValidationError('Invalid restaurant ID');
+    }
+    const { FoodRestaurant } = await import('../../restaurant/models/restaurant.model.js');
+    const restaurant = await FoodRestaurant.findById(id);
+    if (!restaurant) {
+        throw new ValidationError('Restaurant not found');
+    }
+    if (isListed && restaurant.productCount <= 0) {
+        throw new ValidationError('Cannot list a restaurant with 0 products.');
+    }
+    restaurant.isListed = Boolean(isListed);
+    await restaurant.save();
+    return restaurant.toObject();
+}
+
 export async function updateRestaurantLocation(id, body = {}) {
     if (!id || !mongoose.Types.ObjectId.isValid(id)) return null;
     const doc = await FoodRestaurant.findById(id);
@@ -3171,6 +3188,17 @@ export async function createFood(body) {
         approvalStatus: 'approved'
     });
     await doc.save();
+    try {
+        const { FoodRestaurant } = await import('../../restaurant/models/restaurant.model.js');
+        const restaurant = await FoodRestaurant.findByIdAndUpdate(restaurantId, {
+            $inc: { productCount: 1 }
+        });
+        if (restaurant && (restaurant.productCount || 0) === 0) {
+            await FoodRestaurant.findByIdAndUpdate(restaurantId, { isListed: true });
+        }
+    } catch (err) {
+        console.error('Failed to update restaurant product count on admin food create:', err);
+    }
     return doc.toObject();
 }
 
@@ -3217,6 +3245,23 @@ export async function updateFood(id, body) {
 export async function deleteFood(id) {
     if (!id || !mongoose.Types.ObjectId.isValid(id)) return null;
     const deleted = await FoodItem.findByIdAndDelete(id).lean();
+    if (deleted && deleted.restaurantId && deleted.approvalStatus === 'approved') {
+        try {
+            const { FoodRestaurant } = await import('../../restaurant/models/restaurant.model.js');
+            const updated = await FoodRestaurant.findByIdAndUpdate(
+                deleted.restaurantId,
+                { $inc: { productCount: -1 } },
+                { new: true }
+            );
+            if (updated && updated.productCount <= 0) {
+                updated.productCount = 0;
+                updated.isListed = false;
+                await updated.save();
+            }
+        } catch (err) {
+            console.error('Failed to update restaurant product count on food deletion:', err);
+        }
+    }
     return deleted ? { id } : null;
 }
 

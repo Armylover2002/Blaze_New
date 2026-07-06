@@ -547,7 +547,6 @@ export const getProducts = async (req, res) => {
 
 export const getProductById = async (req, res) => {
   setPublicCache(res, 600); // 10 minutes cache
-  // Note: ensureQuickCommerceSeedData runs at server startup — no need here.
 
   const product = await QuickProduct.findOne({ _id: req.params.productId, ...publicProductFilter }).lean();
 

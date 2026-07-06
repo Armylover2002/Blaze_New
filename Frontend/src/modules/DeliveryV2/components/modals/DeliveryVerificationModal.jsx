@@ -10,6 +10,7 @@ import {
   X,
   RefreshCw,
   Package,
+  Phone,
 } from "lucide-react";
 import { deliveryAPI } from "@food/api";
 import { toast } from "sonner";
@@ -128,24 +129,45 @@ const OtpModal = ({ order, onVerified, onClose }) => {
         exit={{ y: "100%" }}
         className="w-full bg-white rounded-t-[2.5rem] shadow-[0_-20px_60px_rgba(0,0,0,0.3)] p-6 pb-12 pointer-events-auto max-w-lg">
         <div className="w-12 h-1.5 bg-gray-200 rounded-full mx-auto mb-6" />
-        <div className="flex justify-between items-center mb-6">
-          <div className="flex items-center gap-3">
+        <div className="flex justify-between items-start mb-6 px-1">
+          <div className="flex items-start gap-4 min-w-0 flex-1">
             <div
-              className={`w-12 h-12 rounded-2xl flex items-center justify-center ${isOtpVerified ? "bg-green-100 text-green-600" : "bg-gray-100 text-gray-500"}`}>
+              className={`w-14 h-14 shrink-0 rounded-2xl flex items-center justify-center shadow-sm border ${isOtpVerified ? "bg-green-50 text-green-600 border-green-100" : "bg-white text-gray-600 border-gray-200"}`}>
               <ShieldCheck className="w-7 h-7" />
             </div>
-            <div>
-              <h2 className="text-xl font-bold text-gray-900">Handover Code</h2>
-              <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">
-                Step 1 of Verification
-              </p>
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2 mb-1">
+                <h2 className="text-xl md:text-2xl font-extrabold text-gray-900 truncate">Handover Code</h2>
+                <span className="text-[10px] font-bold uppercase tracking-widest text-gray-500 bg-gray-100 px-2 py-0.5 rounded-md border border-gray-200 whitespace-nowrap">
+                  Step 1
+                </span>
+              </div>
+              <div className="mt-2">
+                <div className="inline-flex items-center rounded-lg bg-gray-100 px-3 py-1 text-xs font-bold uppercase tracking-widest text-gray-800 font-mono border border-gray-200 shadow-sm whitespace-nowrap">
+                  ID: {orderId}
+                </div>
+              </div>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="p-2 bg-gray-50 rounded-full text-gray-400 hover:text-gray-600">
-            <X className="w-5 h-5" />
-          </button>
+          
+          <div className="flex items-center gap-2 shrink-0 ml-3 mt-1">
+            <button
+              onClick={() => {
+                const phone = isReturnPickupTrip(order)
+                  ? (order?.dropPoint?.phone || order?.storePhone || order?.sellerPhone)
+                  : (order?.userPhone || order?.user?.phone || order?.customerPhone || order?.customer_phone || order?.deliveryAddress?.phone);
+                if (phone) window.location.href = `tel:${phone}`;
+                else toast.error('Phone number not available');
+              }}
+              className="w-10 h-10 flex items-center justify-center bg-green-50 rounded-full text-green-600 hover:bg-green-100 transition-colors">
+              <Phone className="w-4 h-4" />
+            </button>
+            <button
+              onClick={onClose}
+              className="w-10 h-10 flex items-center justify-center bg-gray-50 rounded-full text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
 
         <DeliveryInstructionsPanel note={order?.note} />
@@ -315,26 +337,47 @@ const PaymentModal = ({ order, otpString, onComplete, onClose }) => {
           exit={{ y: "100%" }}
           className="w-full bg-white rounded-t-[2.5rem] shadow-[0_-20px_60px_rgba(0,0,0,0.3)] p-6 pb-12 pointer-events-auto max-w-lg">
           <div className="w-12 h-1.5 bg-gray-200 rounded-full mx-auto mb-6" />
-          <div className="flex justify-between items-center mb-6">
-            <div className="flex items-center gap-3">
+          <div className="flex justify-between items-start mb-6 px-1">
+            <div className="flex items-start gap-4 min-w-0 flex-1">
               <div
-                className={`w-12 h-12 rounded-2xl flex items-center justify-center ${isPaid ? "bg-green-100 text-green-600" : "bg-amber-100 text-amber-600"}`}>
+                className={`w-14 h-14 shrink-0 rounded-2xl flex items-center justify-center shadow-sm border ${isPaid ? "bg-green-50 text-green-600 border-green-100" : "bg-amber-50 text-amber-600 border-amber-100"}`}>
                 <IndianRupee className="w-7 h-7" />
               </div>
-              <div>
-                <h2 className="text-xl font-bold text-gray-900">
-                  Collect Payment
-                </h2>
-                <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">
-                  Step 2 of Verification
-                </p>
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2 mb-1">
+                  <h2 className="text-xl md:text-2xl font-extrabold text-gray-900 truncate">
+                    Collect Payment
+                  </h2>
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-gray-500 bg-gray-100 px-2 py-0.5 rounded-md border border-gray-200 whitespace-nowrap">
+                    Step 2
+                  </span>
+                </div>
+                <div className="mt-2">
+                  <div className="inline-flex items-center rounded-lg bg-gray-100 px-3 py-1 text-xs font-bold uppercase tracking-widest text-gray-800 font-mono border border-gray-200 shadow-sm whitespace-nowrap">
+                    ID: {orderId}
+                  </div>
+                </div>
               </div>
             </div>
-            <button
-              onClick={onClose}
-              className="p-2 bg-gray-50 rounded-full text-gray-400 hover:text-gray-600">
-              <X className="w-5 h-5" />
-            </button>
+            
+            <div className="flex items-center gap-2 shrink-0 ml-3 mt-1">
+              <button
+                onClick={() => {
+                  const phone = isReturnPickupTrip(order)
+                    ? (order?.dropPoint?.phone || order?.storePhone || order?.sellerPhone)
+                    : (order?.userPhone || order?.user?.phone || order?.customerPhone || order?.customer_phone || order?.deliveryAddress?.phone);
+                  if (phone) window.location.href = `tel:${phone}`;
+                  else toast.error('Phone number not available');
+                }}
+                className="w-10 h-10 flex items-center justify-center bg-green-50 rounded-full text-green-600 hover:bg-green-100 transition-colors">
+                <Phone className="w-4 h-4" />
+              </button>
+              <button
+                onClick={onClose}
+                className="w-10 h-10 flex items-center justify-center bg-gray-50 rounded-full text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
           </div>
 
           <DeliveryInstructionsPanel note={order?.note} />
@@ -532,10 +575,43 @@ const ReturnSellerOtpModal = ({ order, onComplete, onClose }) => {
         className="w-full bg-white rounded-t-[2.5rem] shadow-[0_-20px_60px_rgba(0,0,0,0.3)] p-6 pb-12 pointer-events-auto max-w-lg"
       >
         <div className="w-12 h-1.5 bg-gray-200 rounded-full mx-auto mb-6" />
-        <div className="mb-6">
-          <p className="text-[10px] font-bold uppercase tracking-widest text-red-600">Return Pickup</p>
-          <h2 className="text-xl font-bold text-gray-900">Seller OTP</h2>
-          <p className="text-sm text-gray-500 mt-1">Ask the seller for their handover code to complete the return drop.</p>
+        <div className="flex justify-between items-start mb-6 px-1">
+          <div className="flex items-start gap-4 min-w-0 flex-1">
+            <div className="w-14 h-14 shrink-0 rounded-2xl flex items-center justify-center shadow-sm border bg-red-50 text-red-600 border-red-200">
+              <ShieldCheck className="w-7 h-7" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2 mb-1">
+                <h2 className="text-xl md:text-2xl font-extrabold text-gray-900 truncate">Seller OTP</h2>
+                <span className="inline-flex items-center rounded-md border border-red-200 bg-red-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest text-red-700 whitespace-nowrap">
+                  Return Pickup
+                </span>
+              </div>
+              <p className="text-xs font-medium text-gray-500 mb-2 truncate">Ask the seller for their code.</p>
+              <div>
+                <div className="inline-flex items-center rounded-lg bg-gray-100 px-3 py-1 text-xs font-bold uppercase tracking-widest text-gray-800 font-mono border border-gray-200 shadow-sm whitespace-nowrap">
+                  ID: {order?.orderId || order?._id}
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          <div className="flex items-center gap-2 shrink-0 ml-3 mt-1">
+            <button
+              onClick={() => {
+                const phone = order?.dropPoint?.phone || order?.storePhone || order?.sellerPhone;
+                if (phone) window.location.href = `tel:${phone}`;
+                else toast.error('Phone number not available');
+              }}
+              className="w-10 h-10 flex items-center justify-center bg-red-50 rounded-full text-red-600 hover:bg-red-100 transition-colors">
+              <Phone className="w-4 h-4" />
+            </button>
+            <button
+              onClick={onClose}
+              className="w-10 h-10 flex items-center justify-center bg-gray-50 rounded-full text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
         <div className="flex justify-center gap-3 mb-8">
           {otp.map((digit, i) => (

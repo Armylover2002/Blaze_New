@@ -55,6 +55,7 @@ import {
 } from '../controllers/top10GourmetAdmin.controller.js';
 import { getPublicPageController } from '../../admin/controllers/pageContent.controller.js';
 import { getPublicReferralSettingsController } from '../controllers/publicReferralSettings.controller.js';
+import { cacheResponse } from '../../../../middleware/cache.js';
 
 const router = express.Router();
 
@@ -121,15 +122,15 @@ router.patch('/hero-banners/gourmet/:id/order', updateGourmetOrderAdmin);
 router.patch('/hero-banners/gourmet/:id/status', toggleGourmetStatusAdmin);
 
 // Public landing endpoints (Food user app)
-router.get('/hero-banners/public', getPublicHeroBannersController);
-router.get('/hero-banners/under-250/public', getPublicUnder250BannersController);
-router.get('/hero-banners/dining/public', getPublicDiningBannersController);
-router.get('/explore-icons/public', getPublicExploreIconsController);
-router.get('/hero-banners/gourmet/public', getPublicGourmetController);
-router.get('/landing/settings/public', getPublicLandingSettingsController);
+router.get('/hero-banners/public', cacheResponse(300, 'landing_hero'), getPublicHeroBannersController);
+router.get('/hero-banners/under-250/public', cacheResponse(300, 'landing_under250'), getPublicUnder250BannersController);
+router.get('/hero-banners/dining/public', cacheResponse(300, 'landing_dining'), getPublicDiningBannersController);
+router.get('/explore-icons/public', cacheResponse(300, 'landing_explore'), getPublicExploreIconsController);
+router.get('/hero-banners/gourmet/public', cacheResponse(300, 'landing_gourmet'), getPublicGourmetController);
+router.get('/landing/settings/public', cacheResponse(300, 'landing_settings'), getPublicLandingSettingsController);
 router.get('/zones/detect', detectZonePublicController);
 router.get('/zones/nearby', listZonesNearbyPublicController);
-router.get('/zones/public', listZonesPublicController);
+router.get('/zones/public', cacheResponse(600, 'landing_zones'), listZonesPublicController);
 router.get('/public/env', getPublicEnvController);
 // Admin landing settings (old paths used by admin UI)
 router.get('/hero-banners/landing/settings', getAdminLandingSettingsController);

@@ -404,6 +404,20 @@ export const verifyRestaurantOtpAndLogin = async (phone, otp, fcmToken, platform
     };
   }
 
+  // In-progress onboarding — allow resume from saved step
+  if (restaurant.status === "onboarding") {
+    const { getOnboardingDraftByPhone } = await import(
+      "../../modules/food/restaurant/services/restaurant.service.js"
+    );
+    const draft = await getOnboardingDraftByPhone(phone);
+    return {
+      needsRegistration: true,
+      phone,
+      resumeStep: draft?.onboardingStep || restaurant.onboardingStep || 2,
+      restaurant: draft,
+    };
+  }
+
   // Update FCM token if provided
   if (fcmToken) {
     let isModified = false;
@@ -425,16 +439,11 @@ export const verifyRestaurantOtpAndLogin = async (phone, otp, fcmToken, platform
     }
   }
 
-  // Block login for deleted or deactivated restaurants
-  if (restaurant.isDeleted === true || restaurant.accountStatus === 'deleted' || restaurant.isActive === false) {
+  // Block login for deleted restaurants
+  if (restaurant.isDeleted === true || restaurant.accountStatus === "deleted") {
     throw new AuthError(
       "Your account has been deleted/deactivated. Please contact support.",
     );
-  }
-
-  // Block login for pending restaurants
-  if (restaurant.status === "pending") {
-    throw new AuthError("Your restaurant registration is pending approval.");
   }
 
   // For rejected restaurants — return rejection info so frontend can show modal
@@ -445,6 +454,29 @@ export const verifyRestaurantOtpAndLogin = async (phone, otp, fcmToken, platform
       phone,
       needsRegistration: false,
     };
+  }
+
+  // Pending approval — issue a session so the partner can poll status without re-login
+  if (restaurant.status === "pending") {
+    return {
+      ...(await issueRestaurantSession(restaurant)),
+      isPendingApproval: true,
+    };
+  }
+
+  // Block deactivated restaurants that are not awaiting first-time approval
+  if (restaurant.isActive === false) {
+    throw new AuthError(
+      "Your account has been deleted/deactivated. Please contact support.",
+    );
+  }
+
+  return issueRestaurantSession(restaurant);
+};
+
+export const issueRestaurantSession = async (restaurant) => {
+  if (!restaurant?._id) {
+    throw new ValidationError("Restaurant is required");
   }
 
   const payload = { userId: restaurant._id.toString(), role: ROLES.RESTAURANT };
@@ -459,11 +491,15 @@ export const verifyRestaurantOtpAndLogin = async (phone, otp, fcmToken, platform
     expiresAt,
   });
 
+  const user =
+    typeof restaurant.toObject === "function" ? restaurant.toObject() : restaurant;
+
   return {
     accessToken,
     refreshToken,
-    user: restaurant,
+    user,
     needsRegistration: false,
+    isPendingApproval: user?.status === "pending",
   };
 };
 

@@ -5,7 +5,7 @@ import {
   isRestaurantOnboardingComplete,
 } from "@food/utils/onboardingUtils";
 import { motion, AnimatePresence } from "framer-motion";
-import Lenis from "lenis";
+// import Lenis from "lenis";
 import {
   Printer,
   Volume2,
@@ -30,6 +30,11 @@ import {
   Star,
   Package,
   Utensils,
+  Search,
+  Menu,
+  Home,
+  CheckCircle2,
+  Inbox,
 } from "lucide-react";
 import { toast } from "sonner";
 import BottomNavOrders from "@food/components/restaurant/BottomNavOrders";
@@ -49,14 +54,14 @@ const STORAGE_KEY = "restaurant_online_status";
 
 // Top filter tabs
 const filterTabs = [
-  { id: "all", label: "All" },
-  { id: "preparing", label: "Preparing" },
-  { id: "ready", label: "Ready" },
-  { id: "out-for-delivery", label: "Out for delivery" },
-  { id: "scheduled", label: "Scheduled" },
-  { id: "table-booking", label: "Table Booking" },
-  { id: "completed", label: "Completed" },
-  { id: "cancelled", label: "Cancelled" },
+  { id: "all", label: "All", icon: Menu },
+  { id: "preparing", label: "Preparing", icon: Clock },
+  { id: "ready", label: "Ready", icon: Check },
+  { id: "out-for-delivery", label: "Out for delivery", icon: Package },
+  { id: "scheduled", label: "Scheduled", icon: Calendar },
+  { id: "table-booking", label: "Table Booking", icon: Home },
+  { id: "completed", label: "Completed", icon: CheckCircle2 },
+  { id: "cancelled", label: "Cancelled", icon: X },
 ];
 
 const allOrdersStatusPriority = {
@@ -126,7 +131,7 @@ const transformOrderForList = (order) => ({
 });
 
 // Completed Orders List Component
-function CompletedOrders({ onSelectOrder, refreshToken = 0 }) {
+function CompletedOrders({ onSelectOrder, refreshToken = 0, searchQuery = "" }) {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -216,19 +221,29 @@ function CompletedOrders({ onSelectOrder, refreshToken = 0 }) {
     );
   }
 
+  const filteredOrders = orders.filter(o => {
+    if (!searchQuery) return true;
+    const q = searchQuery.toLowerCase();
+    return (
+      String(o.orderId || o.mongoId || "").toLowerCase().includes(q) ||
+      String(o.customerName || "").toLowerCase().includes(q) ||
+      String(o.itemsSummary || "").toLowerCase().includes(q)
+    );
+  });
+
   return (
     <div className="pt-4 pb-6">
       <div className="flex items-baseline justify-between mb-3">
         <h2 className="text-base font-semibold text-black">Completed orders</h2>
-        <span className="text-xs text-gray-500">{orders.length} total</span>
+        <span className="text-xs text-gray-500">{filteredOrders.length} total</span>
       </div>
-      {orders.length === 0 ? (
+      {filteredOrders.length === 0 ? (
         <div className="text-center py-8 text-gray-500 text-sm">
           No completed orders yet
         </div>
       ) : (
         <div>
-          {orders.map((order) => {
+          {filteredOrders.map((order) => {
             const deliveredDate = order.deliveredAt
               ? new Date(order.deliveredAt).toLocaleDateString("en-US", {
                 month: "short",
@@ -330,7 +345,7 @@ function CompletedOrders({ onSelectOrder, refreshToken = 0 }) {
 }
 
 // Cancelled Orders List Component
-function CancelledOrders({ onSelectOrder, refreshToken = 0 }) {
+function CancelledOrders({ onSelectOrder, refreshToken = 0, searchQuery = "" }) {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -423,19 +438,29 @@ function CancelledOrders({ onSelectOrder, refreshToken = 0 }) {
     );
   }
 
+  const filteredOrders = orders.filter(o => {
+    if (!searchQuery) return true;
+    const q = searchQuery.toLowerCase();
+    return (
+      String(o.orderId || o.mongoId || "").toLowerCase().includes(q) ||
+      String(o.customerName || "").toLowerCase().includes(q) ||
+      String(o.itemsSummary || "").toLowerCase().includes(q)
+    );
+  });
+
   return (
     <div className="pt-4 pb-6">
       <div className="flex items-baseline justify-between mb-3">
         <h2 className="text-base font-semibold text-black">Cancelled orders</h2>
-        <span className="text-xs text-gray-500">{orders.length} total</span>
+        <span className="text-xs text-gray-500">{filteredOrders.length} total</span>
       </div>
-      {orders.length === 0 ? (
+      {filteredOrders.length === 0 ? (
         <div className="text-center py-8 text-gray-500 text-sm">
           No cancelled orders yet
         </div>
       ) : (
         <div>
-          {orders.map((order) => {
+          {filteredOrders.map((order) => {
             const cancelledDate = order.cancelledAt
               ? new Date(order.cancelledAt).toLocaleDateString("en-US", {
                 month: "short",
@@ -558,7 +583,7 @@ function CancelledOrders({ onSelectOrder, refreshToken = 0 }) {
 }
 
 // Table Bookings List Component
-function TableBookings() {
+function TableBookings({ searchQuery = "" }) {
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -603,20 +628,30 @@ function TableBookings() {
       <div className="text-center py-10 text-gray-400">Loading bookings...</div>
     );
 
+  const filteredBookings = bookings.filter(b => {
+    if (!searchQuery) return true;
+    const q = searchQuery.toLowerCase();
+    return (
+      String(b.bookingId || b._id || "").toLowerCase().includes(q) ||
+      String(b.user?.name || "").toLowerCase().includes(q) ||
+      String(b.user?.phone || "").toLowerCase().includes(q)
+    );
+  });
+
   return (
     <div className="pt-4 pb-6 px-1">
       <div className="flex items-baseline justify-between mb-4 px-1">
         <h2 className="text-base font-semibold text-black">Table Bookings</h2>
-        <span className="text-xs text-gray-500">{bookings.length} total</span>
+        <span className="text-xs text-gray-500">{filteredBookings.length} total</span>
       </div>
 
-      {bookings.length === 0 ? (
+      {filteredBookings.length === 0 ? (
         <div className="text-center py-12 bg-white rounded-2xl border border-gray-200">
           <p className="text-gray-400 text-sm">No table bookings yet</p>
         </div>
       ) : (
         <div className="space-y-4">
-          {bookings.map((booking) => (
+          {filteredBookings.map((booking) => (
             <div
               key={booking._id}
               className="bg-white rounded-[2rem] p-5 border border-gray-100 shadow-sm transition-all hover:shadow-md">
@@ -724,7 +759,7 @@ function TableBookings() {
   );
 }
 
-function AllOrders({ onSelectOrder, onCancel }) {
+function AllOrders({ onSelectOrder, onCancel, searchQuery = "" }) {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -832,19 +867,38 @@ function AllOrders({ onSelectOrder, onCancel }) {
     );
   }
 
+  const filteredOrders = orders.filter(o => {
+    if (!searchQuery) return true;
+    const q = searchQuery.toLowerCase();
+    return (
+      String(o.orderId || o.mongoId || "").toLowerCase().includes(q) ||
+      String(o.customerName || "").toLowerCase().includes(q) ||
+      String(o.itemsSummary || "").toLowerCase().includes(q)
+    );
+  });
+
   return (
-    <div className="pt-4 pb-6">
-      <div className="flex items-baseline justify-between mb-3">
-        <h2 className="text-base font-semibold text-black">All orders</h2>
-        <span className="text-xs text-gray-500">{orders.length} total</span>
+    <div className="pt-4 pb-6 md:pt-0">
+      <div className="flex items-baseline justify-between mb-3 md:mb-5">
+        <div className="flex items-center gap-2">
+          <h2 className="text-base md:text-lg font-bold text-gray-900">All orders</h2>
+          <span className="text-xs md:text-sm font-semibold text-gray-500">({filteredOrders.length})</span>
+        </div>
+        <button className="text-sm font-semibold text-blue-600 hidden md:block hover:text-blue-700 transition-colors">
+          Full History &gt;
+        </button>
       </div>
-      {orders.length === 0 ? (
-        <div className="text-center py-8 text-gray-500 text-sm">
-          No orders found
+      {filteredOrders.length === 0 ? (
+        <div className="md:bg-white md:rounded-2xl md:border md:border-gray-100/80 md:shadow-sm flex flex-col items-center justify-center py-16 md:min-h-[400px]">
+          <div className="w-16 h-16 bg-slate-50/80 rounded-full flex items-center justify-center mb-4 border border-gray-100 hidden md:flex">
+            <Inbox className="w-6 h-6 text-slate-300" strokeWidth={1.5} />
+          </div>
+          <h3 className="text-base md:text-lg font-bold text-gray-500 md:text-gray-900">There is no live order</h3>
+          <p className="text-sm text-gray-400 mt-1 hidden md:block">There are no orders here right now.</p>
         </div>
       ) : (
         <div>
-          {orders.map((order) => {
+          {filteredOrders.map((order) => {
             const normalizedStatus = String(order.status || "").toLowerCase();
             let etaDisplay = order.eta;
 
@@ -895,6 +949,7 @@ function AllOrders({ onSelectOrder, onCancel }) {
 export default function OrdersMain() {
   const navigate = useNavigate();
   const [activeFilter, setActiveFilter] = useState("all");
+  const [searchQuery, setSearchQuery] = useState("");
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [isSheetOpen, setIsSheetOpen] = useState(false);
@@ -1153,26 +1208,8 @@ export default function OrdersMain() {
     }
   };
 
-  // Lenis smooth scrolling
-  useEffect(() => {
-    const lenis = new Lenis({
-      duration: 1.2,
-      easing: (t) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
-      smoothWheel: true,
-    });
-
-    function raf(time) {
-      lenis.raf(time);
-      requestAnimationFrame(raf);
-    }
-
-    requestAnimationFrame(raf);
-
-    return () => {
-      lenis.destroy();
-    };
-  }, []);
-
+  // Lenis smooth scrolling removed as it interferes with flex container scrolling in h-screen layouts
+  
   // Show new order popup when real order notification arrives from Socket.IO
   useEffect(() => {
     if (newOrder) {
@@ -1944,6 +1981,7 @@ export default function OrdersMain() {
           <AllOrders
             onSelectOrder={handleSelectOrder}
             onCancel={handleCancelClick}
+            searchQuery={searchQuery}
           />
         );
       case "preparing":
@@ -1953,6 +1991,7 @@ export default function OrdersMain() {
             onCancel={handleCancelClick}
             refreshToken={ordersRefreshToken}
             onStatusChanged={requestOrdersRefresh}
+            searchQuery={searchQuery}
           />
         );
       case "ready":
@@ -1960,6 +1999,7 @@ export default function OrdersMain() {
           <ReadyOrders
             onSelectOrder={handleSelectOrder}
             refreshToken={ordersRefreshToken}
+            searchQuery={searchQuery}
           />
         );
       case "out-for-delivery":
@@ -1967,6 +2007,7 @@ export default function OrdersMain() {
           <OutForDeliveryOrders
             onSelectOrder={handleSelectOrder}
             refreshToken={ordersRefreshToken}
+            searchQuery={searchQuery}
           />
         );
       case "scheduled":
@@ -1974,6 +2015,7 @@ export default function OrdersMain() {
           <ScheduledOrders
             onSelectOrder={handleSelectOrder}
             refreshToken={ordersRefreshToken}
+            searchQuery={searchQuery}
           />
         );
       case "completed":
@@ -1981,15 +2023,17 @@ export default function OrdersMain() {
           <CompletedOrders
             onSelectOrder={handleSelectOrder}
             refreshToken={ordersRefreshToken}
+            searchQuery={searchQuery}
           />
         );
       case "table-booking":
-        return <TableBookings />;
+        return <TableBookings searchQuery={searchQuery} />;
       case "cancelled":
         return (
           <CancelledOrders
             onSelectOrder={handleSelectOrder}
             refreshToken={ordersRefreshToken}
+            searchQuery={searchQuery}
           />
         );
       default:
@@ -2002,17 +2046,35 @@ export default function OrdersMain() {
   const popupPrimaryItem = popupVisibleItems[0] || null;
 
   return (
-    <div className="min-h-screen bg-gray-100 flex flex-col">
-      {/* Restaurant Navbar - Sticky at top */}
-      <div className="sticky top-0 z-50 bg-white">
+    <div className="flex-1 flex flex-col h-full bg-gray-100 md:bg-slate-50 md:overflow-hidden overflow-x-hidden">
+      {/* Restaurant Navbar - Sticky at top (Mobile only) */}
+      <div className="sticky top-0 z-50 bg-white md:hidden">
         <RestaurantNavbar showNotifications={true} />
       </div>
 
-      {/* Top Filter Bar - Sticky below navbar */}
-      <div className="sticky top-[50px] z-40 pb-2 bg-gray-100">
+      {/* Desktop Header */}
+      <div className="hidden md:flex items-center justify-between px-6 pt-5 pb-3 bg-white">
+        <div>
+          <h1 className="text-xl font-bold text-gray-900 tracking-tight">Live orders</h1>
+          <p className="text-xs text-gray-500 mt-0.5">Manage incoming and active orders</p>
+        </div>
+        <div className="relative">
+          <Search className="w-4 h-4 text-gray-400 absolute left-4 top-1/2 -translate-y-1/2" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search orders, menu..."
+            className="pl-11 pr-4 py-2.5 bg-white border border-gray-100 rounded-full text-sm w-80 focus:outline-none focus:border-gray-300 shadow-[0_2px_10px_rgba(0,0,0,0.02)] transition-shadow"
+          />
+        </div>
+      </div>
+
+      {/* Top Filter Bar - Sticky below navbar on mobile, static on desktop */}
+      <div className="sticky top-[50px] md:static z-40 pb-2 md:pb-3 bg-gray-100 md:bg-white md:px-6 border-b border-gray-200/50 md:border-gray-100">
         <div
           ref={filterBarRef}
-          className="flex gap-2 overflow-x-auto scrollbar-hide bg-transparent rounded-full px-3 py-2 mt-2"
+          className="flex gap-2 overflow-x-auto scrollbar-hide bg-transparent rounded-full px-3 md:px-0 py-2 mt-2 md:mt-0"
           style={{
             scrollbarWidth: "none",
             msOverflowStyle: "none",
@@ -2037,7 +2099,7 @@ export default function OrdersMain() {
                     setTimeout(() => setIsTransitioning(false), 300);
                   }
                 }}
-                className={`shrink-0 px-6 py-3.5 rounded-full font-medium text-sm whitespace-nowrap relative overflow-hidden ${isActive ? "text-white" : "bg-white text-black"
+                className={`shrink-0 px-4 py-2 md:px-5 md:py-2.5 rounded-full font-medium text-xs md:text-[13px] whitespace-nowrap relative overflow-hidden flex items-center gap-2 ${isActive ? "text-white" : "bg-white text-gray-600 border border-gray-100/50 hover:bg-gray-50"
                   }`}
                 animate={{
                   scale: isActive ? 1.05 : 1,
@@ -2060,90 +2122,96 @@ export default function OrdersMain() {
                     }}
                   />
                 )}
-                <span className="relative z-10">{tab.label}</span>
+                <span className="relative z-10 flex items-center gap-1.5">
+                  {tab.icon && <tab.icon className={`w-3.5 h-3.5 md:w-4 md:h-4 ${isActive ? "text-white" : "text-gray-400"}`} strokeWidth={2.5} />}
+                  {tab.label}
+                </span>
               </motion.button>
             );
           })}
         </div>
       </div>
 
-      {/* Content Area - Scrollable */}
-      <div
-        ref={contentRef}
-        className="flex-1 overflow-y-auto px-4 pb-24 content-scroll"
-        onTouchStart={handleTouchStart}
-        onTouchMove={handleTouchMove}
-        onTouchEnd={handleTouchEnd}
-        onMouseDown={(e) => {
-          mouseStartX.current = e.clientX;
-          mouseEndX.current = e.clientX;
-          isMouseDown.current = true;
-          isSwiping.current = false;
-        }}
-        onMouseMove={(e) => {
-          if (isMouseDown.current) {
-            if (!isSwiping.current) {
-              const deltaX = Math.abs(e.clientX - mouseStartX.current);
-              if (deltaX > 10) {
-                isSwiping.current = true;
+      {/* Main Layout Area */}
+      <div className="flex-1 min-h-0 flex flex-col md:flex-row md:gap-6 px-4 md:px-6 pt-4 md:pt-6 pb-24 md:pb-6 md:overflow-hidden">
+        
+        {/* Left Column - Scrollable Content */}
+        <div
+          ref={contentRef}
+          className="flex-1 min-w-0 min-h-0 overflow-y-auto content-scroll md:pr-1 overscroll-none"
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
+          onMouseDown={(e) => {
+            mouseStartX.current = e.clientX;
+            mouseEndX.current = e.clientX;
+            isMouseDown.current = true;
+            isSwiping.current = false;
+          }}
+          onMouseMove={(e) => {
+            if (isMouseDown.current) {
+              if (!isSwiping.current) {
+                const deltaX = Math.abs(e.clientX - mouseStartX.current);
+                if (deltaX > 10) {
+                  isSwiping.current = true;
+                }
+              }
+              if (isSwiping.current) {
+                mouseEndX.current = e.clientX;
               }
             }
-            if (isSwiping.current) {
-              mouseEndX.current = e.clientX;
-            }
-          }
-        }}
-        onMouseUp={() => {
-          if (isMouseDown.current && isSwiping.current) {
-            const swipeDistance = mouseStartX.current - mouseEndX.current;
-            const minSwipeDistance = 50;
+          }}
+          onMouseUp={() => {
+            if (isMouseDown.current && isSwiping.current) {
+              const swipeDistance = mouseStartX.current - mouseEndX.current;
+              const minSwipeDistance = 50;
 
-            if (
-              Math.abs(swipeDistance) > minSwipeDistance &&
-              !isTransitioning
-            ) {
-              const currentIndex = filterTabs.findIndex(
-                (tab) => tab.id === activeFilter,
-              );
-              let newIndex = currentIndex;
+              if (
+                Math.abs(swipeDistance) > minSwipeDistance &&
+                !isTransitioning
+              ) {
+                const currentIndex = filterTabs.findIndex(
+                  (tab) => tab.id === activeFilter,
+                );
+                let newIndex = currentIndex;
 
-              if (swipeDistance > 0 && currentIndex < filterTabs.length - 1) {
-                newIndex = currentIndex + 1;
-              } else if (swipeDistance < 0 && currentIndex > 0) {
-                newIndex = currentIndex - 1;
-              }
+                if (swipeDistance > 0 && currentIndex < filterTabs.length - 1) {
+                  newIndex = currentIndex + 1;
+                } else if (swipeDistance < 0 && currentIndex > 0) {
+                  newIndex = currentIndex - 1;
+                }
 
-              if (newIndex !== currentIndex) {
-                setIsTransitioning(true);
-                setTimeout(() => {
-                  setActiveFilter(filterTabs[newIndex].id);
-                  scrollToFilter(newIndex);
-                  setTimeout(() => setIsTransitioning(false), 300);
-                }, 50);
+                if (newIndex !== currentIndex) {
+                  setIsTransitioning(true);
+                  setTimeout(() => {
+                    setActiveFilter(filterTabs[newIndex].id);
+                    scrollToFilter(newIndex);
+                    setTimeout(() => setIsTransitioning(false), 300);
+                  }, 50);
+                }
               }
             }
-          }
 
-          isMouseDown.current = false;
-          isSwiping.current = false;
-          mouseStartX.current = 0;
-          mouseEndX.current = 0;
-        }}
-        onMouseLeave={() => {
-          isMouseDown.current = false;
-          isSwiping.current = false;
-        }}>
-        <style>{`
-          .content-scroll {
-            scrollbar-width: none;
-            -ms-overflow-style: none;
-          }
-          .content-scroll::-webkit-scrollbar {
-            display: none;
-          }
-        `}</style>
+            isMouseDown.current = false;
+            isSwiping.current = false;
+            mouseStartX.current = 0;
+            mouseEndX.current = 0;
+          }}
+          onMouseLeave={() => {
+            isMouseDown.current = false;
+            isSwiping.current = false;
+          }}>
+          <style>{`
+            .content-scroll {
+              scrollbar-width: none;
+              -ms-overflow-style: none;
+            }
+            .content-scroll::-webkit-scrollbar {
+              display: none;
+            }
+          `}</style>
 
-        {/* Verification Pending Card - Show if onboarding is complete (all 4 steps) and restaurant is not active */}
+          {/* Verification Pending Card - Show if onboarding is complete (all 4 steps) and restaurant is not active */}
         {!restaurantStatus.isLoading &&
           !restaurantStatus.isActive &&
           restaurantStatus.onboarding?.completedSteps === 4 && (
@@ -2224,16 +2292,175 @@ export default function OrdersMain() {
             </motion.div>
           )}
 
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={activeFilter}
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -20 }}
-            transition={{ duration: 0.3 }}>
-            {renderContent()}
-          </motion.div>
-        </AnimatePresence>
+          <div className="min-h-full flex flex-col">
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={activeFilter}
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -20 }}
+                transition={{ duration: 0.3 }}>
+                {renderContent()}
+              </motion.div>
+            </AnimatePresence>
+          </div>
+        </div>
+
+        {/* Desktop Details Pane (Right Column) */}
+        <div className="hidden md:flex flex-col bg-white rounded-2xl border border-gray-100/80 shadow-sm overflow-hidden w-[380px] lg:w-[420px] shrink-0 h-full">
+            {selectedOrder ? (
+              <div className="flex-1 overflow-y-auto p-4 md:p-5 flex flex-col">
+                <div className="flex items-start justify-between gap-2 mb-3">
+                  <div>
+                    <p className="text-[13px] font-bold text-black">
+                      Order #{selectedOrder.orderId}
+                    </p>
+                    <p className="text-[11px] text-gray-500 mt-0.5">
+                      {selectedOrder.customerName}
+                    </p>
+                    <p className="text-[10px] text-gray-500 mt-0.5">
+                      {selectedOrder.type}
+                      {selectedOrder.tableOrToken
+                        ? ` • ${selectedOrder.tableOrToken}`
+                        : ""}
+                    </p>
+                  </div>
+                  <div className="flex flex-col items-end gap-1">
+                    <span
+                      className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-[11px] font-medium border ${selectedOrder.status === "Ready"
+                          ? "border-green-500 text-green-600"
+                          : "border-gray-800 text-gray-900"
+                        }`}>
+                      <span
+                        className={`h-1.5 w-1.5 rounded-full ${selectedOrder.status === "Ready"
+                            ? "bg-green-500"
+                            : "bg-gray-800"
+                          }`}
+                      />
+                      {selectedOrder.status}
+                    </span>
+                    <span className="text-[11px] text-gray-500">
+                      {selectedOrder.timePlaced}
+                    </span>
+                    {(String(selectedOrder.status).toLowerCase() === "preparing" ||
+                      String(selectedOrder.status).toLowerCase() === "ready") &&
+                      !selectedOrder.deliveryPartnerId && (
+                        <div className="mt-1">
+                          <ResendNotificationButton
+                            orderId={selectedOrder.orderId}
+                            mongoId={selectedOrder.mongoId}
+                            onSuccess={() => {}}
+                          />
+                        </div>
+                      )}
+                  </div>
+                </div>
+
+                <div className="border-t border-gray-100 my-3" />
+
+                <div className="mb-3">
+                  <p className="text-[11px] font-semibold text-gray-700 mb-1">Items</p>
+                  <p className="text-xs text-gray-800 leading-relaxed">
+                    {selectedOrder.itemsSummary}
+                  </p>
+                </div>
+
+                <div className="flex items-center justify-between text-xs text-gray-500 mb-4 bg-gray-50 p-3 rounded-xl border border-gray-100">
+                  {selectedOrder.status !== "ready" && selectedOrder.eta && (
+                    <span className="flex flex-col gap-1">
+                      <span className="text-[10px] uppercase font-bold text-gray-400">ETA</span>
+                      <span className="font-bold text-gray-900 text-sm">
+                        {selectedOrder.eta}
+                      </span>
+                    </span>
+                  )}
+                  {(() => {
+                    const raw = selectedOrder.paymentMethod;
+                    const normalized =
+                      raw != null ? String(raw).toLowerCase().trim() : "";
+                    const isCod = normalized === "cash" || normalized === "cod";
+                    return (
+                      <span className="flex flex-col gap-1 text-right">
+                        <span className="text-[10px] uppercase font-bold text-gray-400">Payment</span>
+                        <span
+                          className={`font-bold text-sm ${isCod ? "text-amber-600" : "text-gray-900"}`}>
+                          {isCod ? "Cash on Delivery" : "Paid online"}
+                        </span>
+                      </span>
+                    );
+                  })()}
+                </div>
+
+                {/* Delivery Partner Details in Desktop Pane */}
+                {selectedOrder.deliveryPartnerId && typeof selectedOrder.deliveryPartnerId === 'object' && (
+                  <div className="mb-2 pt-3 border-t border-gray-100 mt-auto">
+                    <p className="text-[11px] font-bold text-gray-700 mb-2">Delivery Partner details</p>
+                    <div className="bg-slate-50 border border-slate-100 rounded-2xl p-3 flex flex-col gap-2">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 bg-[#FF0000]/10 rounded-full flex items-center justify-center shrink-0">
+                          <User className="w-5 h-5 text-[#FF0000]" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-bold text-gray-900 truncate">
+                            {selectedOrder.deliveryPartnerId.name}
+                          </p>
+                          {selectedOrder.deliveryPartnerId.rating > 0 && (
+                            <div className="flex items-center gap-1 mt-0.5">
+                              <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
+                              <span className="text-xs font-semibold text-gray-600">
+                                {selectedOrder.deliveryPartnerId.rating}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="border-t border-gray-200/60 pt-2 flex flex-col gap-2">
+                        {selectedOrder.deliveryPartnerId.phone === "Hidden until photo upload" || !selectedOrder.deliveryPartnerId.phone ? (
+                          <div className="flex items-start gap-1.5 bg-amber-50 border border-amber-200/50 rounded-xl p-2.5">
+                            <Lock className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
+                            <div className="flex-1">
+                              <p className="text-[11px] font-bold text-amber-800">Phone Hidden</p>
+                              <p className="text-[10px] text-amber-700 leading-tight mt-0.5">
+                                Phone number will be shown once rider arrives at your shop and uploads photo.
+                              </p>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="flex items-center justify-between bg-green-50 border border-green-200/50 rounded-xl p-2.5">
+                            <div className="flex items-start gap-1.5">
+                              <Unlock className="w-3.5 h-3.5 text-green-600 shrink-0 mt-0.5" />
+                              <div>
+                                <p className="text-[11px] font-bold text-green-800">Phone Unlocked</p>
+                                <p className="text-xs font-bold text-gray-900 mt-0.5">{selectedOrder.deliveryPartnerId.phone}</p>
+                              </div>
+                            </div>
+                            <a
+                              href={`tel:${selectedOrder.deliveryPartnerId.phone}`}
+                              className="inline-flex items-center justify-center gap-1 px-2.5 py-1.5 bg-[#FF0000] text-white text-[11px] font-bold rounded-lg shadow-sm hover:bg-[#e04a02] transition-colors shrink-0"
+                            >
+                              <Phone className="w-3 h-3" />
+                              Call
+                            </a>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="flex-1 flex flex-col items-center justify-center p-6 text-center h-full">
+                <div className="w-20 h-20 bg-slate-50/80 rounded-full flex items-center justify-center mb-6 border border-gray-100">
+                  <Inbox className="w-8 h-8 text-slate-300" strokeWidth={1.5} />
+                </div>
+                <h3 className="text-lg font-bold text-gray-900 mb-2">No order selected</h3>
+                <p className="text-sm text-gray-500 max-w-[250px]">
+                  Select an order from the list to view detailed information, items, and status
+                </p>
+              </div>
+            )}
+        </div>
       </div>
 
       {/* Audio element */}
@@ -2670,7 +2897,7 @@ export default function OrdersMain() {
       <AnimatePresence>
         {isSheetOpen && selectedOrder && (
           <motion.div
-            className="fixed inset-0 z-50 bg-black/40 flex items-end justify-center"
+            className="fixed inset-0 z-50 bg-black/40 flex items-end justify-center md:hidden"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -2838,8 +3065,10 @@ export default function OrdersMain() {
         )}
       </AnimatePresence>
 
-      {/* Bottom Navigation - Sticky */}
-      <BottomNavOrders />
+      {/* Bottom Navigation - Sticky (Mobile only) */}
+      <div className="md:hidden">
+        <BottomNavOrders />
+      </div>
     </div>
   );
 }
@@ -2874,7 +3103,7 @@ const OrderCard = memo(function OrderCard({
     .replace(/\b\w/g, (c) => c.toUpperCase());
 
   return (
-    <div className="w-full bg-white rounded-xl p-3 mb-3 border border-gray-100 shadow-sm hover:shadow-md transition-shadow relative flex flex-col gap-2.5 cursor-pointer group"
+    <div className="w-full bg-white rounded-2xl p-4 mb-3 border border-gray-100/80 shadow-[0_2px_10px_rgba(0,0,0,0.01)] hover:shadow-md transition-shadow relative flex flex-col gap-3 cursor-pointer group"
       onClick={() =>
         onSelect?.({
           orderId,
@@ -2893,13 +3122,13 @@ const OrderCard = memo(function OrderCard({
       }>
       
       {/* Top Row: Order ID & Status */}
-      <div className="flex justify-between items-center pb-2 border-b border-gray-50">
-        <span className="text-sm font-black text-gray-900 tracking-tight truncate mr-2">
+      <div className="flex justify-between items-start">
+        <span className="text-sm font-bold text-gray-900 tracking-tight truncate mr-2">
           #{orderId}
         </span>
         <div className="flex items-center gap-2 flex-shrink-0">
-          <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[9px] font-bold uppercase tracking-wider ${isReady ? "bg-green-50 text-green-700" : "bg-gray-100 text-gray-700"}`}>
-             <span className={`w-1.5 h-1.5 rounded-full ${isReady ? "bg-green-500" : "bg-gray-500"}`} />
+          <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[9px] font-bold uppercase tracking-wider ${isReady ? "bg-green-50 text-green-700" : "bg-gray-50 text-gray-600"}`}>
+             <span className={`w-1 h-1 rounded-full ${isReady ? "bg-green-500" : "bg-gray-400"}`} />
              {statusLabel}
           </span>
           {isPreparing && onCancel && (
@@ -3005,6 +3234,7 @@ function PreparingOrders({
   onCancel,
   refreshToken = 0,
   onStatusChanged,
+  searchQuery = ""
 }) {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -3250,19 +3480,29 @@ function PreparingOrders({
     );
   }
 
+  const filteredOrders = orders.filter((o) => {
+    if (!searchQuery) return true;
+    const q = searchQuery.toLowerCase();
+    return (
+      String(o.orderId || o.mongoId || "").toLowerCase().includes(q) ||
+      String(o.customerName || "").toLowerCase().includes(q) ||
+      String(o.itemsSummary || "").toLowerCase().includes(q)
+    );
+  });
+
   return (
     <div className="pt-4 pb-6">
       <div className="flex items-baseline justify-between mb-3">
         <h2 className="text-base font-semibold text-black">Preparing orders</h2>
-        <span className="text-xs text-gray-500">{orders.length} active</span>
+        <span className="text-xs text-gray-500">{filteredOrders.length} active</span>
       </div>
-      {orders.length === 0 ? (
+      {filteredOrders.length === 0 ? (
         <div className="text-center py-8 text-gray-500 text-sm">
           No orders in preparation
         </div>
       ) : (
         <div>
-          {orders.map((order) => {
+          {filteredOrders.map((order) => {
             // Calculate remaining ETA (countdown)
             const elapsedMs = currentTime - order.preparingTimestamp;
             const elapsedMinutes = Math.floor(elapsedMs / 60000);
@@ -3320,7 +3560,7 @@ function PreparingOrders({
 }
 
 // Ready Orders List
-function ReadyOrders({ onSelectOrder, refreshToken = 0 }) {
+function ReadyOrders({ onSelectOrder, refreshToken = 0, searchQuery = "" }) {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -3409,19 +3649,29 @@ function ReadyOrders({ onSelectOrder, refreshToken = 0 }) {
     );
   }
 
+  const filteredOrders = orders.filter((o) => {
+    if (!searchQuery) return true;
+    const q = searchQuery.toLowerCase();
+    return (
+      String(o.orderId || o.mongoId || "").toLowerCase().includes(q) ||
+      String(o.customerName || "").toLowerCase().includes(q) ||
+      String(o.itemsSummary || "").toLowerCase().includes(q)
+    );
+  });
+
   return (
     <div className="pt-4 pb-6">
       <div className="flex items-baseline justify-between mb-3">
-        <h2 className="text-base font-semibold text-black">Ready for pickup</h2>
-        <span className="text-xs text-gray-500">{orders.length} active</span>
+        <h2 className="text-base font-semibold text-black">Ready orders</h2>
+        <span className="text-xs text-gray-500">{filteredOrders.length} active</span>
       </div>
-      {orders.length === 0 ? (
+      {filteredOrders.length === 0 ? (
         <div className="text-center py-8 text-gray-500 text-sm">
-          No orders ready for pickup
+          No orders ready
         </div>
       ) : (
         <div>
-          {orders.map((order) => (
+          {filteredOrders.map((order) => (
             <OrderCard
               key={order.orderId || order.mongoId}
               {...order}
@@ -3435,7 +3685,7 @@ function ReadyOrders({ onSelectOrder, refreshToken = 0 }) {
 }
 
 // Out for Delivery Orders List
-const OutForDeliveryOrders = ({ onSelectOrder, refreshToken = 0 }) => {
+const OutForDeliveryOrders = ({ onSelectOrder, refreshToken = 0, searchQuery = "" }) => {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -3524,19 +3774,29 @@ const OutForDeliveryOrders = ({ onSelectOrder, refreshToken = 0 }) => {
     );
   }
 
+  const filteredOrders = orders.filter(o => {
+    if (!searchQuery) return true;
+    const q = searchQuery.toLowerCase();
+    return (
+      String(o.orderId || o.mongoId || "").toLowerCase().includes(q) ||
+      String(o.customerName || "").toLowerCase().includes(q) ||
+      String(o.itemsSummary || "").toLowerCase().includes(q)
+    );
+  });
+
   return (
     <div className="pt-4 pb-6">
       <div className="flex items-baseline justify-between mb-3">
         <h2 className="text-base font-semibold text-black">Out for delivery</h2>
-        <span className="text-xs text-gray-500">{orders.length} active</span>
+        <span className="text-xs text-gray-500">{filteredOrders.length} active</span>
       </div>
-      {orders.length === 0 ? (
+      {filteredOrders.length === 0 ? (
         <div className="text-center py-8 text-gray-500 text-sm">
           No orders out for delivery
         </div>
       ) : (
         <div>
-          {orders.map((order) => (
+          {filteredOrders.map((order) => (
             <OrderCard
               key={order.orderId || order.mongoId}
               {...order}
@@ -3550,7 +3810,7 @@ const OutForDeliveryOrders = ({ onSelectOrder, refreshToken = 0 }) => {
 };
 
 // Scheduled Orders List
-function ScheduledOrders({ onSelectOrder, refreshToken = 0 }) {
+function ScheduledOrders({ onSelectOrder, refreshToken = 0, searchQuery = "" }) {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -3619,20 +3879,30 @@ function ScheduledOrders({ onSelectOrder, refreshToken = 0 }) {
     );
   }
 
+  const filteredOrders = orders.filter(o => {
+    if (!searchQuery) return true;
+    const q = searchQuery.toLowerCase();
+    return (
+      String(o.orderId || o.mongoId || "").toLowerCase().includes(q) ||
+      String(o.customerName || "").toLowerCase().includes(q) ||
+      String(o.itemsSummary || "").toLowerCase().includes(q)
+    );
+  });
+
   return (
     <div className="pt-4 pb-6">
       <div className="flex items-baseline justify-between mb-3">
         <h2 className="text-base font-semibold text-black">Scheduled orders</h2>
-        <span className="text-xs text-gray-500">{orders.length} total</span>
+        <span className="text-xs text-gray-500">{filteredOrders.length} total</span>
       </div>
-      {orders.length === 0 ? (
+      {filteredOrders.length === 0 ? (
         <div className="text-center py-12 bg-white rounded-2xl border border-gray-200 flex flex-col items-center">
           <Calendar className="w-12 h-12 text-gray-300 mb-3" />
           <p className="text-gray-500 text-sm">Scheduled orders will appear here</p>
         </div>
       ) : (
         <div>
-          {orders.map((order) => {
+          {filteredOrders.map((order) => {
             const scheduledTime = new Date(order.scheduledAt).toLocaleString("en-US", {
               day: "numeric",
               month: "short",

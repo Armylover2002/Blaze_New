@@ -250,11 +250,27 @@ const restaurantSchema = new mongoose.Schema(
     menu: {
       sections: { type: Array, default: [] },
     },
+    isListed: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    productCount: {
+      type: Number,
+      default: 0,
+    },
     status: {
       type: String,
-      enum: ["pending", "approved", "rejected"],
+      enum: ["onboarding", "pending", "approved", "rejected"],
       default: "pending",
       index: true,
+    },
+    /** Next step to show during in-progress onboarding (2–4). Set after each step is saved. */
+    onboardingStep: {
+      type: Number,
+      min: 1,
+      max: 5,
+      default: 1,
     },
     approvedAt: { type: Date, default: null },
     rejectedAt: { type: Date, default: null },

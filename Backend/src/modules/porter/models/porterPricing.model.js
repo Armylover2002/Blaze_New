@@ -9,12 +9,7 @@ const porterPricingSchema = new mongoose.Schema(
             required: true,
             index: true,
         },
-        zoneId: {
-            type: mongoose.Schema.Types.ObjectId,
-            ref: 'PorterZone',
-            default: null,
-            index: true,
-        },
+
         enableDistanceCharges: {
             type: Boolean,
             default: true,
@@ -60,14 +55,7 @@ const porterPricingSchema = new mongoose.Schema(
             default: '',
             trim: true,
         },
-        pricingConfigured: {
-            type: Boolean,
-            default: true,
-        },
-        displayOrder: {
-            type: Number,
-            default: 0,
-        },
+
         isDeleted: {
             type: Boolean,
             default: false,
@@ -92,7 +80,7 @@ const porterPricingSchema = new mongoose.Schema(
     },
 );
 
-porterPricingSchema.index({ vehicleId: 1, zoneId: 1 }, { unique: true, partialFilterExpression: { isDeleted: false } });
+porterPricingSchema.index({ vehicleId: 1 }, { unique: true, partialFilterExpression: { isDeleted: false } });
 porterPricingSchema.index({ status: 1, vehicleId: 1 });
 porterPricingSchema.index({ isDeleted: 1, status: 1, createdAt: -1 });
 
