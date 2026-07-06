@@ -7,6 +7,7 @@ import { canPerformAdminPermissionAction, extractAdminPermissions, extractAdminR
 
 import { adminApi } from "../services/adminApi"
 import { getGoogleMapsApiKey } from "@food/utils/googleMapsApiKey"
+import { findZoneOverlapMessage } from "../../../../shared/utils/zoneOverlap"
 import { Loader } from "@googlemaps/js-api-loader"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
@@ -617,6 +618,17 @@ export default function AddZone() {
         unit: formData.unit || "kilometer",
         coordinates: validCoordinates,
         isActive: true
+      }
+
+      const overlapMessage = findZoneOverlapMessage(
+        validCoordinates,
+        existingZones,
+        isEditMode ? id : null
+      )
+      if (overlapMessage) {
+        alert(overlapMessage)
+        setLoading(false)
+        return
       }
 
       debugLog("Sending zone data:", zoneData)

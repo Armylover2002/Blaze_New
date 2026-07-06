@@ -11,6 +11,7 @@ import Button from "@/shared/components/ui/Button";
 import Input from "@/shared/components/ui/Input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import porterAdminApi from "../services/adminApi";
+import { findZoneOverlapMessage } from "../../../../shared/utils/zoneOverlap";
 import { GoogleMap, useJsApiLoader, Polygon, Marker } from "@react-google-maps/api";
 
 const libraries = ["places"];
@@ -161,6 +162,17 @@ const Zones = () => {
 
   const handleSave = async () => {
     if (!validate()) return;
+
+    const overlapMessage = findZoneOverlapMessage(
+      form.coordinates,
+      zones,
+      editing?.id || null
+    );
+    if (overlapMessage) {
+      setErrors({ coordinates: overlapMessage });
+      return;
+    }
+
     setSaving(true);
     try {
       const payload = {

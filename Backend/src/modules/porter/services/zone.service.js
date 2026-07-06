@@ -11,6 +11,7 @@ import {
 } from '../validators/zone.validator.js';
 import { validateListQuery } from '../validators/listQuery.validator.js';
 import { applySoftDelete } from '../utils/softDelete.util.js';
+import { findOverlappingZone, ZONE_OVERLAP_MESSAGE } from '../../../utils/zoneOverlap.js';
 
 const baseFilter = { isDeleted: { $ne: true } };
 
@@ -94,6 +95,15 @@ export async function createZone(body, reqUser) {
     }
 
     if (payload.coordinates) {
+        const overlapping = await findOverlappingZone(PorterZone, payload.coordinates, {
+            extraFilter: baseFilter,
+        });
+        if (overlapping) {
+            throw new ConflictError(ZONE_OVERLAP_MESSAGE);
+        }
+    }
+
+    if (payload.coordinates) {
         payload.geometry = convertToGeoJSON(payload.coordinates);
         delete payload.coordinates;
         delete payload.polygon;
@@ -127,6 +137,16 @@ export async function updateZone(id, body, reqUser) {
 
         if (existing) {
             throw new ConflictError('Zone with this name already exists in the country');
+        }
+    }
+
+    if (payload.coordinates) {
+        const overlapping = await findOverlappingZone(PorterZone, payload.coordinates, {
+            excludeId: zoneId,
+            extraFilter: baseFilter,
+        });
+        if (overlapping) {
+            throw new ConflictError(ZONE_OVERLAP_MESSAGE);
         }
     }
 

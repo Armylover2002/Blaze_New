@@ -1,4 +1,10 @@
 import mongoose from 'mongoose';
+import { ValidationError } from '../../../../core/auth/errors.js';
+import {
+    coordinatesToGeoJSONPolygon,
+    findOverlappingZone,
+    ZONE_OVERLAP_MESSAGE,
+} from '../../../../utils/zoneOverlap.js';
 
 const coordinateSchema = new mongoose.Schema(
     {
@@ -47,6 +53,15 @@ const zoneSchema = new mongoose.Schema(
                 message: 'Zone must have at least 3 coordinates (polygon).'
             }
         },
+        geometry: {
+            type: {
+                type: String,
+                enum: ['Polygon'],
+            },
+            coordinates: {
+                type: [[[Number]]],
+            },
+        },
          isActive: {
             type: Boolean,
             default: true,
@@ -66,5 +81,28 @@ const zoneSchema = new mongoose.Schema(
 
 zoneSchema.index({ isActive: 1, name: 1 });
 zoneSchema.index({ country: 1, name: 1 });
+zoneSchema.index({ geometry: '2dsphere' }, { sparse: true });
+
+zoneSchema.pre('save', async function saveZoneGeometryAndValidateOverlap(next) {
+    try {
+        if (this.isNew || this.isModified('coordinates')) {
+            const overlapping = await findOverlappingZone(this.constructor, this.coordinates, {
+                excludeId: this._id,
+                extraFilter: { country: this.country },
+            });
+            if (overlapping) {
+                return next(new ValidationError(ZONE_OVERLAP_MESSAGE));
+            }
+        }
+
+        if (this.coordinates?.length >= 3) {
+            this.geometry = coordinatesToGeoJSONPolygon(this.coordinates);
+        }
+
+        return next();
+    } catch (error) {
+        return next(error);
+    }
+});
 
 export const FoodZone = mongoose.model('FoodZone', zoneSchema, 'food_zones');

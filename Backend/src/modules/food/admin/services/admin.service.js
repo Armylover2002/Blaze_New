@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import { ValidationError } from '../../../../core/auth/errors.js';
+import { assertNoZoneOverlap } from '../../../../utils/zoneOverlap.js';
 import { FoodRestaurant } from '../../restaurant/models/restaurant.model.js';
 import { FoodRestaurantWallet } from '../../restaurant/models/restaurantWallet.model.js';
 import { FoodDeliveryPartner } from '../../delivery/models/deliveryPartner.model.js';
@@ -4786,10 +4787,14 @@ export async function createZone(body) {
         longitude: Number(c.longitude) || 0
     }));
 
+    const country = (body.country && body.country.trim()) || 'India';
+    const overlapResult = await assertNoZoneOverlap(FoodZone, normalized, { extraFilter: { country } });
+    if (overlapResult) return overlapResult;
+
     const zone = new FoodZone({
         name,
         zoneName: body.zoneName && body.zoneName.trim() ? body.zoneName.trim() : name,
-        country: (body.country && body.country.trim()) || 'India',
+        country,
         serviceLocation: (body.serviceLocation && body.serviceLocation.trim()) || name,
         unit: body.unit === 'miles' ? 'miles' : 'kilometer',
         coordinates: normalized,
@@ -4810,10 +4815,16 @@ export async function updateZone(id, body) {
     if (body.unit !== undefined) zone.unit = body.unit === 'miles' ? 'miles' : 'kilometer';
     if (body.isActive !== undefined) zone.isActive = body.isActive !== false;
     if (Array.isArray(body.coordinates) && body.coordinates.length >= 3) {
-        zone.coordinates = body.coordinates.map((c) => ({
+        const normalizedCoords = body.coordinates.map((c) => ({
             latitude: Number(c.latitude) || 0,
             longitude: Number(c.longitude) || 0
         }));
+        const overlapResult = await assertNoZoneOverlap(FoodZone, normalizedCoords, {
+            excludeId: id,
+            extraFilter: { country: zone.country },
+        });
+        if (overlapResult) return overlapResult;
+        zone.coordinates = normalizedCoords;
     }
     if (zone.name) zone.serviceLocation = zone.serviceLocation || zone.name;
 
