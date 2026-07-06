@@ -37,6 +37,16 @@ export const processOrderJob = async (job) => {
         }
     }
 
+    // Porter scheduled dispatch
+    if (action === 'PORTER_SCHEDULED_DISPATCH') {
+        try {
+            const { processPorterScheduledDispatchJob } = await import('../../../modules/porter/orders/services/porter-scheduled-dispatch.service.js');
+            await processPorterScheduledDispatchJob(orderMongoId);
+        } catch (err) {
+            logger.error(`[BullMQ:order] PORTER_SCHEDULED_DISPATCH failed: ${err.message}`);
+        }
+    }
+
 
     return { processed: true, action, jobId: job.id };
 };

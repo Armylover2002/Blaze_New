@@ -215,6 +215,29 @@ export const isReturnPickupTrip = (order) =>
   String(order?.tripType || "").trim() === "return_pickup" ||
   String(order?.documentType || "").trim() === "seller_return";
 
+export const isPorterParcelTrip = (order) =>
+  String(order?.module || "").trim() === "parcel" ||
+  String(order?.documentType || "").trim() === "porter_order";
+
+export const enrichPorterDeliveryOrder = (order = {}) => {
+  if (!isPorterParcelTrip(order)) return order;
+  const pickupLoc = normalizeLocationPoint(order.pickup || order.pickupLocation || order.restaurantLocation);
+  const dropLoc = normalizeLocationPoint(order.delivery || order.dropLocation || order.customerLocation);
+  return {
+    ...order,
+    module: "parcel",
+    documentType: order.documentType || "porter_order",
+    orderId: order.orderId || order.id || order.orderMongoId,
+    orderMongoId: order.orderMongoId || order.id || order.orderId,
+    restaurantLocation: pickupLoc,
+    customerLocation: dropLoc,
+    pickupLocation: pickupLoc,
+    dropLocation: dropLoc,
+    earnings: order.earnings ?? order.pricing?.driverEarning ?? 0,
+    riderEarning: order.riderEarning ?? order.pricing?.driverEarning ?? order.earnings ?? 0,
+  };
+};
+
 export const getReturnPickupStopLabels = () => ({
   pickupLabel: "Pickup From Customer",
   dropLabel: "Drop To Seller",

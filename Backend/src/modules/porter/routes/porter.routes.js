@@ -61,6 +61,48 @@ import {
     getPorterUserById,
 } from '../controllers/user.controller.js';
 
+import {
+    createPorterOrder,
+    getActivePorterOrder,
+    getPorterOrder,
+    listPorterOrders,
+    cancelPorterOrder,
+    ratePorterOrder,
+    verifyPayment,
+    listPorterOrdersAdmin,
+    getPorterOrderAdmin,
+} from '../orders/controllers/porterOrder.controller.js';
+
+import {
+    listAvailablePorterOrders,
+    getActivePorterDriverOrder,
+    acceptPorterOrder,
+    rejectPorterOrder,
+    confirmPorterReachedPickup,
+    verifyPorterPickupOtp,
+    confirmPorterPickedUp,
+    confirmPorterReachedDrop,
+    completePorterDelivery,
+    listPorterTripHistory,
+    getDriverVehicles,
+    setActiveDriverVehicle,
+} from '../orders/controllers/porterDriver.controller.js';
+
+import {
+    getPorterDashboard,
+    getPorterReports,
+    getPorterTransactions,
+} from '../orders/controllers/porterAdminAnalytics.controller.js';
+
+import {
+    adminAssignPorterDriver,
+    adminReassignPorterDriver,
+    adminCancelPorterOrder,
+    adminForceClosePorterOrder,
+    getPorterOrderLogsAdmin,
+    listAssignablePorterDrivers,
+} from '../orders/controllers/porterAdminOrder.controller.js';
+
 import { getPublicHomeData } from '../controllers/home.controller.js';
 import {
     reverseGeocode,
@@ -71,6 +113,8 @@ import {
 
 const router = express.Router();
 const adminOrEmployee = [authMiddleware, requireRoles('ADMIN', 'EMPLOYEE')];
+const userAuth = [authMiddleware, requireRoles('USER')];
+const driverAuth = [authMiddleware, requireRoles('DELIVERY_PARTNER')];
 
 router.get('/health', (_req, res) => res.json({ success: true, module: 'porter', status: 'ok' }));
 
@@ -80,6 +124,29 @@ router.get('/maps/reverse-geocode', reverseGeocode);
 router.get('/maps/place-details', getPlaceDetails);
 router.post('/maps/route-preview', getRoutePreview);
 router.post('/maps/quote-preview', getQuotePreview);
+
+// Customer orders
+router.post('/orders', ...userAuth, createPorterOrder);
+router.get('/orders/active', ...userAuth, getActivePorterOrder);
+router.get('/orders', ...userAuth, listPorterOrders);
+router.post('/orders/verify-payment', ...userAuth, verifyPayment);
+router.get('/orders/:id', ...userAuth, getPorterOrder);
+router.post('/orders/:id/cancel', ...userAuth, cancelPorterOrder);
+router.post('/orders/:id/rate', ...userAuth, ratePorterOrder);
+
+// Driver parcel orders (isolated from Food/Quick dispatch)
+router.get('/driver/vehicles', ...driverAuth, getDriverVehicles);
+router.patch('/driver/vehicles/active', ...driverAuth, setActiveDriverVehicle);
+router.get('/driver/orders/available', ...driverAuth, listAvailablePorterOrders);
+router.get('/driver/orders/active', ...driverAuth, getActivePorterDriverOrder);
+router.get('/driver/trips', ...driverAuth, listPorterTripHistory);
+router.post('/driver/orders/:id/accept', ...driverAuth, acceptPorterOrder);
+router.post('/driver/orders/:id/reject', ...driverAuth, rejectPorterOrder);
+router.post('/driver/orders/:id/reached-pickup', ...driverAuth, confirmPorterReachedPickup);
+router.post('/driver/orders/:id/verify-pickup-otp', ...driverAuth, verifyPorterPickupOtp);
+router.post('/driver/orders/:id/picked-up', ...driverAuth, confirmPorterPickedUp);
+router.post('/driver/orders/:id/reached-drop', ...driverAuth, confirmPorterReachedDrop);
+router.post('/driver/orders/:id/complete', ...driverAuth, completePorterDelivery);
 
 // Zones
 router.get('/admin/zones/dropdown', ...adminOrEmployee, checkPermission('porter::zones', 'view'), listZoneDropdown);
@@ -132,5 +199,20 @@ router.delete('/admin/banners/:id', ...adminOrEmployee, checkPermission('porter:
 // Users (FoodUser listing)
 router.get('/admin/users', ...adminOrEmployee, checkPermission('porter::users', 'view'), listPorterUsers);
 router.get('/admin/users/:id', ...adminOrEmployee, checkPermission('porter::users', 'view'), getPorterUserById);
+
+// Admin orders
+router.get('/admin/orders', ...adminOrEmployee, checkPermission('porter::orders', 'view'), listPorterOrdersAdmin);
+router.get('/admin/orders/:id', ...adminOrEmployee, checkPermission('porter::orders', 'view'), getPorterOrderAdmin);
+router.get('/admin/orders/:id/logs', ...adminOrEmployee, checkPermission('porter::orders', 'view'), getPorterOrderLogsAdmin);
+router.get('/admin/orders/:id/assignable-drivers', ...adminOrEmployee, checkPermission('porter::orders', 'edit'), listAssignablePorterDrivers);
+router.post('/admin/orders/:id/assign', ...adminOrEmployee, checkPermission('porter::orders', 'edit'), adminAssignPorterDriver);
+router.post('/admin/orders/:id/reassign', ...adminOrEmployee, checkPermission('porter::orders', 'edit'), adminReassignPorterDriver);
+router.post('/admin/orders/:id/cancel', ...adminOrEmployee, checkPermission('porter::orders', 'edit'), adminCancelPorterOrder);
+router.post('/admin/orders/:id/force-close', authMiddleware, requireRoles('ADMIN'), checkPermission('porter::orders', 'edit'), adminForceClosePorterOrder);
+
+// Admin analytics
+router.get('/admin/dashboard', ...adminOrEmployee, checkPermission('porter::orders', 'view'), getPorterDashboard);
+router.get('/admin/reports', ...adminOrEmployee, checkPermission('porter::orders', 'view'), getPorterReports);
+router.get('/admin/transactions', ...adminOrEmployee, checkPermission('porter::orders', 'view'), getPorterTransactions);
 
 export default router;

@@ -201,6 +201,52 @@ export const porterAdminApi = {
     const response = await axiosInstance.delete(`/porter/admin/users/${id}`);
     return unwrap(response);
   },
+
+  // Orders
+  getOrders: async (params = {}) => {
+    const response = await axiosInstance.get('/porter/admin/orders', { params });
+    return unwrapPaginated(response);
+  },
+  getOrderById: async (id) => {
+    const response = await axiosInstance.get(`/porter/admin/orders/${id}`);
+    return unwrap(response).order || unwrap(response);
+  },
+  getOrderLogs: async (id) => {
+    const response = await axiosInstance.get(`/porter/admin/orders/${id}/logs`);
+    return unwrap(response);
+  },
+  getAssignableDrivers: async (orderId) => {
+    const response = await axiosInstance.get(`/porter/admin/orders/${orderId}/assignable-drivers`);
+    return unwrap(response).drivers || [];
+  },
+  assignDriver: async (orderId, driverId) => {
+    const response = await axiosInstance.post(`/porter/admin/orders/${orderId}/assign`, { driverId });
+    return unwrap(response).order;
+  },
+  reassignDriver: async (orderId, driverId) => {
+    const response = await axiosInstance.post(`/porter/admin/orders/${orderId}/reassign`, { driverId });
+    return unwrap(response).order;
+  },
+  cancelOrder: async (orderId, reason) => {
+    const response = await axiosInstance.post(`/porter/admin/orders/${orderId}/cancel`, { reason });
+    return unwrap(response).order;
+  },
+  forceCloseOrder: async (orderId, payload) => {
+    const response = await axiosInstance.post(`/porter/admin/orders/${orderId}/force-close`, payload);
+    return unwrap(response).order;
+  },
+  getDashboard: async () => {
+    const response = await axiosInstance.get('/porter/admin/dashboard');
+    return unwrap(response);
+  },
+  getReports: async (params = {}) => {
+    const response = await axiosInstance.get('/porter/admin/reports', { params });
+    return unwrap(response);
+  },
+  getTransactions: async (params = {}) => {
+    const response = await axiosInstance.get('/porter/admin/transactions', { params });
+    return unwrap(response);
+  },
 };
 
 export default porterAdminApi;

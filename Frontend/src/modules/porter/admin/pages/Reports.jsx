@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   IndianRupee, Package, TrendingUp, Truck, Download, FileText, FileSpreadsheet,
 } from "lucide-react";
@@ -11,12 +11,8 @@ import {
 } from "@/shared/components/admin";
 import Button from "@/shared/components/ui/Button";
 import Input from "@/shared/components/ui/Input";
-import {
-  MOCK_REPORT_KPIS, MOCK_REVENUE_TREND, MOCK_WEEKLY_REVENUE, MOCK_DAILY_REVENUE,
-  MOCK_VEHICLE_UTILIZATION, MOCK_ZONE_PERFORMANCE, MOCK_TOP_DRIVERS,
-  MOCK_TOP_VEHICLES, MOCK_DRIVER_PERFORMANCE,
-} from "../utils/mock/reports";
 import { formatCurrency } from "../utils/porterTableHelpers";
+import porterAdminApi from "../services/adminApi";
 
 const PIE_COLORS = BLAZE_CHART?.series || ["#FF0000", "#2563EB", "#2E7D32", "#F59E0B", "#7C3AED", "#DC2626"];
 
@@ -24,12 +20,38 @@ const Reports = () => {
   const [range, setRange] = useState("monthly");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
 
-  const revenueData = range === "weekly" ? MOCK_WEEKLY_REVENUE : range === "daily" ? MOCK_DAILY_REVENUE : MOCK_REVENUE_TREND;
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    porterAdminApi.getReports({ range })
+      .then((res) => { if (!cancelled) setData(res); })
+      .catch(() => { if (!cancelled) setData(null); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [range]);
+
+  const kpis = data?.kpis || { totalRevenue: "₹0", totalOrders: "0", avgOrderValue: "₹0", fleetUtilization: "0%" };
+  const revenueData = data?.revenueTrend || [];
+  const vehicleUtilization = data?.vehicleUtilization || [];
+  const zonePerformance = data?.zonePerformance || [];
+  const topDrivers = (data?.topDrivers || []).map((d, i) => ({
+    name: `Driver ${i + 1}`,
+    orders: d.trips,
+    rating: "—",
+    earnings: d.earnings,
+  }));
+  const topVehicles = vehicleUtilization.map((v) => ({
+    name: v.name,
+    orders: v.value,
+    revenue: v.revenue,
+  }));
 
   const exportCsv = () => {
     const headers = ["Period", "Revenue", "Orders"];
-    const rows = MOCK_REVENUE_TREND.map((r) => [r.name, r.revenue, r.orders]);
+    const rows = revenueData.map((r) => [r.name, r.revenue, r.orders]);
     const csv = [headers, ...rows].map((r) => r.join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
@@ -84,10 +106,10 @@ const Reports = () => {
       </SectionCard>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <StatCard title="Total Revenue" value={MOCK_REPORT_KPIS.totalRevenue} icon={<IndianRupee size={18} />} trend="+12%" trendDirection="up" />
-        <StatCard title="Total Orders" value={MOCK_REPORT_KPIS.totalOrders} icon={<Package size={18} />} trend="+8%" trendDirection="up" />
-        <StatCard title="Avg Order Value" value={MOCK_REPORT_KPIS.avgOrderValue} icon={<TrendingUp size={18} />} />
-        <StatCard title="Fleet Utilization" value={MOCK_REPORT_KPIS.fleetUtilization} icon={<Truck size={18} />} trend="+5%" trendDirection="up" />
+        <StatCard title="Total Revenue" value={kpis.totalRevenue} icon={<IndianRupee size={18} />} />
+        <StatCard title="Total Orders" value={kpis.totalOrders} icon={<Package size={18} />} />
+        <StatCard title="Avg Order Value" value={kpis.avgOrderValue} icon={<TrendingUp size={18} />} />
+        <StatCard title="Fleet Utilization" value={kpis.fleetUtilization} icon={<Truck size={18} />} />
       </div>
 
       {/* Revenue + Orders trend */}
@@ -116,8 +138,8 @@ const Reports = () => {
           <div className="h-72 p-4">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
-                <Pie data={MOCK_VEHICLE_UTILIZATION} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label>
-                  {MOCK_VEHICLE_UTILIZATION.map((entry, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+                <Pie data={vehicleUtilization} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label>
+                  {vehicleUtilization.map((entry, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
                 </Pie>
                 <Tooltip {...BLAZE_CHART.tooltip} />
                 <Legend wrapperStyle={{ fontSize: 11 }} />
@@ -132,7 +154,7 @@ const Reports = () => {
         <SectionCard title="Orders Trend" flush>
           <div className="h-64 p-4">
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={MOCK_REVENUE_TREND}>
+              <LineChart data={revenueData}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={BLAZE_CHART.grid} />
                 <XAxis dataKey="name" tick={{ fontSize: 11 }} />
                 <YAxis tick={{ fontSize: 11 }} />
@@ -146,14 +168,14 @@ const Reports = () => {
         <SectionCard title="Driver Performance" subtitle="Completed vs cancelled" flush>
           <div className="h-64 p-4">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={MOCK_DRIVER_PERFORMANCE}>
+              <BarChart data={revenueData}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={BLAZE_CHART.grid} />
                 <XAxis dataKey="name" tick={{ fontSize: 11 }} />
                 <YAxis tick={{ fontSize: 11 }} />
                 <Tooltip {...BLAZE_CHART.tooltip} />
                 <Legend wrapperStyle={{ fontSize: 11 }} />
-                <Bar dataKey="completed" fill={BLAZE_CHART.success} radius={[4, 4, 0, 0]} name="Completed" />
-                <Bar dataKey="cancelled" fill={BLAZE_CHART.danger} radius={[4, 4, 0, 0]} name="Cancelled" />
+                <Bar dataKey="orders" fill={BLAZE_CHART.success} radius={[4, 4, 0, 0]} name="Orders" />
+                <Bar dataKey="revenue" fill={BLAZE_CHART.primary} radius={[4, 4, 0, 0]} name="Revenue" />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -164,7 +186,7 @@ const Reports = () => {
       <SectionCard title="Zone Performance" subtitle="Orders and revenue by zone" flush>
         <div className="h-72 p-4">
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={MOCK_ZONE_PERFORMANCE} layout="vertical" margin={{ left: 30 }}>
+            <BarChart data={zonePerformance.map((z) => ({ name: z.zoneId?.slice(-6) || "Zone", orders: z.orders }))} layout="vertical" margin={{ left: 30 }}>
               <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke={BLAZE_CHART.grid} />
               <XAxis type="number" tick={{ fontSize: 11 }} />
               <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={100} />
@@ -178,8 +200,8 @@ const Reports = () => {
 
       {/* Top tables */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <SectionCard title="Top Drivers"><AdminTable columns={driverColumns} data={MOCK_TOP_DRIVERS} getRowId={(r) => r.name} /></SectionCard>
-        <SectionCard title="Top Vehicles"><AdminTable columns={vehicleColumns} data={MOCK_TOP_VEHICLES} getRowId={(r) => r.name} /></SectionCard>
+        <SectionCard title="Top Drivers"><AdminTable columns={driverColumns} data={topDrivers} getRowId={(r) => r.name} /></SectionCard>
+        <SectionCard title="Top Vehicles"><AdminTable columns={vehicleColumns} data={topVehicles} getRowId={(r) => r.name} /></SectionCard>
       </div>
     </div>
   );

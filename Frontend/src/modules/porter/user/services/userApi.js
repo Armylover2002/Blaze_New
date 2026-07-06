@@ -18,8 +18,30 @@ const porterUserApi = {
     .post('/porter/maps/route-preview', { pickup, delivery })
     .then(unwrap),
 
-  getQuotePreview: ({ pickup, delivery, vehicleId }) => axiosInstance
-    .post('/porter/maps/quote-preview', { pickup, delivery, vehicleId })
+  getQuotePreview: ({ pickup, delivery, vehicleId, parcelWeight }) => axiosInstance
+    .post('/porter/maps/quote-preview', { pickup, delivery, vehicleId, parcelWeight })
+    .then(unwrap),
+
+  createOrder: (payload, options = {}) => axiosInstance
+    .post('/porter/orders', payload, { signal: options.signal })
+    .then(unwrap),
+
+  getActiveOrder: (options = {}) => getWithDedupe('/porter/orders/active', {}, options).then(unwrap),
+
+  verifyPayment: (payload) => axiosInstance
+    .post('/porter/orders/verify-payment', payload)
+    .then(unwrap),
+
+  getOrder: (id) => axiosInstance.get(`/porter/orders/${id}`).then(unwrap),
+
+  listOrders: (params = {}) => axiosInstance.get('/porter/orders', { params }).then(unwrap),
+
+  cancelOrder: (id, reason) => axiosInstance
+    .post(`/porter/orders/${id}/cancel`, { reason })
+    .then(unwrap),
+
+  rateOrder: (id, payload) => axiosInstance
+    .post(`/porter/orders/${id}/rate`, payload)
     .then(unwrap),
 };
 

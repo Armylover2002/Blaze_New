@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { Package, Truck, Clock, AlertTriangle, ArrowRight, TrendingUp, CheckCircle, XCircle, Activity, DollarSign, Users, MapPin, Bell } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell } from "recharts";
 import {
@@ -10,20 +10,33 @@ import {
 } from "@/shared/components/admin";
 import Button from "@/shared/components/ui/Button";
 
+import porterAdminApi from "../services/adminApi";
 import {
-  MOCK_DASHBOARD_KPIS,
   MOCK_CHART_DAILY_ORDERS,
   MOCK_CHART_REVENUE,
   MOCK_CHART_VEHICLE_UTILIZATION,
   MOCK_RECENT_ORDERS,
   MOCK_RECENT_DRIVERS,
-  MOCK_TOP_VEHICLES,
-  MOCK_NOTIFICATIONS
+  MOCK_NOTIFICATIONS,
+  MOCK_TOP_VEHICLES
 } from "../utils/mockData";
 
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042'];
 
 const Dashboard = () => {
+  const [dashboard, setDashboard] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    porterAdminApi.getDashboard()
+      .then(setDashboard)
+      .catch(() => setDashboard(null))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const kpis = dashboard?.kpis || {};
+  const recentOrders = dashboard?.recentOrders || [];
+
   const orderColumns = [
     { header: "Order ID", key: "id", className: "font-medium" },
     { header: "Customer", key: "customer" },
@@ -79,25 +92,34 @@ const Dashboard = () => {
         }
       />
       
-      {/* KPI Cards Grid */}
+      {loading ? (
+        <p className="text-sm text-muted-foreground">Loading dashboard…</p>
+      ) : (
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-        <StatCard title="Total Orders Today" value={MOCK_DASHBOARD_KPIS.totalOrders.value} trend={MOCK_DASHBOARD_KPIS.totalOrders.trend} trendValue={MOCK_DASHBOARD_KPIS.totalOrders.trendValue} subtitle={MOCK_DASHBOARD_KPIS.totalOrders.description} icon={<Package size={18} />} iconBg="bg-blue-100 text-blue-600" />
-        <StatCard title="Active Drivers" value={MOCK_DASHBOARD_KPIS.activeDrivers.value} trend={MOCK_DASHBOARD_KPIS.activeDrivers.trend} trendValue={MOCK_DASHBOARD_KPIS.activeDrivers.trendValue} subtitle={MOCK_DASHBOARD_KPIS.activeDrivers.description} icon={<Users size={18} />} iconBg="bg-green-100 text-green-600" />
-        <StatCard title="Active Vehicles" value={MOCK_DASHBOARD_KPIS.activeVehicles.value} trend={MOCK_DASHBOARD_KPIS.activeVehicles.trend} trendValue={MOCK_DASHBOARD_KPIS.activeVehicles.trendValue} subtitle={MOCK_DASHBOARD_KPIS.activeVehicles.description} icon={<Truck size={18} />} iconBg="bg-teal-100 text-teal-600" />
-        <StatCard title="Revenue Today" value={MOCK_DASHBOARD_KPIS.revenueToday.value} trend={MOCK_DASHBOARD_KPIS.revenueToday.trend} trendValue={MOCK_DASHBOARD_KPIS.revenueToday.trendValue} subtitle={MOCK_DASHBOARD_KPIS.revenueToday.description} icon={<DollarSign size={18} />} iconBg="bg-yellow-100 text-yellow-600" />
-        
-        <StatCard title="Orders In Transit" value={MOCK_DASHBOARD_KPIS.ordersInTransit.value} trend={MOCK_DASHBOARD_KPIS.ordersInTransit.trend} trendValue={MOCK_DASHBOARD_KPIS.ordersInTransit.trendValue} subtitle={MOCK_DASHBOARD_KPIS.ordersInTransit.description} icon={<Activity size={18} />} iconBg="bg-purple-100 text-purple-600" />
-        <StatCard title="Completed Orders" value={MOCK_DASHBOARD_KPIS.completedOrders.value} trend={MOCK_DASHBOARD_KPIS.completedOrders.trend} trendValue={MOCK_DASHBOARD_KPIS.completedOrders.trendValue} subtitle={MOCK_DASHBOARD_KPIS.completedOrders.description} icon={<CheckCircle size={18} />} iconBg="bg-green-100 text-green-600" />
-        <StatCard title="Pending Orders" value={MOCK_DASHBOARD_KPIS.pendingOrders.value} trend={MOCK_DASHBOARD_KPIS.pendingOrders.trend} trendValue={MOCK_DASHBOARD_KPIS.pendingOrders.trendValue} subtitle={MOCK_DASHBOARD_KPIS.pendingOrders.description} icon={<Clock size={18} />} iconBg="bg-orange-100 text-orange-600" />
-        <StatCard title="Cancelled Orders" value={MOCK_DASHBOARD_KPIS.cancelledOrders.value} trend={MOCK_DASHBOARD_KPIS.cancelledOrders.trend} trendValue={MOCK_DASHBOARD_KPIS.cancelledOrders.trendValue} subtitle={MOCK_DASHBOARD_KPIS.cancelledOrders.description} icon={<XCircle size={18} />} iconBg="bg-red-100 text-red-600" />
-        
-        <StatCard title="Avg Delivery Time" value={MOCK_DASHBOARD_KPIS.avgDeliveryTime.value} trend={MOCK_DASHBOARD_KPIS.avgDeliveryTime.trend} trendValue={MOCK_DASHBOARD_KPIS.avgDeliveryTime.trendValue} subtitle={MOCK_DASHBOARD_KPIS.avgDeliveryTime.description} icon={<Clock size={18} />} iconBg="bg-indigo-100 text-indigo-600" />
-        <StatCard title="Customer Rating" value={MOCK_DASHBOARD_KPIS.customerRating.value} trend={MOCK_DASHBOARD_KPIS.customerRating.trend} trendValue={MOCK_DASHBOARD_KPIS.customerRating.trendValue} subtitle={MOCK_DASHBOARD_KPIS.customerRating.description} icon={<TrendingUp size={18} />} iconBg="bg-yellow-50 text-yellow-600" />
-        <StatCard title="Pending Issues" value={MOCK_DASHBOARD_KPIS.pendingIssues.value} trend={MOCK_DASHBOARD_KPIS.pendingIssues.trend} trendValue={MOCK_DASHBOARD_KPIS.pendingIssues.trendValue} subtitle={MOCK_DASHBOARD_KPIS.pendingIssues.description} icon={<AlertTriangle size={18} />} iconBg="bg-red-100 text-red-600" />
-        <StatCard title="Fleet Utilization" value={MOCK_DASHBOARD_KPIS.fleetUtilization.value} trend={MOCK_DASHBOARD_KPIS.fleetUtilization.trend} trendValue={MOCK_DASHBOARD_KPIS.fleetUtilization.trendValue} subtitle={MOCK_DASHBOARD_KPIS.fleetUtilization.description} icon={<Truck size={18} />} iconBg="bg-cyan-100 text-cyan-600" />
+        <StatCard title="Total Orders" value={String(kpis.totalOrders ?? 0)} icon={<Package size={18} />} iconBg="bg-blue-100 text-blue-600" />
+        <StatCard title="Orders Today" value={String(kpis.todayOrders ?? 0)} icon={<Clock size={18} />} iconBg="bg-orange-100 text-orange-600" />
+        <StatCard title="Active Orders" value={String(kpis.activeOrders ?? 0)} icon={<Activity size={18} />} iconBg="bg-purple-100 text-purple-600" />
+        <StatCard title="Revenue Today" value={`₹${(kpis.todayRevenue ?? 0).toLocaleString("en-IN")}`} icon={<DollarSign size={18} />} iconBg="bg-yellow-100 text-yellow-600" />
+        <StatCard title="Total Revenue" value={`₹${(kpis.totalRevenue ?? 0).toLocaleString("en-IN")}`} icon={<TrendingUp size={18} />} iconBg="bg-green-100 text-green-600" />
+        <StatCard title="Delivered" value={String(kpis.deliveredOrders ?? 0)} icon={<CheckCircle size={18} />} iconBg="bg-green-100 text-green-600" />
+        <StatCard title="Cancelled" value={String(kpis.cancelledOrders ?? 0)} icon={<XCircle size={18} />} iconBg="bg-red-100 text-red-600" />
+        <StatCard title="Fleet Utilization" value={kpis.fleetUtilization ?? "0%"} icon={<Truck size={18} />} iconBg="bg-cyan-100 text-cyan-600" />
+      </div>
+      )}
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
+          <SectionCard title="Recent Orders">
+                <AdminTable columns={orderColumns} data={recentOrders.map((o) => ({
+                  ...o,
+                  id: o.orderNumber,
+                  time: o.time ? new Date(o.time).toLocaleString() : "—",
+                  amount: `₹${o.amount ?? 0}`,
+                }))} />
+          </SectionCard>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
+      {/* Legacy charts removed — use Reports page for detailed analytics */}
+      <div className="hidden grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
           <SectionCard title="Daily Orders Trend">
             <div className="h-72 w-full">
                 <ResponsiveContainer width="100%" height="100%">

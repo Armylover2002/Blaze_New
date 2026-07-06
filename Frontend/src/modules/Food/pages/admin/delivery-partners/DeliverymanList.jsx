@@ -912,7 +912,77 @@ availableCashLimit: deliveryman.availableCashLimit || 0,
                   </div>
                 )}
 
-                {/* Vehicle Details */}
+                {/* Multi-Vehicle Details */}
+                {viewDetails.driverVehicles && viewDetails.driverVehicles.length > 0 && (
+                  <div className="pb-6 border-b border-slate-200">
+                    <h3 className="text-sm font-bold text-slate-900 mb-3 flex items-center gap-2">
+                      <Bike className="w-4 h-4" /> Vehicles List
+                    </h3>
+                    <div className="space-y-4">
+                      {viewDetails.driverVehicles.map((v, idx) => (
+                        <div key={v.id || idx} className="bg-slate-50 p-4 rounded-lg border border-slate-200">
+                          <h4 className="font-semibold text-slate-800 text-sm mb-3">Vehicle {idx + 1}: {v.vehicleName || v.vehicleCode || 'N/A'}</h4>
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                            {v.vehicleNumber && (
+                              <div>
+                                <label className="text-xs font-semibold text-slate-500 uppercase">Number</label>
+                                <p className="text-sm text-slate-900 mt-1">{v.vehicleNumber}</p>
+                              </div>
+                            )}
+                            {v.model && (
+                              <div>
+                                <label className="text-xs font-semibold text-slate-500 uppercase">Model</label>
+                                <p className="text-sm text-slate-900 mt-1">{v.model}</p>
+                              </div>
+                            )}
+                            {v.status && (
+                              <div>
+                                <label className="text-xs font-semibold text-slate-500 uppercase">Status</label>
+                                <p className="text-sm text-slate-900 mt-1 capitalize">{v.status}</p>
+                              </div>
+                            )}
+                            {v.isDefault && (
+                              <div>
+                                <label className="text-xs font-semibold text-slate-500 uppercase">Default</label>
+                                <p className="text-sm text-green-600 mt-1 font-medium">Yes</p>
+                              </div>
+                            )}
+                          </div>
+                          
+                          {/* Multi-Vehicle Photos */}
+                          <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-4">
+                            {v.vehiclePhoto && (
+                              <div>
+                                <label className="text-xs font-semibold text-slate-500 uppercase block mb-1">Vehicle Image</label>
+                                <a href={v.vehiclePhoto} target="_blank" rel="noopener noreferrer" className="inline-block relative rounded-lg overflow-hidden border border-slate-200 group bg-white shadow-sm w-full">
+                                  <img src={v.vehiclePhoto} alt="Vehicle" className="w-full h-32 object-cover transition-transform duration-300 group-hover:scale-105" />
+                                </a>
+                              </div>
+                            )}
+                            {v.rcPhoto && (
+                              <div>
+                                <label className="text-xs font-semibold text-slate-500 uppercase block mb-1">RC Image</label>
+                                <a href={v.rcPhoto} target="_blank" rel="noopener noreferrer" className="inline-block relative rounded-lg overflow-hidden border border-slate-200 group bg-white shadow-sm w-full">
+                                  <img src={v.rcPhoto} alt="RC" className="w-full h-32 object-cover transition-transform duration-300 group-hover:scale-105" />
+                                </a>
+                              </div>
+                            )}
+                            {v.insurancePhoto && (
+                              <div>
+                                <label className="text-xs font-semibold text-slate-500 uppercase block mb-1">Insurance Image</label>
+                                <a href={v.insurancePhoto} target="_blank" rel="noopener noreferrer" className="inline-block relative rounded-lg overflow-hidden border border-slate-200 group bg-white shadow-sm w-full">
+                                  <img src={v.insurancePhoto} alt="Insurance" className="w-full h-32 object-cover transition-transform duration-300 group-hover:scale-105" />
+                                </a>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Legacy Single Vehicle Details */}
                 {viewDetails.vehicle && (
                   <div className="pb-6 border-b border-slate-200">
                     <h3 className="text-sm font-bold text-slate-900 mb-3 flex items-center gap-2">

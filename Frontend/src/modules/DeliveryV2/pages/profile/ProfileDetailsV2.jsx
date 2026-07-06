@@ -390,7 +390,16 @@ export const ProfileDetailsV2 = () => {
       setUpiQrPreview(null)
       await refreshProfile()
     } catch (error) {
-      toast.error(error?.response?.data?.message || "Update failed")
+      if (error?.response?.status === 409) {
+          const backendErrors = error.response.data?.errors || {}
+          toast.error(error.response.data?.message || "Duplicate details found")
+          setTimeout(() => {
+              const firstError = Object.keys(backendErrors)[0]
+              if (firstError) document.querySelector(`[name="${firstError}"]`)?.focus()
+          }, 100)
+      } else {
+          toast.error(error?.response?.data?.message || "Update failed")
+      }
     } finally {
       setIsUpdatingBankDetails(false)
     }
@@ -854,6 +863,7 @@ export const ProfileDetailsV2 = () => {
                   </label>
                   <input 
                     type="text" 
+                    name={field.key}
                     value={bankDetails[field.key]} 
                     onChange={(e) => {
                         let val = e.target.value;

@@ -3,6 +3,8 @@ import mongoose from 'mongoose';
 import { ValidationError, NotFoundError } from '../../../core/auth/errors.js';
 import { PorterPricing } from '../models/porterPricing.model.js';
 import { PorterVehicle } from '../models/porterVehicle.model.js';
+import { calculateFareFromPricing } from '../utils/porter-pricing-calculator.util.js';
+import { buildParcelVehicleQuotes } from './porter-parcel-vehicle.service.js';
 
 const MAPS_TIMEOUT_MS = 8000;
 const baseFilter = { isDeleted: { $ne: true } };
@@ -143,30 +145,6 @@ export async function getRoutePreview({ pickup, delivery }) {
     };
 }
 
-function calculateFareFromPricing(pricing, distanceKm) {
-    if (!pricing) return null;
-
-    const basePrice = Number(pricing.basePrice || 0);
-    const baseDistance = Number(pricing.baseDistance || 0);
-    const distancePrice = Number(pricing.distancePrice || 0);
-    const serviceTaxPct = Number(pricing.serviceTax || 0);
-
-    let fare = basePrice;
-    if (pricing.enableDistanceCharges !== false) {
-        const extraKm = Math.max(0, distanceKm - baseDistance);
-        fare += extraKm * distancePrice;
-    }
-
-    const tax = (fare * serviceTaxPct) / 100;
-    const total = Math.round(fare + tax);
-
-    return {
-        baseFare: Math.round(fare),
-        serviceTax: Math.round(tax),
-        total,
-    };
-}
-
 async function resolveVehiclePricing(vehicleId) {
     if (!vehicleId) return { vehicle: null, pricing: null };
 
@@ -174,6 +152,7 @@ async function resolveVehiclePricing(vehicleId) {
         _id: vehicleId,
         ...baseFilter,
         status: 'active',
+        supportedServices: { $in: ['parcel'] },
     }).select({ name: 1, vehicleCode: 1 }).lean();
 
     if (!vehicle) throw new NotFoundError('Vehicle not found');
@@ -187,14 +166,71 @@ async function resolveVehiclePricing(vehicleId) {
     return { vehicle, pricing };
 }
 
-export async function getQuotePreview({ pickup, delivery, vehicleId }) {
+export async function getQuotePreview({ pickup, delivery, vehicleId, parcelWeight }) {
     const route = await getRoutePreview({ pickup, delivery });
-    const { vehicle, pricing } = await resolveVehiclePricing(vehicleId);
-    const fare = calculateFareFromPricing(pricing, route.distanceKm);
+    const weight = parcelWeight != null && Number(parcelWeight) > 0 ? Number(parcelWeight) : null;
+
+    let eligibleVehicles = [];
+    let ineligibleVehicles = [];
+    let recommendedVehicleId = null;
+    let noVehiclesAvailable = false;
+    let message = null;
+
+    const quotes = await buildParcelVehicleQuotes({ parcelWeight: weight || 0, route });
+    eligibleVehicles = quotes.eligible;
+    ineligibleVehicles = quotes.ineligible;
+    recommendedVehicleId = quotes.recommendedVehicleId;
+    noVehiclesAvailable = quotes.noVehiclesAvailable;
+    message = quotes.message;
+
+    let vehicle = null;
+    let fare = null;
+    let pricing = null;
+
+    if (vehicleId) {
+        const resolved = await resolveVehiclePricing(vehicleId);
+        if (resolved.vehicle) {
+            vehicle = {
+                id: String(resolved.vehicle._id),
+                name: resolved.vehicle.name,
+                vehicleCode: resolved.vehicle.vehicleCode,
+            };
+            pricing = calculateFareFromPricing(resolved.pricing, route.distanceKm);
+            fare = pricing
+                ? {
+                    baseFare: pricing.baseFare,
+                    serviceTax: pricing.serviceTax,
+                    total: pricing.total,
+                }
+                : null;
+        }
+    } else if (recommendedVehicleId && eligibleVehicles.length) {
+        const recommended = eligibleVehicles.find((item) => item.id === recommendedVehicleId) || eligibleVehicles[0];
+        vehicle = {
+            id: recommended.id,
+            name: recommended.name,
+            vehicleCode: recommended.vehicleCode,
+        };
+        pricing = recommended.pricing || null;
+        fare = pricing
+            ? {
+                baseFare: pricing.baseFare,
+                serviceTax: pricing.serviceTax,
+                total: pricing.total,
+            }
+            : null;
+    }
 
     return {
         route,
-        vehicle: vehicle ? { id: String(vehicle._id), name: vehicle.name, vehicleCode: vehicle.vehicleCode } : null,
+        parcelWeight: weight,
+        eligibleVehicles,
+        ineligibleVehicles,
+        recommendedVehicleId,
+        noVehiclesAvailable,
+        message,
+        vehicle,
         fare,
+        pricing,
     };
 }

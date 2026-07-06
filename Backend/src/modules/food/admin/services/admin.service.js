@@ -3654,6 +3654,7 @@ export async function getDeliveryJoinRequests(query) {
         city: doc.city || '',
         zone: doc.detectedZoneName,
         vehicleType: doc.vehicleType || '',
+        driverVehicles: doc.driverVehicles || [],
         status: doc.status === 'rejected' ? 'denied' : doc.status,
         rejectionReason: doc.rejectionReason || undefined,
         profilePhoto: doc.profilePhoto || null,
@@ -4552,6 +4553,8 @@ export async function approveDeliveryPartner(id, performer = null) {
     partner.rejectedAt = undefined;
     partner.rejectionReason = undefined;
     partner.approvedBy = performer;
+    const { activateDriverVehiclesOnPartnerApproval } = await import('../../../porter/orders/services/porter-driver-vehicle.service.js');
+    await activateDriverVehiclesOnPartnerApproval(partner);
     await partner.save();
 
     try {

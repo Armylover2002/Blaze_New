@@ -115,36 +115,6 @@ export default function PorterRouteMap({
       dropMarkerRef.current.setPosition(destination);
     }
 
-    const encodedPolyline = routeQuote?.route?.polyline;
-    if (encodedPolyline && window.google.maps.geometry?.encoding) {
-      if (directionsRendererRef.current) {
-        directionsRendererRef.current.setMap(null);
-        directionsRendererRef.current = null;
-      }
-
-      const path = window.google.maps.geometry.encoding.decodePath(encodedPolyline);
-      if (polylineRef.current) {
-        polylineRef.current.setPath(path);
-      } else {
-        polylineRef.current = new window.google.maps.Polyline({
-          map: mapRef.current,
-          path,
-          strokeColor: "#FF0000",
-          strokeWeight: 5,
-          strokeOpacity: 0.9,
-        });
-      }
-
-      if (lastFitPolylineRef.current !== encodedPolyline) {
-        const bounds = new window.google.maps.LatLngBounds();
-        path.forEach((p) => bounds.extend(p));
-        mapRef.current.fitBounds(bounds, 32);
-        lastFitPolylineRef.current = encodedPolyline;
-      }
-      setError("");
-      return undefined;
-    }
-
     if (polylineRef.current) {
       polylineRef.current.setMap(null);
       polylineRef.current = null;
@@ -156,7 +126,7 @@ export default function PorterRouteMap({
       const directionsRenderer = new window.google.maps.DirectionsRenderer({
         map: mapRef.current,
         suppressMarkers: true,
-        preserveViewport: true,
+        preserveViewport: false,
         polylineOptions: {
           strokeColor: "#FF0000",
           strokeWeight: 5,

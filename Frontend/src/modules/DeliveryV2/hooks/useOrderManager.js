@@ -1,7 +1,8 @@
 import { useDeliveryStore } from '@/modules/DeliveryV2/store/useDeliveryStore';
 import { deliveryAPI } from '@food/api';
 import { toast } from 'sonner';
-import { getPrimaryPickupLocation, normalizeLocationPoint, normalizePickupPoints, isReturnPickupTrip, getDeliveryDocumentId, getReturnDropLocation, enrichReturnDeliveryOrder } from '@/modules/DeliveryV2/utils/orderRouting';
+import { getPrimaryPickupLocation, normalizeLocationPoint, normalizePickupPoints, isReturnPickupTrip, isPorterParcelTrip, getDeliveryDocumentId, getReturnDropLocation, enrichReturnDeliveryOrder, enrichPorterDeliveryOrder } from '@/modules/DeliveryV2/utils/orderRouting';
+import porterDriverApi from '@/modules/porter/driver/services/driverApi';
 
 /**
  * useOrderManager - Professional hook for real-world trip lifecycle actions.
@@ -16,6 +17,19 @@ export const useOrderManager = () => {
     const orderId = getDeliveryDocumentId(order);
     if (!orderId) {
       toast.error('Invalid order data');
+      return;
+    }
+
+    if (isPorterParcelTrip(order)) {
+      try {
+        const result = await porterDriverApi.acceptOrder(orderId);
+        const fullOrder = enrichPorterDeliveryOrder(result?.order || order);
+        setActiveOrder(fullOrder);
+        updateTripStatus('PICKING_UP');
+      } catch (error) {
+        toast.error(error?.response?.data?.message || 'Order already taken or unavailable');
+        throw error;
+      }
       return;
     }
 
@@ -116,6 +130,11 @@ export const useOrderManager = () => {
   const reachPickup = async () => {
     const orderId = getDeliveryDocumentId(activeOrder);
     try {
+      if (isPorterParcelTrip(activeOrder)) {
+        await porterDriverApi.reachedPickup(orderId);
+        updateTripStatus('REACHED_PICKUP');
+        return;
+      }
       const response = await deliveryAPI.confirmReachedPickup(orderId, {
         documentType: isReturnPickupTrip(activeOrder) ? 'seller_return' : undefined,
       });
@@ -137,6 +156,16 @@ export const useOrderManager = () => {
   const pickUpOrder = async (billImageUrl, extra = {}) => {
     const orderId = getDeliveryDocumentId(activeOrder);
     try {
+      if (isPorterParcelTrip(activeOrder)) {
+        const otp = extra?.otp || extra?.customerOtp || extra?.pickupOtp;
+        if (otp) await porterDriverApi.verifyPickupOtp(orderId, otp);
+        const result = await porterDriverApi.confirmPickedUp(orderId);
+        const updatedOrder = enrichPorterDeliveryOrder(result?.order || activeOrder);
+        setActiveOrder(updatedOrder);
+        updateTripStatus('PICKED_UP');
+        return;
+      }
+
       const payload = isReturnPickupTrip(activeOrder)
         ? {
             documentType: 'seller_return',
@@ -176,6 +205,11 @@ export const useOrderManager = () => {
   const reachDrop = async () => {
     const orderId = getDeliveryDocumentId(activeOrder);
     try {
+      if (isPorterParcelTrip(activeOrder)) {
+        await porterDriverApi.reachedDrop(orderId);
+        updateTripStatus('REACHED_DROP');
+        return;
+      }
       const response = await deliveryAPI.confirmReachedDrop(orderId, {
         documentType: isReturnPickupTrip(activeOrder) ? 'seller_return' : undefined,
       });
@@ -200,6 +234,14 @@ export const useOrderManager = () => {
     const isReturn = isReturnPickupTrip(activeOrder);
 
     try {
+      if (isPorterParcelTrip(activeOrder)) {
+        const result = await porterDriverApi.completeDelivery(orderId, otp);
+        const finalOrder = enrichPorterDeliveryOrder(result?.order || activeOrder);
+        setActiveOrder(finalOrder);
+        updateTripStatus('COMPLETED');
+        return;
+      }
+
       if (isReturn) {
         const completeRes = await deliveryAPI.completeDelivery(orderId, {
           otp,

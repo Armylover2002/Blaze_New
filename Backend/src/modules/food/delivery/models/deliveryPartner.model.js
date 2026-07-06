@@ -20,7 +20,13 @@ const deliveryPartnerSchema = new mongoose.Schema(
             trim: true,
             unique: true
         },
-        email: { type: String, trim: true },
+        email: { 
+            type: String, 
+            trim: true,
+            lowercase: true,
+            sparse: true,
+            unique: true
+        },
         countryCode: {
             type: String,
             default: '+91'
@@ -43,17 +49,31 @@ const deliveryPartnerSchema = new mongoose.Schema(
         vehicleNumber: {
             type: String,
             unique: true,
-            sparse: true
+            sparse: true,
+            trim: true,
+            uppercase: true
         },
         panNumber: {
-            type: String
+            type: String,
+            trim: true,
+            uppercase: true,
+            sparse: true,
+            unique: true,
+            match: [/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/, 'Invalid PAN number format']
         },
         aadharNumber: {
-            type: String
+            type: String,
+            trim: true,
+            sparse: true,
+            unique: true,
+            match: [/^\d{12}$/, 'Invalid Aadhaar number format']
         },
         drivingLicenseNumber: {
             type: String,
-            trim: true
+            trim: true,
+            uppercase: true,
+            sparse: true,
+            unique: true
         },
         profilePhoto: {
             type: String
@@ -135,7 +155,25 @@ const deliveryPartnerSchema = new mongoose.Schema(
             type: String,
             enum: ['active', 'deleted'],
             default: 'active'
-        }
+        },
+        driverVehicles: [{
+            id: { type: String, trim: true },
+            porterVehicleId: { type: mongoose.Schema.Types.ObjectId, ref: 'PorterVehicle' },
+            vehicleName: { type: String, trim: true },
+            vehicleNumber: { type: String, trim: true, uppercase: true },
+            vehicleCode: { type: String, trim: true },
+            model: { type: String, trim: true, default: '' },
+            vehiclePhoto: { type: String, trim: true, default: '' },
+            rcPhoto: { type: String, trim: true, default: '' },
+            insurancePhoto: { type: String, trim: true, default: '' },
+            fitnessPhoto: { type: String, trim: true, default: '' },
+            pollutionPhoto: { type: String, trim: true, default: '' },
+            permitPhoto: { type: String, trim: true, default: '' },
+            supportedServices: [{ type: String, enum: ['food', 'quick', 'parcel'] }],
+            status: { type: String, enum: ['active', 'inactive', 'pending', 'draft', 'rejected'], default: 'active' },
+            isDefault: { type: Boolean, default: false },
+        }],
+        activeVehicleId: { type: String, trim: true, default: null },
     },
     {
         collection: 'food_delivery_partners',
@@ -145,6 +183,7 @@ const deliveryPartnerSchema = new mongoose.Schema(
 
 // Indices
 deliveryPartnerSchema.index({ lastLocation: '2dsphere' });
+deliveryPartnerSchema.index({ 'driverVehicles.vehicleNumber': 1 }, { unique: true, sparse: true });
 
 export const FoodDeliveryPartner = mongoose.model('FoodDeliveryPartner', deliveryPartnerSchema, 'food_delivery_partners');
 

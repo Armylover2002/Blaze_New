@@ -205,7 +205,7 @@ export async function listNearbyOnlineDeliveryPartners(
   const allOnline = await FoodDeliveryPartner.find({
     availabilityStatus: "online",
   })
-    .select("_id status lastLat lastLng lastLocationAt name")
+    .select("_id status lastLat lastLng lastLocationAt name driverVehicles activeVehicleId")
     .lean();
 
   const scored = [];
@@ -224,6 +224,20 @@ export async function listNearbyOnlineDeliveryPartners(
     if (p.lastLat == null || p.lastLng == null || isStale) {
       scored.push({ partnerId: p._id, distanceKm: 999, status: p.status });
       continue;
+    }
+
+    const pVehicles = p.driverVehicles || [];
+    if (pVehicles.length > 0) {
+        const activeId = p.activeVehicleId ? String(p.activeVehicleId) : null;
+        const activeVeh = activeId ? pVehicles.find(v => String(v._id) === activeId || String(v.id) === activeId) : pVehicles.find(v => v.isDefault) || pVehicles[0];
+        
+        if (!activeVeh || activeVeh.status !== 'active') {
+             continue; // Must have an explicitly active vehicle if multi-vehicle profile
+        }
+        
+        const services = Array.isArray(activeVeh.supportedServices) ? activeVeh.supportedServices : [];
+        if (sourceType === 'food' && !services.includes('food')) continue;
+        if (sourceType === 'quick' && !services.includes('quick')) continue;
     }
 
     const d = haversineKm(rLat, rLng, p.lastLat, p.lastLng);
@@ -288,7 +302,7 @@ export async function listNearbyOnlineDeliveryPartnersByCoords(
   };
 
   const allOnline = await FoodDeliveryPartner.find({ availabilityStatus: "online" })
-    .select("_id status lastLat lastLng lastLocationAt name")
+    .select("_id status lastLat lastLng lastLocationAt name driverVehicles activeVehicleId")
     .lean();
 
   const scored = [];
@@ -305,6 +319,20 @@ export async function listNearbyOnlineDeliveryPartnersByCoords(
       scored.push({ partnerId: p._id, distanceKm: 999, status: p.status });
       continue;
     }
+
+    const pVehicles = p.driverVehicles || [];
+    if (pVehicles.length > 0) {
+        const activeId = p.activeVehicleId ? String(p.activeVehicleId) : null;
+        const activeVeh = activeId ? pVehicles.find(v => String(v._id) === activeId || String(v.id) === activeId) : pVehicles.find(v => v.isDefault) || pVehicles[0];
+        
+        if (!activeVeh || activeVeh.status !== 'active') {
+             continue; // Must have an explicitly active vehicle if multi-vehicle profile
+        }
+        
+        const services = Array.isArray(activeVeh.supportedServices) ? activeVeh.supportedServices : [];
+        if (!services.includes('quick')) continue; // listNearbyOnlineDeliveryPartnersByCoords is always quick
+    }
+
     const d = haversineKm(lat, lng, p.lastLat, p.lastLng);
     if (Number.isFinite(d) && d <= maxKm) {
       scored.push({ partnerId: p._id, distanceKm: d, status: p.status });

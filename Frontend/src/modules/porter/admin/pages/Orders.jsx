@@ -1,4 +1,6 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect, useCallback, useRef } from "react";
+import io from "socket.io-client";
+import { API_BASE_URL } from "@food/api/config";
 import {
   Search, Package, Eye, UserPlus, XCircle, FileText, RefreshCw, MapPin, Clock,
   CheckCircle2, Circle, Truck,
@@ -10,9 +12,25 @@ import {
 import Button from "@/shared/components/ui/Button";
 import Input from "@/shared/components/ui/Input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { MOCK_ORDERS, ORDER_STATUS_OPTIONS, ORDER_STATUS_TABS } from "../utils/mock/orders";
-import { MOCK_DRIVERS } from "../utils/mock/drivers";
 import { filterBySearch, sortItems, paginateItems, formatCurrency, formatDateTime } from "../utils/porterTableHelpers";
+import porterAdminApi from "../services/adminApi";
+
+const mapApiOrder = (o) => ({
+  id: String(o._id || o.id),
+  orderNumber: o.orderNumber,
+  customer: o.userId?.name || "Customer",
+  pickup: o.pickup?.address || "",
+  drop: o.delivery?.address || "",
+  driverId: o.dispatch?.deliveryPartnerId?._id || o.dispatch?.deliveryPartnerId,
+  driverName: o.dispatch?.deliveryPartnerId?.name || "—",
+  vehicle: o.vehicleName || "—",
+  goodsType: o.parcel?.parcelName || "Parcel",
+  amount: o.pricing?.total ?? 0,
+  deliveryStatus: o.status,
+  paymentStatus: o.payment?.status,
+  createdAt: o.createdAt,
+  timeline: o.statusHistory || [],
+});
 
 const STATUS_LABELS = {
   pending: "Pending",
@@ -38,10 +56,35 @@ const STATUS_TONES = {
   cancelled: "danger",
   failed: "danger",
   refunded: "danger",
+  scheduled: "warning",
+  searching_partner: "warning",
+  partner_accepted: "info",
+  at_pickup: "primary",
+  at_drop: "primary",
+  cancelled_by_user: "danger",
+  cancelled_by_admin: "danger",
+  cancelled_by_driver: "danger",
 };
 
+const ORDER_STATUS_OPTIONS = [
+  { value: "all", label: "All statuses" },
+  { value: "searching_partner", label: "Searching" },
+  { value: "partner_accepted", label: "Accepted" },
+  { value: "delivered", label: "Delivered" },
+  { value: "cancelled_by_user", label: "Cancelled" },
+];
+
+const ORDER_STATUS_TABS = [
+  { id: "all", label: "All" },
+  { id: "searching_partner", label: "Searching" },
+  { id: "partner_accepted", label: "Active" },
+  { id: "delivered", label: "Delivered" },
+  { id: "cancelled_by_user", label: "Cancelled" },
+];
+
 const Orders = () => {
-  const [orders, setOrders] = useState(MOCK_ORDERS);
+  const [orders, setOrders] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [activeTab, setActiveTab] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -55,8 +98,65 @@ const Orders = () => {
   const [assignOpen, setAssignOpen] = useState(false);
   const [selected, setSelected] = useState(null);
   const [assignDriverId, setAssignDriverId] = useState("");
+  const [assignableDrivers, setAssignableDrivers] = useState([]);
+  const [actionLoading, setActionLoading] = useState(false);
+  const socketRef = useRef(null);
+
+  const loadOrders = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await porterAdminApi.getOrders({ limit: 200 });
+      setOrders((data.records || []).map(mapApiOrder));
+    } catch {
+      setOrders([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { loadOrders(); }, [loadOrders]);
+
+  useEffect(() => {
+    if (!API_BASE_URL) return undefined;
+    const token = localStorage.getItem("admin_accessToken") || localStorage.getItem("accessToken");
+    if (!token) return undefined;
+
+    let backendUrl = API_BASE_URL;
+    try { backendUrl = new URL(backendUrl).origin; } catch { /* keep */ }
+
+    const socket = io(backendUrl, {
+      path: "/socket.io/",
+      transports: ["websocket", "polling"],
+      reconnection: true,
+      auth: { token },
+    });
+    socketRef.current = socket;
+    socket.on("porter_admin_order_update", () => loadOrders());
+    return () => {
+      socket.disconnect();
+      socketRef.current = null;
+    };
+  }, [loadOrders]);
+
+  const loadAssignableDrivers = useCallback(async (orderId) => {
+    if (!orderId) return;
+    try {
+      const drivers = await porterAdminApi.getAssignableDrivers(orderId);
+      setAssignableDrivers(drivers);
+    } catch {
+      setAssignableDrivers([]);
+    }
+  }, []);
 
   const vehicles = useMemo(() => [...new Set(orders.map((o) => o.vehicle))], [orders]);
+
+  const drivers = useMemo(() => {
+    const map = new Map();
+    orders.forEach((o) => {
+      if (o.driverId && o.driverName) map.set(String(o.driverId), o.driverName);
+    });
+    return [...map.entries()].map(([id, name]) => ({ id, name }));
+  }, [orders]);
 
   const tabCounts = useMemo(() => {
     const counts = { all: orders.length };
@@ -88,39 +188,64 @@ const Orders = () => {
     revenue: orders.filter((o) => o.deliveryStatus === "delivered").reduce((a, o) => a + o.amount, 0),
   }), [orders]);
 
-  const openDetail = (row) => { setSelected(row); setDetailOpen(true); };
-
-  const handleAssign = () => {
-    if (!selected || !assignDriverId) return;
-    const driver = MOCK_DRIVERS.find((d) => d.id === assignDriverId);
-    setOrders((prev) => prev.map((o) => o.id === selected.id ? {
-      ...o,
-      driverId: driver.id,
-      driverName: driver.name,
-      deliveryStatus: o.deliveryStatus === "pending" ? "assigned" : o.deliveryStatus,
-      timeline: [...(o.timeline || []), { label: "Driver Reassigned", status: "completed", at: new Date().toISOString() }],
-    } : o));
-    setAssignOpen(false);
-    setDetailOpen(false);
+  const openDetail = async (row) => {
+    setSelected(row);
+    setDetailOpen(true);
+    try {
+      const [order, logs] = await Promise.all([
+        porterAdminApi.getOrderById(row.id),
+        porterAdminApi.getOrderLogs(row.id),
+      ]);
+      const timeline = (logs?.statusHistory || row.timeline || []).map((s) => ({
+        label: s.note || s.status,
+        status: "completed",
+        at: s.changedAt || s.at,
+      }));
+      setSelected({
+        ...row,
+        ...mapApiOrder(order),
+        timeline,
+        auditLogs: logs?.auditLogs || [],
+      });
+    } catch {
+      // keep row data
+    }
   };
 
-  const handleCancel = (id) => {
-    if (!window.confirm("Cancel this order?")) return;
-    setOrders((prev) => prev.map((o) => o.id === id ? {
-      ...o,
-      deliveryStatus: "cancelled",
-      paymentStatus: "refunded",
-      timeline: [...(o.timeline || []), { label: "Cancelled by Admin", status: "cancelled", at: new Date().toISOString() }],
-    } : o));
-    setDetailOpen(false);
+  const handleAssign = async () => {
+    if (!selected?.id || !assignDriverId) return;
+    setActionLoading(true);
+    try {
+      await porterAdminApi.assignDriver(selected.id, assignDriverId);
+      setAssignOpen(false);
+      setAssignDriverId("");
+      await loadOrders();
+    } catch (err) {
+      window.alert(err?.response?.data?.message || "Assign failed");
+    } finally {
+      setActionLoading(false);
+    }
   };
 
-  const handleStatusUpdate = (id, newStatus) => {
-    setOrders((prev) => prev.map((o) => o.id === id ? {
-      ...o,
-      deliveryStatus: newStatus,
-      timeline: [...(o.timeline || []), { label: `Status → ${STATUS_LABELS[newStatus]}`, status: "completed", at: new Date().toISOString() }],
-    } : o));
+  const handleCancel = async (orderId) => {
+    const reason = window.prompt("Cancellation reason:");
+    if (!reason?.trim()) return;
+    setActionLoading(true);
+    try {
+      await porterAdminApi.cancelOrder(orderId, reason.trim());
+      setDetailOpen(false);
+      await loadOrders();
+    } catch (err) {
+      window.alert(err?.response?.data?.message || "Cancel failed");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const openAssign = (row) => {
+    setSelected(row);
+    setAssignOpen(true);
+    loadAssignableDrivers(row.id);
   };
 
   const columns = [
@@ -141,10 +266,10 @@ const Orders = () => {
       cell: (row) => (
         <div className="flex justify-end gap-1">
           <Button variant="ghost" size="sm" onClick={() => openDetail(row)}><Eye size={14} /></Button>
-          {row.deliveryStatus === "pending" && (
-            <Button variant="ghost" size="sm" onClick={() => { setSelected(row); setAssignOpen(true); }}><UserPlus size={14} /></Button>
+          {["searching_partner", "scheduled", "assigned"].includes(row.deliveryStatus) && (
+            <Button variant="ghost" size="sm" onClick={() => openAssign(row)}><UserPlus size={14} /></Button>
           )}
-          {!["delivered", "cancelled", "failed", "refunded"].includes(row.deliveryStatus) && (
+          {!["delivered", "completed", "cancelled_by_user", "cancelled_by_admin", "cancelled_by_driver", "failed"].includes(row.deliveryStatus) && (
             <Button variant="ghost" size="sm" className="text-red-500" onClick={() => handleCancel(row.id)}><XCircle size={14} /></Button>
           )}
         </div>
@@ -162,13 +287,13 @@ const Orders = () => {
       <div className="sticky top-0 z-20 -mx-4 sm:-mx-6 lg:-mx-8 px-4 sm:px-6 lg:px-8 py-2 bg-[#FAF7F2]/90 backdrop-blur border-b border-[#EDE8E0]">
         <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
           {ORDER_STATUS_TABS.map((tab) => {
-            const isActive = activeTab === tab.value;
-            const count = tabCounts[tab.value] || 0;
+            const isActive = activeTab === tab.id;
+            const count = tabCounts[tab.id] || 0;
             return (
               <button
-                key={tab.value}
+                key={tab.id}
                 type="button"
-                onClick={() => { setActiveTab(tab.value); setPage(1); }}
+                onClick={() => { setActiveTab(tab.id); setPage(1); }}
                 className={`shrink-0 inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-sm font-medium transition-all duration-200 border ${
                   isActive
                     ? "bg-[var(--blaze-primary)] text-white border-[var(--blaze-primary)] shadow-sm"
@@ -213,7 +338,7 @@ const Orders = () => {
                 </select>
                 <select className={selectCls} value={driverFilter} onChange={(e) => { setDriverFilter(e.target.value); setPage(1); }}>
                   <option value="all">All Drivers</option>
-                  {MOCK_DRIVERS.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+                  {drivers.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
                 </select>
                 <Input type="date" className="w-auto" value={dateFrom} onChange={(e) => { setDateFrom(e.target.value); setPage(1); }} />
                 <Input type="date" className="w-auto" value={dateTo} onChange={(e) => { setDateTo(e.target.value); setPage(1); }} />
@@ -292,26 +417,11 @@ const Orders = () => {
               </div>
               <div className="px-6 py-4 border-t flex flex-wrap gap-2 justify-end bg-gray-50/50">
                 <Button variant="outline" size="sm" className="gap-1" onClick={() => window.print()}><FileText size={14} /> Invoice</Button>
-                {selected.deliveryStatus === "pending" && (
-                  <Button size="sm" className="gap-1" onClick={() => { setAssignOpen(true); }}><UserPlus size={14} /> Assign Driver</Button>
+                {["searching_partner", "scheduled", "assigned"].includes(selected.deliveryStatus) && (
+                  <Button size="sm" className="gap-1" onClick={() => openAssign(selected)}><UserPlus size={14} /> Assign Driver</Button>
                 )}
-                {selected.deliveryStatus === "assigned" && (
-                  <Button size="sm" variant="outline" className="gap-1" onClick={() => handleStatusUpdate(selected.id, "driver_accepted")}><RefreshCw size={14} /> Driver Accepted</Button>
-                )}
-                {selected.deliveryStatus === "driver_accepted" && (
-                  <Button size="sm" variant="outline" className="gap-1" onClick={() => handleStatusUpdate(selected.id, "picked_up")}><RefreshCw size={14} /> Mark Picked Up</Button>
-                )}
-                {selected.deliveryStatus === "picked_up" && (
-                  <Button size="sm" variant="outline" onClick={() => handleStatusUpdate(selected.id, "in_transit")}>Mark In Transit</Button>
-                )}
-                {selected.deliveryStatus === "in_transit" && (
-                  <Button size="sm" variant="outline" onClick={() => handleStatusUpdate(selected.id, "near_destination")}>Near Destination</Button>
-                )}
-                {selected.deliveryStatus === "near_destination" && (
-                  <Button size="sm" onClick={() => handleStatusUpdate(selected.id, "delivered")}>Mark Delivered</Button>
-                )}
-                {!["delivered", "cancelled", "failed", "refunded"].includes(selected.deliveryStatus) && (
-                  <Button size="sm" variant="outline" className="text-red-600" onClick={() => handleCancel(selected.id)}>Cancel Order</Button>
+                {!["delivered", "completed", "cancelled_by_user", "cancelled_by_admin", "cancelled_by_driver", "failed"].includes(selected.deliveryStatus) && (
+                  <Button size="sm" variant="outline" className="text-red-600" disabled={actionLoading} onClick={() => handleCancel(selected.id)}>Cancel Order</Button>
                 )}
               </div>
             </>
@@ -325,13 +435,13 @@ const Orders = () => {
           <DialogHeader><DialogTitle>Assign Driver</DialogTitle></DialogHeader>
           <select className={selectCls + " w-full"} value={assignDriverId} onChange={(e) => setAssignDriverId(e.target.value)}>
             <option value="">Select driver</option>
-            {MOCK_DRIVERS.filter((d) => d.onlineStatus === "online").map((d) => (
-              <option key={d.id} value={d.id}>{d.name} · {d.vehicle} · ★{d.rating}</option>
+            {(assignableDrivers.length ? assignableDrivers : drivers).map((d) => (
+              <option key={d.id} value={d.id}>{d.name}{d.phone ? ` · ${d.phone}` : ""}</option>
             ))}
           </select>
           <div className="flex justify-end gap-2 mt-4">
             <Button variant="outline" onClick={() => setAssignOpen(false)}>Cancel</Button>
-            <Button onClick={handleAssign} disabled={!assignDriverId}>Assign</Button>
+            <Button onClick={handleAssign} disabled={!assignDriverId || actionLoading}>Assign</Button>
           </div>
         </DialogContent>
       </Dialog>

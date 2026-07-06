@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import {
   Search, Download, IndianRupee, Percent, Receipt, FileText, Eye, Wallet,
 } from "lucide-react";
@@ -9,11 +9,16 @@ import {
 import Button from "@/shared/components/ui/Button";
 import Input from "@/shared/components/ui/Input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { MOCK_TRANSACTIONS, MOCK_TXN_SUMMARY, PAYMENT_METHODS, TXN_STATUSES } from "../utils/mock/transactions";
 import { filterBySearch, sortItems, paginateItems, formatCurrency, formatDateTime } from "../utils/porterTableHelpers";
+import porterAdminApi from "../services/adminApi";
+
+const PAYMENT_METHODS = ["wallet", "cash", "razorpay"];
+const TXN_STATUSES = ["paid", "pending", "refunded", "delivered", "completed"];
 
 const Transactions = () => {
-  const [txns] = useState(MOCK_TRANSACTIONS);
+  const [txns, setTxns] = useState([]);
+  const [summary, setSummary] = useState({ grossRevenue: 0, totalCommission: 0, totalTax: 0, netPayout: 0 });
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [methodFilter, setMethodFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -23,6 +28,26 @@ const Transactions = () => {
   const [pageSize, setPageSize] = useState(10);
   const [detailOpen, setDetailOpen] = useState(false);
   const [selected, setSelected] = useState(null);
+
+  useEffect(() => {
+    porterAdminApi.getTransactions({ limit: 200 })
+      .then((data) => {
+        setTxns((data.records || []).map((t) => ({
+          id: t.id,
+          orderId: t.orderNumber,
+          amount: t.amount,
+          commission: t.commission,
+          tax: t.tax,
+          driverPayout: t.driverPayout,
+          paymentMethod: t.paymentMethod,
+          status: t.status,
+          createdAt: t.date,
+        })));
+        setSummary(data.summary || {});
+      })
+      .catch(() => setTxns([]))
+      .finally(() => setLoading(false));
+  }, []);
 
   const filtered = useMemo(() => {
     let rows = filterBySearch(txns, search, ["id", "orderId", "driverName", "customer"]);
@@ -87,10 +112,10 @@ const Transactions = () => {
       />
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <StatCard title="Gross Revenue" value={formatCurrency(MOCK_TXN_SUMMARY.grossRevenue)} icon={<IndianRupee size={18} />} />
-        <StatCard title="Total Commission" value={formatCurrency(MOCK_TXN_SUMMARY.totalCommission)} icon={<Percent size={18} />} />
-        <StatCard title="Total Tax" value={formatCurrency(MOCK_TXN_SUMMARY.totalTax)} icon={<Receipt size={18} />} />
-        <StatCard title="Net Payout" value={formatCurrency(MOCK_TXN_SUMMARY.netPayout)} icon={<Wallet size={18} />} />
+        <StatCard title="Gross Revenue" value={formatCurrency(summary.grossRevenue)} icon={<IndianRupee size={18} />} />
+        <StatCard title="Total Commission" value={formatCurrency(summary.totalCommission)} icon={<Percent size={18} />} />
+        <StatCard title="Total Tax" value={formatCurrency(summary.totalTax)} icon={<Receipt size={18} />} />
+        <StatCard title="Net Payout" value={formatCurrency(summary.netPayout)} icon={<Wallet size={18} />} />
       </div>
 
       <SectionCard flush>

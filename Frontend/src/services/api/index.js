@@ -1843,6 +1843,8 @@ export const deliveryAPI = {
     }
     return apiClient.post("/food/delivery/register", formData);
   },
+  validateDocumentsPublic: (data) => apiClient.post("/food/delivery/validate-documents-public", data),
+  validateDocuments: (data) => apiClient.post("/food/delivery/validate-documents", data, { contextModule: "delivery" }),
   /** PATCH /food/delivery/profile - complete profile after OTP (Bearer token required). */
   completeProfile: (formData) => {
     if (!formData || !(formData instanceof FormData)) {
@@ -1923,12 +1925,52 @@ export const deliveryAPI = {
       contextModule: "delivery",
     }),
   /** PATCH /food/delivery/availability - set online/offline (and optional lat/lng). */
-  updateOnlineStatus: (isOnline) =>
-    apiClient.patch(
+  updateOnlineStatus: (isOnline) => {
+    deliveryMeCached = null;
+    deliveryMeCacheTime = 0;
+    return apiClient.patch(
       "/food/delivery/availability",
       { status: isOnline ? "online" : "offline" },
       { contextModule: "delivery" },
-    ),
+    );
+  },
+  getVehicles: (() => {
+    let inFlight = null;
+    let cache = null;
+    let cacheTime = 0;
+    const CACHE_MS = 3000;
+    return (options = {}) => {
+      if (options.force) {
+        cache = null;
+        cacheTime = 0;
+      }
+      const now = Date.now();
+      if (cache && now - cacheTime < CACHE_MS) {
+        return Promise.resolve(cache);
+      }
+      if (inFlight) return inFlight;
+      inFlight = apiClient
+        .get("/food/delivery/vehicles", { contextModule: "delivery" })
+        .then((res) => {
+          cache = res;
+          cacheTime = Date.now();
+          return res;
+        })
+        .finally(() => {
+          inFlight = null;
+        });
+      return inFlight;
+    };
+  })(),
+  setActiveVehicle: (vehicleId) => {
+    deliveryMeCached = null;
+    deliveryMeCacheTime = 0;
+    return apiClient.patch(
+      "/food/delivery/vehicles/active",
+      { vehicleId },
+      { contextModule: "delivery" },
+    );
+  },
   updateLocation: (latitude, longitude, isOnline, extras = {}) =>
     apiClient.patch(
       "/food/delivery/availability",

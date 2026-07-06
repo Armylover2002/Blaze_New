@@ -1,6 +1,7 @@
-import React from "react";
+import React, { useState, useEffect } from "react";
+import { userAPI } from "../../../../services/api/index.js";
 import { useNavigate } from "react-router-dom";
-import { MapPin, Package, Calendar, Tag, CreditCard, ChevronRight, Navigation, FileText, Scale } from "lucide-react";
+import { MapPin, Package, Calendar, Tag, CreditCard, ChevronRight, Navigation, FileText, Scale, Check } from "lucide-react";
 import Screen from "../components/Screen";
 import PorterRouteMap from "../components/PorterRouteMap";
 import { PrimaryButton, StickyBar, FareRow, SectionLabel, inr } from "../components/ui";
@@ -11,7 +12,7 @@ import {
   getPorterPaymentPath,
   getPorterSchedulePath,
 } from "../utils/routes";
-import { PAYMENT_METHODS } from "../utils/mock/payments";
+import { PAYMENT_METHODS } from "../constants/booking";
 
 export default function FareEstimate() {
   const navigate = useNavigate();
@@ -22,6 +23,7 @@ export default function FareEstimate() {
     vehicle,
     coupon,
     paymentMethodId,
+    setPaymentMethodId,
     scheduledAt,
     distanceKm,
     durationMin,
@@ -33,9 +35,21 @@ export default function FareEstimate() {
     routeQuote,
   } = useBooking();
 
+  const [walletBalance, setWalletBalance] = useState(null);
+
+  useEffect(() => {
+    userAPI.getWallet()
+      .then((res) => {
+        const w = res?.data?.data?.wallet || res?.data?.wallet || res?.wallet;
+        if (w && w.balance != null) {
+          setWalletBalance(w.balance);
+        }
+      })
+      .catch((err) => console.error("Failed to fetch wallet:", err));
+  }, []);
+
   const payment = PAYMENT_METHODS.find((p) => p.id === paymentMethodId);
-  const platformFee = 12;
-  const payable = (total ?? 0) + platformFee;
+  const payable = total ?? 0;
   const hasRouteCoordinates = (
     Number.isFinite(Number(pickup?.lat))
     && Number.isFinite(Number(pickup?.lng))
@@ -122,17 +136,44 @@ export default function FareEstimate() {
           </div>
           <ChevronRight className="h-4 w-4 text-gray-400" />
         </button>
-        <button
-          type="button"
-          onClick={() => navigate(getPorterPaymentPath())}
-          className="flex w-full items-center justify-between rounded-2xl border border-gray-100 bg-white p-3 shadow-sm"
-        >
-          <div className="flex items-center gap-2">
-            <CreditCard className="h-4 w-4 text-[#FF0000]" />
-            <span className="text-[14px] font-bold text-gray-900">{payment?.label || "Payment Method"}</span>
-          </div>
-          <ChevronRight className="h-4 w-4 text-gray-400" />
-        </button>
+      </div>
+
+      <SectionLabel>Payment Method</SectionLabel>
+      <div className="mb-4 space-y-2">
+        {PAYMENT_METHODS.map((m) => (
+          <button
+            key={m.id}
+            type="button"
+            onClick={() => setPaymentMethodId(m.id)}
+            className={`flex w-full items-center justify-between rounded-2xl border p-3 transition ${
+              paymentMethodId === m.id
+                ? "border-[#FF0000] bg-[#FFF1F1]"
+                : "border-gray-100 bg-white"
+            }`}
+          >
+            <div className="flex items-center gap-3">
+              <span className="text-xl">{m.icon}</span>
+              <div className="text-left">
+                <div className="flex items-center gap-2">
+                  <p className="text-[14px] font-bold text-gray-900">{m.label}</p>
+                  {m.recommended && (
+                    <span className="rounded-full bg-[#FF0000] px-2 py-0.5 text-[9px] font-bold text-white">Recommended</span>
+                  )}
+                </div>
+                <p className="text-[11px] text-gray-500">
+                  {m.id === "wallet" && walletBalance != null 
+                    ? `Balance: ₹${walletBalance}` 
+                    : m.subtitle}
+                </p>
+              </div>
+            </div>
+            {paymentMethodId === m.id && (
+              <div className="flex h-5 w-5 items-center justify-center rounded-full bg-[#FF0000] text-white">
+                <Check className="h-3 w-3" />
+              </div>
+            )}
+          </button>
+        ))}
       </div>
 
       <SectionLabel>Estimated Fare</SectionLabel>
@@ -144,7 +185,6 @@ export default function FareEstimate() {
         {(durationText || durationMin != null) && (
           <FareRow label="ETA" value={durationText || `${durationMin} min`} />
         )}
-        <FareRow label="Handling & platform fee" value={inr(platformFee)} />
         {discount > 0 && <FareRow label="Promo discount" value={`−${inr(discount)}`} accent />}
         <div className="my-2 border-t border-gray-100" />
         <FareRow label="Total Payable" value={inr(payable)} strong />

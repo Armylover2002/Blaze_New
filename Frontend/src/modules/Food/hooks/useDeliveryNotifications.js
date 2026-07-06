@@ -132,6 +132,18 @@ const buildDeliveryOrderNotification = (orderData = {}) => {
 }
 
 const isActionableDeliveryOffer = (orderData = {}) => {
+  if (String(orderData?.documentType || '').trim() === 'porter_order') {
+    const status = String(orderData?.status || '').trim().toLowerCase();
+    const dispatchStatus = String(
+      orderData?.dispatch?.status || orderData?.dispatchStatus || '',
+    ).trim().toLowerCase();
+    if (['partner_accepted', 'picked_up', 'delivered', 'completed'].includes(status)) {
+      return false;
+    }
+    if (dispatchStatus === 'accepted') return false;
+    return Boolean(orderData?.orderId || orderData?.orderMongoId || orderData?.id);
+  }
+
   if (
     String(orderData?.tripType || '').trim() === 'return_pickup' ||
     String(orderData?.documentType || '').trim() === 'seller_return'
@@ -936,6 +948,37 @@ export const useDeliveryNotifications = () => {
       // Treat it the same as new_order for now - delivery boy can accept it
       setNewOrder(orderData);
       handleIncomingOrderAlert(orderData);
+    });
+
+    socketRef.current.on('porter_order_available', (orderData) => {
+      if (!isActionableDeliveryOffer(orderData)) {
+        debugLog('Ignoring non-actionable porter_order_available event', orderData);
+        return;
+      }
+      debugLog('Porter parcel order available', {
+        orderId: orderData?.orderId || orderData?.orderMongoId || orderData?.id,
+      });
+      setNewOrder({ ...orderData, module: 'parcel', documentType: 'porter_order' });
+      handleIncomingOrderAlert(orderData);
+    });
+
+    socketRef.current.on('porter_play_notification_sound', (data) => {
+      const normalizedData = {
+        orderId: data?.orderId,
+        orderMongoId: data?.orderMongoId || data?.orderId,
+        documentType: 'porter_order',
+        module: 'parcel',
+        ...data,
+      };
+      handleIncomingOrderAlert(normalizedData);
+    });
+
+    socketRef.current.on('porter_order_status', (statusData) => {
+      setOrderStatusUpdate({ ...statusData, documentType: 'porter_order', module: 'parcel' });
+    });
+
+    socketRef.current.on('porter_order_cancelled', (statusData) => {
+      setOrderStatusUpdate({ ...statusData, documentType: 'porter_order', module: 'parcel', cancelled: true });
     });
 
     socketRef.current.on('play_notification_sound', (data) => {

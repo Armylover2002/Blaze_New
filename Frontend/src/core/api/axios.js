@@ -31,9 +31,9 @@ axiosInstance.interceptors.request.use(
         // This is crucial for shared APIs like /products or /admin/categories
         if (pagePath.startsWith('/seller')) {
             token = localStorage.getItem('auth_seller');
-        } else if (pagePath.startsWith('/admin')) {
+        } else if (pagePath.startsWith('/admin') || pagePath.startsWith('/porter/admin')) {
             token = localStorage.getItem('auth_admin');
-        } else if (pagePath.startsWith('/delivery')) {
+        } else if (pagePath.startsWith('/delivery') || pagePath.startsWith('/porter/driver')) {
             token = localStorage.getItem('auth_delivery');
         } else if (pagePath.startsWith('/customer') || pagePath.startsWith('/quick')) {
             token = pickCustomerToken();
@@ -42,22 +42,23 @@ axiosInstance.interceptors.request.use(
         // 2. Fallback to URL-based detection
         if (!token) {
             if (url.startsWith('/seller')) token = localStorage.getItem('auth_seller');
-            else if (url.startsWith('/admin')) token = localStorage.getItem('auth_admin');
-            else if (url.startsWith('/delivery')) token = localStorage.getItem('auth_delivery');
+            else if (url.startsWith('/admin') || url.startsWith('/porter/admin')) token = localStorage.getItem('auth_admin');
+            else if (url.startsWith('/delivery') || url.startsWith('/porter/driver')) token = localStorage.getItem('auth_delivery');
             else if (
               url.startsWith('/customer') ||
               url.startsWith('/quick-commerce') ||
               url.startsWith('/cart') ||
               url.startsWith('/wishlist') ||
               url.startsWith('/categories') ||
-              url.startsWith('/products')
+              url.startsWith('/products') ||
+              url.startsWith('/porter/orders')
             ) {
                 token = pickCustomerToken();
             }
         }
 
         // 3. Final default: if we are on a general page and STILL no token, try customer token
-        if (!token && !pagePath.startsWith('/admin') && !pagePath.startsWith('/seller') && !pagePath.startsWith('/delivery')) {
+        if (!token && !pagePath.startsWith('/admin') && !pagePath.startsWith('/porter/admin') && !pagePath.startsWith('/seller') && !pagePath.startsWith('/delivery') && !pagePath.startsWith('/porter/driver')) {
             token = pickCustomerToken();
         }
 

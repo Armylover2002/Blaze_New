@@ -21,6 +21,7 @@ const deliveryRegisterSchema = z.object({
     vehicleType: z.string().optional(),
     vehicleName: z.string().optional(),
     vehicleNumber: z.string().optional(),
+    vehicles: z.string().optional(),
     drivingLicenseNumber: z.string().optional().or(z.literal('')),
     ref: z.string().trim().max(64).optional().or(z.literal('')),
     panNumber: z
@@ -39,11 +40,19 @@ const deliveryRegisterSchema = z.object({
     razorpayPaymentId: z.string().optional(),
     razorpaySignature: z.string().optional()
 }).superRefine((data, ctx) => {
+    let hasVehicles = false;
+    if (data.vehicles) {
+        try {
+            const parsed = JSON.parse(data.vehicles);
+            if (Array.isArray(parsed) && parsed.length > 0) hasVehicles = true;
+        } catch(e) {}
+    }
+
     const isBicycle = data.vehicleType === 'bicycle';
     const isElectricBike = data.vehicleType === 'electric_bike';
 
     // Driving license validation
-    if (!isBicycle && !isElectricBike) {
+    if (!isBicycle && !isElectricBike && !hasVehicles) {
         if (!data.drivingLicenseNumber || !data.drivingLicenseNumber.trim()) {
             ctx.addIssue({
                 code: z.ZodIssueCode.custom,
@@ -70,7 +79,7 @@ const deliveryRegisterSchema = z.object({
     }
 
     // Vehicle number validation
-    if (!isBicycle) {
+    if (!isBicycle && !hasVehicles) {
         if (!data.vehicleNumber || !data.vehicleNumber.trim()) {
             ctx.addIssue({
                 code: z.ZodIssueCode.custom,
@@ -86,6 +95,15 @@ const deliveryRegisterSchema = z.object({
                     path: ['vehicleNumber']
                 });
             }
+        }
+    } else if (data.vehicleNumber && data.vehicleNumber.trim()) {
+        const vehicleNumberRegex = /^[A-Z]{2}[0-9]{1,2}[A-Z]{1,2}[0-9]{4}$/;
+        if (!vehicleNumberRegex.test(data.vehicleNumber.trim())) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: 'Invalid Indian vehicle number format (e.g., MH12AB1234)',
+                path: ['vehicleNumber']
+            });
         }
     }
 });
@@ -107,6 +125,7 @@ const deliveryProfileUpdateSchema = z.object({
     vehicleType: z.string().optional(),
     vehicleName: z.string().optional(),
     vehicleNumber: z.string().optional(),
+    vehicles: z.string().optional(),
     drivingLicenseNumber: z.string().optional().or(z.literal('')),
     fcmToken: z.string().optional().nullable(),
     platform: z.enum(['web', 'mobile']).optional().default('web')
