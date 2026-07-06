@@ -4,7 +4,7 @@ import { Check } from "lucide-react";
 import Screen from "../components/Screen";
 import { PrimaryButton, StickyBar } from "../components/ui";
 import { useBooking } from "../context/BookingContext";
-import { PAYMENT_METHODS } from "../utils/mock/payments";
+import { PAYMENT_METHODS } from "../constants/booking";
 
 export default function PaymentSelection() {
   const navigate = useNavigate();

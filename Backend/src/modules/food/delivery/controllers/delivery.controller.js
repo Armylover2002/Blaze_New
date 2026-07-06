@@ -1,19 +1,52 @@
 import mongoose from 'mongoose';
 import { FoodDeliveryCashDeposit } from '../models/foodDeliveryCashDeposit.model.js';
-import { registerDeliveryPartner, updateDeliveryPartnerProfile, updateDeliveryPartnerBankDetails, listSupportTicketsByPartner, createSupportTicket, getSupportTicketByIdAndPartner, updateDeliveryPartnerDetails, updateDeliveryPartnerProfilePhotoBase64, updateDeliveryAvailability, getDeliveryPartnerWallet, getDeliveryPartnerEarnings, getDeliveryPartnerTripHistory, getDeliveryPocketDetails, getActiveEarningAddonsForPartner, deleteDeliveryPartnerAccount } from '../services/delivery.service.js';
+import { registerDeliveryPartner, updateDeliveryPartnerProfile, updateDeliveryPartnerBankDetails, listSupportTicketsByPartner, createSupportTicket, getSupportTicketByIdAndPartner, updateDeliveryPartnerDetails, updateDeliveryPartnerProfilePhotoBase64, updateDeliveryAvailability, getDeliveryPartnerWallet, getDeliveryPartnerEarnings, getDeliveryPartnerTripHistory, getDeliveryPocketDetails, getActiveEarningAddonsForPartner, deleteDeliveryPartnerAccount, getDeliveryPartnerVehicles, setDeliveryPartnerActiveVehicle, validateUniqueDocuments } from '../services/delivery.service.js';
 import { createDeliveryCashDepositOrder, getDeliveryPartnerWalletEnhanced, requestDeliveryWithdrawal, verifyDeliveryCashDepositPayment, submitDeliveryManualDeposit } from '../services/deliveryFinance.service.js';
 import { getDeliveryCashLimitSettings, getDeliveryEmergencyHelp } from '../../admin/services/admin.service.js';
 import { DeliveryBonusTransaction } from '../../admin/models/deliveryBonusTransaction.model.js';
 import { validateDeliveryRegisterDto, validateDeliveryProfileUpdateDto, validateDeliveryBankDetailsDto } from '../validators/delivery.validator.js';
 import { sendResponse } from '../../../../utils/response.js';
 import { getDeliveryReferralStats } from '../services/deliveryReferral.service.js';
+import {
+    mapDeliveryPartnerRegistrationResponse,
+    mapDeliveryPartnerProfileCompletionResponse,
+} from '../utils/deliveryPartnerResponse.mapper.js';
+
+export const validateDocumentsController = async (req, res, next) => {
+    try {
+        const userId = req.user?.userId || null;
+        await validateUniqueDocuments(req.body, userId);
+        return sendResponse(res, 200, 'Documents are valid');
+    } catch (error) {
+        if (error.statusCode === 409) {
+            return res.status(409).json({
+                success: false,
+                message: error.message,
+                errors: error.errors
+            });
+        }
+        next(error);
+    }
+};
 
 export const registerDeliveryPartnerController = async (req, res, next) => {
     try {
         const validated = validateDeliveryRegisterDto(req.body);
         const partner = await registerDeliveryPartner(validated, req.files);
-        return sendResponse(res, 201, 'Delivery partner registered successfully', partner);
+        return sendResponse(
+            res,
+            201,
+            'Delivery partner registered successfully',
+            mapDeliveryPartnerRegistrationResponse(partner),
+        );
     } catch (error) {
+        if (error.statusCode === 409) {
+            return res.status(409).json({
+                success: false,
+                message: error.message,
+                errors: error.errors
+            });
+        }
         next(error);
     }
 };
@@ -23,8 +56,20 @@ export const updateDeliveryPartnerProfileController = async (req, res, next) => 
         const userId = req.user?.userId;
         const validated = validateDeliveryProfileUpdateDto(req.body);
         const result = await updateDeliveryPartnerProfile(userId, validated, req.files);
-        return sendResponse(res, 200, 'Profile updated successfully', result);
+        return sendResponse(
+            res,
+            200,
+            'Profile updated successfully',
+            mapDeliveryPartnerProfileCompletionResponse(result),
+        );
     } catch (error) {
+        if (error.statusCode === 409) {
+            return res.status(409).json({
+                success: false,
+                message: error.message,
+                errors: error.errors
+            });
+        }
         next(error);
     }
 };
@@ -67,6 +112,13 @@ export const updateDeliveryPartnerBankDetailsController = async (req, res, next)
         };
         return sendResponse(res, 200, 'Bank details updated successfully', data);
     } catch (error) {
+        if (error.statusCode === 409) {
+            return res.status(409).json({
+                success: false,
+                message: error.message,
+                errors: error.errors
+            });
+        }
         next(error);
     }
 };
@@ -109,6 +161,27 @@ export const updateAvailabilityController = async (req, res, next) => {
         const userId = req.user?.userId;
         const data = await updateDeliveryAvailability(userId, req.body || {});
         return sendResponse(res, 200, 'Availability updated successfully', data);
+    } catch (error) {
+        next(error);
+    }
+};
+
+export const getDeliveryPartnerVehiclesController = async (req, res, next) => {
+    try {
+        const userId = req.user?.userId;
+        const data = await getDeliveryPartnerVehicles(userId);
+        return sendResponse(res, 200, 'Driver vehicles fetched', data);
+    } catch (error) {
+        next(error);
+    }
+};
+
+export const setDeliveryPartnerActiveVehicleController = async (req, res, next) => {
+    try {
+        const userId = req.user?.userId;
+        const vehicleId = req.body?.vehicleId;
+        const data = await setDeliveryPartnerActiveVehicle(userId, vehicleId);
+        return sendResponse(res, 200, 'Active vehicle updated', data);
     } catch (error) {
         next(error);
     }

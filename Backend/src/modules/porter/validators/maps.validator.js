@@ -44,6 +44,7 @@ export const validateQuotePreviewBody = (body = {}) => {
         vehicleId: z.string().refine((val) => mongoose.Types.ObjectId.isValid(val), {
             message: 'Invalid vehicleId',
         }).optional(),
+        parcelWeight: z.coerce.number().min(0).optional(),
     });
     const result = schema.safeParse(body);
     if (!result.success) {

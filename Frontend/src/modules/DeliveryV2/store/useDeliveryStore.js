@@ -1,94 +1,77 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-
-/**
- * @typedef {Object} Location
- * @property {number} lat
- * @property {number} lng
- */
-
-/**
- * @typedef {Object} ActiveOrder
- * @property {string} orderId
- * @property {string} status
- * @property {Location} restaurantLocation
- * @property {Location} customerLocation
- * @property {number} orderAmount
- */
+import { getApprovedVehicles } from '@/modules/DeliveryV2/utils/deliveryPartnerSync'
 
 /**
  * useDeliveryStore - Professional Zustand store for Delivery V2
- * Handles Trip Lifecycle, Rider Status, and Admin Settings.
+ * Single source of truth for availabilityStatus (isOnline) and activeVehicleId.
  */
 export const useDeliveryStore = create(
   persist(
     (set, get) => ({
-      // --- Rider Status ---
       isOnline: false,
-      riderLocation: null, // { lat, lng }
-      activeVehicleId: null, // string | null
-      driverVehicles: [], // array of vehicle objects
-      
-      // --- Trip State ---
-      activeOrder: null, // ActiveOrder | null
-      tripStatus: 'IDLE', // 'IDLE' | 'PICKING_UP' | 'REACHED_PICKUP' | 'PICKED_UP' | 'DELIVERING' | 'REACHED_DROP' | 'COMPLETED'
-      
-      // --- Admin / Business Settings ---
+      riderLocation: null,
+      activeVehicleId: null,
+      driverVehicles: [],
+      partnerHydrated: false,
+
+      activeOrder: null,
+      tripStatus: 'IDLE',
+
       settings: {
-        pickupRangeLimit: 500, // meters, fallback default
-        deliveryRangeLimit: 500, // meters, fallback default
+        pickupRangeLimit: 500,
+        deliveryRangeLimit: 500,
       },
 
-      // --- Actions ---
-      toggleOnline: () => set((state) => {
-        if (!state.isOnline && !state.activeVehicleId) {
-          // Cannot go online without a selected vehicle
-          // This should be handled by UI, but we protect the store as well
-          console.warn("Cannot go online without an active vehicle");
-          return state;
+      hydratePartnerState: ({
+        availabilityStatus,
+        activeVehicleId,
+        driverVehicles,
+        isOnline,
+      } = {}) => set((state) => {
+        const next = { ...state, partnerHydrated: true };
+        if (Array.isArray(driverVehicles)) {
+          next.driverVehicles = driverVehicles;
         }
-        return { isOnline: !state.isOnline };
-      }),
-      
-      setOnline: (online) => set((state) => {
-        if (online && !state.activeVehicleId) {
-          console.warn("Cannot go online without an active vehicle");
-          return state;
+        if (activeVehicleId) {
+          next.activeVehicleId = String(activeVehicleId);
         }
-        return { isOnline: online };
+        if (availabilityStatus === 'online' || availabilityStatus === 'offline') {
+          next.isOnline = availabilityStatus === 'online';
+        } else if (typeof isOnline === 'boolean') {
+          next.isOnline = isOnline;
+        }
+        return next;
       }),
 
-      setDriverVehicles: (vehicles) => set({ driverVehicles: vehicles }),
+      setOnline: (online) => set({ isOnline: Boolean(online) }),
 
-      setActiveVehicle: (id) => {
-        const state = get();
-        if (state.isOnline) {
-          console.error("Cannot change active vehicle while online");
-          return false;
-        }
-        set({ activeVehicleId: id });
-        return true;
-      },
-      
+      setDriverVehicles: (vehicles) => set({
+        driverVehicles: Array.isArray(vehicles) ? vehicles : [],
+      }),
+
+      setActiveVehicleId: (id) => set({
+        activeVehicleId: id ? String(id) : null,
+      }),
+
       setRiderLocation: (location) => set({ riderLocation: location }),
-      
+
       setSettings: (newSettings) => set((state) => ({
-        settings: { ...state.settings, ...newSettings }
+        settings: { ...state.settings, ...newSettings },
       })),
 
-      setActiveOrder: (order) => set({ 
-        activeOrder: order, 
-        tripStatus: order ? 'PICKING_UP' : 'IDLE' 
+      setActiveOrder: (order) => set({
+        activeOrder: order,
+        tripStatus: order ? 'PICKING_UP' : 'IDLE',
       }),
 
       updateTripStatus: (status) => set({ tripStatus: status }),
 
-      clearActiveOrder: () => set({ 
-        activeOrder: null, 
-        tripStatus: 'IDLE' 
+      clearActiveOrder: () => set({
+        activeOrder: null,
+        tripStatus: 'IDLE',
       }),
 
-      // --- Selectors / Computed Helper ---
       canAdvanceToPickup: () => {
         const { activeOrder, tripStatus } = get();
         return activeOrder && tripStatus === 'PICKING_UP';
@@ -99,32 +82,35 @@ export const useDeliveryStore = create(
         return activeOrder && tripStatus === 'PICKED_UP';
       },
 
-      // Derived Getters
+      getApprovedVehicles: () => getApprovedVehicles(get().driverVehicles),
+
       getActiveVehicle: () => {
         const { activeVehicleId, driverVehicles } = get();
-        if (!activeVehicleId || !driverVehicles || driverVehicles.length === 0) return null;
-        return driverVehicles.find(v => v.vehicleId === activeVehicleId || v.id === activeVehicleId) || null;
+        if (!activeVehicleId || !driverVehicles?.length) return null;
+        return driverVehicles.find(
+          (v) => v.vehicleId === activeVehicleId || v.id === activeVehicleId,
+        ) || null;
       },
 
       getAvailableModules: () => {
         const activeVehicle = get().getActiveVehicle();
         if (!activeVehicle) return [];
-        // Support either a nested master vehicle object or a flat supportedServices array
-        return activeVehicle.supportedServices || (activeVehicle.master && activeVehicle.master.supportedServices) || [];
+        return activeVehicle.supportedServices
+          || activeVehicle.master?.supportedServices
+          || [];
       },
 
       getCurrentModule: () => {
         const { activeOrder } = get();
-        return activeOrder?.module || 'food'; // Default fallback
-      }
+        return activeOrder?.module || 'food';
+      },
     }),
     {
       name: 'delivery-v2-online-pref',
-      // ONLY persist the 'isOnline' and 'activeVehicleId' state
-      partialize: (state) => ({ 
+      partialize: (state) => ({
         isOnline: state.isOnline,
-        activeVehicleId: state.activeVehicleId
+        activeVehicleId: state.activeVehicleId,
       }),
-    }
-  )
+    },
+  ),
 );

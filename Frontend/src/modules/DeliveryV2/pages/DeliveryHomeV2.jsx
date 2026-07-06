@@ -26,13 +26,18 @@ const ProfileV2 = React.lazy(() => import('@/modules/DeliveryV2/pages/ProfileV2'
 import { 
   Bell, HelpCircle, AlertTriangle, 
   Wallet, History, User as UserIcon, LayoutGrid,
-  Plus, Minus, Navigation2, Target, Play, CheckCircle2, Clock, ChevronDown,
+  Plus, Minus, Navigation2, Target, Play, CheckCircle2, Clock, ChevronDown, ChevronRight,
   Contact, Package, ShieldCheck, Loader2, Zap, Phone, Navigation
 } from 'lucide-react';
-import { subscriptionAPI } from '@food/api';
+import useDeliveryPartnerHydration from '@/modules/DeliveryV2/hooks/useDeliveryPartnerHydration';
+import {
+  getApprovedVehicles,
+  extractAvailabilityPayload,
+} from '@/modules/DeliveryV2/utils/deliveryPartnerSync';
+import porterDriverApi from '@/modules/porter/driver/services/driverApi';
 
 import { getHaversineDistance, calculateETA, calculateHeading } from '@/modules/DeliveryV2/utils/geo';
-import { formatDeliveryAddressText, getPrimaryPickupLocation, normalizeLocationPoint, normalizePickupPoints } from '@/modules/DeliveryV2/utils/orderRouting';
+import { formatDeliveryAddressText, getPrimaryPickupLocation, normalizeLocationPoint, normalizePickupPoints, enrichPorterDeliveryOrder, isPorterParcelTrip } from '@/modules/DeliveryV2/utils/orderRouting';
 import { useCompanyName } from "@food/hooks/useCompanyName";
 import { useNavigate } from 'react-router-dom';
 import useNotificationInbox from "@food/hooks/useNotificationInbox";
@@ -225,10 +230,17 @@ const CashLimitBlockingModal = ({ isOpen, onClose }) => {
  */
 export default function DeliveryHomeV2({ tab = 'feed' }) {
   const navigate = useNavigate();
-  const { isOnline, setOnline, toggleOnline, activeOrder, tripStatus, setRiderLocation, setActiveOrder, updateTripStatus, clearActiveOrder } = useDeliveryStore();
+  const {
+    isOnline, setOnline, activeOrder, tripStatus, setRiderLocation, setActiveOrder,
+    updateTripStatus, clearActiveOrder, setDriverVehicles, driverVehicles,
+    hydratePartnerState, setActiveVehicleId, activeVehicleId,
+  } = useDeliveryStore();
+  useDeliveryPartnerHydration();
   const getActiveVehicle = useDeliveryStore(state => state.getActiveVehicle);
   const activeVehicle = getActiveVehicle();
+  const [isVehicleDetailsExpanded, setIsVehicleDetailsExpanded] = useState(false);
   const [showVehicleSwitcher, setShowVehicleSwitcher] = useState(false);
+  const [vehicleSelectMode, setVehicleSelectMode] = useState('switch');
   const { isWithinRange, distanceToTarget } = useProximityCheck();
   const { acceptOrder, reachPickup, pickUpOrder, reachDrop, completeDelivery, resetTrip } = useOrderManager();
   const { newOrder, clearNewOrder, orderStatusUpdate, clearOrderStatusUpdate, isConnected: isSocketConnected, emitLocation, forcedOfflineEvent, clearForcedOfflineEvent } = useDeliveryNotifications();
@@ -243,6 +255,112 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
       clearForcedOfflineEvent();
     }
   }, [forcedOfflineEvent, setOnline, clearForcedOfflineEvent]);
+
+  const completeGoOnline = useCallback(async () => {
+    setIsProcessingToggle(true);
+    try {
+      const res = await deliveryAPI.updateOnlineStatus(true);
+      const avail = extractAvailabilityPayload(res);
+      hydratePartnerState({
+        availabilityStatus: avail.availabilityStatus || 'online',
+        activeVehicleId: avail.activeVehicleId || activeVehicleId,
+        isOnline: true,
+      });
+      setOnline(true);
+      navigator.geolocation.getCurrentPosition((pos) => {
+        deliveryAPI.updateLocation(pos.coords.latitude, pos.coords.longitude, true).catch(() => {});
+      }, () => {}, { enableHighAccuracy: true });
+    } catch (err) {
+      const errMsg = err?.response?.data?.message || err?.message || '';
+      if (errMsg === 'CASH_LIMIT_EXCEEDED') {
+        setShowCashLimitModal(true);
+      } else {
+        toast.error(errMsg || 'Failed to go online');
+      }
+      throw err;
+    } finally {
+      setIsProcessingToggle(false);
+    }
+  }, [activeVehicleId, hydratePartnerState, setOnline]);
+
+  const handleOnlineToggle = useCallback(async () => {
+    if (isProcessingToggle) return;
+
+    if (isOnline) {
+      setIsProcessingToggle(true);
+      try {
+        await deliveryAPI.updateOnlineStatus(false);
+        hydratePartnerState({ availabilityStatus: 'offline', isOnline: false });
+        setOnline(false);
+      } catch {
+        toast.error('Failed to go offline');
+      } finally {
+        setIsProcessingToggle(false);
+      }
+      return;
+    }
+
+    const approved = getApprovedVehicles(driverVehicles);
+    if (!approved.length) {
+      toast.error('No approved vehicle available. Please contact admin.');
+      return;
+    }
+
+    if (approved.length === 1) {
+      const only = approved[0];
+      const vId = only.id || only.vehicleId;
+      try {
+        if (String(activeVehicleId) !== String(vId)) {
+          await deliveryAPI.setActiveVehicle(vId);
+          setActiveVehicleId(vId);
+        }
+        await completeGoOnline();
+      } catch {
+        // toast handled in completeGoOnline
+      }
+      return;
+    }
+
+    setVehicleSelectMode('go_online');
+    setShowVehicleSwitcher(true);
+  }, [
+    isOnline, isProcessingToggle, driverVehicles, activeVehicleId,
+    completeGoOnline, hydratePartnerState, setOnline, setActiveVehicleId,
+  ]);
+
+  const handleVehicleSelectedForOnline = useCallback(async (vehicleId) => {
+    setShowVehicleSwitcher(false);
+    setVehicleSelectMode('switch');
+    try {
+      await completeGoOnline();
+    } catch {
+      // handled in completeGoOnline
+    }
+  }, [completeGoOnline]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (activeOrder) return undefined;
+
+    porterDriverApi.getActiveOrder()
+      .then((data) => {
+        if (cancelled) return;
+        const order = data?.order || data;
+        if (!order?.id && !order?.orderId) return;
+        const enriched = enrichPorterDeliveryOrder(order);
+        if (!isPorterParcelTrip(enriched)) return;
+        setActiveOrder(enriched);
+        const status = enriched.status;
+        if (status === 'at_pickup') updateTripStatus('at_pickup');
+        else if (status === 'picked_up' || status === 'in_transit') updateTripStatus('picked_up');
+        else if (status === 'at_drop') updateTripStatus('at_drop');
+        else updateTripStatus('accepted');
+      })
+      .catch(() => {});
+
+    return () => { cancelled = true; };
+  }, [activeOrder, setActiveOrder, updateTripStatus]);
+
   const [showSubModal, setShowSubModal] = useState(false);
   const [showLowBalanceModal, setShowLowBalanceModal] = useState(false);
   const [showCashLimitModal, setShowCashLimitModal] = useState(false);
@@ -827,41 +945,7 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
                 <img src={profileImage || "https://i.ibb.co/3m2Yh7r/Appzeto-Brand-Image.png"} alt="Profile" className="w-full h-full object-cover rounded-full" />
              </div>
              <button 
-                onClick={async () => {
-                  if (isProcessingToggle) return;
-                  
-                  const turningOn = !isOnline;
-                  if (!turningOn) {
-                    setIsProcessingToggle(true);
-                    try {
-                      await deliveryAPI.updateOnlineStatus(false);
-                      setOnline(false);
-                    } catch (err) {
-                      toast.error("Failed to go offline");
-                    } finally {
-                      setIsProcessingToggle(false);
-                    }
-                    return;
-                  }
-
-                  setIsProcessingToggle(true);
-                  try {
-                    await deliveryAPI.updateOnlineStatus(true);
-                    setOnline(true);
-                    setIsProcessingToggle(false);
-                    navigator.geolocation.getCurrentPosition((pos) => {
-                        deliveryAPI.updateLocation(pos.coords.latitude, pos.coords.longitude, true).catch(() => {});
-                    }, (err) => console.warn('Online sync position failed:', err), { enableHighAccuracy: true });
-                  } catch (err) {
-                    const errMsg = err?.response?.data?.message || err?.message || '';
-                    if (errMsg === 'CASH_LIMIT_EXCEEDED') {
-                      setShowCashLimitModal(true);
-                    } else {
-                      toast.error("Failed to go online");
-                    }
-                    setIsProcessingToggle(false);
-                  }
-                }}
+                onClick={handleOnlineToggle}
                 disabled={isProcessingToggle}
                 className={`relative w-[92px] h-8 rounded-full p-1 transition-all duration-500 flex items-center ${isOnline ? 'bg-green-500 shadow-lg shadow-green-500/20' : 'bg-gray-400'}`}
              >
@@ -947,39 +1031,62 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
                   </div>
                   
                   {activeVehicle && (
-                    <div 
-                      onClick={() => setShowVehicleSwitcher(true)}
-                      className="bg-white/5 rounded-2xl p-4 flex flex-col border border-white/10 shadow-sm backdrop-blur-md relative overflow-hidden group cursor-pointer active:scale-95 transition-all"
-                    >
-                      <div className="flex items-center justify-between mb-3">
+                    <div className="bg-white/5 rounded-2xl flex flex-col border border-white/10 shadow-sm backdrop-blur-md relative overflow-hidden group transition-all">
+                      <div 
+                        onClick={() => setIsVehicleDetailsExpanded(!isVehicleDetailsExpanded)}
+                        className="flex items-center justify-between p-4 cursor-pointer hover:bg-white/10 active:bg-white/5 transition-colors"
+                      >
                         <span className="text-[9px] text-white/50 font-black uppercase tracking-[0.15em]">Current Vehicle</span>
-                        <div className="flex items-center gap-1 text-[10px] text-blue-400 font-bold uppercase tracking-widest">
-                          <span>Change</span>
-                          <ChevronRight className="w-3 h-3" />
+                        <div className="flex items-center gap-1 text-[10px] text-gray-400 font-bold uppercase tracking-widest">
+                          <span>{isVehicleDetailsExpanded ? 'Hide' : 'Show'}</span>
+                          <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-300 ${isVehicleDetailsExpanded ? 'rotate-180' : ''}`} />
                         </div>
                       </div>
-                      
-                      <div className="flex items-center gap-3">
-                        <div className="w-12 h-12 bg-white/10 rounded-xl flex items-center justify-center shrink-0 shadow-inner">
-                          <img src={(activeVehicle.master || activeVehicle).image || "https://i.ibb.co/68zRzVv/Auto.png"} alt="Vehicle" className="w-8 h-8 object-contain" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <h3 className="text-white font-bold text-sm truncate">{(activeVehicle.master || activeVehicle).name || 'Vehicle'}</h3>
-                          <div className="text-[10px] text-gray-400 uppercase tracking-widest font-semibold flex items-center gap-1.5 mt-0.5 truncate">
-                            <span>{activeVehicle.registrationNumber || 'No Reg'}</span>
-                            <span>•</span>
-                            <span className={activeVehicle.verificationStatus === 'Approved' ? 'text-green-400' : 'text-orange-400'}>{activeVehicle.verificationStatus || 'Unknown'}</span>
-                          </div>
-                        </div>
-                      </div>
-                      
-                      {((activeVehicle.master || activeVehicle).supportedServices || []).length > 0 && (
-                        <div className="flex items-center gap-1 mt-3 flex-wrap">
-                          {((activeVehicle.master || activeVehicle).supportedServices || []).map(s => (
-                            <span key={s} className="text-[9px] bg-white/10 text-white px-2 py-1 rounded font-black uppercase">{s}</span>
-                          ))}
-                        </div>
-                      )}
+
+                      <AnimatePresence>
+                        {isVehicleDetailsExpanded && (
+                          <motion.div 
+                            initial={{ height: 0, opacity: 0 }}
+                            animate={{ height: 'auto', opacity: 1 }}
+                            exit={{ height: 0, opacity: 0 }}
+                            transition={{ duration: 0.2 }}
+                            className="px-4 pb-4 overflow-hidden"
+                          >
+                             <div 
+                               onClick={() => { setVehicleSelectMode('switch'); setShowVehicleSwitcher(true); }}
+                               className="bg-black/20 border border-white/5 rounded-xl p-3 flex flex-col relative overflow-hidden cursor-pointer hover:bg-black/30 active:scale-[0.98] transition-all"
+                             >
+                                <div className="absolute top-3 right-3 text-[9px] text-blue-400 font-bold uppercase tracking-widest flex items-center bg-blue-500/10 px-2 py-1 rounded-full">
+                                  Change <ChevronRight className="w-3 h-3 ml-0.5" />
+                                </div>
+                                
+                                <div className="flex items-center gap-3">
+                                  <div className="w-12 h-12 bg-white/5 rounded-lg flex items-center justify-center shrink-0 shadow-inner p-1">
+                                    <img src={(activeVehicle.master || activeVehicle).image || "https://i.ibb.co/68zRzVv/Auto.png"} alt="Vehicle" className="w-full h-full object-contain drop-shadow-md" />
+                                  </div>
+                                  <div className="flex-1 min-w-0 pr-16">
+                                    <h3 className="text-white font-bold text-sm truncate">{(activeVehicle.master || activeVehicle).name || 'Vehicle'}</h3>
+                                    <div className="text-[10px] text-gray-400 uppercase tracking-widest font-semibold flex items-center gap-1.5 mt-1 truncate">
+                                      <span className="text-gray-300">{activeVehicle.registrationNumber || 'No Reg'}</span>
+                                      <span>•</span>
+                                      <span className={activeVehicle.isDispatchEligible || ['active', 'approved'].includes(String(activeVehicle.status || '').toLowerCase()) ? 'text-green-400' : 'text-orange-400'}>
+                                        {activeVehicle.verificationStatus || activeVehicle.status || 'Unknown'}
+                                      </span>
+                                    </div>
+                                  </div>
+                                </div>
+                                
+                                {((activeVehicle.master || activeVehicle).supportedServices || []).length > 0 && (
+                                  <div className="flex items-center gap-1.5 mt-3 pt-3 border-t border-white/5 flex-wrap">
+                                    {((activeVehicle.master || activeVehicle).supportedServices || []).map(s => (
+                                      <span key={s} className="text-[9px] bg-white/10 text-white px-2 py-0.5 rounded font-black uppercase tracking-wider">{s}</span>
+                                    ))}
+                                  </div>
+                                )}
+                             </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
                     </div>
                   )}
                 </div>
@@ -994,18 +1101,11 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
           data={eligibilityData}
           loading={isProcessingToggle}
           onConfirm={async () => {
-             setIsProcessingToggle(true);
+             setShowSubModal(false);
              try {
-               await deliveryAPI.updateOnlineStatus(true);
-               setOnline(true);
-               setShowSubModal(false);
-               navigator.geolocation.getCurrentPosition((pos) => {
-                 deliveryAPI.updateLocation(pos.coords.latitude, pos.coords.longitude, true).catch(() => {});
-               }, (err) => console.warn('Online sync position failed:', err), { enableHighAccuracy: true });
-             } catch (err) {
-               toast.error("Failed to go online");
-             } finally {
-               setIsProcessingToggle(false);
+               await completeGoOnline();
+             } catch {
+               // handled in completeGoOnline
              }
           }}
         />
@@ -1349,25 +1449,23 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
         loading={isProcessingToggle}
         onClose={() => setShowSubModal(false)}
         onConfirm={async () => {
-          setIsProcessingToggle(true);
+          setShowSubModal(false);
           try {
-            await deliveryAPI.updateOnlineStatus(true);
-            setOnline(true);
-            setShowSubModal(false);
-            navigator.geolocation.getCurrentPosition((pos) => {
-                deliveryAPI.updateLocation(pos.coords.latitude, pos.coords.longitude, true).catch(() => {});
-            }, (err) => console.warn('Online sync position failed:', err), { enableHighAccuracy: true });
-          } catch (err) {
-            toast.error(err.response?.data?.message || "Failed to activate pass");
-          } finally {
-            setIsProcessingToggle(false);
+            await completeGoOnline();
+          } catch {
+            // handled in completeGoOnline
           }
         }}
       />
       
       <VehicleSwitcherSheet 
         isOpen={showVehicleSwitcher}
-        onClose={() => setShowVehicleSwitcher(false)}
+        onClose={() => {
+          setShowVehicleSwitcher(false);
+          setVehicleSelectMode('switch');
+        }}
+        mode={vehicleSelectMode}
+        onVehicleSelected={vehicleSelectMode === 'go_online' ? handleVehicleSelectedForOnline : undefined}
       />
     </div>
   );

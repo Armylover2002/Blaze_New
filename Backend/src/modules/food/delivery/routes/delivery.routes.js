@@ -3,23 +3,34 @@ import { upload } from '../../../../middleware/upload.js';
 import { authMiddleware } from '../../../../core/auth/auth.middleware.js';
 import { requireRoles } from '../../../../core/roles/role.middleware.js';
 import * as orderController from '../../orders/controllers/order.controller.js';
-import { registerDeliveryPartnerController, updateDeliveryPartnerProfileController, updateDeliveryPartnerBankDetailsController, listSupportTicketsController, createSupportTicketController, getSupportTicketByIdController, updateDeliveryPartnerDetailsController, updateDeliveryPartnerProfilePhotoBase64Controller, updateAvailabilityController, getWalletController, createWithdrawalRequestController, createCashDepositOrderController, verifyCashDepositPaymentController, getEarningsController, getTripHistoryController, getPocketDetailsController, getEmergencyHelpController, getCashLimitController, getDeliveryReferralStatsController, getActiveEarningAddonsController, deleteDeliveryPartnerAccountController, submitDeliveryManualDepositController, getDepositZonesController, getDepositZoneHubsController } from '../controllers/delivery.controller.js';
+import { registerDeliveryPartnerController, updateDeliveryPartnerProfileController, updateDeliveryPartnerBankDetailsController, listSupportTicketsController, createSupportTicketController, getSupportTicketByIdController, updateDeliveryPartnerDetailsController, updateDeliveryPartnerProfilePhotoBase64Controller, updateAvailabilityController, getDeliveryPartnerVehiclesController, setDeliveryPartnerActiveVehicleController, getWalletController, createWithdrawalRequestController, createCashDepositOrderController, verifyCashDepositPaymentController, getEarningsController, getTripHistoryController, getPocketDetailsController, getEmergencyHelpController, getCashLimitController, getDeliveryReferralStatsController, getActiveEarningAddonsController, deleteDeliveryPartnerAccountController, submitDeliveryManualDepositController, getDepositZonesController, getDepositZoneHubsController, validateDocumentsController } from '../controllers/delivery.controller.js';
 import { getDepositPaymentSettingsPublicController } from '../../admin/controllers/admin.controller.js';
 
 const router = express.Router();
 
-const uploadFields = upload.fields([
-    { name: 'profilePhoto', maxCount: 1 },
-    { name: 'aadharPhoto', maxCount: 1 },
-    { name: 'panPhoto', maxCount: 1 },
-    { name: 'drivingLicensePhoto', maxCount: 1 },
-    { name: 'upiQrCode', maxCount: 1 },
-    { name: 'vehicleImage', maxCount: 1 }
-]);
+const dynamicUpload = [
+    upload.any(),
+    (req, res, next) => {
+        if (Array.isArray(req.files)) {
+            const filesObj = {};
+            req.files.forEach(f => {
+                if (!filesObj[f.fieldname]) filesObj[f.fieldname] = [];
+                filesObj[f.fieldname].push(f);
+            });
+            req.files = filesObj;
+        }
+        next();
+    }
+];
 
-router.post('/register', uploadFields, registerDeliveryPartnerController);
+router.post('/validate-documents', authMiddleware, validateDocumentsController);
 
-router.patch('/profile', authMiddleware, requireRoles('DELIVERY_PARTNER'), uploadFields, updateDeliveryPartnerProfileController);
+// Make an unauthenticated version for signup step 1
+router.post('/validate-documents-public', validateDocumentsController);
+
+router.post('/register', dynamicUpload, registerDeliveryPartnerController);
+
+router.patch('/profile', authMiddleware, requireRoles('DELIVERY_PARTNER'), dynamicUpload, updateDeliveryPartnerProfileController);
 router.delete('/profile', authMiddleware, requireRoles('DELIVERY_PARTNER'), deleteDeliveryPartnerAccountController);
 
 // JSON-only profile updates (no files) – safe for web updates like vehicle number.
@@ -28,9 +39,12 @@ router.patch('/profile/details', authMiddleware, requireRoles('DELIVERY_PARTNER'
 // Base64 profile photo update – designed for Flutter in-app WebView camera handler.
 router.post('/profile/photo-base64', authMiddleware, requireRoles('DELIVERY_PARTNER'), updateDeliveryPartnerProfilePhotoBase64Controller);
 
-router.patch('/profile/bank-details', authMiddleware, requireRoles('DELIVERY_PARTNER'), uploadFields, updateDeliveryPartnerBankDetailsController);
+router.patch('/profile/bank-details', authMiddleware, requireRoles('DELIVERY_PARTNER'), dynamicUpload, updateDeliveryPartnerBankDetailsController);
 
 router.patch('/availability', authMiddleware, requireRoles('DELIVERY_PARTNER'), updateAvailabilityController);
+
+router.get('/vehicles', authMiddleware, requireRoles('DELIVERY_PARTNER'), getDeliveryPartnerVehiclesController);
+router.patch('/vehicles/active', authMiddleware, requireRoles('DELIVERY_PARTNER'), setDeliveryPartnerActiveVehicleController);
 
 router.get('/support-tickets', authMiddleware, requireRoles('DELIVERY_PARTNER'), listSupportTicketsController);
 router.post('/support-tickets', authMiddleware, requireRoles('DELIVERY_PARTNER'), createSupportTicketController);

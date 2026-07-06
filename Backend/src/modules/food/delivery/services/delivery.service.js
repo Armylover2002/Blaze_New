@@ -11,6 +11,62 @@ import { uploadImageBuffer } from '../../../../services/cloudinary.service.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
 import { getDeliveryCashLimitSettings } from '../../admin/services/admin.service.js';
 import { ensureDailyPassEligibility, activateDailyPass } from '../../subscriptions/services/wallet.service.js';
+import { verifyAndConsumeOnboardingPayment } from '../../../common/services/onboardingFee.service.js';
+import { OnboardingPaymentLog } from '../../../common/models/onboardingPaymentLog.model.js';
+import { enrichDriverVehiclesFromSignupPayload } from '../../../porter/orders/services/porter-driver-vehicle.service.js';
+import { notifyAdminsSafely } from '../../../../core/notifications/firebase.service.js';
+import {
+    parseSignupVehiclesPayload,
+    uploadPartnerDocumentImages,
+    uploadSignupVehicleDocuments,
+    mergeVehicleDocumentUploads,
+} from '../utils/deliveryPartnerUpload.helper.js';
+
+export const validateUniqueDocuments = async (payload, excludeUserId = null) => {
+    const { drivingLicenseNumber, panNumber, aadharNumber } = payload;
+    
+    const orConditions = [];
+    const normalizedDL = drivingLicenseNumber ? String(drivingLicenseNumber).replace(/\s+/g, '').toUpperCase() : null;
+    const normalizedPAN = panNumber ? String(panNumber).trim().toUpperCase() : null;
+    const normalizedAadhar = aadharNumber ? String(aadharNumber).replace(/\D/g, '') : null;
+
+    if (normalizedDL) orConditions.push({ drivingLicenseNumber: normalizedDL });
+    if (normalizedPAN) orConditions.push({ panNumber: normalizedPAN });
+    if (normalizedAadhar) orConditions.push({ aadharNumber: normalizedAadhar });
+
+    if (orConditions.length === 0) return { isValid: true, errors: {} };
+
+    const query = { $or: orConditions };
+    if (excludeUserId) {
+        query._id = { $ne: excludeUserId };
+    }
+
+    const duplicates = await FoodDeliveryPartner.find(query).lean();
+    
+    if (duplicates.length === 0) return { isValid: true, errors: {} };
+
+    const errors = {};
+    for (const duplicate of duplicates) {
+        if (normalizedDL && duplicate.drivingLicenseNumber === normalizedDL) {
+            errors.drivingLicenseNumber = 'Driving License Number already registered.';
+        }
+        if (normalizedPAN && duplicate.panNumber === normalizedPAN) {
+            errors.panNumber = 'PAN Number already registered.';
+        }
+        if (normalizedAadhar && duplicate.aadharNumber === normalizedAadhar) {
+            errors.aadharNumber = 'Aadhaar Number already registered.';
+        }
+    }
+
+    if (Object.keys(errors).length > 0) {
+        const error = new Error(Object.values(errors).join('\n'));
+        error.statusCode = 409;
+        error.errors = errors;
+        throw error;
+    }
+
+    return { isValid: true, errors: {} };
+};
 
 export const registerDeliveryPartner = async (payload, files) => {
     const {
@@ -21,38 +77,56 @@ export const registerDeliveryPartner = async (payload, files) => {
     const refRaw = typeof payload?.ref === 'string' ? String(payload.ref).trim() : '';
 
     let partner;
+    const signupVehicles = parseSignupVehiclesPayload(payload);
 
     const existing = await FoodDeliveryPartner.findOne({ phone });
     if (existing) {
         if (existing.status !== 'rejected') {
             throw new ValidationError('Delivery partner with this phone already exists');
         }
-        // If rejected, allow update and bypass payment
         partner = existing;
     }
 
-    const images = {};
+    const excludeUserId = partner?._id;
+    const vNumbers = [
+        vehicleNumber,
+        ...signupVehicles.map((v) => v.registrationNumber || v.vehicleNumber),
+    ]
+        .filter(Boolean)
+        .map((n) => String(n).trim().toUpperCase());
 
-    if (files?.profilePhoto?.[0]) {
-        images.profilePhoto = await uploadImageBuffer(files.profilePhoto[0].buffer, 'food/delivery/profile');
+    const duplicateOrConditions = [];
+    if (email && String(email).trim()) {
+        duplicateOrConditions.push({ email: String(email).trim().toLowerCase() });
     }
-    if (files?.aadharPhoto?.[0]) {
-        images.aadharPhoto = await uploadImageBuffer(files.aadharPhoto[0].buffer, 'food/delivery/aadhar');
+    if (vNumbers.length > 0) {
+        duplicateOrConditions.push({ vehicleNumber: { $in: vNumbers } });
+        duplicateOrConditions.push({ 'driverVehicles.vehicleNumber': { $in: vNumbers } });
     }
-    if (files?.panPhoto?.[0]) {
-        images.panPhoto = await uploadImageBuffer(files.panPhoto[0].buffer, 'food/delivery/pan');
-    }
-    if (files?.drivingLicensePhoto?.[0]) {
-        images.drivingLicensePhoto = await uploadImageBuffer(
-            files.drivingLicensePhoto[0].buffer,
-            'food/delivery/license'
-        );
-    }
-    if (files?.vehicleImage?.[0]) {
-        images.vehicleImage = await uploadImageBuffer(
-            files.vehicleImage[0].buffer,
-            'food/delivery/vehicle'
-        );
+
+    const duplicateCheckPromise = duplicateOrConditions.length > 0
+        ? FoodDeliveryPartner.findOne({ $or: duplicateOrConditions }).select('_id email').lean()
+        : Promise.resolve(null);
+
+    const [, duplicate, images, enrichedVehicles, vehicleUploadMap] = await Promise.all([
+        validateUniqueDocuments({ drivingLicenseNumber, panNumber, aadharNumber }, excludeUserId),
+        duplicateCheckPromise,
+        uploadPartnerDocumentImages(files),
+        enrichDriverVehiclesFromSignupPayload(payload),
+        uploadSignupVehicleDocuments(files, signupVehicles),
+        verifyAndConsumeOnboardingPayment({
+            role: 'DELIVERY_PARTNER',
+            paymentDetails: { razorpayOrderId, razorpayPaymentId, razorpaySignature },
+            userDetails: { name, phone, email },
+            entityId: partner?._id,
+        }),
+    ]);
+
+    if (duplicate && String(duplicate._id) !== String(partner?._id)) {
+        if (email && String(email).trim().toLowerCase() === duplicate.email) {
+            throw new ValidationError('Delivery partner with this email already exists');
+        }
+        throw new ValidationError('Delivery partner with this Vehicle Number already exists');
     }
 
     const partnerData = {
@@ -74,49 +148,12 @@ export const registerDeliveryPartner = async (payload, files) => {
     };
 
     if (partner) {
-        // Verify onboarding fee payment if required for re-onboarding.
-        // verifyAndConsumeOnboardingPayment automatically bypasses the check
-        // if the user already paid successfully in a prior attempt.
-        const { verifyAndConsumeOnboardingPayment } = await import('../../../common/services/onboardingFee.service.js');
-        await verifyAndConsumeOnboardingPayment({
-            role: 'DELIVERY_PARTNER',
-            paymentDetails: { razorpayOrderId, razorpayPaymentId, razorpaySignature },
-            userDetails: { name, phone, email },
-            entityId: partner._id
-        });
-
         Object.assign(partner, partnerData);
         partner.rejectionReason = null;
         partner.isActive = false;
         partner.isVerified = false;
-
-        // Associate created partner ID with payment log if paid
-        if (razorpayOrderId) {
-            const { OnboardingPaymentLog } = await import('../../../common/models/onboardingPaymentLog.model.js');
-            await OnboardingPaymentLog.updateOne(
-                { razorpayOrderId },
-                { $set: { entityId: partner._id } }
-            );
-        }
     } else {
-        // Verify onboarding fee payment if required
-        const { verifyAndConsumeOnboardingPayment } = await import('../../../common/services/onboardingFee.service.js');
-        await verifyAndConsumeOnboardingPayment({
-            role: 'DELIVERY_PARTNER',
-            paymentDetails: { razorpayOrderId, razorpayPaymentId, razorpaySignature },
-            userDetails: { name, phone, email }
-        });
-
         partner = await FoodDeliveryPartner.create(partnerData);
-
-        // Associate created partner ID with payment log if paid
-        if (razorpayOrderId) {
-            const { OnboardingPaymentLog } = await import('../../../common/models/onboardingPaymentLog.model.js');
-            await OnboardingPaymentLog.updateOne(
-                { razorpayOrderId },
-                { $set: { entityId: partner._id } }
-            );
-        }
     }
 
     // Update FCM token if provided
@@ -131,6 +168,25 @@ export const registerDeliveryPartner = async (payload, files) => {
     // Ensure referralCode exists for sharing.
     if (!partner.referralCode) {
         partner.referralCode = String(partner._id);
+    }
+
+    if ((enrichedVehicles || []).length) {
+        try {
+            const vehicles = mergeVehicleDocumentUploads(enrichedVehicles, vehicleUploadMap).map((vehicle) => {
+                const stableId = new mongoose.Types.ObjectId().toString();
+                return {
+                    ...vehicle,
+                    _id: stableId,
+                    id: stableId,
+                };
+            });
+            partner.driverVehicles = vehicles;
+            const defaultVeh = vehicles.find((v) => v.isDefault) || vehicles[0];
+            partner.activeVehicleId = defaultVeh?.id || null;
+        } catch (vehErr) {
+            // eslint-disable-next-line no-console
+            console.warn('Failed to persist driver vehicles on signup:', vehErr.message);
+        }
     }
 
     // Store referredBy (no credit here; credit happens on admin approval).
@@ -157,23 +213,24 @@ export const registerDeliveryPartner = async (payload, files) => {
 
     await partner.save();
 
-    try {
-        const { notifyAdminsSafely } = await import('../../../../core/notifications/firebase.service.js');
-        void notifyAdminsSafely({
-            title: 'New Delivery Partner Registration 🚲',
-            body: `A new delivery partner "${partner.name}" has signed up and is pending approval.`,
-            data: {
-                type: 'new_registration',
-                subType: 'delivery_partner',
-                id: String(partner._id)
-            }
-        });
-    } catch (e) {
-        // eslint-disable-next-line no-console
-        console.error('Failed to notify admins of new delivery partner registration:', e);
+    if (razorpayOrderId) {
+        void OnboardingPaymentLog.updateOne(
+            { razorpayOrderId },
+            { $set: { entityId: partner._id } },
+        );
     }
 
-    return partner.toObject();
+    void notifyAdminsSafely({
+        title: 'New Delivery Partner Registration 🚲',
+        body: `A new delivery partner "${partner.name}" has signed up and is pending approval.`,
+        data: {
+            type: 'new_registration',
+            subType: 'delivery_partner',
+            id: String(partner._id),
+        },
+    });
+
+    return partner;
 };
 
 export const updateDeliveryPartnerProfile = async (userId, payload, files) => {
@@ -187,6 +244,9 @@ export const updateDeliveryPartnerProfile = async (userId, payload, files) => {
         vehicleType, vehicleName, vehicleNumber, drivingLicenseNumber, panNumber, aadharNumber,
         fcmToken, platform
     } = payload;
+
+    // Run the new unique validation for documents
+    await validateUniqueDocuments({ drivingLicenseNumber, panNumber, aadharNumber }, userId);
 
     if (name) partner.name = name;
     if (countryCode !== undefined) partner.countryCode = countryCode;
@@ -238,8 +298,26 @@ export const updateDeliveryPartnerProfile = async (userId, payload, files) => {
     if (panNumber !== undefined) partner.panNumber = panNumber;
 
     await partner.save();
+    const partnerObj = partner.toObject();
+
+    try {
+        if (partnerObj.driverVehicles && partnerObj.driverVehicles.length > 0) {
+            const activeId = partnerObj.activeVehicleId ? String(partnerObj.activeVehicleId) : null;
+            const activeVeh = activeId 
+                ? partnerObj.driverVehicles.find(v => String(v._id) === activeId || String(v.id) === activeId) 
+                : partnerObj.driverVehicles.find(v => v.isDefault) || partnerObj.driverVehicles[0];
+            
+            if (activeVeh) {
+                partnerObj.vehicleNumber = activeVeh.vehicleNumber;
+                partnerObj.vehicleType = activeVeh.vehicleCode;
+                partnerObj.vehicleName = activeVeh.vehicleName;
+                partnerObj.supportedServices = activeVeh.supportedServices;
+            }
+        }
+    } catch(e) {}
+
     return {
-        partner: partner.toObject(),
+        partner: partnerObj,
         requiresReapproval: false
     };
 };
@@ -324,7 +402,11 @@ export const updateDeliveryPartnerBankDetails = async (userId, payload, files) =
     }
 
     if (panDetails?.number !== undefined) {
-        partner.panNumber = panDetails.number ? String(panDetails.number).trim().toUpperCase() : '';
+        const panNumber = panDetails.number ? String(panDetails.number).trim().toUpperCase() : '';
+        if (panNumber) {
+            await validateUniqueDocuments({ panNumber }, userId);
+        }
+        partner.panNumber = panNumber;
     }
 
     if (files?.upiQrCode?.[0]) {
@@ -419,10 +501,23 @@ export const updateDeliveryAvailability = async (userId, payload) => {
     if (partner.availabilityStatus === 'offline' && validStatus === 'online') {
         const { getDeliveryPartnerWalletEnhanced } = await import('./deliveryFinance.service.js');
         const wallet = await getDeliveryPartnerWalletEnhanced(userId);
-        // Block if: (1) admin set limit to 0 OR (2) delivery boy has exhausted their limit
         const cashLimitHit = wallet.totalCashLimit === 0 || wallet.availableCashLimit <= 0;
         if (cashLimitHit) {
             throw new ValidationError('CASH_LIMIT_EXCEEDED');
+        }
+
+        const { getApprovedDriverVehicles } = await import('../../../porter/orders/services/porter-driver-vehicle.service.js');
+        const approved = getApprovedDriverVehicles(partner.driverVehicles || []);
+        if (!approved.length) {
+            throw new ValidationError('No approved vehicle available. Please contact admin.');
+        }
+        if (!partner.activeVehicleId) {
+            partner.activeVehicleId = String(approved[0].id || approved[0]._id);
+        } else {
+            const activeOk = approved.some((v) => String(v.id || v._id) === String(partner.activeVehicleId));
+            if (!activeOk) {
+                partner.activeVehicleId = String(approved[0].id || approved[0]._id);
+            }
         }
     }
 
@@ -437,7 +532,57 @@ export const updateDeliveryAvailability = async (userId, payload) => {
         partner.lastLocationAt = new Date();
     }
     await partner.save();
-    return { availabilityStatus: partner.availabilityStatus };
+    return {
+        availabilityStatus: partner.availabilityStatus,
+        activeVehicleId: partner.activeVehicleId || null,
+    };
+};
+
+export const getDeliveryPartnerVehicles = async (userId) => {
+    let partner = await FoodDeliveryPartner.findById(userId).lean();
+    if (!partner) throw new ValidationError('Delivery partner not found');
+
+    if (partner.status === 'approved') {
+        const needsActivation = (partner.driverVehicles || []).some((v) => {
+            const status = String(v.status || '').toLowerCase();
+            return status === 'draft' || status === 'pending';
+        });
+        if (needsActivation) {
+            const doc = await FoodDeliveryPartner.findById(userId);
+            const { activateDriverVehiclesOnPartnerApproval } = await import('../../../porter/orders/services/porter-driver-vehicle.service.js');
+            await activateDriverVehiclesOnPartnerApproval(doc);
+            partner = doc.toObject();
+        }
+    }
+
+    const { getDeliveryPartnerVehiclePayload } = await import('../../../porter/orders/services/porter-driver-vehicle.service.js');
+    return getDeliveryPartnerVehiclePayload(partner);
+};
+
+export const setDeliveryPartnerActiveVehicle = async (userId, vehicleId) => {
+    const partner = await FoodDeliveryPartner.findById(userId);
+    if (!partner) throw new ValidationError('Delivery partner not found');
+    if (partner.availabilityStatus === 'online') {
+        throw new ValidationError('Go offline before switching vehicle');
+    }
+
+    const { getDeliveryPartnerVehiclePayload, isDriverVehicleDispatchEligible } = await import('../../../porter/orders/services/porter-driver-vehicle.service.js');
+    const payload = await getDeliveryPartnerVehiclePayload(partner);
+    const match = payload.vehicles.find((v) => v.id === String(vehicleId) || v.vehicleId === String(vehicleId));
+    if (!match) throw new ValidationError('Vehicle not found on profile');
+    if (!isDriverVehicleDispatchEligible(match)) {
+        throw new ValidationError('Vehicle is not approved for dispatch');
+    }
+
+    partner.activeVehicleId = match.id;
+    await partner.save();
+
+    return {
+        activeVehicleId: partner.activeVehicleId,
+        vehicle: match,
+        vehicles: payload.vehicles,
+        driverVehicles: payload.vehicles,
+    };
 };
 
 // ----- Delivery partner wallet (Pocket / requests page) -----

@@ -1,10 +1,10 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Package, MapPin } from "lucide-react";
+import { Package } from "lucide-react";
 import Screen from "../components/Screen";
-import { SectionLabel, inr } from "../components/ui";
+import { inr } from "../components/ui";
 import { getPorterShipmentDetailsPath } from "../utils/routes";
-import { SHIPMENT_HISTORY } from "../utils/mock/shipments";
+import porterUserApi from "../services/userApi";
 
 const TABS = [
   { id: "all", label: "All" },
@@ -13,14 +13,35 @@ const TABS = [
   { id: "cancelled", label: "Cancelled" },
 ];
 
+const ACTIVE_STATUSES = new Set([
+  "searching_partner", "assigned", "partner_accepted", "en_route_pickup",
+  "at_pickup", "picked_up", "in_transit", "at_drop",
+]);
+
 export default function ShipmentHistory() {
   const navigate = useNavigate();
   const [tab, setTab] = useState("all");
+  const [orders, setOrders] = useState([]);
+  const [loading, setLoading] = useState(true);
 
-  const filtered = SHIPMENT_HISTORY.filter((s) => {
+  useEffect(() => {
+    let cancelled = false;
+    porterUserApi.listOrders({ limit: 50 })
+      .then((data) => {
+        if (cancelled) return;
+        setOrders(data?.records || data?.docs || []);
+      })
+      .catch(() => setOrders([]))
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+
+  const filtered = orders.filter((s) => {
     if (tab === "all") return true;
-    if (tab === "active") return ["in_transit", "to_pickup", "picked_up", "out_for_delivery"].includes(s.stage);
-    return s.status === tab;
+    if (tab === "active") return ACTIVE_STATUSES.has(s.status);
+    if (tab === "delivered") return ["delivered", "completed"].includes(s.status);
+    if (tab === "cancelled") return String(s.status || "").startsWith("cancelled");
+    return true;
   });
 
   return (
@@ -40,7 +61,9 @@ export default function ShipmentHistory() {
         ))}
       </div>
 
-      {filtered.length === 0 ? (
+      {loading ? (
+        <p className="text-center text-sm text-gray-500 py-12">Loading shipments…</p>
+      ) : filtered.length === 0 ? (
         <div className="flex flex-col items-center py-16 text-center">
           <Package className="mb-3 h-12 w-12 text-gray-300" />
           <p className="text-[14px] font-bold text-gray-900">No shipments found</p>
@@ -53,37 +76,15 @@ export default function ShipmentHistory() {
               key={s.id}
               type="button"
               onClick={() => navigate(getPorterShipmentDetailsPath(s.id))}
-              className="w-full rounded-2xl border border-gray-100 bg-white p-4 text-left shadow-sm transition hover:border-gray-200"
+              className="w-full rounded-2xl border border-gray-100 bg-white p-4 text-left shadow-sm"
             >
-              <div className="mb-2 flex items-center justify-between">
-                <span className="text-[11px] font-bold text-gray-400">{s.trackingId}</span>
-                <span
-                  className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold capitalize ${
-                    s.status === "delivered"
-                      ? "bg-green-50 text-[#2e7d32]"
-                      : s.status === "cancelled"
-                      ? "bg-gray-100 text-gray-500"
-                      : "bg-amber-50 text-amber-700"
-                  }`}
-                >
-                  {s.status.replace("_", " ")}
-                </span>
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-[13px] font-bold text-gray-900">{s.orderNumber}</p>
+                <span className="text-[11px] font-bold uppercase text-[#FF0000]">{s.status}</span>
               </div>
-              <p className="mb-2 text-[14px] font-bold text-gray-900">{s.vehicle} · {s.weightKg} kg</p>
-              <div className="mb-2 space-y-1">
-                <div className="flex items-start gap-2">
-                  <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-[#2e7d32]" />
-                  <p className="truncate text-[12px] text-gray-600">{s.pickup.address}</p>
-                </div>
-                <div className="flex items-start gap-2">
-                  <MapPin className="mt-0.5 h-3 w-3 shrink-0 text-[#FF0000]" />
-                  <p className="truncate text-[12px] text-gray-600">{s.delivery.address}</p>
-                </div>
-              </div>
-              <div className="flex items-center justify-between border-t border-gray-100 pt-2">
-                <span className="text-[11px] text-gray-500">{s.vehicle} · {new Date(s.createdAt).toLocaleDateString()}</span>
-                <span className="text-[14px] font-extrabold text-gray-900">{inr(s.total)}</span>
-              </div>
+              <p className="mt-1 text-[12px] text-gray-500 line-clamp-1">{s.pickup?.address}</p>
+              <p className="text-[12px] text-gray-500 line-clamp-1">→ {s.delivery?.address}</p>
+              <p className="mt-2 text-[13px] font-bold text-gray-900">{inr(s.pricing?.total ?? 0)}</p>
             </button>
           ))}
         </div>

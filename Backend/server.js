@@ -19,6 +19,7 @@ let server = null;
 let expireOffersInterval = null;
 let fssaiExpiryInterval = null;
 let porterCouponLifecycleInterval = null;
+let porterScheduledDispatchInterval = null;
 
 const gracefulShutdown = async (signal) => {
     logger.info(`${signal} received, starting graceful shutdown`);
@@ -34,6 +35,7 @@ const gracefulShutdown = async (signal) => {
             if (expireOffersInterval) clearInterval(expireOffersInterval);
             if (fssaiExpiryInterval) clearInterval(fssaiExpiryInterval);
             if (porterCouponLifecycleInterval) clearInterval(porterCouponLifecycleInterval);
+            if (porterScheduledDispatchInterval) clearInterval(porterScheduledDispatchInterval);
             logger.info('Graceful shutdown complete');
             process.exit(0);
         } catch (err) {
@@ -122,6 +124,17 @@ const startServer = async () => {
         };
         runPorterCouponLifecycle();
         porterCouponLifecycleInterval = setInterval(runPorterCouponLifecycle, 60 * 1000);
+
+        const runPorterScheduledDispatch = async () => {
+            try {
+                const { processDueScheduledPorterOrders } = await import('./src/modules/porter/orders/services/porter-scheduled-dispatch.service.js');
+                await processDueScheduledPorterOrders();
+            } catch (err) {
+                logger.error(`Porter scheduled dispatch error: ${err.message}`);
+            }
+        };
+        runPorterScheduledDispatch();
+        porterScheduledDispatchInterval = setInterval(runPorterScheduledDispatch, 60 * 1000);
 
         process.on('SIGINT', () => gracefulShutdown('SIGINT'));
         process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));

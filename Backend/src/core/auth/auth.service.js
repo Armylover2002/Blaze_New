@@ -680,11 +680,30 @@ export const verifyDeliveryOtpAndLogin = async (phone, otp, fcmToken, platform) 
     token: refreshToken,
     expiresAt,
   });
+  
+  const userObj = deliveryPartner.toObject();
+  
+  // Reconstruct active vehicle and strip internal data for backward compatibility
+  try {
+      if (userObj.driverVehicles && userObj.driverVehicles.length > 0) {
+          const activeId = userObj.activeVehicleId ? String(userObj.activeVehicleId) : null;
+          const activeVeh = activeId 
+              ? userObj.driverVehicles.find(v => String(v._id) === activeId || String(v.id) === activeId) 
+              : userObj.driverVehicles.find(v => v.isDefault) || userObj.driverVehicles[0];
+          
+          if (activeVeh) {
+              userObj.vehicleNumber = activeVeh.vehicleNumber;
+              userObj.vehicleType = activeVeh.vehicleCode;
+              userObj.vehicleName = activeVeh.vehicleName;
+              userObj.supportedServices = activeVeh.supportedServices;
+          }
+      }
+  } catch(e) {}
 
   return {
     accessToken,
     refreshToken,
-    user: deliveryPartner,
+    user: userObj,
     needsRegistration: false,
   };
 };
@@ -858,10 +877,26 @@ export const getProfile = async (userId, role) => {
       const deliveryId = partner._id
         ? `DP-${partner._id.toString().slice(-8).toUpperCase()}`
         : null;
+
+      let clientVehicles = [];
+      let resolvedActiveVehicleId = partner.activeVehicleId || null;
+      try {
+        const { getDeliveryPartnerVehiclePayload } = await import('../../modules/porter/orders/services/porter-driver-vehicle.service.js');
+        const vehiclePayload = await getDeliveryPartnerVehiclePayload(partner);
+        clientVehicles = vehiclePayload.vehicles || [];
+        resolvedActiveVehicleId = vehiclePayload.activeVehicleId || resolvedActiveVehicleId;
+      } catch {
+        clientVehicles = Array.isArray(partner.driverVehicles) ? partner.driverVehicles : [];
+      }
+
       profile = {
         ...partner,
         email: partner.email || null,
         deliveryId,
+        availabilityStatus: partner.availabilityStatus || 'offline',
+        activeVehicleId: resolvedActiveVehicleId,
+        driverVehicles: clientVehicles,
+        vehicles: clientVehicles,
         status: partner.status === "rejected" ? "blocked" : partner.status,
         profileImage: partner.profilePhoto
           ? { url: partner.profilePhoto }

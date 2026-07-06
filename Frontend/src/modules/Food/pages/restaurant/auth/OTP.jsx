@@ -116,10 +116,13 @@ export default function RestaurantOTP() {
   }, [navigate])
 
   useEffect(() => {
-    if (inputRefs.current[0]) {
-      inputRefs.current[0].focus()
-    }
-  }, [])
+    const focusFirstInput = () => inputRefs.current[0]?.focus()
+    const frameId = requestAnimationFrame(() => {
+      focusFirstInput()
+      window.setTimeout(focusFirstInput, 120)
+    })
+    return () => cancelAnimationFrame(frameId)
+  }, [authData])
 
   useEffect(() => {
     if (typeof window === "undefined") return
@@ -306,6 +309,15 @@ export default function RestaurantOTP() {
       const restaurant = data?.user ?? data?.restaurant
 
       if (accessToken && restaurant) {
+        const sessionPhone = String(
+          normalizedPhone || restaurant?.ownerPhone || restaurant?.primaryContactNumber || phone || "",
+        )
+          .replace(/\D/g, "")
+          .slice(-10)
+        if (sessionPhone) {
+          setRestaurantPendingPhone(sessionPhone)
+        }
+
         setRestaurantAuthData("restaurant", accessToken, restaurant, refreshToken)
         window.dispatchEvent(new Event("restaurantAuthChanged"))
         sessionStorage.removeItem("restaurantAuthData")
@@ -546,7 +558,7 @@ export default function RestaurantOTP() {
                   disabled={isLoading || !isOtpComplete}
                   className={`w-full h-14 sm:h-16 rounded-[32px] font-black text-base sm:text-lg tracking-widest uppercase shadow-lg transition-all duration-300 ${isOtpComplete && !isLoading
                       ? "bg-[#FF0000] hover:bg-[#E64D02] text-white shadow-[#FF0000]/20 transform active:scale-[0.98]"
-                      : "bg-slate-100 text-slate-300 cursor-not-allowed"
+                      : "border-2 border-slate-300 bg-white text-slate-600 shadow-sm cursor-not-allowed"
                     }`}
                 >
                   {isLoading ? "Verifying..." : "Verify Code"}

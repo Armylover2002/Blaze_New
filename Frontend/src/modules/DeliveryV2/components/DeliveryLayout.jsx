@@ -5,6 +5,8 @@ import BottomNavigation from "./BottomNavigation"
 import { getUnreadDeliveryNotificationCount } from "@food/utils/deliveryNotifications"
 import { deliveryAPI } from "@food/api"
 
+import useDeliveryPartnerHydration from '@/modules/DeliveryV2/hooks/useDeliveryPartnerHydration';
+
 export default function DeliveryLayout({
   children,
   showGig = false,
@@ -17,6 +19,7 @@ export default function DeliveryLayout({
     getUnreadDeliveryNotificationCount()
   )
   const [approvalStatus, setApprovalStatus] = useState("loading")
+  useDeliveryPartnerHydration()
 
   useEffect(() => {
     // Initialize delivery app settings and favicon

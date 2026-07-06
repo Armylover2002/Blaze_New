@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef } from "react"
 import { useNavigate, useLocation } from "react-router-dom"
-import { ArrowLeft, Upload, X, Check, Camera, Image as ImageIcon } from "lucide-react"
+import { ArrowLeft, Upload, X, Check, Camera, Image as ImageIcon, Truck } from "lucide-react"
 import { toast } from "sonner"
 import { openCamera, openGallery } from "@food/utils/imageUploadUtils"
 import useDeliveryBackNavigation from "../../hooks/useDeliveryBackNavigation"
-import { usePorterVehicles } from "../../../porter/admin/utils/vehicleStore"
+import { usePorterHomeData } from "../../../porter/user/hooks/usePorterHomeData"
+import { deliveryAPI } from "@food/api"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -97,7 +98,7 @@ const removeFileFromDB = async (key) => {
 export default function SignupStep1() {
   const navigate = useNavigate()
   const goBack = useDeliveryBackNavigation()
-  const [porterVehicles] = usePorterVehicles()
+  const { vehicles: porterVehicles } = usePorterHomeData()
   const location = useLocation()
   const searchParams = new URLSearchParams(location.search)
   const queryRef = searchParams.get("ref") || ""
@@ -153,14 +154,23 @@ export default function SignupStep1() {
     // Future ready registration requirement
     const registrationRequired = !isBicycle;
 
-    if (registrationRequired && !newVehicle.registrationNumber.trim()) {
-      toast.error("Registration Number is required for this vehicle");
-      return;
-    }
+    if (registrationRequired) {
+      const normalizedReg = newVehicle.registrationNumber.trim().toUpperCase();
+      if (!normalizedReg) {
+        toast.error("Registration Number is required for this vehicle");
+        return;
+      }
 
-    if (registrationRequired && !/^[A-Z]{2}[0-9]{1,2}[A-Z]{1,2}[0-9]{4}$/.test(newVehicle.registrationNumber.trim().toUpperCase())) {
-      toast.error("Invalid Indian vehicle number format (e.g., MH12AB1234)");
-      return;
+      if (!/^[A-Z]{2}[0-9]{1,2}[A-Z]{1,2}[0-9]{4}$/.test(normalizedReg)) {
+        toast.error("Invalid Indian vehicle number format (e.g., MH12AB1234)");
+        return;
+      }
+
+      const isDuplicate = formData.vehicles.some(v => v.registrationNumber === normalizedReg);
+      if (isDuplicate) {
+        toast.error("This vehicle number is already added to your list");
+        return;
+      }
     }
 
     setFormData(prev => ({
@@ -241,7 +251,11 @@ export default function SignupStep1() {
     let updatedValue = value
 
     if (name === "drivingLicenseNumber") {
-      updatedValue = updatedValue.replace(/[^A-Z0-9]/g, "").slice(0, 16)
+      updatedValue = updatedValue.replace(/[^A-Za-z0-9]/g, "").toUpperCase().slice(0, 16)
+    }
+
+    if (name === "panNumber") {
+      updatedValue = updatedValue.replace(/[^A-Za-z0-9]/g, "").toUpperCase().slice(0, 10)
     }
 
     // Restrict Aadhaar to numeric only and format as XXXX XXXX XXXX
@@ -346,12 +360,24 @@ export default function SignupStep1() {
 
     if (!validate()) {
       toast.error("Please fill all required fields correctly")
+      // Focus first error field
+      setTimeout(() => {
+         const firstError = Object.keys(errors)[0]
+         if (firstError) document.querySelector(`[name="${firstError}"]`)?.focus()
+      }, 100)
       return
     }
 
     setIsSubmitting(true)
 
     try {
+      // Validate unique documents with backend
+      await deliveryAPI.validateDocumentsPublic({
+         drivingLicenseNumber: formData.drivingLicenseNumber,
+         panNumber: formData.panNumber,
+         aadharNumber: formData.aadharNumber
+      })
+
       const details = {
         name: formData.name.trim(),
         phone: String(formData.phone || "").replace(/\D/g, "").slice(0, 15),
@@ -371,7 +397,17 @@ export default function SignupStep1() {
       navigate("/food/delivery/signup/documents")
     } catch (error) {
       debugError("Error saving details:", error)
-      toast.error("Failed to save. Please try again.")
+      if (error?.response?.status === 409) {
+          const backendErrors = error.response.data?.errors || {}
+          setErrors(prev => ({ ...prev, ...backendErrors }))
+          toast.error(error.response.data?.message || "Duplicate documents found")
+          setTimeout(() => {
+              const firstError = Object.keys(backendErrors)[0]
+              if (firstError) document.querySelector(`[name="${firstError}"]`)?.focus()
+          }, 100)
+      } else {
+          toast.error("Failed to save. Please try again.")
+      }
     } finally {
       setIsSubmitting(false)
     }

@@ -75,7 +75,11 @@ export async function getBalance(entityType, entityId) {
  * @param {Object} [payload.metadata] - extra data
  * @returns {Object} { transaction, wallet }
  */
-export async function recordTransaction(payload) {
+/**
+ * Record a transaction within an existing MongoDB session (caller manages commit).
+ * Backward-compatible addition — existing recordTransaction() behaviour unchanged.
+ */
+export async function recordTransactionWithSession(payload, session) {
     const {
         entityType, entityId, type, amount,
         description = '', category = 'other',
@@ -83,83 +87,81 @@ export async function recordTransaction(payload) {
         metadata = undefined, module = 'food'
     } = payload;
 
+    if (!session) throw new Error('session is required for recordTransactionWithSession');
     if (!['credit', 'debit'].includes(type)) throw new Error('type must be credit or debit');
     if (!Number.isFinite(amount) || amount <= 0) throw new Error('amount must be positive');
 
     const { Model, filter } = resolveWallet(entityType, entityId);
 
+    let wallet = await Model.findOne(filter).session(session);
+    if (!wallet) {
+        [wallet] = await Model.create([{ ...filter, balance: 0 }], { session });
+    }
+
+    const currentBalance = Number(wallet.balance) || 0;
+    const newBalance = type === 'credit'
+        ? currentBalance + amount
+        : currentBalance - amount;
+
+    if (type === 'debit' && entityType !== 'admin' && newBalance < 0) {
+        throw new Error(`Insufficient balance. Current: ${currentBalance}, Debit: ${amount}`);
+    }
+
+    const entityOid = entityType === 'admin'
+        ? ADMIN_ENTITY_OID
+        : new mongoose.Types.ObjectId(entityId);
+
+    const [txn] = await Transaction.create([{
+        paymentId: paymentId ? new mongoose.Types.ObjectId(paymentId) : null,
+        orderId: orderId ? new mongoose.Types.ObjectId(orderId) : null,
+        entityType,
+        entityId: entityOid,
+        type,
+        amount,
+        balanceAfter: newBalance,
+        currency: 'INR',
+        status: 'completed',
+        description,
+        category,
+        module,
+        metadata
+    }], { session });
+
+    if (type === 'credit') {
+        if (entityType === 'restaurant' || entityType === 'deliveryBoy') {
+            await Model.updateOne(filter, {
+                $set: { balance: newBalance },
+                $inc: { totalEarnings: amount }
+            }, { session });
+        } else if (entityType === 'admin') {
+            await Model.updateOne(filter, {
+                $set: { balance: newBalance },
+                $inc: { totalRevenue: amount }
+            }, { session });
+        } else {
+            await Model.updateOne(filter, { $set: { balance: newBalance } }, { session });
+        }
+    } else {
+        await Model.updateOne(filter, { $set: { balance: newBalance } }, { session });
+    }
+
+    return {
+        transaction: txn.toObject(),
+        wallet: { balance: newBalance }
+    };
+}
+
+export async function recordTransaction(payload) {
     const session = await mongoose.startSession();
     session.startTransaction();
 
     try {
-        // 1. Ensure wallet exists
-        let wallet = await Model.findOne(filter).session(session);
-        if (!wallet) {
-            [wallet] = await Model.create([{ ...filter, balance: 0 }], { session });
-        }
-
-        // 2. Compute new balance
-        const currentBalance = Number(wallet.balance) || 0;
-        const newBalance = type === 'credit'
-            ? currentBalance + amount
-            : currentBalance - amount;
-
-        // Debit guard: prevent negative balance (except admin wallet which can go negative)
-        if (type === 'debit' && entityType !== 'admin' && newBalance < 0) {
-            throw new Error(`Insufficient balance. Current: ${currentBalance}, Debit: ${amount}`);
-        }
-
-        // 3. Create transaction row
-        const entityOid = entityType === 'admin'
-            ? ADMIN_ENTITY_OID
-            : new mongoose.Types.ObjectId(entityId);
-
-        const [txn] = await Transaction.create([{
-            paymentId: paymentId ? new mongoose.Types.ObjectId(paymentId) : null,
-            orderId: orderId ? new mongoose.Types.ObjectId(orderId) : null,
-            entityType,
-            entityId: entityOid,
-            type,
-            amount,
-            balanceAfter: newBalance,
-            currency: 'INR',
-            status: 'completed',
-            description,
-            category,
-            module,
-            metadata
-        }], { session });
-
-        // 4. Update wallet balance atomically
-        const updateFields = { balance: newBalance };
-
-        // Update lifetime totals based on entity + type
-        if (type === 'credit') {
-            if (entityType === 'restaurant' || entityType === 'deliveryBoy') {
-                await Model.updateOne(filter, {
-                    $set: { balance: newBalance },
-                    $inc: { totalEarnings: amount }
-                }, { session });
-            } else if (entityType === 'admin') {
-                await Model.updateOne(filter, {
-                    $set: { balance: newBalance },
-                    $inc: { totalRevenue: amount }
-                }, { session });
-            } else {
-                await Model.updateOne(filter, { $set: { balance: newBalance } }, { session });
-            }
-        } else {
-            await Model.updateOne(filter, { $set: { balance: newBalance } }, { session });
-        }
-
+        const result = await recordTransactionWithSession(payload, session);
         await session.commitTransaction();
-
-        logger.info(`Transaction recorded: ${type} ${amount} INR for ${entityType}:${entityId} → balance ${newBalance}`);
-
-        return {
-            transaction: txn.toObject(),
-            wallet: { balance: newBalance }
-        };
+        logger.info(
+            `Transaction recorded: ${payload.type} ${payload.amount} INR for ${payload.entityType}:${payload.entityId} → balance ${result.wallet.balance}`,
+        );
+        return result;
     } catch (err) {
         await session.abortTransaction();
         logger.error(`recordTransaction failed: ${err.message}`);

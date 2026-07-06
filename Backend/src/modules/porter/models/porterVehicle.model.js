@@ -61,6 +61,10 @@ const porterVehicleSchema = new mongoose.Schema(
             default: 0,
             index: true,
         },
+        requiredDocuments: {
+            type: [{ type: String, enum: ['rc', 'insurance', 'fitness', 'pollution', 'permit'] }],
+            default: [],
+        },
 
         isDeleted: {
             type: Boolean,

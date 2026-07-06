@@ -1,9 +1,11 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Star, ThumbsUp } from "lucide-react";
+import { Star, ThumbsUp, Loader2 } from "lucide-react";
+import { toast } from "sonner";
 import Screen from "../components/Screen";
 import { PrimaryButton, StickyBar } from "../components/ui";
 import { useBooking } from "../context/BookingContext";
+import porterUserApi from "../services/userApi";
 
 const TAGS = ["On time", "Careful handling", "Professional", "Good communication", "Safe driving"];
 
@@ -13,29 +15,43 @@ export default function RateDelivery() {
   const [rating, setRating] = useState(0);
   const [tags, setTags] = useState([]);
   const [comment, setComment] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
   const toggleTag = (tag) => {
     setTags((prev) => (prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]));
   };
 
-  const submit = () => {
-    resetBooking();
-    navigate("/porter/shipments", { replace: true });
+  const submit = async () => {
+    const orderId = activeShipment?.id;
+    if (!orderId) {
+      toast.error("No order to rate");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const tagNote = tags.length ? ` Tags: ${tags.join(", ")}` : "";
+      await porterUserApi.rateOrder(orderId, {
+        score: rating,
+        comment: `${comment}${tagNote}`.trim(),
+      });
+      resetBooking();
+      navigate("/porter/shipments", { replace: true });
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to submit rating");
+    } finally {
+      setSubmitting(false);
+    }
   };
-
-  const partner = activeShipment?.partner;
 
   return (
     <Screen title="Rate delivery" subtitle="How was your parcel delivery?">
-      {partner && (
-        <div className="mb-6 flex flex-col items-center rounded-2xl bg-white p-6 shadow-sm">
-          <div className="mb-3 flex h-16 w-16 items-center justify-center rounded-full bg-[#FFF1F1] text-[24px] font-bold text-[#FF0000]">
-            {partner.name.charAt(0)}
-          </div>
-          <p className="text-[16px] font-extrabold text-gray-900">{partner.name}</p>
-          <p className="text-[12px] text-gray-500">{partner.vehicle} · {partner.vehicleNumber}</p>
+      <div className="mb-6 flex flex-col items-center rounded-2xl bg-white p-6 shadow-sm">
+        <div className="mb-3 flex h-16 w-16 items-center justify-center rounded-full bg-[#FFF1F1] text-[24px] font-bold text-[#FF0000]">
+          P
         </div>
-      )}
+        <p className="text-[16px] font-extrabold text-gray-900">Your delivery partner</p>
+        <p className="text-[12px] text-gray-500">{activeShipment?.vehicle || "Parcel"}</p>
+      </div>
 
       <div className="mb-6 flex justify-center gap-2">
         {[1, 2, 3, 4, 5].map((n) => (
@@ -73,9 +89,8 @@ export default function RateDelivery() {
       />
 
       <StickyBar>
-        <PrimaryButton disabled={rating === 0} onClick={submit}>
-          <ThumbsUp className="h-4 w-4" />
-          Submit rating
+        <PrimaryButton disabled={rating === 0 || submitting} onClick={submit}>
+          {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <><ThumbsUp className="h-4 w-4" /> Submit rating</>}
         </PrimaryButton>
       </StickyBar>
     </Screen>

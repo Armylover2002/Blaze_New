@@ -1,12 +1,12 @@
 import { useState, useEffect, useRef } from "react"
 import { useNavigate } from "react-router-dom"
-import { ArrowLeft, Upload, X, Check, Camera, Image as ImageIcon } from "lucide-react"
+import { ArrowLeft, Upload, X, Check, Camera, Image as ImageIcon, Truck } from "lucide-react"
 import { deliveryAPI, onboardingFeeAPI } from "@food/api"
 import { toast } from "sonner"
 import { initRazorpayPayment } from "@food/utils/razorpay"
 import { openCamera, openGallery } from "@food/utils/imageUploadUtils"
 import useDeliveryBackNavigation from "../../hooks/useDeliveryBackNavigation"
-import { usePorterVehicles } from "../../../porter/admin/utils/vehicleStore"
+import { usePorterHomeData } from "../../../porter/user/hooks/usePorterHomeData"
 
 const debugLog = (...args) => { }
 const debugWarn = (...args) => { }
@@ -215,15 +215,20 @@ const sanitizeUploadedDocValue = (value) => {
   return null
 }
 
-const sanitizeUploadedDocs = (docs) => ({
-  profilePhoto: sanitizeUploadedDocValue(docs?.profilePhoto),
-  aadharPhoto: sanitizeUploadedDocValue(docs?.aadharPhoto),
-  panPhoto: sanitizeUploadedDocValue(docs?.panPhoto),
-  drivingLicensePhoto: sanitizeUploadedDocValue(docs?.drivingLicensePhoto)
-})
+const sanitizeUploadedDocs = (docs) => {
+  if (!docs || typeof docs !== 'object') return createEmptyUploadedDocs();
+  const sanitized = {};
+  Object.keys(docs).forEach(key => {
+    sanitized[key] = sanitizeUploadedDocValue(docs[key]);
+  });
+  return {
+    ...createEmptyUploadedDocs(),
+    ...sanitized
+  };
+}
 
 const hasDocumentValue = (localFile, uploadedValue) => {
-  if (localFile instanceof File) return true
+  if (localFile instanceof File || localFile instanceof Blob) return true
   if (typeof uploadedValue === "string") return uploadedValue.trim().length > 0
   if (uploadedValue && typeof uploadedValue === "object") {
     if (typeof uploadedValue.url === "string" && uploadedValue.url.trim()) return true
@@ -283,8 +288,9 @@ const buildFormData = async (details, documents) => {
   if (details.aadharNumber) formData.append("aadharNumber", details.aadharNumber)
 
   Object.keys(documents).forEach(key => {
-    if (documents[key] instanceof File) {
-      formData.append(key, documents[key])
+    const file = documents[key];
+    if (file instanceof File || file instanceof Blob) {
+      formData.append(key, file, file.name || `${key}.jpg`)
     }
   })
 
@@ -365,7 +371,7 @@ const submitRegistration = async ({ isCompleteProfile, formData, navigate }) => 
 export default function SignupStep2() {
   const navigate = useNavigate()
   const goBack = useDeliveryBackNavigation()
-  const [porterVehicles] = usePorterVehicles()
+  const { vehicles: porterVehicles } = usePorterHomeData()
   const signupDetailsRaw = sessionStorage.getItem("deliverySignupDetails")
 
   let signupDetails = {}
@@ -377,8 +383,7 @@ export default function SignupStep2() {
 
   const isDlOptional = !(signupDetails.vehicles || []).some(v => {
     const master = porterVehicles.find(p => p.id === v.vehicleId);
-    const cat = master?.category?.toLowerCase() || "";
-    return cat !== "bicycle" && cat !== "electric bike" && cat !== "electric_bike";
+    return (master?.requiredDocuments || []).length > 0;
   });
 
   const fileInputRefs = useRef({
@@ -429,6 +434,38 @@ export default function SignupStep2() {
   }, [documents])
 
   useEffect(() => {
+    let isMounted = true;
+    const loadFromDB = async () => {
+      const keys = ["profilePhoto", "aadharPhoto", "panPhoto", "drivingLicensePhoto"];
+      if (signupDetails.vehicles) {
+        signupDetails.vehicles.forEach(v => {
+          keys.push(`vehiclePhoto_${v.id}`);
+          keys.push(`rc_${v.id}`);
+          keys.push(`insurance_${v.id}`);
+          keys.push(`fitness_${v.id}`);
+          keys.push(`pollution_${v.id}`);
+          keys.push(`permit_${v.id}`);
+        });
+      }
+      
+      const loaded = {};
+      for (const key of keys) {
+        if (uploadedDocs[key]) {
+          const file = await getFileFromDB(key);
+          if (file) {
+            loaded[key] = file;
+          }
+        }
+      }
+      if (isMounted && Object.keys(loaded).length > 0) {
+        setDocuments(prev => ({ ...prev, ...loaded }));
+      }
+    };
+    loadFromDB();
+    return () => { isMounted = false; };
+  }, []);
+
+  useEffect(() => {
     const fetchFees = async () => {
       try {
         setFetchingFees(true)
@@ -464,7 +501,7 @@ export default function SignupStep2() {
   useEffect(() => {
     return () => {
       Object.values(documentsRef.current).forEach((file) => {
-        if (file instanceof File) {
+        if (file instanceof File || file instanceof Blob) {
           const previewUrl = file._previewUrl || file.previewUrl
           if (previewUrl && previewUrl.startsWith('blob:')) {
             URL.revokeObjectURL(previewUrl)
@@ -480,7 +517,7 @@ export default function SignupStep2() {
     if (uploaded?.url) return uploaded.url
 
     const localFile = documents[docType]
-    if (localFile instanceof File) {
+    if (localFile instanceof File || localFile instanceof Blob) {
       if (!localFile._previewUrl) {
         localFile._previewUrl = URL.createObjectURL(localFile)
       }
@@ -552,14 +589,14 @@ export default function SignupStep2() {
     (signupDetails.vehicles || []).forEach(v => {
       const master = porterVehicles.find(p => p.id === v.vehicleId);
       if (!master) return;
-      const isBicycle = master.category?.toLowerCase() === "bicycle" || master.category?.toLowerCase() === "bike";
-      const requiresDocs = !isBicycle;
-
       if (!hasDocumentValue(documents[`vehiclePhoto_${v.id}`], uploadedDocs[`vehiclePhoto_${v.id}`])) hasAllVehicleDocs = false;
-      if (requiresDocs) {
-        if (!hasDocumentValue(documents[`rc_${v.id}`], uploadedDocs[`rc_${v.id}`])) hasAllVehicleDocs = false;
-        if (!hasDocumentValue(documents[`insurance_${v.id}`], uploadedDocs[`insurance_${v.id}`])) hasAllVehicleDocs = false;
-      }
+      if (!hasDocumentValue(documents[`rc_${v.id}`], uploadedDocs[`rc_${v.id}`])) hasAllVehicleDocs = false;
+      if (!hasDocumentValue(documents[`insurance_${v.id}`], uploadedDocs[`insurance_${v.id}`])) hasAllVehicleDocs = false;
+      
+      const reqDocs = master.requiredDocuments || [];
+      if (reqDocs.includes('fitness') && !hasDocumentValue(documents[`fitness_${v.id}`], uploadedDocs[`fitness_${v.id}`])) hasAllVehicleDocs = false;
+      if (reqDocs.includes('pollution') && !hasDocumentValue(documents[`pollution_${v.id}`], uploadedDocs[`pollution_${v.id}`])) hasAllVehicleDocs = false;
+      if (reqDocs.includes('permit') && !hasDocumentValue(documents[`permit_${v.id}`], uploadedDocs[`permit_${v.id}`])) hasAllVehicleDocs = false;
     });
     return hasAllVehicleDocs;
   }
@@ -826,14 +863,13 @@ export default function SignupStep2() {
                   {signupDetails.vehicles.map(v => {
                     const master = porterVehicles.find(p => p.id === v.vehicleId);
                     if (!master) return null;
-                    const isBicycle = master.category?.toLowerCase() === "bicycle" || master.category?.toLowerCase() === "bike";
-                    const requiresDocs = !isBicycle;
+                    const reqDocs = master.requiredDocuments || [];
                     
                     return (
                       <div key={v.id} className="bg-gray-50 rounded-xl p-4 border border-gray-200 space-y-4">
                         <div className="flex items-center gap-3 mb-2">
-                          <div className="w-10 h-10 bg-white rounded-lg p-1.5 border border-gray-200 shadow-sm">
-                            {master.image ? <img src={master.image} alt={master.name} className="w-full h-full object-contain" /> : <div className="w-full h-full bg-gray-200 rounded"></div>}
+                          <div className="w-10 h-10 bg-white rounded-lg p-1.5 border border-gray-200 shadow-sm flex items-center justify-center">
+                            {master.image ? <img src={master.image} alt={master.name} className="w-full h-full object-contain" /> : <Truck className="w-6 h-6 text-gray-400" />}
                           </div>
                           <div>
                             <h4 className="font-bold text-gray-900 text-sm">{master.name}</h4>
@@ -842,11 +878,16 @@ export default function SignupStep2() {
                         </div>
                         
                         <DocumentUpload docType={`vehiclePhoto_${v.id}`} label={`${master.name} Photo`} required={true} />
-                        {requiresDocs && (
-                          <>
-                            <DocumentUpload docType={`rc_${v.id}`} label="RC (Registration Certificate)" required={true} />
-                            <DocumentUpload docType={`insurance_${v.id}`} label="Vehicle Insurance" required={true} />
-                          </>
+                        <DocumentUpload docType={`rc_${v.id}`} label="RC (Registration Certificate)" required={true} />
+                        <DocumentUpload docType={`insurance_${v.id}`} label="Vehicle Insurance" required={true} />
+                        {reqDocs.includes('fitness') && (
+                           <DocumentUpload docType={`fitness_${v.id}`} label="Fitness Certificate" required={true} />
+                        )}
+                        {reqDocs.includes('pollution') && (
+                           <DocumentUpload docType={`pollution_${v.id}`} label="Pollution Certificate" required={true} />
+                        )}
+                        {reqDocs.includes('permit') && (
+                           <DocumentUpload docType={`permit_${v.id}`} label="Vehicle Permit" required={true} />
                         )}
                       </div>
                     )
