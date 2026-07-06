@@ -9,7 +9,6 @@ const debugWarn = (...args) => {}
 const debugError = (...args) => {}
 
 const MIN_POINTS = 3;
-const MAX_POINTS = 10;
 
 // Order points by angle around their centroid so polygon edges never self-intersect,
 // while KEEPING every clicked point (unlike a convex hull).
@@ -39,6 +38,7 @@ export default function AddZone() {
   const mapRef = useRef(null)
   const mapInstanceRef = useRef(null)
   const polygonRef = useRef(null)
+  const polylineRef = useRef(null)
   const pathMarkersRef = useRef([])
   
   const mapClickListenerRef = useRef(null)
@@ -81,6 +81,9 @@ export default function AddZone() {
       }
       if (polygonRef.current) {
         polygonRef.current.setMap(null);
+      }
+      if (polylineRef.current) {
+        polylineRef.current.setMap(null);
       }
       pathMarkersRef.current?.forEach(m => m.setMap(null));
       existingZonesPolygonsRef.current?.forEach(p => p?.setMap(null));
@@ -249,10 +252,6 @@ export default function AddZone() {
     // Setup map click listener for drawing points
     mapClickListenerRef.current = google.maps.event.addListener(map, 'click', (event) => {
       if (!isDrawingRef.current) return;
-      if (drawPointsRef.current.length >= MAX_POINTS) {
-        alert(`You can add at most ${MAX_POINTS} points. Click "Finish Drawing" to complete.`);
-        return;
-      }
       drawPointsRef.current.push(event.latLng);
       renderDrawingPolygon(google, map);
     });
@@ -359,31 +358,31 @@ export default function AddZone() {
 
   const renderDrawingPolygon = (google, map) => {
     const points = drawPointsRef.current;
-    if (polygonRef.current) { 
-      polygonRef.current.setMap(null); 
-      polygonRef.current = null; 
+    if (polygonRef.current) {
+      polygonRef.current.setMap(null);
+      polygonRef.current = null;
+    }
+    if (polylineRef.current) {
+      polylineRef.current.setMap(null);
+      polylineRef.current = null;
     }
 
-    const ordered = points.length >= 3
-      ? orderPointsRadially(points)
-      : points.map(p => ({ lat: p.lat(), lng: p.lng() }));
+    const path = points.map(p => ({ lat: p.lat(), lng: p.lng() }));
 
-    if (ordered.length >= 2) {
-      polygonRef.current = new google.maps.Polygon({
-        paths: ordered, 
-        fillColor: "#9333ea", 
-        fillOpacity: 0.35,
-        strokeColor: "#9333ea", 
+    // Polyline preview (no fill) so clicks inside the shape still reach the map
+    if (path.length >= 2) {
+      polylineRef.current = new google.maps.Polyline({
+        path,
+        strokeColor: "#9333ea",
         strokeWeight: 2,
-        clickable: false, 
-        editable: false, 
+        clickable: false,
         zIndex: 1,
       });
-      polygonRef.current.setMap(map);
+      polylineRef.current.setMap(map);
     }
 
     renderVertexMarkers(google, map, points);
-    setCoordinates(ordered.map(p => ({
+    setCoordinates(path.map(p => ({
       latitude: parseFloat(p.lat.toFixed(6)),
       longitude: parseFloat(p.lng.toFixed(6)),
     })));
@@ -400,6 +399,7 @@ export default function AddZone() {
     }
 
     if (polygonRef.current) { polygonRef.current.setMap(null); polygonRef.current = null; }
+    if (polylineRef.current) { polylineRef.current.setMap(null); polylineRef.current = null; }
     pathMarkersRef.current?.forEach(m => m.setMap(null));
     pathMarkersRef.current = [];
 
@@ -508,6 +508,7 @@ export default function AddZone() {
   const clearDrawing = () => {
     drawPointsRef.current = [];
     if (polygonRef.current) { polygonRef.current.setMap(null); polygonRef.current = null; }
+    if (polylineRef.current) { polylineRef.current.setMap(null); polylineRef.current = null; }
     pathMarkersRef.current?.forEach(m => m.setMap(null));
     pathMarkersRef.current = [];
     setCoordinates([]);
@@ -736,11 +737,16 @@ export default function AddZone() {
                     className="w-full pl-10 pr-4 py-2.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
+                {isDrawing && (
+                  <p className="text-xs text-slate-600 mt-2">
+                    Click on the map to add points (minimum {MIN_POINTS}), then click <strong>Stop Drawing</strong>.
+                  </p>
+                )}
                 {coordinates.length > 0 && (
                   <p className="text-xs text-slate-600 mt-2">
                     Points drawn: <strong>{coordinates.length}</strong>
-                    {coordinates.length < 3 && (
-                      <span className="text-red-600 ml-2">(Minimum 3 points required)</span>
+                    {coordinates.length < MIN_POINTS && (
+                      <span className="text-red-600 ml-2">(Minimum {MIN_POINTS} points required)</span>
                     )}
                   </p>
                 )}
