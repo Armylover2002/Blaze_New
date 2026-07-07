@@ -77,6 +77,7 @@ export const adminLoginController = async (req, res, next) => {
 export const getPublicRolesController = async (req, res, next) => {
   try {
     const roles = await getPublicRoles();
+    res.set('Cache-Control', 'no-store');
     return sendResponse(res, 200, "Roles fetched successfully", roles);
   } catch (error) {
     next(error);

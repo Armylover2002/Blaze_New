@@ -452,8 +452,16 @@ export const adminLogin = async (email, password, roleId) => {
 };
 
 export const getPublicRoles = async () => {
-  const roles = await AdminRole.find({ status: 'active' }).select('_id roleName').lean();
-  return roles;
+  const roles = await AdminRole.find({ status: 'active' })
+    .select('_id roleName')
+    .sort({ roleName: 1 })
+    .lean();
+
+  // Public login picker only needs stable id + display name.
+  return roles.map((role) => ({
+    _id: String(role._id),
+    roleName: String(role.roleName || '').trim(),
+  }));
 };
 
 export const requestRestaurantOtp = async (phone) => {
