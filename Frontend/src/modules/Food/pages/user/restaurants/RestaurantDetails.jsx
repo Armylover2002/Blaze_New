@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useRef, useMemo } from "react"
+import { useState, useEffect, useRef, useMemo } from "react"
 import { useParams, useNavigate, useSearchParams } from "react-router-dom"
 import { restaurantAPI, diningAPI, orderAPI } from "@food/api"
 import { API_BASE_URL } from "@food/api/config"
@@ -481,8 +481,8 @@ function RestaurantDetailsContent() {
               "Unknown Restaurant",
             cuisine: resolvedTopCategory,
             topCategory: resolvedTopCategory,
-            rating: actualRestaurant?.rating || apiRestaurant?.rating || actualRestaurant?.averageRating || apiRestaurant?.averageRating || 4.5,
-            reviews: actualRestaurant?.totalRatings || apiRestaurant?.totalRatings || actualRestaurant?.reviewCount || apiRestaurant?.reviewCount || actualRestaurant?.reviews?.length || apiRestaurant?.reviews?.length || 0,
+            rating: actualRestaurant?.rating ?? apiRestaurant?.rating ?? actualRestaurant?.averageRating ?? apiRestaurant?.averageRating ?? 0,
+            reviews: actualRestaurant?.totalRatings ?? apiRestaurant?.totalRatings ?? actualRestaurant?.reviewCount ?? apiRestaurant?.reviewCount ?? actualRestaurant?.reviews?.length ?? apiRestaurant?.reviews?.length ?? 0,
             deliveryTime: actualRestaurant?.estimatedDeliveryTime || apiRestaurant?.estimatedDeliveryTime || actualRestaurant?.deliveryTime || apiRestaurant?.deliveryTime || actualRestaurant?.avgDeliveryTime || apiRestaurant?.avgDeliveryTime || "25-30 mins",
             distance: calculatedDistance || actualRestaurant?.distance || apiRestaurant?.distance || actualRestaurant?.distanceFromUser || apiRestaurant?.distanceFromUser || "1.2 km",
             location: formattedAddress,
@@ -728,13 +728,24 @@ function RestaurantDetailsContent() {
               debugLog('? Menu resolved using lookup ID:', resolvedMenuLookupId)
               if (menuResponse.data && menuResponse.data.success && menuResponse.data.data && menuResponse.data.data.menu) {
                 const rawSections = menuResponse.data.data.menu.sections || []
+                let recommendedMap = {}
+                try {
+                  recommendedMap = JSON.parse(localStorage.getItem("restaurant_inventory_recommended_map")) || {}
+                } catch (e) {}
+
                 const toArray = (value) => {
                   if (Array.isArray(value)) return value
                   if (!value || typeof value !== "object") return []
                   return Object.values(value).filter((entry) => entry && typeof entry === "object")
                 }
                 const normalizeItem = (item = {}) => {
-                  const isRecommended = item.isRecommended === true || item.isRecommended === 1 || String(item.isRecommended) === "true"
+                  const itemIdStr = String(item.id || item._id || "")
+                  let isRecommended = item.isRecommended === true || item.isRecommended === 1 || String(item.isRecommended) === "true"
+                  
+                  if (recommendedMap[itemIdStr] === true) {
+                    isRecommended = true
+                  }
+
                   const isSpicy = item.isSpicy === true || item.isSpicy === 1 || String(item.isSpicy) === "true"
                   let foodType = item.foodType || "Non-Veg"
                   if (typeof foodType === 'string') {
@@ -840,7 +851,7 @@ function RestaurantDetailsContent() {
                 }
 
                 let finalMenuSections = [...menuSections]
-                if (hasPreviousOrderForRestaurant) {
+                if (recommendedItems.length > 0) {
                   finalMenuSections = [{ name: "Recommended for you", items: recommendedItems, subsections: [] }, ...finalMenuSections]
                 }
                 if (searchedDishSection) {
@@ -1271,7 +1282,11 @@ function RestaurantDetailsContent() {
   }
 
   const isRecommendedItem = (item) => {
-    return item.isRecommended === true && typeof item.isRecommended === "boolean"
+    return (
+      item.isRecommended === true ||
+      item.isRecommended === 1 ||
+      String(item.isRecommended).toLowerCase() === "true"
+    )
   }
 
   const getSectionDisplayName = (section) => {
@@ -1380,6 +1395,11 @@ function RestaurantDetailsContent() {
 
   // Handle bookmark click
   const handleBookmarkClick = (item) => {
+    if (!isModuleAuthenticated('user')) {
+      toast.error("Please login to save dishes")
+      navigate('/user/auth/login', { state: { from: window.location.pathname } })
+      return
+    }
     const restaurantId = restaurant?.restaurantId || restaurant?._id || restaurant?.id
     if (!restaurantId) {
       toast.error("Restaurant information is missing")
@@ -1421,6 +1441,11 @@ function RestaurantDetailsContent() {
 
   // Handle add to collection
   const handleAddToCollection = () => {
+    if (!isModuleAuthenticated('user')) {
+      toast.error("Please login to save restaurants")
+      navigate('/user/auth/login', { state: { from: window.location.pathname } })
+      return
+    }
     const restaurantSlug = restaurant?.slug || slug || ""
 
     if (!restaurantSlug) {
@@ -1629,8 +1654,10 @@ function RestaurantDetailsContent() {
   };
 
   // Filter menu items based on active filters
-  const filterMenuItems = (items) => {
+  const filterMenuItems = (items, section = null) => {
     if (!items) return items
+
+    const isRecSection = section ? isRecommendedSection(section) : false
 
     return items.filter((item) => {
       // Under 250 filter (when coming from Under 250 page)
@@ -1662,7 +1689,7 @@ function RestaurantDetailsContent() {
         if (item.foodType !== "Non-Veg") return false
       }
 
-      if (filters.highlyReordered && !isRecommendedItem(item)) return false
+      if (filters.highlyReordered && !isRecommendedItem(item) && !isRecSection) return false
       if (filters.spicy && item.isSpicy !== true) return false
 
       return true
@@ -1748,7 +1775,8 @@ function RestaurantDetailsContent() {
       .map((section, index) => {
         const filteredItems = sortMenuItems(
           filterMenuItems(
-            toRenderableArray(section?.items).filter((item) => item?.isAvailable !== false)
+            toRenderableArray(section?.items).filter((item) => item?.isAvailable !== false),
+            section
           )
         )
 
@@ -1757,7 +1785,8 @@ function RestaurantDetailsContent() {
             ...subsection,
             items: sortMenuItems(
               filterMenuItems(
-                toRenderableArray(subsection?.items).filter((item) => item?.isAvailable !== false)
+                toRenderableArray(subsection?.items).filter((item) => item?.isAvailable !== false),
+                section
               )
             ),
           }))
@@ -2041,12 +2070,6 @@ function RestaurantDetailsContent() {
         restaurant={restaurant}
         isRestaurantOffline={isRestaurantOffline}
         isOutOfService={isOutOfService}
-      />
-
-      <RestaurantDetailsOffers
-        offers={highlightOffers}
-        activeIndex={highlightIndex}
-        onOpenOffers={() => setShowOffersSheet(true)}
       />
 
       <RestaurantDetailsMenuToolbar

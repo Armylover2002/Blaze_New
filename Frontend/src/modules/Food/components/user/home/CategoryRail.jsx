@@ -9,7 +9,8 @@ const CategoryRail = memo(({
   displayCategories, 
   showCategorySkeleton,
   navigate,
-  backendOrigin = ""
+  backendOrigin = "",
+  hasOffers = true
 }) => {
   return (
     <section className="mt-6 px-4 md:mt-8" data-purpose="mind-categories">
@@ -17,6 +18,7 @@ const CategoryRail = memo(({
       
       <div className="flex gap-4 overflow-x-auto pb-2 custom-scrollbar md:grid md:grid-cols-4 md:overflow-visible lg:grid-cols-6 xl:grid-cols-8 md:gap-5 md:pb-0">
         {/* Offers Card */}
+        {hasOffers && (
         <div 
           className="flex-shrink-0 flex flex-col items-center space-y-2 cursor-pointer group"
           onClick={() => navigate("/user/under-250")}
@@ -30,6 +32,7 @@ const CategoryRail = memo(({
           </div>
           <span className="text-xs font-semibold text-gray-600">Offers</span>
         </div>
+        )}
 
         {!showCategorySkeleton && displayCategories.map((category, index) => (
           <Link

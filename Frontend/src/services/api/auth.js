@@ -19,6 +19,26 @@ const AUTH = {
   ME: "/food/auth/me",
 };
 
+const LOGOUT_MAX_RETRIES = 2;
+const LOGOUT_RETRY_DELAY_MS = 400;
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function postAuthWithRetry(requestFn, retries = LOGOUT_MAX_RETRIES) {
+  let lastError;
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    try {
+      return await requestFn();
+    } catch (error) {
+      lastError = error;
+      if (attempt < retries) {
+        await sleep(LOGOUT_RETRY_DELAY_MS * (attempt + 1));
+      }
+    }
+  }
+  throw lastError;
+}
+
 /**
  * Normalize phone to digits only (for backend 8–15 digits).
  * @param {string} phone - e.g. "+91 9876543210" or "9876543210"
@@ -178,7 +198,7 @@ export function logout(refreshToken, fcmToken = null, platform = "web") {
     payload.platform = platform;
   }
 
-  return apiClient.post(AUTH.LOGOUT, payload);
+  return postAuthWithRetry(() => apiClient.post(AUTH.LOGOUT, payload));
 }
 
 /**

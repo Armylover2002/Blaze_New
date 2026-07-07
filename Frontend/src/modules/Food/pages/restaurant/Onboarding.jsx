@@ -36,17 +36,17 @@ import { LocalizationProvider } from "@mui/x-date-pickers/LocalizationProvider"
 import { AdapterDateFns } from "@mui/x-date-pickers/AdapterDateFns"
 import { determineStepToShow } from "@food/utils/onboardingUtils"
 import {
-  saveOnboardingDraft,
-  loadOnboardingDraft,
-  clearOnboardingDraft,
-  syncOnboardingFileCache,
-  clearOnboardingFileCache,
-  restoreDraftImage,
-  getOnboardingFileCache,
-} from "@food/utils/onboardingDraftStorage"
+  validateOnboardingStep1,
+  validateOnboardingStep2,
+  validateOnboardingStep3,
+  validateOnboardingStep4,
+  onboardingInputClass,
+} from "@food/utils/onboardingValidation"
+import { clearOnboardingDraft, clearOnboardingFileCache } from "@food/utils/onboardingDraftStorage"
+import OnboardingRestaurantCardPreview from "@food/components/restaurant/OnboardingRestaurantCardPreview"
 import { toast } from "sonner"
 import { useCompanyName } from "@food/hooks/useCompanyName"
-import { clearModuleAuth, clearAuthData, getRestaurantPendingPhone, setAuthData } from "@food/utils/auth"
+import { clearModuleAuth, clearAuthData, getRestaurantPendingPhone, setAuthData, setRestaurantPendingPhone } from "@food/utils/auth"
 import { persistRestaurantAuthFromPayload } from "@food/utils/restaurantApproval"
 import { ImageSourcePicker } from "@food/components/ImageSourcePicker"
 import { isFlutterBridgeAvailable, openCamera } from "@food/utils/imageUploadUtils"
@@ -89,7 +89,12 @@ const PINCODE_REGEX = /^\d{6}$/
 const LOCAL_IMAGE_FILE_ACCEPT = ".jpg,.jpeg,.png,.webp,.heic,.heif"
 const GALLERY_IMAGE_ACCEPT =
   ".jpg,.jpeg,.png,.webp,.heic,.heif,image/jpeg,image/png,image/webp,image/heic,image/heif"
-const ONBOARDING_DRAFT_FILE_MAX_SIZE = 2.5 * 1024 * 1024
+
+const FieldErrorMsg = ({ message }) =>
+  message ? <p className="mt-1.5 text-xs font-medium text-red-600">{message}</p> : null
+
+const ONBOARDING_DOC_PREVIEW =
+  "relative mt-3 aspect-[4/3] max-h-40 w-full max-w-xs overflow-hidden rounded-xl bg-slate-100 ring-1 ring-slate-200"
 
 const isUploadableFile = (value) => {
   if (!value || typeof value !== "object") return false
@@ -351,23 +356,7 @@ const parseLocalYMDDate = (value) => {
 /**
  * Ray-casting point-in-polygon check for frontend validation.
  */
-const isPointInPolygon = (lat, lng, polygon) => {
-  if (!Array.isArray(polygon) || polygon.length < 3) return false
-  let inside = false
-  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-    const xi = Number(polygon[i].longitude || polygon[i].lng)
-    const yi = Number(polygon[i].latitude || polygon[i].lat)
-    const xj = Number(polygon[j].longitude || polygon[j].lng)
-    const yj = Number(polygon[j].latitude || polygon[j].lat)
-    const intersect =
-      yi > lat !== yj > lat &&
-      lng < ((xj - xi) * (lat - yi)) / (yj - yi + 0.0) + xi
-    if (intersect) inside = !inside
-  }
-  return inside
-}
-
-function TimeSelector({ label, value, onChange }) {
+function TimeSelector({ label, value, onChange, hasError = false }) {
   const timeValue = stringToTime(value)
 
   const handleTimeChange = (newValue) => {
@@ -380,7 +369,11 @@ function TimeSelector({ label, value, onChange }) {
   }
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-slate-50/80 px-4 py-3 transition-colors focus-within:border-[#FF0000]/30 focus-within:ring-2 focus-within:ring-[#FF0000]/10">
+    <div className={`rounded-xl border bg-slate-50/80 px-4 py-3 transition-colors focus-within:ring-2 ${
+      hasError
+        ? "border-red-400 ring-2 ring-red-200 focus-within:border-red-400 focus-within:ring-red-200"
+        : "border-slate-200 focus-within:border-[#FF0000]/30 focus-within:ring-[#FF0000]/10"
+    }`}>
       <div className="mb-2 flex items-center gap-2">
         <Clock className="h-4 w-4 text-[#FF0000]" />
         <span className="text-xs font-semibold uppercase tracking-wider text-slate-700">{label}</span>
@@ -566,9 +559,9 @@ export default function RestaurantOnboarding() {
     menuImages: [],
     profileImage: null,
     cuisines: [],
-    openingTime: "",
-    closingTime: "21:00",
-    openDays: [],
+    openingTime: "11:00",
+    closingTime: "23:00",
+    openDays: [...daysOfWeek],
   })
 
   const [step3, setStep3] = useState({
@@ -593,9 +586,9 @@ export default function RestaurantOnboarding() {
   const [step4, setStep4] = useState({
     estimatedDeliveryTime: "",
   })
+  const [fieldErrors, setFieldErrors] = useState({})
   const previewUrlCacheRef = useRef(new Map())
   const hasRestoredDraftStepRef = useRef(false)
-  const draftHydratedRef = useRef(false)
   const onboardingDraftRef = useRef(null)
   const menuImagesInputRef = useRef(null)
   const profileImageInputRef = useRef(null)
@@ -616,9 +609,21 @@ export default function RestaurantOnboarding() {
     const nextParams = new URLSearchParams(searchParams)
     nextParams.set("step", String(normalizedStep))
     setStep(normalizedStep)
+    setFieldErrors({})
     setSearchParams(nextParams, { replace: shouldReplace })
     requestAnimationFrame(() => scrollOnboardingToTop())
   }
+
+  const clearFieldError = (field) => {
+    setFieldErrors((prev) => {
+      if (!prev[field]) return prev
+      const next = { ...prev }
+      delete next[field]
+      return next
+    })
+  }
+
+  const inputCls = (field) => onboardingInputClass(fieldErrors, field, ONBOARDING_INPUT)
 
   useEffect(() => {
     scrollOnboardingToTop()
@@ -789,9 +794,9 @@ export default function RestaurantOnboarding() {
           menuImages: [],
           profileImage: null,
           cuisines: [],
-          openingTime: "",
-          closingTime: "21:00",
-          openDays: [],
+          openingTime: "11:00",
+          closingTime: "23:00",
+          openDays: [...daysOfWeek],
         }
 
         let initialStep3 = {
@@ -896,136 +901,6 @@ export default function RestaurantOnboarding() {
           setIsEditing(true)
         }
 
-        // 3. Overlay session draft (survives refresh, cleared on tab close / login)
-        let localData = loadOnboardingDraft()
-        if (localData?.step1?.ownerPhone && verifiedPhone) {
-          const storedPhone = getDisplayPhone(localData.step1.ownerPhone)
-          const currentPhone = getDisplayPhone(verifiedPhone)
-          if (storedPhone && currentPhone && storedPhone !== currentPhone) {
-            localData = null
-          }
-        }
-        if (localData) {
-          if (localData.step1) {
-            const serverStep1 = { ...initialStep1 }
-            initialStep1 = {
-              ...serverStep1,
-              ...localData.step1,
-              restaurantName: pickNonEmpty(localData.step1.restaurantName, serverStep1.restaurantName),
-              pureVegRestaurant:
-                typeof localData.step1.pureVegRestaurant === "boolean"
-                  ? localData.step1.pureVegRestaurant
-                  : serverStep1.pureVegRestaurant,
-              ownerName: pickNonEmpty(localData.step1.ownerName, serverStep1.ownerName),
-              ownerEmail: pickNonEmpty(localData.step1.ownerEmail, serverStep1.ownerEmail),
-              ownerPhone:
-                resolveVerifiedOwnerPhone(localData.step1.ownerPhone, serverStep1.ownerPhone) ||
-                serverStep1.ownerPhone,
-              primaryContactNumber: pickNonEmpty(
-                localData.step1.primaryContactNumber,
-                serverStep1.primaryContactNumber,
-              ),
-              zoneId: normalizeZoneIdValue(localData.step1.zoneId) || serverStep1.zoneId,
-              zoneName: pickNonEmpty(localData.step1.zoneName, serverStep1.zoneName),
-              location: {
-                ...serverStep1.location,
-                ...(localData.step1.location || {}),
-                formattedAddress: pickNonEmpty(
-                  localData.step1.location?.formattedAddress,
-                  serverStep1.location?.formattedAddress,
-                ),
-                addressLine1: pickNonEmpty(
-                  localData.step1.location?.addressLine1,
-                  serverStep1.location?.addressLine1,
-                ),
-                addressLine2: pickNonEmpty(
-                  localData.step1.location?.addressLine2,
-                  serverStep1.location?.addressLine2,
-                ),
-                area: pickNonEmpty(localData.step1.location?.area, serverStep1.location?.area),
-                city: pickNonEmpty(localData.step1.location?.city, serverStep1.location?.city),
-                state: pickNonEmpty(localData.step1.location?.state, serverStep1.location?.state),
-                pincode: pickNonEmpty(localData.step1.location?.pincode, serverStep1.location?.pincode),
-                landmark: pickNonEmpty(localData.step1.location?.landmark, serverStep1.location?.landmark),
-                latitude: pickNonEmpty(localData.step1.location?.latitude, serverStep1.location?.latitude),
-                longitude: pickNonEmpty(localData.step1.location?.longitude, serverStep1.location?.longitude),
-              },
-            }
-          }
-          if (localData.step2) {
-            const restoredMenuImages = await Promise.all(
-              (localData.step2.menuImages || []).map((img, index) =>
-                restoreDraftImage(img, `menu-image-${index + 1}`)
-              )
-            )
-            const filteredMenuImages = restoredMenuImages.filter(Boolean)
-            const cachedMenuImages = getOnboardingFileCache().step2.menuImages || []
-            const restoredProfileImage = await restoreDraftImage(
-              localData.step2.profileImage,
-              "restaurant-profile",
-            )
-            const cachedProfileImage = getOnboardingFileCache().step2.profileImage || null
-
-            const localMenuImages = [...filteredMenuImages, ...cachedMenuImages]
-            const serverMenuImages = (initialStep2.menuImages || []).filter(hasValidMenuImageAsset)
-
-            initialStep2 = {
-              ...initialStep2,
-              ...localData.step2,
-              menuImages: localMenuImages.length > 0 ? localMenuImages : serverMenuImages,
-              profileImage: cachedProfileImage || restoredProfileImage || initialStep2.profileImage,
-              openingTime: normalizeTimeValue(localData.step2.openingTime) || initialStep2.openingTime,
-              closingTime: normalizeTimeValue(localData.step2.closingTime) || initialStep2.closingTime,
-            }
-          }
-          if (localData.step3) {
-            const restoredPanImage = await restoreDraftImage(localData.step3.panImage, "pan-image")
-            const restoredGstImage = await restoreDraftImage(localData.step3.gstImage, "gst-image")
-            const restoredFssaiImage = await restoreDraftImage(localData.step3.fssaiImage, "fssai-image")
-            const serverStep3 = { ...initialStep3 }
-
-            initialStep3 = {
-              ...serverStep3,
-              ...localData.step3,
-              panNumber: pickNonEmpty(localData.step3.panNumber, serverStep3.panNumber),
-              nameOnPan: pickNonEmpty(localData.step3.nameOnPan, serverStep3.nameOnPan),
-              gstNumber: pickNonEmpty(localData.step3.gstNumber, serverStep3.gstNumber),
-              gstLegalName: pickNonEmpty(localData.step3.gstLegalName, serverStep3.gstLegalName),
-              gstAddress: pickNonEmpty(localData.step3.gstAddress, serverStep3.gstAddress),
-              fssaiNumber: pickNonEmpty(localData.step3.fssaiNumber, serverStep3.fssaiNumber),
-              fssaiExpiry: pickNonEmpty(localData.step3.fssaiExpiry, serverStep3.fssaiExpiry),
-              accountNumber: pickNonEmpty(localData.step3.accountNumber, serverStep3.accountNumber),
-              confirmAccountNumber: pickNonEmpty(
-                localData.step3.confirmAccountNumber,
-                serverStep3.confirmAccountNumber,
-                serverStep3.accountNumber,
-              ),
-              accountHolderName: pickNonEmpty(
-                localData.step3.accountHolderName,
-                serverStep3.accountHolderName,
-              ),
-              accountType: normalizeAccountTypeValue(
-                pickNonEmpty(localData.step3.accountType, serverStep3.accountType),
-              ),
-              gstRegistered:
-                typeof localData.step3.gstRegistered === "boolean"
-                  ? localData.step3.gstRegistered
-                  : serverStep3.gstRegistered,
-              panImage: getOnboardingFileCache().step3.panImage || restoredPanImage || serverStep3.panImage,
-              gstImage: getOnboardingFileCache().step3.gstImage || restoredGstImage || serverStep3.gstImage,
-              fssaiImage:
-                getOnboardingFileCache().step3.fssaiImage || restoredFssaiImage || serverStep3.fssaiImage,
-              ifscCode: (pickNonEmpty(localData.step3.ifscCode, serverStep3.ifscCode) || "").toUpperCase(),
-            }
-          }
-          if (localData.step4) {
-            initialStep4 = {
-              ...initialStep4,
-              ...localData.step4,
-            }
-          }
-        }
-
         const finalVerifiedPhone = resolveVerifiedOwnerPhone(
           verifiedPhone,
           initialStep1.ownerPhone,
@@ -1034,6 +909,7 @@ export default function RestaurantOnboarding() {
         if (finalVerifiedPhone) {
           initialStep1.ownerPhone = finalVerifiedPhone
           setVerifiedPhoneNumber(finalVerifiedPhone)
+          setRestaurantPendingPhone(finalVerifiedPhone)
         }
 
         // Apply initialized values to React state
@@ -1052,10 +928,7 @@ export default function RestaurantOnboarding() {
             setStep(stepNum)
           }
         } else {
-          if (localData?.currentStep) {
-            stepToShow = localData.currentStep
-            hasRestoredDraftStepRef.current = true
-          } else if (serverData) {
+          if (serverData) {
             if (serverData.status === "onboarding") {
               stepToShow = Math.min(Math.max(Number(serverData.onboardingStep) || 2, 1), 4)
               hasRestoredDraftStepRef.current = true
@@ -1110,7 +983,6 @@ export default function RestaurantOnboarding() {
         setIsEditing(true)
         debugError("Error during onboarding initialization:", err)
       } finally {
-        draftHydratedRef.current = true
         setLoading(false)
       }
     }
@@ -1162,37 +1034,6 @@ export default function RestaurantOnboarding() {
     }
   }, [])
 
-  // Save draft to sessionStorage whenever step data changes (after initial hydration).
-  useEffect(() => {
-    if (!draftHydratedRef.current) return
-
-    let active = true
-
-    ;(async () => {
-      await saveOnboardingDraft(
-        {
-          ...step1,
-          ownerPhone:
-            resolveVerifiedOwnerPhone(step1.ownerPhone, getVerifiedPhoneFromStoredRestaurant()) ||
-            step1.ownerPhone,
-        },
-        step2,
-        step3,
-        step4,
-        step,
-      )
-      if (!active) return
-    })()
-
-    return () => {
-      active = false
-    }
-  }, [step1, step2, step3, step4, step])
-
-  useEffect(() => {
-    syncOnboardingFileCache(step2, step3)
-  }, [step2, step3])
-
   useEffect(() => {
     return () => {
       previewUrlCacheRef.current.forEach((url) => {
@@ -1218,246 +1059,6 @@ export default function RestaurantOnboarding() {
       throw new Error(`Image upload failed: ${errorMsg}`)
     }
   }
-
-  // Validation functions for each step
-  const validateStep1 = () => {
-    const errors = []
-
-    if (!step1.restaurantName?.trim()) {
-      errors.push("Restaurant name is required")
-    }
-    if (typeof step1.pureVegRestaurant !== "boolean") {
-      errors.push("Please select whether your restaurant is pure veg")
-    }
-    if (!step1.ownerName?.trim()) {
-      errors.push("Owner name is required")
-    } else if (!NAME_REGEX.test(step1.ownerName.trim())) {
-      errors.push("Owner name must contain only letters")
-    }
-    if (!step1.ownerEmail?.trim()) {
-      errors.push("Owner email is required")
-    } else if (!OWNER_EMAIL_REGEX.test(step1.ownerEmail.trim())) {
-      errors.push("Email must be a valid @gmail.com address")
-    }
-    if (!step1.ownerPhone?.trim()) {
-      errors.push("Owner phone number is required")
-    } else if (!PHONE_NUMBER_REGEX.test(step1.ownerPhone.trim())) {
-      errors.push("Owner phone number must be a valid 10 to 12-digit number")
-    }
-    if (!step1.primaryContactNumber?.trim()) {
-      errors.push("Primary contact number is required")
-    } else if (!PRIMARY_PHONE_NUMBER_REGEX.test(step1.primaryContactNumber.trim())) {
-      errors.push("Primary contact number must contain exactly 10 digits")
-    }
-    if (!step1.zoneId?.trim()) {
-      errors.push("Service zone is required")
-    }
-    if (
-      step1.zoneId &&
-      (!step1.location?.latitude || !step1.location?.longitude)
-    ) {
-      errors.push("Please pin your restaurant location inside the selected service zone")
-    }
-    if (!step1.location?.addressLine1?.trim()) {
-      errors.push("Building/Floor/Street address is required")
-    }
-    if (!step1.location?.area?.trim()) {
-      errors.push("Area/Sector/Locality is required")
-    }
-    if (!step1.location?.city?.trim()) {
-      errors.push("City is required")
-    }
-    if (!step1.location?.pincode?.trim()) {
-      errors.push("Pincode is required")
-    } else if (!PINCODE_REGEX.test(step1.location.pincode.trim())) {
-      errors.push("Pincode must contain exactly 6 digits")
-    }
-
-    // Geofencing Validation: Ensure coordinates are inside the selected zone
-    if (step1.zoneId && step1.location?.latitude && step1.location?.longitude) {
-      const selectedZone = zones.find((z) => String(z._id || z.id) === step1.zoneId)
-      if (selectedZone && Array.isArray(selectedZone.coordinates) && selectedZone.coordinates.length >= 3) {
-        const isInside = isPointInPolygon(
-          Number(step1.location.latitude),
-          Number(step1.location.longitude),
-          selectedZone.coordinates,
-        )
-        if (!isInside) {
-          errors.push("Selected address is outside the selected zone")
-        }
-      }
-    }
-
-    return errors
-  }
-
-  const validateStep2 = () => {
-    const errors = []
-
-    // Check menu images - must have at least one File or existing URL
-    const hasMenuImages = step2.menuImages && step2.menuImages.length > 0
-    if (!hasMenuImages) {
-      errors.push("At least one menu image is required")
-    } else {
-      // Verify that menu images are either File objects or have valid URLs
-      const validMenuImages = step2.menuImages.filter(img => {
-        if (isUploadableFile(img)) return true
-        if (img?.url && typeof img.url === 'string') return true
-        if (typeof img === 'string' && img.startsWith('http')) return true
-        return false
-      })
-      if (validMenuImages.length === 0) {
-        errors.push("Please upload at least one valid menu image")
-      }
-    }
-
-    // Check profile image - must be a File or existing URL
-    if (!step2.profileImage) {
-      errors.push("Restaurant profile image is required")
-    } else {
-      // Verify profile image is either a File or has a valid URL
-      const isValidProfileImage =
-        isUploadableFile(step2.profileImage) ||
-        (step2.profileImage?.url && typeof step2.profileImage.url === 'string') ||
-        (typeof step2.profileImage === 'string' && step2.profileImage.startsWith('http'))
-      if (!isValidProfileImage) {
-        errors.push("Please upload a valid restaurant profile image")
-      }
-    }
-
-    if (!step2.openingTime?.trim()) {
-      errors.push("Opening time is required")
-    }
-    if (!step2.closingTime?.trim()) {
-      errors.push("Closing time is required")
-    }
-    if (!step2.openDays || step2.openDays.length === 0) {
-      errors.push("Please select at least one open day")
-    }
-
-    return errors
-  }
-
-  const validateStep4 = () => {
-    const errors = []
-    if (!step4.estimatedDeliveryTime || !step4.estimatedDeliveryTime.trim()) {
-      errors.push("Estimated delivery time is required")
-    }
-    return errors
-  }
-
-  const validateStep3 = () => {
-    const errors = []
-
-    if (!step3.panNumber?.trim()) {
-      errors.push("PAN number is required")
-    } else if (!PAN_NUMBER_REGEX.test(step3.panNumber.trim().toUpperCase())) {
-      errors.push("PAN number must be valid (e.g., ABCDE1234F)")
-    }
-    if (!step3.nameOnPan?.trim()) {
-      errors.push("Name on PAN is required")
-    }
-    // Validate PAN image - must be a File or existing URL
-    if (!step3.panImage) {
-      errors.push("PAN image is required")
-    } else {
-      const isValidPanImage =
-        isUploadableFile(step3.panImage) ||
-        (step3.panImage?.url && typeof step3.panImage.url === 'string') ||
-        (typeof step3.panImage === 'string' && step3.panImage.startsWith('http'))
-      if (!isValidPanImage) {
-        errors.push("Please upload a valid PAN image")
-      }
-    }
-
-    if (!step3.fssaiNumber?.trim()) {
-      errors.push("FSSAI number is required")
-    } else if (!FSSAI_NUMBER_REGEX.test(step3.fssaiNumber.trim())) {
-      errors.push("FSSAI number must contain exactly 14 digits")
-    }
-    if (!step3.fssaiExpiry?.trim()) {
-      errors.push("FSSAI expiry date is required")
-    } else if (step3.fssaiExpiry < getTodayLocalYMD()) {
-      errors.push("FSSAI expiry date cannot be in the past")
-    }
-    // Validate FSSAI image - must be a File or existing URL
-    if (!step3.fssaiImage) {
-      errors.push("FSSAI image is required")
-    } else {
-      const isValidFssaiImage =
-        isUploadableFile(step3.fssaiImage) ||
-        (step3.fssaiImage?.url && typeof step3.fssaiImage.url === 'string') ||
-        (typeof step3.fssaiImage === 'string' && step3.fssaiImage.startsWith('http'))
-      if (!isValidFssaiImage) {
-        errors.push("Please upload a valid FSSAI image")
-      }
-    }
-
-    // Validate GST details if GST registered
-    if (step3.gstRegistered) {
-      if (!step3.gstNumber?.trim()) {
-        errors.push("GST number is required when GST registered")
-      } else if (!GST_NUMBER_REGEX.test(step3.gstNumber.trim().toUpperCase())) {
-        errors.push("GST number must be a valid 15-character GSTIN")
-      }
-      if (!step3.gstLegalName?.trim()) {
-        errors.push("GST legal name is required when GST registered")
-      } else if (!GST_LEGAL_NAME_REGEX.test(step3.gstLegalName.trim())) {
-        errors.push("GST legal name must contain only letters")
-      }
-      if (!step3.gstAddress?.trim()) {
-        errors.push("GST registered address is required when GST registered")
-      }
-      // Validate GST image if GST registered
-      if (!step3.gstImage) {
-        errors.push("GST image is required when GST registered")
-      } else {
-        const isValidGstImage =
-          isUploadableFile(step3.gstImage) ||
-          (step3.gstImage?.url && typeof step3.gstImage.url === 'string') ||
-          (typeof step3.gstImage === 'string' && step3.gstImage.startsWith('http'))
-        if (!isValidGstImage) {
-          errors.push("Please upload a valid GST image")
-        }
-      }
-    }
-
-    if (!step3.accountNumber?.trim()) {
-      errors.push("Account number is required")
-    } else if (!BANK_ACCOUNT_NUMBER_REGEX.test(step3.accountNumber.trim())) {
-      errors.push("Account number must contain 9 to 18 digits only")
-    }
-    if (!step3.confirmAccountNumber?.trim()) {
-      errors.push("Please confirm your account number")
-    } else if (!BANK_ACCOUNT_NUMBER_REGEX.test(step3.confirmAccountNumber.trim())) {
-      errors.push("Confirm account number must contain 9 to 18 digits only")
-    }
-    if (step3.accountNumber && step3.confirmAccountNumber && step3.accountNumber !== step3.confirmAccountNumber) {
-      errors.push("Account number and confirmation do not match")
-    }
-    if (!step3.ifscCode?.trim()) {
-      errors.push("IFSC code is required")
-    } else if (!IFSC_CODE_REGEX.test(step3.ifscCode.trim().toUpperCase())) {
-      errors.push("IFSC code must contain exactly 11 alphanumeric characters")
-    }
-    if (!step3.accountHolderName?.trim()) {
-      errors.push("Account holder name is required")
-    } else if (!ACCOUNT_HOLDER_NAME_REGEX.test(step3.accountHolderName.trim())) {
-      errors.push("Account holder name must contain only letters")
-    }
-    if (!step3.accountType?.trim()) {
-      errors.push("Account type is required")
-    } else if (!["Saving", "Current"].includes(step3.accountType.trim())) {
-      errors.push("Account type must be either Saving or Current")
-    }
-
-    return errors
-  }
-
-  // Fill dummy data for testing (development mode only)
-
-
-
 
   const requiresOnboardingFee =
     Boolean(feeConfig?.isActive && Number(feeConfig?.price) > 0 && !isReonboardBypass)
@@ -1531,36 +1132,25 @@ export default function RestaurantOnboarding() {
   const handleNext = async () => {
     setError("")
 
-    // Validate current step before proceeding
-    let validationErrors = []
+    let validationErrors = {}
     if (step === 1) {
-      validationErrors = validateStep1()
+      validationErrors = validateOnboardingStep1(step1, zones)
     } else if (step === 2) {
-      validationErrors = validateStep2()
+      validationErrors = validateOnboardingStep2(step2)
     } else if (step === 3) {
-      validationErrors = validateStep3()
+      validationErrors = validateOnboardingStep3(step3, getTodayLocalYMD)
     } else if (step === 4) {
-      validationErrors = validateStep4()
-      debugLog('?? Step 4 validation:', {
-        step4,
-        errors: validationErrors,
-        estimatedDeliveryTime: step4.estimatedDeliveryTime,
-      })
+      validationErrors = validateOnboardingStep4(step4)
     }
 
-    if (validationErrors.length > 0) {
-      // Show error toast for each validation error
-      validationErrors.forEach((error, index) => {
-        setTimeout(() => {
-          toast.error(error, {
-            duration: 4000,
-          })
-        }, index * 100)
-      })
-      debugLog('? Validation failed:', validationErrors)
+    const errorKeys = Object.keys(validationErrors)
+    if (errorKeys.length > 0) {
+      setFieldErrors(validationErrors)
+      scrollOnboardingToTop()
       return
     }
 
+    setFieldErrors({})
     setSaving(true)
     try {
       if (step === 1) {
@@ -1778,6 +1368,7 @@ export default function RestaurantOnboarding() {
 
 
   const toggleDay = (day) => {
+    clearFieldError("openDays")
     setStep2((prev) => {
       const exists = prev.openDays.includes(day)
       if (exists) {
@@ -1788,6 +1379,8 @@ export default function RestaurantOnboarding() {
   }
 
   const handleZoneChange = (newZoneId) => {
+    clearFieldError("zoneId")
+    clearFieldError("locationPin")
     const selectedZone = zones.find((z) => String(z._id || z.id) === String(newZoneId))
     setStep1((prev) => ({
       ...prev,
@@ -1809,6 +1402,11 @@ export default function RestaurantOnboarding() {
   }
 
   const handleLocationChange = (payload) => {
+    clearFieldError("locationPin")
+    clearFieldError("addressLine1")
+    clearFieldError("area")
+    clearFieldError("city")
+    clearFieldError("pincode")
     if (payload?.outsideZone) {
       setStep1((prev) => ({
         ...prev,
@@ -1848,20 +1446,26 @@ export default function RestaurantOnboarding() {
             <Input
               value={step1.restaurantName || ""}
               onChange={(e) => {
+                clearFieldError("restaurantName")
                 const val = e.target.value.replace(/[^A-Za-z ]/g, "")
                 setStep1({ ...step1, restaurantName: val })
               }}
-              className={ONBOARDING_INPUT}
+              className={inputCls("restaurantName")}
               placeholder="Customers will see this name"
               disabled={!isEditing}
             />
+            <FieldErrorMsg message={fieldErrors.restaurantName} />
           </div>
           <div>
             <Label className={ONBOARDING_LABEL}>Pure veg restaurant?*</Label>
-            <div className="mt-2.5 flex flex-wrap items-center gap-2">
+            <div className={`mt-2.5 flex flex-wrap items-center gap-2 ${fieldErrors.pureVegRestaurant ? "rounded-xl ring-2 ring-red-200 p-1" : ""}`}>
               <button
                 type="button"
-                onClick={() => isEditing && setStep1({ ...step1, pureVegRestaurant: true })}
+                onClick={() => {
+                  if (!isEditing) return
+                  clearFieldError("pureVegRestaurant")
+                  setStep1({ ...step1, pureVegRestaurant: true })
+                }}
                 className={`cursor-pointer rounded-full border px-4 py-2 text-xs font-semibold transition-all duration-200 ${
                   step1.pureVegRestaurant === true
                     ? "border-emerald-600 bg-emerald-600 text-white shadow-sm shadow-emerald-600/20"
@@ -1872,7 +1476,11 @@ export default function RestaurantOnboarding() {
               </button>
               <button
                 type="button"
-                onClick={() => isEditing && setStep1({ ...step1, pureVegRestaurant: false })}
+                onClick={() => {
+                  if (!isEditing) return
+                  clearFieldError("pureVegRestaurant")
+                  setStep1({ ...step1, pureVegRestaurant: false })
+                }}
                 className={`cursor-pointer rounded-full border px-4 py-2 text-xs font-semibold transition-all duration-200 ${
                   step1.pureVegRestaurant === false
                     ? ONBOARDING_CHIP_ACTIVE
@@ -1882,6 +1490,7 @@ export default function RestaurantOnboarding() {
                 No, Mixed Menu
               </button>
             </div>
+            <FieldErrorMsg message={fieldErrors.pureVegRestaurant} />
             <p className={`${ONBOARDING_HINT} mt-2`}>
               This helps users filter restaurants by dietary preference.
             </p>
@@ -1900,45 +1509,65 @@ export default function RestaurantOnboarding() {
             <Input
               value={step1.ownerName || ""}
               onChange={(e) => {
+                clearFieldError("ownerName")
                 const val = e.target.value.replace(/[^A-Za-z ]/g, "")
                 setStep1({ ...step1, ownerName: val })
               }}
-              className={ONBOARDING_INPUT}
+              className={inputCls("ownerName")}
               placeholder="Owner full name"
               disabled={!isEditing}
             />
+            <FieldErrorMsg message={fieldErrors.ownerName} />
           </div>
           <div>
             <Label className={ONBOARDING_LABEL}>Email address*</Label>
             <Input
               type="email"
               value={step1.ownerEmail || ""}
-              onChange={(e) => setStep1({ ...step1, ownerEmail: e.target.value })}
+              onChange={(e) => {
+                clearFieldError("ownerEmail")
+                setStep1({ ...step1, ownerEmail: e.target.value })
+              }}
               onBlur={(e) =>
                 setStep1((prev) => ({
                   ...prev,
                   ownerEmail: String(e.target.value || "").trim().toLowerCase(),
                 }))
               }
-              className={ONBOARDING_INPUT}
+              className={inputCls("ownerEmail")}
               placeholder="owner@example.com"
               inputMode="email"
               pattern={OWNER_EMAIL_REGEX.source}
               disabled={!isEditing}
             />
+            <FieldErrorMsg message={fieldErrors.ownerEmail} />
           </div>
           <div>
             <Label className={ONBOARDING_LABEL}>Phone number*</Label>
             <Input
               type="tel"
-              value={step1.ownerPhone || verifiedPhoneNumber || ""}
-              readOnly={Boolean(verifiedPhoneNumber)}
+              value={
+                step1.ownerPhone ||
+                verifiedPhoneNumber ||
+                getVerifiedPhoneFromStoredRestaurant() ||
+                ""
+              }
+              readOnly={Boolean(
+                verifiedPhoneNumber || getVerifiedPhoneFromStoredRestaurant(),
+              )}
               maxLength={10}
-              className="mt-1.5 cursor-not-allowed bg-slate-100 text-sm text-slate-700"
+              className={`mt-1.5 text-sm ${
+                fieldErrors.ownerPhone
+                  ? "border-red-400 ring-2 ring-red-200"
+                  : "cursor-not-allowed bg-slate-100 text-slate-700"
+              }`}
               placeholder="Owner phone number"
-              disabled={Boolean(verifiedPhoneNumber)}
+              disabled={Boolean(
+                verifiedPhoneNumber || getVerifiedPhoneFromStoredRestaurant(),
+              )}
             />
-            {verifiedPhoneNumber ? (
+            <FieldErrorMsg message={fieldErrors.ownerPhone} />
+            {verifiedPhoneNumber || getVerifiedPhoneFromStoredRestaurant() ? (
               <p className={`${ONBOARDING_HINT} mt-2`}>
                 This is your OTP-verified number and cannot be changed.
               </p>
@@ -1955,6 +1584,7 @@ export default function RestaurantOnboarding() {
             type="tel"
             value={step1.primaryContactNumber || ""}
             onChange={(e) => {
+              clearFieldError("primaryContactNumber")
               const val = e.target.value.replace(/\D/g, "").slice(0, 10)
               setStep1({ ...step1, primaryContactNumber: val })
             }}
@@ -1965,15 +1595,17 @@ export default function RestaurantOnboarding() {
             }}
             onPaste={(e) => {
               e.preventDefault()
+              clearFieldError("primaryContactNumber")
               const pasted = e.clipboardData.getData("text").replace(/\D/g, "").slice(0, 10)
               setStep1({ ...step1, primaryContactNumber: pasted })
             }}
             maxLength={10}
             inputMode="numeric"
-            className={ONBOARDING_INPUT}
+            className={inputCls("primaryContactNumber")}
             placeholder="Primary contact number (10 digits)"
             disabled={!isEditing}
           />
+          <FieldErrorMsg message={fieldErrors.primaryContactNumber} />
           <p className={`${ONBOARDING_HINT} mt-2`}>
             Customers, delivery partners and {companyName} may call on this number for order
             support.
@@ -1991,18 +1623,22 @@ export default function RestaurantOnboarding() {
             location={step1.location}
             onZoneChange={handleZoneChange}
             onLocationChange={handleLocationChange}
+            zoneError={fieldErrors.zoneId}
+            locationError={fieldErrors.locationPin}
           />
           <Input
             value={step1.location?.addressLine1 || ""}
-            onChange={(e) =>
+            onChange={(e) => {
+              clearFieldError("addressLine1")
               setStep1({
                 ...step1,
                 location: { ...step1.location, addressLine1: e.target.value },
               })
-            }
-            className={ONBOARDING_INPUT}
+            }}
+            className={inputCls("addressLine1")}
             placeholder="Shop no. / building no. (optional)"
           />
+          <FieldErrorMsg message={fieldErrors.addressLine1} />
           <Input
             value={step1.location?.addressLine2 || ""}
             onChange={(e) =>
@@ -2027,26 +1663,30 @@ export default function RestaurantOnboarding() {
           />
           <Input
             value={step1.location?.area || ""}
-            onChange={(e) =>
+            onChange={(e) => {
+              clearFieldError("area")
               setStep1({
                 ...step1,
                 location: { ...step1.location, area: e.target.value },
               })
-            }
-            className={ONBOARDING_INPUT}
+            }}
+            className={inputCls("area")}
             placeholder="Area / Sector / Locality*"
           />
+          <FieldErrorMsg message={fieldErrors.area} />
           <Input
             value={step1.location?.city || ""}
-            onChange={(e) =>
+            onChange={(e) => {
+              clearFieldError("city")
               setStep1({
                 ...step1,
                 location: { ...step1.location, city: e.target.value.replace(/[^A-Za-z ]/g, "") },
               })
-            }
-            className={ONBOARDING_INPUT}
+            }}
+            className={inputCls("city")}
             placeholder="City"
           />
+          <FieldErrorMsg message={fieldErrors.city} />
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Input
               value={step1.location?.state || ""}
@@ -2061,16 +1701,18 @@ export default function RestaurantOnboarding() {
             />
             <Input
               value={step1.location?.pincode || ""}
-              onChange={(e) =>
+              onChange={(e) => {
+                clearFieldError("pincode")
                 setStep1({
                   ...step1,
                   location: { ...step1.location, pincode: e.target.value.replace(/\D/g, "").slice(0, 6) },
                 })
-              }
-              className={ONBOARDING_INPUT}
+              }}
+              className={inputCls("pincode")}
               placeholder="Pincode"
             />
           </div>
+          <FieldErrorMsg message={fieldErrors.pincode} />
           <p className={ONBOARDING_HINT}>
             Please ensure that this address is the same as mentioned on your FSSAI license.
           </p>
@@ -2118,7 +1760,11 @@ export default function RestaurantOnboarding() {
 
         <div className="space-y-2">
           <Label className={ONBOARDING_LABEL}>Menu images</Label>
-          <div className="mt-1 flex flex-col items-center justify-between gap-4 rounded-xl border-2 border-dashed border-slate-200 bg-slate-50/70 px-4 py-5 sm:flex-row">
+          <div className={`mt-1 flex flex-col items-center justify-between gap-4 rounded-xl border-2 border-dashed px-4 py-5 sm:flex-row ${
+            fieldErrors.menuImages
+              ? "border-red-300 bg-red-50/40"
+              : "border-slate-200 bg-slate-50/70"
+          }`}>
             <div className="flex items-center gap-3">
               <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-white shadow-sm">
                 <ImageIcon className="h-5 w-5 text-[#FF0000]" />
@@ -2139,11 +1785,13 @@ export default function RestaurantOnboarding() {
                   title: "Add menu image",
                   fallbackInputRef: menuImagesInputRef,
                   fileNamePrefix: "menu-image",
-                  onSelectFile: (file) =>
+                  onSelectFile: (file) => {
+                    clearFieldError("menuImages")
                     setStep2((prev) => ({
                       ...prev,
                       menuImages: [...(prev.menuImages || []), file],
-                    })),
+                    }))
+                  },
                 })
               }
             >
@@ -2160,6 +1808,7 @@ export default function RestaurantOnboarding() {
               onChange={(e) => {
                 const files = Array.from(e.target.files || [])
                 if (!files.length) return
+                clearFieldError("menuImages")
                 debugLog('?? Menu images selected:', files.length, 'files')
                 setStep2((prev) => ({
                   ...prev,
@@ -2170,10 +1819,11 @@ export default function RestaurantOnboarding() {
               }}
             />
           </div>
+          <FieldErrorMsg message={fieldErrors.menuImages} />
 
           {/* Menu image previews */}
           {!!step2.menuImages.length && (
-            <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="mt-2 grid max-w-2xl grid-cols-3 gap-2 sm:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
               {step2.menuImages.map((file, idx) => {
                 // Handle both File objects and URL objects
                 let imageUrl = null
@@ -2194,7 +1844,7 @@ export default function RestaurantOnboarding() {
                 return (
                   <div
                     key={idx}
-                    className="relative aspect-4/5 overflow-hidden rounded-xl bg-slate-100 ring-1 ring-slate-200"
+                    className="relative aspect-square overflow-hidden rounded-xl bg-slate-100 ring-1 ring-slate-200"
                   >
                     <div className="absolute right-1 top-1 z-30">
                       <button
@@ -2236,11 +1886,11 @@ export default function RestaurantOnboarding() {
         </div>
 
         {/* Profile image */}
-        <div className="space-y-2">
+        <div className={`space-y-2 ${fieldErrors.profileImage ? "rounded-xl ring-2 ring-red-200 p-2" : ""}`}>
           <Label className={ONBOARDING_LABEL}>Restaurant profile image</Label>
           <div className="flex items-center gap-4">
             <div className="relative">
-              <div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-2xl border-2 border-slate-200 bg-slate-100 shadow-sm">
+              <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl border-2 border-slate-200 bg-slate-100 shadow-sm lg:h-16 lg:w-16">
                 {step2.profileImage ? (
                   (() => {
                     const imageSrc = getPreviewImageUrl(step2.profileImage)
@@ -2294,11 +1944,13 @@ export default function RestaurantOnboarding() {
                 title: "Upload profile image",
                 fallbackInputRef: profileImageInputRef,
                 fileNamePrefix: "restaurant-profile",
-                onSelectFile: (file) =>
+                onSelectFile: (file) => {
+                  clearFieldError("profileImage")
                   setStep2((prev) => ({
                     ...prev,
                     profileImage: file,
-                  })),
+                  }))
+                },
               })
             }
           >
@@ -2314,6 +1966,7 @@ export default function RestaurantOnboarding() {
             onChange={(e) => {
               const file = e.target.files?.[0] || null
               if (file) {
+                clearFieldError("profileImage")
                 debugLog('?? Profile image selected:', file.name)
                 setStep2((prev) => ({
                   ...prev,
@@ -2324,6 +1977,7 @@ export default function RestaurantOnboarding() {
               e.target.value = ''
             }}
           />
+          <FieldErrorMsg message={fieldErrors.profileImage} />
         </div>
       </section>
 
@@ -2334,18 +1988,23 @@ export default function RestaurantOnboarding() {
             <TimeSelector
               label="Opening time"
               value={step2.openingTime || ""}
-              onChange={(val) =>
+              hasError={Boolean(fieldErrors.openingTime)}
+              onChange={(val) => {
+                clearFieldError("openingTime")
                 setStep2((prev) => ({ ...prev, openingTime: normalizeTimeValue(val) || "" }))
-              }
+              }}
             />
             <TimeSelector
               label="Closing time"
               value={step2.closingTime || ""}
-              onChange={(val) =>
+              hasError={Boolean(fieldErrors.closingTime)}
+              onChange={(val) => {
+                clearFieldError("closingTime")
                 setStep2((prev) => ({ ...prev, closingTime: normalizeTimeValue(val) || "" }))
-              }
+              }}
             />
           </div>
+          <FieldErrorMsg message={fieldErrors.openingTime || fieldErrors.closingTime} />
         </div>
 
         {/* Open days in a calendar-like grid */}
@@ -2357,7 +2016,9 @@ export default function RestaurantOnboarding() {
           <p className={ONBOARDING_HINT}>
             Select the days your restaurant accepts delivery orders.
           </p>
-          <div className="mt-2 grid grid-cols-7 gap-1.5 sm:gap-2">
+          <div className={`mt-2 grid grid-cols-7 gap-1.5 sm:gap-2 ${
+            fieldErrors.openDays ? "rounded-xl p-1 ring-2 ring-red-200" : ""
+          }`}>
             {daysOfWeek.map((day) => {
               const active = step2.openDays.includes(day)
               return (
@@ -2374,6 +2035,7 @@ export default function RestaurantOnboarding() {
               )
             })}
           </div>
+          <FieldErrorMsg message={fieldErrors.openDays} />
         </div>
       </section>
     </div>
@@ -2389,31 +2051,36 @@ export default function RestaurantOnboarding() {
             <Input
               value={step3.panNumber || ""}
               onChange={(e) => {
+                clearFieldError("panNumber")
                 const normalized = e.target.value
                   .toUpperCase()
                   .replace(/[^A-Z0-9]/g, "")
                   .slice(0, 10)
                 setStep3({ ...step3, panNumber: normalized })
               }}
-              className={ONBOARDING_INPUT}
+              className={inputCls("panNumber")}
               placeholder="ABCDE1234F"
             />
+            <FieldErrorMsg message={fieldErrors.panNumber} />
           </div>
           <div>
             <Label className={ONBOARDING_LABEL}>PAN Card Holder Name</Label>
             <Input
               value={step3.nameOnPan || ""}
-              onChange={(e) =>
+              onChange={(e) => {
+                clearFieldError("nameOnPan")
                 setStep3({
                   ...step3,
                   nameOnPan: e.target.value.replace(/[^A-Za-z ]/g, ""),
                 })
-              }
-              className={ONBOARDING_INPUT}
+              }}
+              className={inputCls("nameOnPan")}
+              placeholder="Name as printed on PAN card"
             />
+            <FieldErrorMsg message={fieldErrors.nameOnPan} />
           </div>
         </div>
-        <div>
+        <div className={fieldErrors.panImage ? "rounded-xl ring-2 ring-red-200 p-2" : ""}>
           <Label className={ONBOARDING_LABEL}>PAN image</Label>
           <Button
             type="button"
@@ -2424,8 +2091,10 @@ export default function RestaurantOnboarding() {
                 title: "Upload PAN image",
                 fallbackInputRef: panImageInputRef,
                 fileNamePrefix: "pan-image",
-                onSelectFile: (file) =>
-                  setStep3((prev) => ({ ...prev, panImage: file })),
+                onSelectFile: (file) => {
+                  clearFieldError("panImage")
+                  setStep3((prev) => ({ ...prev, panImage: file }))
+                },
               })
             }
           >
@@ -2437,12 +2106,13 @@ export default function RestaurantOnboarding() {
             accept={GALLERY_IMAGE_ACCEPT}
             className="hidden"
             ref={panImageInputRef}
-            onChange={(e) =>
+            onChange={(e) => {
+              clearFieldError("panImage")
               setStep3((prev) => ({ ...prev, panImage: e.target.files?.[0] || null }))
-            }
+            }}
           />
           {step3.panImage && (
-            <div className="relative mt-3 aspect-4/3 overflow-hidden rounded-xl bg-slate-100 ring-1 ring-slate-200">
+            <div className={ONBOARDING_DOC_PREVIEW}>
               {getPreviewImageUrl(step3.panImage) ? (
                 <img
                   src={getPreviewImageUrl(step3.panImage)}
@@ -2467,6 +2137,7 @@ export default function RestaurantOnboarding() {
               </button>
             </div>
           )}
+          <FieldErrorMsg message={fieldErrors.panImage} />
         </div>
       </section>
 
@@ -2497,32 +2168,40 @@ export default function RestaurantOnboarding() {
           <div className="space-y-3">
             <Input
               value={step3.gstNumber || ""}
-              onChange={(e) =>
+              onChange={(e) => {
+                clearFieldError("gstNumber")
                 setStep3({
                   ...step3,
                   gstNumber: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 15),
                 })
-              }
-              className={ONBOARDING_INPUT}
+              }}
+              className={inputCls("gstNumber")}
               placeholder="GST number (15 characters)"
             />
+            <FieldErrorMsg message={fieldErrors.gstNumber} />
             <Input
               value={step3.gstLegalName || ""}
-              onChange={(e) =>
+              onChange={(e) => {
+                clearFieldError("gstLegalName")
                 setStep3({
                   ...step3,
                   gstLegalName: e.target.value.replace(/[^A-Za-z ]/g, ""),
                 })
-              }
-              className={ONBOARDING_INPUT}
+              }}
+              className={inputCls("gstLegalName")}
               placeholder="Legal name"
             />
+            <FieldErrorMsg message={fieldErrors.gstLegalName} />
             <Input
               value={step3.gstAddress || ""}
-              onChange={(e) => setStep3({ ...step3, gstAddress: e.target.value })}
-              className={ONBOARDING_INPUT}
+              onChange={(e) => {
+                clearFieldError("gstAddress")
+                setStep3({ ...step3, gstAddress: e.target.value })
+              }}
+              className={inputCls("gstAddress")}
               placeholder="Registered address"
             />
+            <FieldErrorMsg message={fieldErrors.gstAddress} />
             <Button
               type="button"
               variant="outline"
@@ -2532,8 +2211,10 @@ export default function RestaurantOnboarding() {
                   title: "Upload GST certificate",
                   fallbackInputRef: gstImageInputRef,
                   fileNamePrefix: "gst-image",
-                  onSelectFile: (file) =>
-                    setStep3((prev) => ({ ...prev, gstImage: file })),
+                  onSelectFile: (file) => {
+                    clearFieldError("gstImage")
+                    setStep3((prev) => ({ ...prev, gstImage: file }))
+                  },
                 })
               }
             >
@@ -2545,12 +2226,13 @@ export default function RestaurantOnboarding() {
               accept={GALLERY_IMAGE_ACCEPT}
               className="hidden"
               ref={gstImageInputRef}
-              onChange={(e) =>
+              onChange={(e) => {
+                clearFieldError("gstImage")
                 setStep3((prev) => ({ ...prev, gstImage: e.target.files?.[0] || null }))
-              }
+              }}
             />
             {step3.gstImage && (
-              <div className="relative mt-3 aspect-4/3 overflow-hidden rounded-xl bg-slate-100 ring-1 ring-slate-200">
+              <div className={ONBOARDING_DOC_PREVIEW}>
                 {getPreviewImageUrl(step3.gstImage) ? (
                   <img
                     src={getPreviewImageUrl(step3.gstImage)}
@@ -2575,6 +2257,7 @@ export default function RestaurantOnboarding() {
                 </button>
               </div>
             )}
+            <FieldErrorMsg message={fieldErrors.gstImage} />
           </div>
         )}
       </section>
@@ -2586,12 +2269,14 @@ export default function RestaurantOnboarding() {
             <Label className={ONBOARDING_LABEL}>FSSAI number</Label>
             <Input
               value={step3.fssaiNumber || ""}
-              onChange={(e) =>
+              onChange={(e) => {
+                clearFieldError("fssaiNumber")
                 setStep3({ ...step3, fssaiNumber: e.target.value.replace(/\D/g, "").slice(0, 14) })
-              }
-              className={ONBOARDING_INPUT}
+              }}
+              className={inputCls("fssaiNumber")}
               placeholder="FSSAI number (14 digits)"
             />
+            <FieldErrorMsg message={fieldErrors.fssaiNumber} />
           </div>
           <div>
             <Label className={`${ONBOARDING_LABEL} mb-1 block`}>FSSAI expiry date</Label>
@@ -2600,7 +2285,11 @@ export default function RestaurantOnboarding() {
                 <button
                   type="button"
                   onClick={() => setIsFssaiCalendarOpen(true)}
-                  className="flex w-full cursor-pointer items-center justify-between rounded-xl border border-slate-200 bg-slate-50/80 px-3 py-2.5 text-left text-sm transition-colors hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0000]/20"
+                  className={`flex w-full cursor-pointer items-center justify-between rounded-xl border bg-slate-50/80 px-3 py-2.5 text-left text-sm transition-colors hover:bg-white focus-visible:outline-none focus-visible:ring-2 ${
+                    fieldErrors.fssaiExpiry
+                      ? "border-red-400 ring-2 ring-red-200 focus-visible:ring-red-300"
+                      : "border-slate-200 focus-visible:ring-[#FF0000]/20"
+                  }`}
                 >
                   <span className={step3.fssaiExpiry ? "text-slate-900" : "text-slate-500"}>
                     {step3.fssaiExpiry
@@ -2622,6 +2311,7 @@ export default function RestaurantOnboarding() {
                     disabled={(date) => formatDateToLocalYMD(date) < getTodayLocalYMD()}
                     onSelect={(date) => {
                       if (date && formatDateToLocalYMD(date) >= getTodayLocalYMD()) {
+                        clearFieldError("fssaiExpiry")
                         const formattedDate = formatDateToLocalYMD(date)
                         setStep3({ ...step3, fssaiExpiry: formattedDate })
                         setIsFssaiCalendarOpen(false)
@@ -2635,8 +2325,10 @@ export default function RestaurantOnboarding() {
                 </div>
               </PopoverContent>
             </Popover>
+            <FieldErrorMsg message={fieldErrors.fssaiExpiry} />
           </div>
         </div>
+        <div className={fieldErrors.fssaiImage ? "rounded-xl ring-2 ring-red-200 p-2" : ""}>
         <Button
           type="button"
           variant="outline"
@@ -2646,8 +2338,10 @@ export default function RestaurantOnboarding() {
               title: "Upload FSSAI image",
               fallbackInputRef: fssaiImageInputRef,
               fileNamePrefix: "fssai-image",
-              onSelectFile: (file) =>
-                setStep3((prev) => ({ ...prev, fssaiImage: file })),
+              onSelectFile: (file) => {
+                clearFieldError("fssaiImage")
+                setStep3((prev) => ({ ...prev, fssaiImage: file }))
+              },
             })
           }
         >
@@ -2659,12 +2353,13 @@ export default function RestaurantOnboarding() {
           accept={GALLERY_IMAGE_ACCEPT}
           className="hidden"
           ref={fssaiImageInputRef}
-          onChange={(e) =>
+          onChange={(e) => {
+            clearFieldError("fssaiImage")
             setStep3((prev) => ({ ...prev, fssaiImage: e.target.files?.[0] || null }))
-          }
+          }}
         />
         {step3.fssaiImage && (
-          <div className="relative mt-3 aspect-4/3 overflow-hidden rounded-xl bg-slate-100 ring-1 ring-slate-200">
+          <div className={ONBOARDING_DOC_PREVIEW}>
             {getPreviewImageUrl(step3.fssaiImage) ? (
               <img
                 src={getPreviewImageUrl(step3.fssaiImage)}
@@ -2689,48 +2384,66 @@ export default function RestaurantOnboarding() {
             </button>
           </div>
         )}
+        <FieldErrorMsg message={fieldErrors.fssaiImage} />
+        </div>
       </section>
 
       <section className={`${ONBOARDING_SECTION} space-y-4`}>
         <h2 className={ONBOARDING_SECTION_TITLE}>Bank account details</h2>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div>
           <Input
             value={step3.accountNumber || ""}
-            onChange={(e) =>
+            onChange={(e) => {
+              clearFieldError("accountNumber")
               setStep3({ ...step3, accountNumber: e.target.value.replace(/\D/g, "").slice(0, 18) })
-            }
-            className={ONBOARDING_INPUT}
+            }}
+            className={inputCls("accountNumber")}
             placeholder="Account number"
           />
+          <FieldErrorMsg message={fieldErrors.accountNumber} />
+          </div>
+          <div>
           <Input
             value={step3.confirmAccountNumber || ""}
-            onChange={(e) =>
+            onChange={(e) => {
+              clearFieldError("confirmAccountNumber")
               setStep3({
                 ...step3,
                 confirmAccountNumber: e.target.value.replace(/\D/g, "").slice(0, 18),
               })
-            }
-            className={ONBOARDING_INPUT}
+            }}
+            className={inputCls("confirmAccountNumber")}
             placeholder="Re-enter account number"
           />
+          <FieldErrorMsg message={fieldErrors.confirmAccountNumber} />
+          </div>
         </div>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div>
           <Input
             value={step3.ifscCode || ""}
-            onChange={(e) =>
+            onChange={(e) => {
+              clearFieldError("ifscCode")
               setStep3({
                 ...step3,
                 ifscCode: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 11),
               })
-            }
-            className={ONBOARDING_INPUT}
+            }}
+            className={inputCls("ifscCode")}
             placeholder="IFSC code"
           />
+          <FieldErrorMsg message={fieldErrors.ifscCode} />
+          </div>
+          <div>
           <Select
             value={step3.accountType || ""}
-            onValueChange={(value) => setStep3({ ...step3, accountType: value })}
+            onValueChange={(value) => {
+              clearFieldError("accountType")
+              setStep3({ ...step3, accountType: value })
+            }}
           >
-            <SelectTrigger className={`${ONBOARDING_INPUT} mt-0`}>
+            <SelectTrigger className={`${inputCls("accountType")} mt-0`}>
               <SelectValue placeholder="Select account type" />
             </SelectTrigger>
             <SelectContent>
@@ -2738,18 +2451,22 @@ export default function RestaurantOnboarding() {
               <SelectItem value="Current">Current</SelectItem>
             </SelectContent>
           </Select>
+          <FieldErrorMsg message={fieldErrors.accountType} />
+          </div>
         </div>
         <Input
           value={step3.accountHolderName || ""}
-          onChange={(e) =>
+          onChange={(e) => {
+            clearFieldError("accountHolderName")
             setStep3({
               ...step3,
               accountHolderName: e.target.value.replace(/[^A-Za-z ]/g, ""),
             })
-          }
-          className={ONBOARDING_INPUT}
+          }}
+          className={inputCls("accountHolderName")}
           placeholder="Account holder name"
         />
+        <FieldErrorMsg message={fieldErrors.accountHolderName} />
       </section>
     </div>
   )
@@ -2833,6 +2550,22 @@ export default function RestaurantOnboarding() {
       </section>
 
       <section className={`${ONBOARDING_SECTION} space-y-4`}>
+        <h2 className={ONBOARDING_SECTION_TITLE}>How customers will see you</h2>
+        <p className={ONBOARDING_SECTION_DESC}>
+          Preview of your restaurant card on the user home page.
+        </p>
+        <OnboardingRestaurantCardPreview
+          restaurantName={step1.restaurantName}
+          profileImageUrl={getPreviewImageUrl(step2.profileImage) || getImageAssetUrl(step2.profileImage)}
+          pureVeg={step1.pureVegRestaurant}
+          area={step1.location?.area}
+          city={step1.location?.city}
+          estimatedDeliveryTime={step4.estimatedDeliveryTime}
+          cuisines={step2.cuisines}
+        />
+      </section>
+
+      <section className={`${ONBOARDING_SECTION} space-y-4`}>
         <div className="flex items-start gap-3">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#FF0000]/10">
             <Truck className="h-5 w-5 text-[#FF0000]" />
@@ -2848,9 +2581,12 @@ export default function RestaurantOnboarding() {
           <Label className={ONBOARDING_LABEL}>Estimated delivery time*</Label>
           <Select
             value={step4.estimatedDeliveryTime || ""}
-            onValueChange={(value) => setStep4({ ...step4, estimatedDeliveryTime: value })}
+            onValueChange={(value) => {
+              clearFieldError("estimatedDeliveryTime")
+              setStep4({ ...step4, estimatedDeliveryTime: value })
+            }}
           >
-            <SelectTrigger className={ONBOARDING_INPUT}>
+            <SelectTrigger className={inputCls("estimatedDeliveryTime")}>
               <SelectValue placeholder="Select estimated timing" />
             </SelectTrigger>
             <SelectContent>
@@ -2867,6 +2603,7 @@ export default function RestaurantOnboarding() {
               ))}
             </SelectContent>
           </Select>
+          <FieldErrorMsg message={fieldErrors.estimatedDeliveryTime} />
         </div>
       </section>
 

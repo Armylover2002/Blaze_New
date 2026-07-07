@@ -247,12 +247,19 @@ export const adminAPI = {
       contextModule: "admin",
     }),
   /** POST /auth/admin/change-password */
-  changePassword: (currentPassword, newPassword) =>
-    apiClient.post(
+  changePassword: (currentPassword, newPassword) => {
+    // Send the current refresh token so the backend revokes all OTHER sessions
+    // after the password change while keeping this session alive.
+    const refreshToken =
+      typeof localStorage !== "undefined"
+        ? localStorage.getItem("admin_refreshToken")
+        : null;
+    return apiClient.post(
       "/auth/admin/change-password",
-      { currentPassword, newPassword },
+      { currentPassword, newPassword, ...(refreshToken ? { refreshToken } : {}) },
       { contextModule: "admin" },
-    ),
+    );
+  },
   logout: (refreshToken) => {
     const token =
       refreshToken ||
@@ -1252,6 +1259,12 @@ export const restaurantAPI = {
         limit: 1000,
         ...params,
       },
+      contextModule: "restaurant",
+    }),
+  // Live status of a single category (used to dynamically warn when a category
+  // has been deactivated by the admin).
+  getCategoryStatus: (id) =>
+    apiClient.get(`/food/restaurant/categories/${String(id)}/status`, {
       contextModule: "restaurant",
     }),
   createCategory: (body) =>

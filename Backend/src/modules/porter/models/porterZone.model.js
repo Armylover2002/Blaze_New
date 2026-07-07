@@ -1,5 +1,7 @@
 import mongoose from 'mongoose';
 import { actionPerformerSchema } from '../../../core/models/actionPerformer.schema.js';
+import { ValidationError } from '../../../core/auth/errors.js';
+import { findOverlappingZone, ZONE_OVERLAP_MESSAGE } from '../../../utils/zoneOverlap.js';
 
 
 const porterZoneSchema = new mongoose.Schema(
@@ -80,7 +82,25 @@ porterZoneSchema.index({ isDeleted: 1, status: 1, createdAt: -1 });
 porterZoneSchema.index({ isDeleted: 1, createdAt: -1 });
 
 porterZoneSchema.pre('save', async function (next) {
-    if (this.isNew) {
+    try {
+        if (this.isNew || this.isModified('geometry')) {
+            const ring = this.geometry?.coordinates?.[0];
+            if (Array.isArray(ring) && ring.length >= 3) {
+                const coordinates = ring.map(([lng, lat]) => ({ lat, lng }));
+                const overlapping = await findOverlappingZone(this.constructor, coordinates, {
+                    excludeId: this._id,
+                    extraFilter: { isDeleted: { $ne: true } },
+                });
+                if (overlapping) {
+                    return next(new ValidationError(ZONE_OVERLAP_MESSAGE));
+                }
+            }
+        }
+
+        if (!this.isNew) {
+            return next();
+        }
+
         if (!this.zoneCode) {
             let prefix = this.name.replace(/[^a-zA-Z]/g, '').substring(0, 3).toUpperCase();
             if (prefix.length < 3) prefix = prefix.padEnd(3, 'X');
@@ -105,8 +125,10 @@ porterZoneSchema.pre('save', async function (next) {
             const maxOrderZone = await this.constructor.findOne({}, { displayOrder: 1 }).sort({ displayOrder: -1 });
             this.displayOrder = maxOrderZone && maxOrderZone.displayOrder ? maxOrderZone.displayOrder + 1 : 1;
         }
+        return next();
+    } catch (error) {
+        return next(error);
     }
-    next();
 });
 
 export const PorterZone = mongoose.models.PorterZone

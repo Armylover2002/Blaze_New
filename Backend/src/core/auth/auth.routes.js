@@ -43,7 +43,7 @@ router.post('/delivery/verify-otp', authRateLimiter, verifyDeliveryOtpController
 
 // Admin login
 router.post('/admin/login', authRateLimiter, adminLoginController);
-router.get('/admin/roles', getPublicRolesController);
+router.get('/admin/roles', authRateLimiter, getPublicRolesController);
 
 // Admin forgot password (no auth required)
 router.post('/admin/forgot-password/request-otp', authRateLimiter, requestAdminForgotPasswordOtpController);

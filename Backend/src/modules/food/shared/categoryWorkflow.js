@@ -80,7 +80,18 @@ const buildCategoryStatsMap = async (categoryIds = []) => {
     return new Map(stats.map((item) => [String(item._id), item]));
 };
 
-export const backfillLegacyCategoryWorkflow = async (categories = []) => {
+/**
+ * Normalizes legacy category records (missing approvalStatus/foodTypeScope/createdByRestaurantId)
+ * and returns a stats map keyed by category id.
+ *
+ * @param {Array} categories
+ * @param {Object} [options]
+ * @param {boolean} [options.persist=true] When false, legacy fields are normalized in-memory only
+ *        and NOT written back to MongoDB. Use this for read-only paths (e.g. list endpoints) so a
+ *        GET never mutates the database. The returned/serialized data is unchanged either way.
+ */
+export const backfillLegacyCategoryWorkflow = async (categories = [], options = {}) => {
+    const { persist = true } = options;
     const list = Array.isArray(categories) ? categories.filter(Boolean) : [];
     if (!list.length) return new Map();
 
@@ -142,7 +153,7 @@ export const backfillLegacyCategoryWorkflow = async (categories = []) => {
         }
     }
 
-    if (writes.length) {
+    if (writes.length && persist) {
         const { FoodCategory } = await import('../admin/models/category.model.js');
         await FoodCategory.bulkWrite(writes, { ordered: false });
     }
@@ -190,8 +201,8 @@ export const serializeCategoryForResponse = (category = {}, options = {}) => {
             ? Boolean(restaurantId && restaurantId === String(options.currentRestaurantId))
             : true,
         canDelete: options.currentRestaurantId
-            ? Boolean(restaurantId && restaurantId === String(options.currentRestaurantId) && Number(stats?.totalFoods || 0) === 0)
-            : Number(stats?.totalFoods || 0) === 0,
+            ? Boolean(restaurantId && restaurantId === String(options.currentRestaurantId))
+            : true,
         restaurant: category?.restaurantId?._id
             ? {
                 _id: category.restaurantId._id,

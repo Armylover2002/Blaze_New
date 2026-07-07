@@ -186,21 +186,22 @@ export default function CODDepositVerification() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
-      {/* Premium Header */}
-      <div className="bg-white px-4 pt-4 pb-1 flex flex-col gap-3 border-b border-slate-200 sticky top-0 z-10 shadow-sm">
+    <div className="min-h-full bg-slate-50 flex flex-col font-sans lg:pb-8">
+      {/* Header */}
+      <div className="bg-white px-4 pt-4 pb-1 flex flex-col gap-3 border-b border-slate-200 sticky top-0 z-10 shadow-sm backdrop-blur bg-white/95">
+        <div className="lg:max-w-6xl lg:mx-auto lg:px-4 lg:w-full">
         <div className="flex items-center gap-3">
-          <button onClick={goBack} className="p-2 rounded-full hover:bg-slate-100 transition-colors" aria-label="Back">
+          <button onClick={goBack} className="p-2 rounded-full hover:bg-slate-100 transition-colors lg:hidden" aria-label="Back">
             <ArrowLeft className="w-5 h-5 text-slate-800" />
           </button>
           <div>
-            <h1 className="text-lg font-extrabold text-slate-900">COD Deposit Verification</h1>
-            <p className="text-xs text-slate-500 font-medium">Verify physical cash handover from delivery partners</p>
+            <h1 className="text-lg font-extrabold text-slate-900 lg:text-2xl">COD Deposit Verification</h1>
+            <p className="text-xs text-slate-500 font-medium lg:text-sm">Verify physical cash handover from delivery partners</p>
           </div>
         </div>
 
-        {/* Dynamic Segmented Control / Tabs */}
-        <div className="flex bg-slate-100 p-1 rounded-xl mb-2">
+        {/* Tabs */}
+        <div className="flex bg-slate-100 p-1 rounded-xl mb-2 lg:max-w-xl">
           {["Pending", "Restaurant_Accepted", "Restaurant_Rejected"].map((tab) => (
             <button
               key={tab}
@@ -217,10 +218,11 @@ export default function CODDepositVerification() {
             </button>
           ))}
         </div>
+        </div>
       </div>
 
       {/* Main Request Listing */}
-      <div className="flex-1 px-4 py-4 space-y-4">
+      <div className="flex-1 px-4 py-4 space-y-4 lg:max-w-6xl lg:mx-auto lg:px-8 lg:py-6 lg:w-full">
         {loading ? (
           <div className="py-12 flex flex-col items-center justify-center gap-3 text-slate-500">
             <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
@@ -237,7 +239,7 @@ export default function CODDepositVerification() {
             </p>
           </div>
         ) : (
-          <div className="grid gap-4 max-w-md mx-auto">
+          <div className="grid gap-4 max-w-md mx-auto lg:max-w-none lg:grid-cols-2 xl:grid-cols-2">
             {filteredRequests.map((req) => (
               <div key={req.id} className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm relative overflow-hidden transition-all hover:shadow-md">
                 {/* Status indicator pill */}

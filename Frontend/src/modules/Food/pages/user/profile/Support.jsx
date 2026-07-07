@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { Link, useLocation as useRouterLocation } from "react-router-dom"
+import { Link, useLocation as useRouterLocation, useNavigate } from "react-router-dom"
 import AnimatedPage from "@food/components/user/AnimatedPage"
 import { Button } from "@food/components/ui/button"
 import { Input } from "@food/components/ui/input"
@@ -38,6 +38,7 @@ const FAQItem = ({ question, answer }) => {
 
 export default function Support() {
   const routerLocation = useRouterLocation()
+  const navigate = useNavigate()
   const { location: currentFoodLocation } = useFoodLocation()
   const { zoneId: detectedFoodZoneId } = useZone(currentFoodLocation)
   const isSharedProfile = routerLocation.pathname.startsWith("/profile")
@@ -416,11 +417,20 @@ export default function Support() {
     <AnimatedPage className="min-h-screen bg-[#f5f5f5] dark:bg-[#0a0a0a]">
       <div className="max-w-md md:max-w-2xl lg:max-w-4xl xl:max-w-5xl mx-auto px-4 sm:px-6 md:px-8 lg:px-10 xl:px-12 py-4 sm:py-6 md:py-8 pb-20">
         <div className="mb-4">
-          <Link to={profileHomePath}>
-            <Button variant="ghost" size="icon" className="h-8 w-8 p-0">
-              <ArrowLeft className="h-5 w-5 text-black dark:text-white" />
-            </Button>
-          </Link>
+          <Button 
+            variant="ghost" 
+            size="icon" 
+            className="h-8 w-8 p-0"
+            onClick={() => {
+              if (window.history.length > 1) {
+                navigate(-1);
+              } else {
+                navigate(profileHomePath);
+              }
+            }}
+          >
+            <ArrowLeft className="h-5 w-5 text-black dark:text-white" />
+          </Button>
         </div>
 
         <Card className="bg-white dark:bg-[#1a1a1a] rounded-xl shadow-sm border border-slate-200 dark:border-gray-800 mb-3">

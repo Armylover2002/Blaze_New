@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import { ValidationError } from '../../../../core/auth/errors.js';
+import { assertNoZoneOverlap } from '../../../../utils/zoneOverlap.js';
 import { FoodRestaurant } from '../../restaurant/models/restaurant.model.js';
 import { FoodRestaurantWallet } from '../../restaurant/models/restaurantWallet.model.js';
 import { FoodDeliveryPartner } from '../../delivery/models/deliveryPartner.model.js';
@@ -28,6 +29,7 @@ import { FoodRestaurantSupportTicket } from '../../restaurant/models/supportTick
 import { FoodOrder } from '../../orders/models/order.model.js';
 import { FoodTransaction } from '../../orders/models/foodTransaction.model.js';
 import { FoodRestaurantWithdrawal } from '../../restaurant/models/foodRestaurantWithdrawal.model.js';
+import { applyPendingOpenDaysUpdate, discardPendingOpenDaysUpdate } from '../../restaurant/services/outletTimings.service.js';
 import { 
     creditWallet, 
     debitWallet
@@ -56,6 +58,7 @@ import {
     normalizeFoodVariantsInput,
     serializeFoodVariants
 } from './foodVariant.service.js';
+import { notifyCategoryStatusChange } from './categoryStatusNotification.service.js';
 
 const parseBooleanLike = (value, fieldName) => {
     if (typeof value === 'boolean') return value;
@@ -72,6 +75,10 @@ const toFiniteNumber = (value) => {
     const num = typeof value === 'number' ? value : Number(String(value).trim());
     return Number.isFinite(num) ? num : null;
 };
+
+// Escapes user input before embedding it in a MongoDB $regex to prevent regex
+// injection / ReDoS-style slowdowns from special characters like ( ) * + ? etc.
+const escapeRegex = (value) => String(value ?? '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 const normalizeRestaurantTime = (value) => {
     const raw = String(value || '').trim();
@@ -2304,7 +2311,13 @@ export async function updateRestaurantMenuById(id, menu) {
 }
 
 export async function getPendingRestaurants() {
-    const restaurants = await FoodRestaurant.find({ status: { $in: ['pending', 'rejected'] } })
+    const restaurants = await FoodRestaurant.find({
+        $or: [
+            { status: { $in: ['pending', 'rejected'] } },
+            // Already-approved restaurants with a staged opening-days change awaiting review.
+            { 'pendingOpenDays.hasPendingUpdate': true }
+        ]
+    })
         .populate('zoneId', 'name zoneName serviceLocation')
         .sort({ createdAt: -1 })
         .lean();
@@ -2312,6 +2325,8 @@ export async function getPendingRestaurants() {
         ...r,
         sl: i + 1,
         zone: r.zoneId?.serviceLocation || r.zoneId?.zoneName || r.zoneId?.name || null,
+        // Flag so the admin UI can treat approved-but-pending-open-days as a review item.
+        hasPendingOpenDaysUpdate: Boolean(r.pendingOpenDays?.hasPendingUpdate),
     }));
 }
 
@@ -2458,12 +2473,17 @@ export async function toggleRestaurantListing(id, isListed) {
         throw new ValidationError('Invalid restaurant ID');
     }
     const { FoodRestaurant } = await import('../../restaurant/models/restaurant.model.js');
+    const { FoodItem } = await import('../../admin/models/food.model.js');
     const restaurant = await FoodRestaurant.findById(id);
     if (!restaurant) {
         throw new ValidationError('Restaurant not found');
     }
-    if (isListed && restaurant.productCount <= 0) {
-        throw new ValidationError('Cannot list a restaurant with 0 products.');
+    
+    if (isListed) {
+        const itemCount = await FoodItem.countDocuments({ restaurantId: id });
+        if (itemCount <= 0) {
+            throw new ValidationError('Cannot make visible. Restaurant has no menu items.');
+        }
     }
     restaurant.isListed = Boolean(isListed);
     await restaurant.save();
@@ -2544,7 +2564,7 @@ export async function getCategories(query) {
 
     const filter = {};
     if (query.search && String(query.search).trim()) {
-        const term = String(query.search).trim();
+        const term = escapeRegex(String(query.search).trim().slice(0, 80));
         filter.$or = [{ name: { $regex: term, $options: 'i' } }];
     }
     // Optional zone filter for admin list.
@@ -2598,7 +2618,8 @@ export async function getCategories(query) {
         FoodCategory.countDocuments(filter)
     ]);
 
-    const statsById = await backfillLegacyCategoryWorkflow(list);
+    // Read-only: normalize legacy records in-memory for the response, but do NOT write on a GET.
+    const statsById = await backfillLegacyCategoryWorkflow(list, { persist: false });
     const restaurantIds = Array.from(
         new Set(
             list
@@ -2721,6 +2742,8 @@ export async function updateCategory(id, body) {
     const doc = await FoodCategory.findById(id);
     if (!doc) return null;
 
+    const previousIsActive = doc.isActive !== false;
+
     const nextFoodTypeScope = body.foodTypeScope !== undefined
         ? normalizeCategoryFoodTypeScope(body.foodTypeScope, doc.foodTypeScope || 'Both')
         : normalizeCategoryFoodTypeScope(doc.foodTypeScope, 'Both');
@@ -2756,6 +2779,12 @@ export async function updateCategory(id, body) {
         doc.createdByRestaurantId = doc.restaurantId;
     }
     await doc.save();
+
+    const nextIsActive = doc.isActive !== false;
+    if (previousIsActive !== nextIsActive) {
+        await notifyCategoryStatusChange(doc, { isActive: nextIsActive });
+    }
+
     return doc.toObject();
 }
 
@@ -2773,11 +2802,18 @@ export async function toggleCategoryStatus(id) {
     if (!id || !mongoose.Types.ObjectId.isValid(id)) return null;
     const doc = await FoodCategory.findById(id);
     if (!doc) return null;
+    const previousIsActive = doc.isActive !== false;
     doc.isActive = !doc.isActive;
     if (!doc.createdByRestaurantId && doc.restaurantId) {
         doc.createdByRestaurantId = doc.restaurantId;
     }
     await doc.save();
+
+    const nextIsActive = doc.isActive !== false;
+    if (previousIsActive !== nextIsActive) {
+        await notifyCategoryStatusChange(doc, { isActive: nextIsActive });
+    }
+
     return doc.toObject();
 }
 
@@ -3377,12 +3413,42 @@ export async function createRestaurantByAdmin(body) {
 
 export async function approveRestaurant(id, performer = null) {
     if (!id || !mongoose.Types.ObjectId.isValid(id)) return null;
+
+    // Opening-days re-approval on an already-approved restaurant: apply the staged
+    // schedule only (do not re-run the fresh-join approval side effects such as
+    // referral crediting or the "restaurant approved" notification).
+    const existing = await FoodRestaurant.findById(id).select('status pendingOpenDays restaurantName').lean();
+    if (!existing) return null;
+    const isOpenDaysReapproval = existing.status === 'approved' && existing.pendingOpenDays?.hasPendingUpdate;
+    if (isOpenDaysReapproval) {
+        await applyPendingOpenDaysUpdate(id);
+        const updated = await FoodRestaurant.findById(id).lean();
+        try {
+            const { notifyOwnersSafely } = await import('../../../../core/notifications/firebase.service.js');
+            await notifyOwnersSafely(
+                [{ ownerType: 'RESTAURANT', ownerId: id }],
+                {
+                    title: 'Opening Days Updated ✅',
+                    body: `Your updated opening days for "${existing.restaurantName}" have been approved and are now live.`,
+                    data: {
+                        type: 'restaurant_open_days_approved',
+                        restaurantId: String(id)
+                    }
+                }
+            );
+        } catch (e) {
+            console.error('Failed to send opening-days approval notification:', e);
+        }
+        return updated;
+    }
+
     const updated = await FoodRestaurant.findByIdAndUpdate(
         id,
         {
             $set: {
                 status: 'approved',
                 isActive: true,
+                wasEverApproved: true,
                 approvedAt: new Date(),
                 rejectedAt: undefined,
                 rejectionReason: undefined,
@@ -3469,6 +3535,36 @@ export async function approveRestaurant(id, performer = null) {
 
 export async function rejectRestaurant(id, reason, performer = null) {
     if (!id || !mongoose.Types.ObjectId.isValid(id)) return null;
+
+    // Opening-days re-approval on an already-approved restaurant: rejecting simply
+    // discards the staged change. The restaurant stays approved & online with its
+    // current live schedule (never demoted to "rejected").
+    const existing = await FoodRestaurant.findById(id).select('status pendingOpenDays restaurantName').lean();
+    if (!existing) return null;
+    const isOpenDaysReapproval = existing.status === 'approved' && existing.pendingOpenDays?.hasPendingUpdate;
+    if (isOpenDaysReapproval) {
+        await discardPendingOpenDaysUpdate(id);
+        const updated = await FoodRestaurant.findById(id).lean();
+        try {
+            const { notifyOwnersSafely } = await import('../../../../core/notifications/firebase.service.js');
+            await notifyOwnersSafely(
+                [{ ownerType: 'RESTAURANT', ownerId: id }],
+                {
+                    title: 'Opening Days Update Rejected 📋',
+                    body: `Your requested opening-days change for "${existing.restaurantName}" was rejected${reason ? `. Reason: ${reason}` : ''}. Your current schedule remains active.`,
+                    data: {
+                        type: 'restaurant_open_days_rejected',
+                        restaurantId: String(id),
+                        reason: reason || ''
+                    }
+                }
+            );
+        } catch (e) {
+            console.error('Failed to send opening-days rejection notification:', e);
+        }
+        return updated;
+    }
+
     const updated = await FoodRestaurant.findByIdAndUpdate(
         id,
         {
@@ -4789,10 +4885,14 @@ export async function createZone(body) {
         longitude: Number(c.longitude) || 0
     }));
 
+    const country = (body.country && body.country.trim()) || 'India';
+    const overlapResult = await assertNoZoneOverlap(FoodZone, normalized, { extraFilter: { country } });
+    if (overlapResult) return overlapResult;
+
     const zone = new FoodZone({
         name,
         zoneName: body.zoneName && body.zoneName.trim() ? body.zoneName.trim() : name,
-        country: (body.country && body.country.trim()) || 'India',
+        country,
         serviceLocation: (body.serviceLocation && body.serviceLocation.trim()) || name,
         unit: body.unit === 'miles' ? 'miles' : 'kilometer',
         coordinates: normalized,
@@ -4813,10 +4913,16 @@ export async function updateZone(id, body) {
     if (body.unit !== undefined) zone.unit = body.unit === 'miles' ? 'miles' : 'kilometer';
     if (body.isActive !== undefined) zone.isActive = body.isActive !== false;
     if (Array.isArray(body.coordinates) && body.coordinates.length >= 3) {
-        zone.coordinates = body.coordinates.map((c) => ({
+        const normalizedCoords = body.coordinates.map((c) => ({
             latitude: Number(c.latitude) || 0,
             longitude: Number(c.longitude) || 0
         }));
+        const overlapResult = await assertNoZoneOverlap(FoodZone, normalizedCoords, {
+            excludeId: id,
+            extraFilter: { country: zone.country },
+        });
+        if (overlapResult) return overlapResult;
+        zone.coordinates = normalizedCoords;
     }
     if (zone.name) zone.serviceLocation = zone.serviceLocation || zone.name;
 

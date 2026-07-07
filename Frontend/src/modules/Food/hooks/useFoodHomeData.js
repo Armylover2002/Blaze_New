@@ -227,8 +227,8 @@ export const useFoodHomeData = ({
             distance: restaurant.distanceInKm 
               ? `${restaurant.distanceInKm} km` 
               : (restaurant.distance ? String(restaurant.distance).includes("km") ? restaurant.distance : `${restaurant.distance} km` : `${(2 + Math.random()).toFixed(1)} km`),
-            featuredDish: restaurant.featuredDish || "Special Dish",
-            featuredPrice: restaurant.featuredPrice || (restaurant.restaurantName === "Sayaji" ? "249" : "199"),
+            featuredDish: restaurant.featuredDish,
+            featuredPrice: restaurant.featuredPrice,
             image: allImages[0] || "",
             images: allImages,
             pureVegRestaurant: restaurant.pureVegRestaurant === true,

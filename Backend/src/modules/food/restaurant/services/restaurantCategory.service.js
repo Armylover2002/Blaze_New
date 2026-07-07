@@ -122,7 +122,8 @@ export async function listRestaurantCategories(restaurantId, query = {}) {
         FoodCategory.countDocuments(filter)
     ]);
 
-    const statsById = await backfillLegacyCategoryWorkflow(list);
+    // Read-only: normalize legacy records in-memory for the response, but never write on a GET.
+    const statsById = await backfillLegacyCategoryWorkflow(list, { persist: false });
     const restaurantIds = !compact
         ? Array.from(
             new Set(
@@ -198,10 +199,45 @@ export async function listPublicCategories(query = {}) {
         FoodCategory.countDocuments(filter)
     ]);
 
-    await backfillLegacyCategoryWorkflow(list);
+    // Read-only path; this projection omits fields the backfill would infer from, so persisting
+    // here could write wrong values. Normalize in-memory only.
+    await backfillLegacyCategoryWorkflow(list, { persist: false });
     const categories = list.map((category) => serializeCategoryForResponse(category));
 
     return { categories, total, page, limit };
+}
+
+/**
+ * Return the live status of a single category for a restaurant. Used by the
+ * restaurant dashboard to dynamically warn when a previously-used category has
+ * been deactivated by the admin, without relying on cached/stale values.
+ */
+export async function getRestaurantCategoryStatus(restaurantId, id) {
+    const context = await getRestaurantContext(restaurantId);
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+        throw new ValidationError('Invalid category id');
+    }
+
+    const category = await FoodCategory.findById(id)
+        .select('name image foodTypeScope approvalStatus isActive restaurantId createdByRestaurantId zoneId')
+        .lean();
+
+    if (!category?._id) return null;
+
+    // Read-only status check: normalize in-memory without writing on a GET.
+    await backfillLegacyCategoryWorkflow([category], { persist: false });
+
+    return {
+        id: String(category._id),
+        _id: String(category._id),
+        name: category.name || '',
+        isActive: category.isActive !== false,
+        approvalStatus: category.approvalStatus || 'approved',
+        foodTypeScope: normalizeCategoryFoodTypeScope(category.foodTypeScope, 'Both'),
+        ownedByRestaurant:
+            String(category.restaurantId || '') === String(context.restaurantId) ||
+            String(category.createdByRestaurantId || '') === String(context.restaurantId)
+    };
 }
 
 export async function createRestaurantCategory(restaurantId, body = {}) {
@@ -263,16 +299,41 @@ export async function updateRestaurantCategory(restaurantId, id, body = {}) {
         throw new ValidationError('Pure veg restaurants can only keep veg categories');
     }
 
+    let needsApproval = false;
+
     if (body.name !== undefined) {
         const name = String(body.name || '').trim();
         if (!name) throw new ValidationError('Category name is required');
         if (name.length > 200) throw new ValidationError('Category name is too long');
-        doc.name = name;
+        if (doc.name !== name) {
+            doc.name = name;
+            needsApproval = true;
+        }
     }
-    if (body.image !== undefined) doc.image = String(body.image || '').trim();
-    if (body.type !== undefined) doc.type = String(body.type || '').trim();
-    if (body.isActive !== undefined) doc.isActive = body.isActive !== false;
-    if (body.sortOrder !== undefined) doc.sortOrder = Number(body.sortOrder) || 0;
+    if (body.image !== undefined) {
+        const image = String(body.image || '').trim();
+        if (doc.image !== image) {
+            doc.image = image;
+            needsApproval = true;
+        }
+    }
+    if (body.type !== undefined) {
+        const type = String(body.type || '').trim();
+        if (doc.type !== type) {
+            doc.type = type;
+            needsApproval = true;
+        }
+    }
+    if (body.isActive !== undefined) {
+        doc.isActive = body.isActive !== false;
+    }
+    if (body.sortOrder !== undefined) {
+        const sortOrder = Number(body.sortOrder) || 0;
+        if (doc.sortOrder !== sortOrder) {
+            doc.sortOrder = sortOrder;
+            needsApproval = true;
+        }
+    }
     if (body.foodTypeScope !== undefined) {
         const incompatibleFoods = nextFoodTypeScope === 'Both'
             ? 0
@@ -283,16 +344,21 @@ export async function updateRestaurantCategory(restaurantId, id, body = {}) {
         if (incompatibleFoods > 0) {
             throw new ValidationError(`This category already has ${incompatibleFoods} food item(s) outside the selected diet type`);
         }
-        doc.foodTypeScope = nextFoodTypeScope;
+        if (doc.foodTypeScope !== nextFoodTypeScope) {
+            doc.foodTypeScope = nextFoodTypeScope;
+            needsApproval = true;
+        }
     }
 
-    doc.createdByRestaurantId = doc.createdByRestaurantId || context.restaurantId;
-    doc.approvalStatus = 'pending';
-    doc.isApproved = false;
-    doc.rejectionReason = '';
-    doc.requestedAt = new Date();
-    doc.approvedAt = undefined;
-    doc.rejectedAt = undefined;
+    if (needsApproval) {
+        doc.createdByRestaurantId = doc.createdByRestaurantId || context.restaurantId;
+        doc.approvalStatus = 'pending';
+        doc.isApproved = false;
+        doc.rejectionReason = '';
+        doc.requestedAt = new Date();
+        doc.approvedAt = undefined;
+        doc.rejectedAt = undefined;
+    }
 
     await doc.save();
     return doc.toObject();
@@ -304,14 +370,36 @@ export async function deleteRestaurantCategory(restaurantId, id) {
         throw new ValidationError('Invalid category id');
     }
 
-    const category = await FoodCategory.findOne({ _id: id, restaurantId: context.restaurantId }).select('_id').lean();
+    const category = await FoodCategory.findOne({ _id: id, restaurantId: context.restaurantId })
+        .select('_id name')
+        .lean();
     if (!category?._id) return null;
 
-    const inUse = await FoodItem.countDocuments({ categoryId: id, restaurantId: context.restaurantId });
-    if (inUse > 0) {
-        throw new ValidationError('Cannot delete category while it has items');
+    const linkedItems = await FoodItem.find({
+        categoryId: id,
+        restaurantId: context.restaurantId
+    })
+        .select('_id name categoryName')
+        .lean();
+
+    if (linkedItems.length > 0) {
+        await FoodItem.updateMany(
+            { categoryId: id, restaurantId: context.restaurantId },
+            {
+                $set: {
+                    isAvailable: false,
+                    categoryId: null
+                }
+            }
+        );
     }
 
     const deleted = await FoodCategory.findOneAndDelete({ _id: id, restaurantId: context.restaurantId }).lean();
-    return deleted ? { id } : null;
+    if (!deleted) return null;
+
+    return {
+        id,
+        deactivatedItemCount: linkedItems.length,
+        deactivatedItemIds: linkedItems.map((item) => String(item._id))
+    };
 }

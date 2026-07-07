@@ -196,7 +196,7 @@ export default function HubFinance() {
   }, [invoiceOrders])
 
   const handleViewDetails = () => {
-    navigate("/restaurant/finance-details", { state: { financeData, restaurantData } })
+    navigate("/food/restaurant/finance-details", { state: { financeData, restaurantData } })
   }
 
   const getWithdrawalStatusClass = (statusRaw) => {
@@ -716,79 +716,81 @@ export default function HubFinance() {
   }, [showDownloadMenu])
 
   return (
-    <div className="min-h-screen bg-gray-100 flex flex-col">
-      {/* Navbar */}
-      <div className="sticky bg-white top-0 z-40 px-4 py-3 border-b border-gray-200">
+    <div className="min-h-full flex flex-col bg-gray-100 md:bg-slate-50">
+      {/* Mobile header */}
+      <div className="sticky top-0 z-40 border-b border-gray-200 bg-white/95 px-4 py-3 backdrop-blur md:hidden">
         <div className="flex items-center justify-between">
-          <div className="flex-1 min-w-0 flex items-start gap-2">
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-1">
-                <p className="text-lg font-bold text-gray-900 truncate">
-                  {restaurantData?.name || financeData?.restaurant?.name || "Restaurant"}
-                </p>
-                <ChevronDown className="w-4 h-4 text-gray-600 flex-shrink-0" />
-              </div>
-              <p className="text-xs text-gray-600 mt-0.5">
-                {(() => {
-                  const restaurantId = restaurantData?.restaurantId || financeData?.restaurant?.restaurantId
-                  const address = restaurantData?.address || financeData?.restaurant?.address || ''
-                  const parts = []
-                  if (restaurantId) {
-                    const formattedId = formatRestaurantId(restaurantId)
-                    parts.push(`ID: ${formattedId}`)
-                  }
-                  if (address) {
-                    const shortAddress = address.length > 40 ? address.substring(0, 40) + '...' : address
-                    parts.push(shortAddress)
-                  }
-                  return parts.length > 0 ? parts.join(' • ') : 'Loading...'
-                })()}
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-1">
+              <p className="truncate text-lg font-bold text-gray-900">
+                {restaurantData?.name || financeData?.restaurant?.name || "Restaurant"}
               </p>
+              <ChevronDown className="h-4 w-4 shrink-0 text-gray-600" />
             </div>
+            <p className="mt-0.5 text-xs text-gray-600">
+              {(() => {
+                const restaurantId = restaurantData?.restaurantId || financeData?.restaurant?.restaurantId
+                const address = restaurantData?.address || financeData?.restaurant?.address || ''
+                const parts = []
+                if (restaurantId) parts.push(`ID: ${formatRestaurantId(restaurantId)}`)
+                if (address) parts.push(address.length > 40 ? address.substring(0, 40) + '...' : address)
+                return parts.length > 0 ? parts.join(' • ') : 'Loading...'
+              })()}
+            </p>
           </div>
-          <div className="flex items-center gap-1 ml-2">
-            <button
-              className="p-2 hover:bg-gray-100 rounded-full transition-colors"
-              onClick={() => navigate("/restaurant/withdrawal-history")}
-              title="Withdrawal History"
-            >
-              <Wallet className="w-5 h-5 text-gray-700" />
+          <div className="ml-2 flex items-center gap-1">
+            <button className="rounded-full p-2 transition-colors hover:bg-gray-100" onClick={() => navigate("/food/restaurant/withdrawal-history")} title="Withdrawal History">
+              <Wallet className="h-5 w-5 text-gray-700" />
             </button>
-            <button
-              className="p-2 hover:bg-gray-100 rounded-full transition-colors"
-              onClick={() => navigate("/restaurant/notifications")}
-            >
-              <Bell className="w-5 h-5 text-gray-700" />
+            <button className="rounded-full p-2 transition-colors hover:bg-gray-100" onClick={() => navigate("/food/restaurant/notifications")}>
+              <Bell className="h-5 w-5 text-gray-700" />
             </button>
-            <button
-              className="p-2 hover:bg-gray-100 rounded-full transition-colors"
-              onClick={() => navigate("/restaurant/explore")}
-            >
-              <Menu className="w-5 h-5 text-gray-700" />
+            <button className="rounded-full p-2 transition-colors hover:bg-gray-100" onClick={() => navigate("/food/restaurant/explore")}>
+              <Menu className="h-5 w-5 text-gray-700" />
             </button>
           </div>
         </div>
       </div>
 
-      {/* Primary Navigation Tabs */}
-      <div className="px-4 py-3">
-        <div className="flex gap-2">
+      {/* Desktop header */}
+      <div className="sticky top-0 z-40 hidden border-b border-gray-200 bg-white/95 backdrop-blur md:block">
+        <div className="mx-auto flex max-w-6xl items-center justify-between px-8 py-5">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">Payouts</h1>
+            <p className="mt-1 text-sm text-gray-500">
+              {restaurantData?.name || financeData?.restaurant?.name || "Restaurant"} · Manage withdrawals, earnings & invoices
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => navigate("/food/restaurant/withdrawal-history")}
+            className="flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
+          >
+            <Wallet className="h-4 w-4" />
+            Withdrawal history
+          </button>
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div className="border-b border-gray-200 bg-white px-4 py-3 md:px-8">
+        <div className="mx-auto flex max-w-6xl gap-2 md:max-w-md">
           <button
             onClick={() => setActiveTab("payouts")}
-            className={`flex-1 py-3 px-4 rounded-full font-medium text-sm transition-colors ${
+            className={`flex-1 rounded-full px-4 py-3 text-sm font-medium transition-colors ${
               activeTab === "payouts"
                 ? "bg-black text-white"
-                : "bg-white text-gray-600 border border-gray-300"
+                : "border border-gray-300 bg-white text-gray-600"
             }`}
           >
             Payouts
           </button>
           <button
             onClick={() => setActiveTab("invoices")}
-            className={`flex-1 py-3 px-4 rounded-full font-medium text-sm transition-colors ${
+            className={`flex-1 rounded-full px-4 py-3 text-sm font-medium transition-colors ${
               activeTab === "invoices"
                 ? "bg-black text-white"
-                : "bg-white text-gray-600 border border-gray-300"
+                : "border border-gray-300 bg-white text-gray-600"
             }`}
           >
             Invoices & Taxes
@@ -797,91 +799,86 @@ export default function HubFinance() {
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto px-4 pt-6 pb-28">
+      <div className="flex-1 overflow-y-auto px-4 pb-28 pt-6 md:mx-auto md:max-w-6xl md:px-8 md:pb-8 md:pt-6 md:w-full">
         {activeTab === "payouts" && (
           <div className="space-y-6">
-            {/* Withdrawable Balance */}
-            <div>
-              <h2 className="text-base font-bold text-gray-900 mb-3">Withdrawable balance</h2>
-              <div className="bg-black rounded-lg p-6 text-white">
-                {loading ? (
-                  <div className="py-8 text-center text-gray-400">Loading...</div>
-                ) : (
-                  <>
-                    <p className="text-sm text-gray-400 mb-1">Available for withdrawal</p>
-                    <p className="text-4xl font-black mb-6">
-                      ₹{(financeData?.earnings?.availableBalance || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </p>
-                    <button
-                      onClick={() => setShowWithdrawalModal(true)}
-                      disabled={!(financeData?.earnings?.availableBalance > 0)}
-                      className={`w-full py-4 px-4 rounded-xl font-bold flex items-center justify-center gap-2 transition-all ${
-                        financeData?.earnings?.availableBalance > 0
-                          ? "bg-white text-black hover:bg-gray-100 active:scale-95"
-                          : "bg-gray-800 text-gray-500 cursor-not-allowed"
-                      }`}
-                    >
-                      <Wallet className="h-5 w-5" />
-                      Withdraw Funds
-                    </button>
-                  </>
-                )}
+            {/* Top row: balance + stats */}
+            <div className="md:grid md:grid-cols-12 md:gap-6">
+              <div className="md:col-span-5">
+                <h2 className="mb-3 text-base font-bold text-gray-900">Withdrawable balance</h2>
+                <div className="rounded-2xl bg-black p-6 text-white shadow-lg md:p-8">
+                  {loading ? (
+                    <div className="py-8 text-center text-gray-400">Loading...</div>
+                  ) : (
+                    <>
+                      <p className="mb-1 text-sm text-gray-400">Available for withdrawal</p>
+                      <p className="mb-6 text-4xl font-black md:text-5xl">
+                        ₹{(financeData?.earnings?.availableBalance || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </p>
+                      <button
+                        onClick={() => setShowWithdrawalModal(true)}
+                        disabled={!(financeData?.earnings?.availableBalance > 0)}
+                        className={`flex w-full items-center justify-center gap-2 rounded-xl px-4 py-4 font-bold transition-all ${
+                          financeData?.earnings?.availableBalance > 0
+                            ? "bg-white text-black hover:bg-gray-100 active:scale-95"
+                            : "cursor-not-allowed bg-gray-800 text-gray-500"
+                        }`}
+                      >
+                        <Wallet className="h-5 w-5" />
+                        Withdraw funds
+                      </button>
+                    </>
+                  )}
+                </div>
               </div>
-            </div>
 
-            {/* Earnings Breakdown Grid */}
-            <div className="grid grid-cols-2 gap-4">
-              <div className="bg-white rounded-lg p-4 border border-gray-100 shadow-sm">
-                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Current Cycle</p>
-                <p className="text-xl font-bold text-gray-900">
-                  ₹{(financeData?.currentCycle?.totalEarnings || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </p>
-                <p className="text-[10px] text-gray-500 mt-1">{financeData?.currentCycle?.totalOrders || 0} orders</p>
-              </div>
-              <div className="bg-white rounded-lg p-4 border border-gray-100 shadow-sm">
-                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Pending Payout</p>
-                <p className="text-xl font-bold text-gray-900">
-                  ₹{(financeData?.earnings?.pendingPayout || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </p>
-                <p className="text-[10px] text-gray-500 mt-1">Total unsettled share</p>
-              </div>
-            </div>
-
-            {/* Referral Earnings */}
-            <div>
-              <div className="flex items-center justify-between mb-3">
-                <h2 className="text-base font-bold text-gray-900">Referral earnings</h2>
-                <button 
-                  onClick={() => navigate("/restaurant/refer-earn")}
-                  className="text-sm font-medium text-red-600 hover:underline"
-                >
-                  Refer more
-                </button>
-              </div>
-              <div className="bg-white rounded-lg p-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-2xl font-bold text-gray-900">
-                      ₹{(financeData?.earnings?.referralEarnings || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </p>
-                    <p className="text-xs text-gray-500 mt-1">
-                      From {referralStats?.referralCount || 0} approved referrals
-                    </p>
-                  </div>
-                  <div className="bg-red-50 p-3 rounded-full">
-                    <Gift className="w-6 h-6 text-red-600" />
+              <div className="mt-6 grid grid-cols-2 gap-4 md:col-span-7 md:mt-0 md:grid-cols-2 md:content-start">
+                <div className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+                  <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-gray-400">Current cycle</p>
+                  <p className="text-2xl font-bold text-gray-900">
+                    ₹{(financeData?.currentCycle?.totalEarnings || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </p>
+                  <p className="mt-1 text-xs text-gray-500">{financeData?.currentCycle?.totalOrders || 0} orders</p>
+                </div>
+                <div className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+                  <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-gray-400">Pending payout</p>
+                  <p className="text-2xl font-bold text-gray-900">
+                    ₹{(financeData?.earnings?.pendingPayout || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </p>
+                  <p className="mt-1 text-xs text-gray-500">Total unsettled share</p>
+                </div>
+                <div className="col-span-2 rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-gray-400">Referral earnings</p>
+                      <p className="text-2xl font-bold text-gray-900">
+                        ₹{(financeData?.earnings?.referralEarnings || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </p>
+                      <p className="mt-1 text-xs text-gray-500">
+                        From {referralStats?.referralCount || 0} approved referrals
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={() => navigate("/food/restaurant/refer-earn")}
+                        className="text-sm font-medium text-red-600 hover:underline"
+                      >
+                        Refer more
+                      </button>
+                      <div className="rounded-full bg-red-50 p-3">
+                        <Gift className="h-6 w-6 text-red-600" />
+                      </div>
+                    </div>
                   </div>
                 </div>
-                <p className="text-[11px] text-gray-500 mt-4 border-t pt-3">
-                  Referral earnings are automatically added to your withdrawable balance.
-                </p>
               </div>
             </div>
 
-            {/* Withdrawal Requests */}
+            {/* Withdrawal requests + past cycles on desktop */}
+            <div className="md:grid md:grid-cols-2 md:gap-6 md:items-start">
             <div>
-              <h2 className="text-base font-bold text-gray-900 mb-3">Withdrawal requests</h2>
-              <div className="bg-white rounded-lg p-4">
+              <h2 className="mb-3 text-base font-bold text-gray-900">Withdrawal requests</h2>
+              <div className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm md:p-5">
                 {loadingWithdrawals ? (
                   <div className="py-6 text-center text-sm text-gray-500">Loading withdrawal requests...</div>
                 ) : withdrawalRequests.length === 0 ? (
@@ -919,7 +916,7 @@ export default function HubFinance() {
                     {withdrawalRequests.length > 8 ? (
                       <button
                         type="button"
-                        onClick={() => navigate("/restaurant/withdrawal-history")}
+                        onClick={() => navigate("/food/restaurant/withdrawal-history")}
                         className="w-full text-sm font-medium text-black hover:underline pt-1"
                       >
                         View all requests
@@ -932,8 +929,8 @@ export default function HubFinance() {
 
             {/* Past cycles */}
             <div>
-              <h2 className="text-base font-bold text-gray-900 mb-3">Past cycles</h2>
-              <div className="space-y-3">
+              <h2 className="mb-3 text-base font-bold text-gray-900">Past cycles</h2>
+              <div className="space-y-3 rounded-2xl border border-gray-100 bg-white p-4 shadow-sm md:p-5">
                 <div className="flex gap-2">
                   <div className="flex-1 relative" ref={dateRangePickerRef}>
                     <button 
@@ -1197,11 +1194,12 @@ export default function HubFinance() {
                 )}
               </div>
             </div>
+            </div>
           </div>
         )}
 
         {activeTab === "invoices" && (
-          <div className="space-y-4">
+          <div className="space-y-4 md:rounded-2xl md:border md:border-gray-200 md:bg-white md:p-6 md:shadow-sm">
             <div className="bg-white rounded-lg p-4 border border-gray-200">
               <h3 className="text-sm font-semibold text-gray-900 mb-3">Invoices & Taxes Summary</h3>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1375,7 +1373,9 @@ export default function HubFinance() {
         )}
       </AnimatePresence>
 
-      <BottomNavOrders />
+      <div className="md:hidden">
+        <BottomNavOrders />
+      </div>
     </div>
   )
 }

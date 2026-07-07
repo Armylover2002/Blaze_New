@@ -1,6 +1,6 @@
 import { useMemo, useState, useEffect, useRef, useCallback } from "react"
 import { useNavigate } from "react-router-dom"
-import { ChevronLeft, ChevronRight, Plus, MapPin, MoreHorizontal, Navigation, Home, Building2, Briefcase, Phone, X, Crosshair, Search } from "lucide-react"
+import { ChevronLeft, ChevronRight, Plus, MapPin, MoreHorizontal, Navigation, Home, Building2, Briefcase, Phone, X, Crosshair, Search, Trash2 } from "lucide-react"
 import { Button } from "@food/components/ui/button"
 import { Input } from "@food/components/ui/input"
 import { Label } from "@food/components/ui/label"
@@ -12,6 +12,14 @@ import { locationAPI, userAPI } from "@food/api"
 import AnimatedPage from "@food/components/user/AnimatedPage"
 import useAppBackNavigation from "@food/hooks/useAppBackNavigation"
 import { loadGoogleMaps } from "@/core/services/googleMapsLoader"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@food/components/ui/dialog"
 
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
@@ -101,7 +109,9 @@ export default function AddressSelectorPage() {
   const navigate = useNavigate()
   const goBack = useAppBackNavigation()
   const { location, loading, requestLocation, reverseGeocode } = useGeoLocation()
-  const { addresses = [], addAddress, updateAddress, setDefaultAddress, userProfile } = useProfile()
+  const { addresses = [], addAddress, updateAddress, setDefaultAddress, deleteAddress, userProfile } = useProfile()
+  const [addressToDelete, setAddressToDelete] = useState(null)
+  const [isDeleting, setIsDeleting] = useState(false)
   const [showAddressForm, setShowAddressForm] = useState(false)
   const [mapPosition, setMapPosition] = useState([22.7196, 75.8577]) // Default Indore coordinates [lat, lng]
   const [addressFormData, setAddressFormData] = useState({
@@ -162,6 +172,20 @@ export default function AddressSelectorPage() {
   const ENABLE_LOCATION_REVERSE_GEOCODE = import.meta.env.VITE_ENABLE_LOCATION_REVERSE_GEOCODE !== "false"
   const ENABLE_NOMINATIM_SEARCH = import.meta.env.VITE_ENABLE_NOMINATIM_SEARCH !== "false"
   const getAddressId = (address) => address?.id || address?._id || null
+
+  const handleDeleteConfirm = async () => {
+    if (!addressToDelete) return;
+    setIsDeleting(true);
+    try {
+      await deleteAddress(addressToDelete);
+      toast.success("Address deleted successfully");
+      setAddressToDelete(null);
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to delete address");
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   const handleBack = () => {
     goBack()
@@ -449,6 +473,45 @@ export default function AddressSelectorPage() {
       debugError("Reverse geocode error:", e)
     }
   }
+
+  // Auto-geocode from manual address fields (debounced)
+  useEffect(() => {
+    if (!showAddressForm || typeof window === "undefined" || !window.google) return;
+    const addr = `${addressFormData.street || ""}, ${addressFormData.city || ""}`.trim();
+    if (addr.length < 5) return;
+
+    const timeout = setTimeout(() => {
+      // Don't auto-geocode if the user just moved the map (which triggered reverse geocode)
+      // or if it's the same address we just geocoded
+      if (manualFieldRefs.current._lastGeocoded === addr) return;
+      manualFieldRefs.current._lastGeocoded = addr;
+
+      try {
+        const geocoder = new window.google.maps.Geocoder();
+        geocoder.geocode({ address: addr }, (results, status) => {
+          if (status === "OK" && results && results[0]) {
+            const location = results[0].geometry.location;
+            const lat = location.lat();
+            const lng = location.lng();
+            
+            // Update map but don't trigger reverse geocode again
+            const coordKey = `${lat.toFixed(5)},${lng.toFixed(5)}`;
+            manualFieldRefs.current._lastCoords = coordKey;
+            
+            setMapPosition([lat, lng]);
+            if (googleMapRef.current) {
+              googleMapRef.current.panTo(location);
+              googleMapRef.current.setZoom(17);
+            }
+          }
+        });
+      } catch (err) {
+        // Ignored
+      }
+    }, 1200);
+
+    return () => clearTimeout(timeout);
+  }, [addressFormData.street, addressFormData.city, showAddressForm]);
 
   const handleAddressFormSubmit = async (e) => {
     e.preventDefault()
@@ -793,31 +856,76 @@ export default function AddressSelectorPage() {
             ) : (
               addresses.map((addr, idx) => {
                 const Icon = getAddressIcon(addr)
+                const addrId = getAddressId(addr);
                 return (
-                  <button
-                    key={getAddressId(addr) || idx}
-                    onClick={() => handleSelectSavedAddress(addr)}
-                    className="w-full flex items-start gap-4 p-4 bg-slate-50 dark:bg-[#1a1a1a] rounded-xl hover:bg-red-50 dark:hover:bg-red-900/10 transition-colors text-left group"
-                  >
-                    <div className="h-10 w-10 rounded-full bg-white dark:bg-gray-800 flex items-center justify-center shadow-sm">
-                      <Icon className="h-5 w-5 text-gray-600 dark:text-gray-400" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-bold text-gray-900 dark:text-white capitalize">{addr.label || "Address"}</p>
-                      <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-2 mt-0.5">
-                        {[addr.additionalDetails, addr.street, addr.city, addr.state].filter(Boolean).join(", ")}
-                      </p>
-                    </div>
-                    <div className="h-6 w-6 rounded-full border border-gray-200 dark:border-gray-700 mt-2 flex items-center justify-center group-hover:border-[#FF0000]">
-                       <ChevronRight className="h-3 w-3 text-gray-400 group-hover:text-[#FF0000]" />
-                    </div>
-                  </button>
+                  <div key={addrId || idx} className="relative group">
+                    <button
+                      onClick={() => handleSelectSavedAddress(addr)}
+                      className="w-full flex items-start gap-4 p-4 bg-slate-50 dark:bg-[#1a1a1a] rounded-xl hover:bg-red-50 dark:hover:bg-red-900/10 transition-colors text-left"
+                    >
+                      <div className="h-10 w-10 rounded-full bg-white dark:bg-gray-800 flex items-center justify-center shadow-sm flex-shrink-0">
+                        <Icon className="h-5 w-5 text-gray-700 dark:text-gray-300" />
+                      </div>
+                      <div className="flex-1 min-w-0 pr-8">
+                        <div className="flex items-center gap-2 mb-1">
+                          <p className="font-bold text-gray-900 dark:text-white capitalize">{addr.label || "Address"}</p>
+                        </div>
+                        <p className="text-xs text-gray-500 line-clamp-2 leading-relaxed">
+                          {[addr.additionalDetails, addr.street, addr.city].filter(Boolean).join(", ")}
+                        </p>
+                      </div>
+                    </button>
+                    {addrId && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setAddressToDelete(addrId);
+                        }}
+                        className="absolute right-4 top-1/2 -translate-y-1/2 p-2 text-red-500 hover:bg-red-100 dark:hover:bg-red-900/20 rounded-full transition-colors"
+                        title="Delete Address"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
                 )
               })
             )}
           </div>
         </div>
       </div>
+
+      <Dialog open={!!addressToDelete} onOpenChange={(isOpen) => !isOpen && !isDeleting && setAddressToDelete(null)}>
+        <DialogContent className="sm:max-w-md w-[90vw] rounded-2xl mx-auto p-6 pt-8">
+          <DialogHeader className="pr-6">
+            <DialogTitle className="text-center sm:text-left">Delete Address</DialogTitle>
+            <DialogDescription className="text-center sm:text-left mt-2">
+              Are you sure you want to delete this address? This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex gap-2 sm:gap-0 mt-4">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setAddressToDelete(null)}
+              disabled={isDeleting}
+              className="flex-1 rounded-xl"
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={handleDeleteConfirm}
+              disabled={isDeleting}
+              className="flex-1 rounded-xl bg-red-600 hover:bg-red-700 text-white"
+            >
+              {isDeleting ? "Deleting..." : "Delete"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <style>{`
         @keyframes bounce-short {
           0%, 100% { transform: translateY(0); }

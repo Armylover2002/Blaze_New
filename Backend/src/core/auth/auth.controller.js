@@ -77,6 +77,7 @@ export const adminLoginController = async (req, res, next) => {
 export const getPublicRolesController = async (req, res, next) => {
   try {
     const roles = await getPublicRoles();
+    res.set('Cache-Control', 'no-store');
     return sendResponse(res, 200, "Roles fetched successfully", roles);
   } catch (error) {
     next(error);
@@ -197,10 +198,10 @@ export const updateAdminProfileController = async (req, res, next) => {
 export const changeAdminPasswordController = async (req, res, next) => {
   try {
     const { userId } = req.user;
-    const { currentPassword, newPassword } = validateAdminChangePasswordDto(
+    const { currentPassword, newPassword, refreshToken } = validateAdminChangePasswordDto(
       req.body,
     );
-    await changeAdminPassword(userId, currentPassword, newPassword);
+    await changeAdminPassword(userId, currentPassword, newPassword, refreshToken);
     return sendResponse(res, 200, "Password changed successfully", {
       success: true,
     });

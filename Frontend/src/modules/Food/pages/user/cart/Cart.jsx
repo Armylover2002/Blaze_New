@@ -199,6 +199,7 @@ export default function Cart() {
   const [isPlacingOrder, setIsPlacingOrder] = useState(false)
   const [showBillDetails, setShowBillDetails] = useState(true)
   const [showPlacingOrder, setShowPlacingOrder] = useState(false)
+  const [deliveryType, setDeliveryType] = useState("standard")
   const [isScheduled, setIsScheduled] = useState(false)
   const [scheduledDate, setScheduledDate] = useState("")
   const [scheduledTime, setScheduledTime] = useState("")
@@ -1038,10 +1039,11 @@ export default function Cart() {
 
     return Number(feeSettings.baseDeliveryFee || 0)
   })()
-  const deliveryFee =
+  const baseComputedDeliveryFee =
     pricing?.deliveryFee !== undefined && pricing?.deliveryFee !== null
       ? Number(pricing.deliveryFee || 0)
       : fallbackDeliveryFee
+  const deliveryFee = baseComputedDeliveryFee + (deliveryType === "fastest" ? 5 : 0)
   const deliveryFeeBreakdown = pricing?.deliveryFeeBreakdown || null
   const hasDistanceDeliveryBreakdown =
     deliveryFeeBreakdown?.source === "distance" &&
@@ -2099,6 +2101,26 @@ export default function Cart() {
     )
   }
 
+  let calculatedDeliveryTime = restaurantData?.estimatedDeliveryTime || "15-20 mins";
+  let maxUpperBound = 0;
+  let maxTimeString = "";
+  
+  cart.forEach((item) => {
+    const timeStr = String(item.preparationTime || "0");
+    const matches = timeStr.match(/\d+/g);
+    if (matches) {
+      const upper = Math.max(...matches.map(Number));
+      if (upper > maxUpperBound) {
+        maxUpperBound = upper;
+        maxTimeString = timeStr;
+      }
+    }
+  });
+
+  if (maxTimeString && maxUpperBound > 0) {
+    calculatedDeliveryTime = maxTimeString.includes("min") ? maxTimeString : `${maxTimeString} mins`;
+  }
+
   return (
     <div className="relative min-h-screen overflow-x-hidden bg-slate-50 dark:bg-[#0a0a0a]">
       {/* Header - Sticky at top */}
@@ -2117,7 +2139,7 @@ export default function Cart() {
               <div className="min-w-0">
                 <p className="text-xs md:text-sm text-gray-500 dark:text-gray-400">{restaurantName}</p>
                 <p className="text-sm md:text-base font-medium text-gray-800 dark:text-white truncate">
-                  {restaurantData?.estimatedDeliveryTime || "10-15 mins"} to <span className="font-semibold">Location</span>
+                  {calculatedDeliveryTime} to <span className="font-semibold">Location</span>
                   <span className="text-gray-400 dark:text-gray-500 ml-1 text-xs md:text-sm">{defaultAddress ? (formatFullAddress(defaultAddress) || defaultAddress?.formattedAddress || defaultAddress?.address || defaultAddress?.city || "Select address") : "Select address"}</span>
                 </p>
               </div>
@@ -2248,7 +2270,9 @@ export default function Cart() {
                       </div>
 
                       <p className="mt-3 text-lg font-bold tracking-tight text-gray-900 dark:text-white md:text-xl">
-                        Delivery in <span className="text-[#FF0000]">{restaurantData?.estimatedDeliveryTime || "15-20 mins"}</span>
+                        Delivery in <span className="text-[#FF0000]">
+                          {calculatedDeliveryTime}
+                        </span>
                       </p>
                       <p className="mt-1 max-w-xl text-sm leading-6 text-gray-600 dark:text-gray-300">
                         We prioritize your order, match the nearest available rider, and keep the handoff moving smoothly.
@@ -2546,6 +2570,66 @@ export default function Cart() {
                     )}
                   </div>
                 )}
+              </div>
+
+              {/* Delivery Type */}
+              <div className="bg-white dark:bg-[#1a1a1a] rounded-2xl overflow-hidden border border-slate-100 dark:border-gray-800 shadow-sm flex flex-col p-4 md:p-5">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-[15px] font-bold text-[#118A42] dark:text-green-500">Delivery Modes</h3>
+                    <span className="bg-[#118A42] text-white text-[10px] font-bold px-1.5 py-0.5 rounded tracking-wide">NEW</span>
+                  </div>
+                  <span className="text-sm font-medium text-gray-500">Instructions</span>
+                </div>
+                
+                <div className="flex flex-col gap-0">
+                  {/* Quick Delivery */}
+                  <div
+                    onClick={() => setDeliveryType("fastest")}
+                    className={`flex items-start gap-3 p-3 cursor-pointer rounded-xl transition-all ${
+                      deliveryType === "fastest" ? "bg-gray-50 dark:bg-gray-800/50" : "bg-transparent"
+                    }`}
+                  >
+                    <div className="mt-1">
+                      <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${
+                        deliveryType === "fastest" ? "border-[#118A42]" : "border-gray-300 dark:border-gray-600"
+                      }`}>
+                        {deliveryType === "fastest" && <div className="w-2.5 h-2.5 bg-[#118A42] rounded-full" />}
+                      </div>
+                    </div>
+                    <div className="flex-1 flex flex-col">
+                      <div className="flex items-center justify-between w-full">
+                        <span className={`text-[15px] font-semibold ${deliveryType === "fastest" ? "text-gray-900 dark:text-white" : "text-gray-600 dark:text-gray-400"}`}>
+                          Quick ⚡
+                        </span>
+                        <span className="text-[15px] font-medium text-gray-700 dark:text-gray-300">+{RUPEE_SYMBOL}5</span>
+                      </div>
+                      <span className="text-xs text-gray-400 mt-0.5">Add address to check delivery time</span>
+                    </div>
+                  </div>
+
+                  {/* Basic Delivery */}
+                  <div
+                    onClick={() => setDeliveryType("standard")}
+                    className={`flex items-start gap-3 p-3 cursor-pointer rounded-xl transition-all ${
+                      deliveryType === "standard" ? "bg-gray-50 dark:bg-gray-800/50" : "bg-transparent"
+                    }`}
+                  >
+                    <div className="mt-1">
+                      <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${
+                        deliveryType === "standard" ? "border-[#118A42]" : "border-gray-300 dark:border-gray-600"
+                      }`}>
+                        {deliveryType === "standard" && <div className="w-2.5 h-2.5 bg-[#118A42] rounded-full" />}
+                      </div>
+                    </div>
+                    <div className="flex-1 flex flex-col">
+                      <span className={`text-[15px] font-semibold ${deliveryType === "standard" ? "text-gray-900 dark:text-white" : "text-gray-600 dark:text-gray-400"}`}>
+                        Basic
+                      </span>
+                      <span className="text-xs text-gray-400 mt-0.5">Add address to check delivery time</span>
+                    </div>
+                  </div>
+                </div>
               </div>
 
               {/* Delivery Address */}

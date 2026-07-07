@@ -20,6 +20,16 @@ import { sendAdminResetOtpEmail } from "../../utils/email.js";
 import mongoose from "mongoose";
 import { AdminRole } from "../admin/role.model.js";
 import { creditReferralReward } from "../../modules/food/user/services/userWallet.service.js";
+import {
+  assertAdminForgotOtpRequestAllowed,
+  assertAdminForgotOtpVerificationAllowed,
+  assertAdminLoginAllowed,
+  clearAdminForgotOtpVerificationLockout,
+  clearAdminLoginLockout,
+  getAdminAccountLockoutKey,
+  lockAdminForgotOtpVerification,
+  recordAdminLoginFailure,
+} from "./auth.lockout.js";
 
 const ROLES = {
   USER: "USER",
@@ -174,8 +184,18 @@ export const requestUserOtp = async (phone) => {
     }
   }
 
-  const existingUser = await findExistingFoodUserByIdentifier(phone);
-  assertUserEligibleForOtp(existingUser);
+  // Check if the user exists and is deactivated
+  let userDoc;
+  if (isEmail) {
+    const emailLower = String(phone || "").trim().toLowerCase();
+    userDoc = await FoodUser.findOne({ email: emailLower });
+  } else {
+    userDoc = await FoodUser.findOne({ phone });
+  }
+
+  if (userDoc && (userDoc.isActive === false || userDoc.isDeleted === true || userDoc.accountStatus === 'deleted')) {
+    throw new AuthError("Your account has been deleted/deactivated. Please contact support.");
+  }
 
   const otp = await createOrUpdateOtp(phone);
   const shouldExposeOtp =
@@ -205,9 +225,15 @@ export const verifyUserOtpAndLogin = async (
     const emailLower = String(phone || "").trim().toLowerCase();
     userDoc = await FoodUser.findOne({ email: emailLower });
   } else {
-    userDoc = await FoodUser.findOne({ phone });
+    const candidates = getPhoneCandidates(phone);
+    const last10 = String(phone || "").replace(/\D/g, "").slice(-10);
+    const orClauses = [{ phone: { $in: candidates } }];
+    if (last10) {
+      orClauses.push({ phone: { $regex: new RegExp(`${last10}$`) } });
+    }
+    userDoc = await FoodUser.findOne({ $or: orClauses });
   }
-  
+
   // Ensure user exists and mark as verified on successful OTP.
   // Check if user is new or hasn't provided a name yet
   const needsNamePrompt = !userDoc || !userDoc.name || String(userDoc.name).trim() === "" || String(userDoc.name).toLowerCase() === "null";
@@ -394,24 +420,33 @@ export const adminLogin = async (email, password, roleId) => {
     throw new AuthError("User not found");
   }
 
+  const lockoutKey = getAdminAccountLockoutKey(admin);
+  await assertAdminLoginAllowed(lockoutKey);
+
   const isMatch = await admin.comparePassword(password);
   if (!isMatch) {
+    await recordAdminLoginFailure(lockoutKey);
     throw new AuthError("Incorrect password");
   }
 
   if (roleId) {
     if (roleId === 'ADMIN' && admin.role !== 'ADMIN') {
+      await recordAdminLoginFailure(lockoutKey);
       throw new AuthError("Please select the correct role for this account.");
     }
     if (roleId !== 'ADMIN') {
       if (admin.role !== 'EMPLOYEE') {
+        await recordAdminLoginFailure(lockoutKey);
         throw new AuthError("Please select the correct role for this account.");
       }
       if (admin.adminRoleId && String(admin.adminRoleId._id) !== roleId) {
+        await recordAdminLoginFailure(lockoutKey);
         throw new AuthError("Please select the correct role for this account.");
       }
     }
   }
+
+  await clearAdminLoginLockout(lockoutKey);
 
   const payload = { userId: admin._id.toString(), role: admin.role };
 
@@ -433,8 +468,16 @@ export const adminLogin = async (email, password, roleId) => {
 };
 
 export const getPublicRoles = async () => {
-  const roles = await AdminRole.find({ status: 'active' }).select('_id roleName').lean();
-  return roles;
+  const roles = await AdminRole.find({ status: 'active' })
+    .select('_id roleName')
+    .sort({ roleName: 1 })
+    .lean();
+
+  // Public login picker only needs stable id + display name.
+  return roles.map((role) => ({
+    _id: String(role._id),
+    roleName: String(role.roleName || '').trim(),
+  }));
 };
 
 export const requestRestaurantOtp = async (phone) => {
@@ -530,12 +573,17 @@ export const verifyRestaurantOtpAndLogin = async (phone, otp, fcmToken, platform
     };
   }
 
-  // Pending approval — issue a session so the partner can poll status without re-login
-  if (restaurant.status === "pending") {
+  // Pending first-time approval — issue session for status polling only for new restaurants
+  if (restaurant.status === "pending" && restaurant.wasEverApproved !== true) {
     return {
       ...(await issueRestaurantSession(restaurant)),
       isPendingApproval: true,
     };
+  }
+
+  // Re-verification or profile review after first approval — full panel access
+  if (restaurant.status === "pending" && restaurant.wasEverApproved === true) {
+    return issueRestaurantSession(restaurant);
   }
 
   // Block deactivated restaurants that are not awaiting first-time approval
@@ -573,7 +621,8 @@ export const issueRestaurantSession = async (restaurant) => {
     refreshToken,
     user,
     needsRegistration: false,
-    isPendingApproval: user?.status === "pending",
+    isPendingApproval:
+      user?.status === "pending" && user?.wasEverApproved !== true,
   };
 };
 
@@ -680,25 +729,25 @@ export const verifyDeliveryOtpAndLogin = async (phone, otp, fcmToken, platform) 
     token: refreshToken,
     expiresAt,
   });
-  
+
   const userObj = deliveryPartner.toObject();
-  
+
   // Reconstruct active vehicle and strip internal data for backward compatibility
   try {
-      if (userObj.driverVehicles && userObj.driverVehicles.length > 0) {
-          const activeId = userObj.activeVehicleId ? String(userObj.activeVehicleId) : null;
-          const activeVeh = activeId 
-              ? userObj.driverVehicles.find(v => String(v._id) === activeId || String(v.id) === activeId) 
-              : userObj.driverVehicles.find(v => v.isDefault) || userObj.driverVehicles[0];
-          
-          if (activeVeh) {
-              userObj.vehicleNumber = activeVeh.vehicleNumber;
-              userObj.vehicleType = activeVeh.vehicleCode;
-              userObj.vehicleName = activeVeh.vehicleName;
-              userObj.supportedServices = activeVeh.supportedServices;
-          }
+    if (userObj.driverVehicles && userObj.driverVehicles.length > 0) {
+      const activeId = userObj.activeVehicleId ? String(userObj.activeVehicleId) : null;
+      const activeVeh = activeId
+        ? userObj.driverVehicles.find(v => String(v._id) === activeId || String(v.id) === activeId)
+        : userObj.driverVehicles.find(v => v.isDefault) || userObj.driverVehicles[0];
+
+      if (activeVeh) {
+        userObj.vehicleNumber = activeVeh.vehicleNumber;
+        userObj.vehicleType = activeVeh.vehicleCode;
+        userObj.vehicleName = activeVeh.vehicleName;
+        userObj.supportedServices = activeVeh.supportedServices;
       }
-  } catch(e) {}
+    }
+  } catch (e) { }
 
   return {
     accessToken,
@@ -716,12 +765,12 @@ export const logout = async (refreshToken, fcmToken, platform) => {
   // 1. Remove specific FCM token from ALL collections if provided
   if (fcmToken) {
     console.log(`[FCM-Logout] Starting logout-driven token removal: platform=${platform}, tokenPreview=${fcmToken?.slice(0, 10)}...`);
-    
+
     // We try to remove the token from all 4 possible models regardless of the user ID, 
     // ensuring no stale connections are left across any role or app the user was logged into.
     const field = platform === "mobile" ? "fcmTokenMobile" : "fcmTokens";
     const models = [FoodUser, FoodRestaurant, FoodDeliveryPartner, FoodAdmin];
-    
+
     try {
       await Promise.all(
         models.map((model) =>
@@ -819,28 +868,28 @@ export const getProfile = async (userId, role) => {
 
         const location =
           doc.addressLine1 ||
-          doc.addressLine2 ||
-          doc.area ||
-          doc.city ||
-          doc.state ||
-          doc.pincode ||
-          doc.landmark
+            doc.addressLine2 ||
+            doc.area ||
+            doc.city ||
+            doc.state ||
+            doc.pincode ||
+            doc.landmark
             ? {
-                addressLine1: doc.addressLine1 || "",
-                addressLine2: doc.addressLine2 || "",
-                area: doc.area || "",
-                city: doc.city || "",
-                state: doc.state || "",
-                pincode: doc.pincode || "",
-                landmark: doc.landmark || "",
-              }
+              addressLine1: doc.addressLine1 || "",
+              addressLine2: doc.addressLine2 || "",
+              area: doc.area || "",
+              city: doc.city || "",
+              state: doc.state || "",
+              pincode: doc.pincode || "",
+              landmark: doc.landmark || "",
+            }
             : null;
 
         const menuImages = Array.isArray(doc.menuImages)
           ? doc.menuImages
-              .map((m) => (m && (typeof m === "string" ? m : m.url)) || null)
-              .filter(Boolean)
-              .map((url) => ({ url, publicId: null }))
+            .map((m) => (m && (typeof m === "string" ? m : m.url)) || null)
+            .filter(Boolean)
+            .map((url) => ({ url, publicId: null }))
           : [];
 
         profile = {
@@ -905,56 +954,56 @@ export const getProfile = async (userId, role) => {
           aadhar:
             partner.aadharPhoto || partner.aadharNumber
               ? {
-                  number: partner.aadharNumber || null,
-                  document: partner.aadharPhoto || null,
-                }
+                number: partner.aadharNumber || null,
+                document: partner.aadharPhoto || null,
+              }
               : null,
           pan:
             partner.panPhoto || partner.panNumber
               ? {
-                  number: partner.panNumber || null,
-                  document: partner.panPhoto || null,
-                }
+                number: partner.panNumber || null,
+                document: partner.panPhoto || null,
+              }
               : null,
           drivingLicense: partner.drivingLicensePhoto || partner.drivingLicenseNumber
             ? {
-                number: partner.drivingLicenseNumber || null,
-                document: partner.drivingLicensePhoto || null,
-              }
+              number: partner.drivingLicenseNumber || null,
+              document: partner.drivingLicensePhoto || null,
+            }
             : null,
           bankDetails:
             partner.bankAccountHolderName ||
-            partner.bankAccountNumber ||
-            partner.bankIfscCode ||
-            partner.bankName ||
-            partner.upiId ||
-            partner.upiQrCode
+              partner.bankAccountNumber ||
+              partner.bankIfscCode ||
+              partner.bankName ||
+              partner.upiId ||
+              partner.upiQrCode
               ? {
-                  accountHolderName: partner.bankAccountHolderName || null,
-                  accountNumber: partner.bankAccountNumber || null,
-                  ifscCode: partner.bankIfscCode || null,
-                  bankName: partner.bankName || null,
-                  upiId: partner.upiId || null,
-                  upiQrCode: partner.upiQrCode || null,
-                }
+                accountHolderName: partner.bankAccountHolderName || null,
+                accountNumber: partner.bankAccountNumber || null,
+                ifscCode: partner.bankIfscCode || null,
+                bankName: partner.bankName || null,
+                upiId: partner.upiId || null,
+                upiQrCode: partner.upiQrCode || null,
+              }
               : null,
         },
         location:
           partner.address || partner.city || partner.state
             ? {
-                addressLine1: partner.address,
-                city: partner.city,
-                state: partner.state,
-              }
+              addressLine1: partner.address,
+              city: partner.city,
+              state: partner.state,
+            }
             : null,
         vehicle:
           partner.vehicleType || partner.vehicleName || partner.vehicleNumber
             ? {
-                type: partner.vehicleType,
-                brand: partner.vehicleName,
-                model: partner.vehicleName,
-                number: partner.vehicleNumber,
-              }
+              type: partner.vehicleType,
+              brand: partner.vehicleName,
+              model: partner.vehicleName,
+              number: partner.vehicleNumber,
+            }
             : null,
       };
       break;
@@ -1053,6 +1102,7 @@ export const changeAdminPassword = async (
   userId,
   currentPassword,
   newPassword,
+  currentRefreshToken = null,
 ) => {
   if (!userId) {
     throw new AuthError("Invalid token payload");
@@ -1070,6 +1120,19 @@ export const changeAdminPassword = async (
   }
   admin.password = newPassword;
   await admin.save();
+
+  // Security: revoke existing sessions after a password change so any
+  // compromised/stale tokens can no longer be refreshed. Preserve the caller's
+  // current session (if provided) to avoid logging the acting admin out.
+  try {
+    const revokeFilter = { userId: admin._id };
+    if (currentRefreshToken) {
+      revokeFilter.token = { $ne: currentRefreshToken };
+    }
+    await FoodRefreshToken.deleteMany(revokeFilter);
+  } catch (e) {
+    logger?.warn?.({ err: e }, "Failed to revoke sessions after admin password change");
+  }
 
   try {
     const { notifyAdminsSafely } = await import("../../core/notifications/firebase.service.js");
@@ -1102,6 +1165,8 @@ export const requestAdminForgotPasswordOtp = async (email) => {
   if (!admin) {
     throw new AuthError("This email is not registered as an admin account.");
   }
+
+  await assertAdminForgotOtpRequestAllowed(normalizedEmail);
 
   const otp = config.useDefaultOtp
     ? "123456"
@@ -1145,6 +1210,8 @@ export const resetAdminPasswordWithOtp = async (email, otp, newPassword) => {
     throw new ValidationError("New password must be at least 6 characters");
   }
 
+  await assertAdminForgotOtpVerificationAllowed(normalizedEmail);
+
   const record = await AdminResetOtp.findOne({ email: normalizedEmail });
   if (!record) {
     throw new AuthError("OTP not found or expired. Please request a new code.");
@@ -1154,11 +1221,15 @@ export const resetAdminPasswordWithOtp = async (email, otp, newPassword) => {
     throw new AuthError("OTP has expired. Please request a new code.");
   }
   if (record.attempts >= (config.otpMaxAttempts || 5)) {
+    await lockAdminForgotOtpVerification(normalizedEmail);
     throw new AuthError("Too many attempts. Please request a new code.");
   }
   record.attempts += 1;
   if (record.otp !== otpStr) {
     await record.save();
+    if (record.attempts >= (config.otpMaxAttempts || 5)) {
+      await lockAdminForgotOtpVerification(normalizedEmail);
+    }
     throw new AuthError("Invalid OTP.");
   }
 
@@ -1171,6 +1242,15 @@ export const resetAdminPasswordWithOtp = async (email, otp, newPassword) => {
   admin.password = newPassword;
   await admin.save();
   await record.deleteOne();
+  await clearAdminForgotOtpVerificationLockout(normalizedEmail);
+
+  // Security: a forgot-password reset is unauthenticated, so revoke ALL
+  // existing sessions for this admin. The user re-authenticates via login.
+  try {
+    await FoodRefreshToken.deleteMany({ userId: admin._id });
+  } catch (e) {
+    logger?.warn?.({ err: e }, "Failed to revoke sessions after admin password reset");
+  }
 
   try {
     const { notifyAdminsSafely } = await import("../../core/notifications/firebase.service.js");

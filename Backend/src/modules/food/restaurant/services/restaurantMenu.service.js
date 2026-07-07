@@ -5,7 +5,7 @@ import { FoodItem } from '../../admin/models/food.model.js';
 import { FoodCategory } from '../../admin/models/category.model.js';
 import { getFoodDisplayPrice, getFoodDisplayOtherPrice, serializeFoodVariants } from '../../admin/services/foodVariant.service.js';
 
-const buildMenuFromFoods = async (foods = []) => {
+const buildMenuFromFoods = async (foods = [], filterPublicOnly = false) => {
     const categoryIds = Array.from(
         new Set(
             (foods || [])
@@ -20,14 +20,28 @@ const buildMenuFromFoods = async (foods = []) => {
 
     const categoryDocs = categoryIds.length
         ? await FoodCategory.find({ _id: { $in: categoryIds } })
-            .select('name image sortOrder')
+            .select('name image sortOrder isActive approvalStatus')
             .lean()
         : [];
     const categoryMap = new Map(categoryDocs.map((doc) => [String(doc._id), doc]));
 
+    const allowedCategories = new Set();
+    if (filterPublicOnly) {
+        for (const doc of categoryDocs) {
+            if (doc.isActive !== false && doc.approvalStatus === 'approved') {
+                allowedCategories.add(String(doc._id));
+            }
+        }
+    }
+
     const byCategory = new Map();
     for (const food of foods) {
         const categoryId = food?.categoryId ? String(food.categoryId) : '';
+        
+        if (filterPublicOnly && categoryId && !allowedCategories.has(categoryId)) {
+            continue;
+        }
+
         const categoryDoc = categoryMap.get(categoryId) || null;
         const sectionName = (categoryDoc?.name || food?.categoryName || food?.category || 'Menu').trim() || 'Menu';
         const groupKey = categoryId || `name:${sectionName.toLowerCase()}`;
@@ -48,6 +62,8 @@ const buildMenuFromFoods = async (foods = []) => {
             categoryId: categoryId || null,
             categoryName: sectionName,
             category: sectionName,
+            hasValidCategory: Boolean(categoryDoc),
+            needsCategoryAssignment: !categoryDoc,
             name: food.name,
             description: food.description || '',
             price: getFoodDisplayPrice(food),
@@ -148,7 +164,7 @@ export async function getPublicApprovedRestaurantMenu(restaurantIdOrSlug) {
         .sort({ createdAt: -1 })
         .limit(2000)
         .lean();
-    return buildMenuFromFoods(foods);
+    return buildMenuFromFoods(foods, true);
 }
 
 const MAX_BATCH_MENU_IDS = 50;
@@ -200,20 +216,31 @@ export async function getPublicMenusBatch(restaurantIds = []) {
         )
     );
     const categoryDocs = categoryIds.length
-        ? await FoodCategory.find({ _id: { $in: categoryIds } }).select('name image').lean()
+        ? await FoodCategory.find({ _id: { $in: categoryIds } }).select('name image isActive approvalStatus').lean()
         : [];
     const categoryMap = new Map(categoryDocs.map((doc) => [String(doc._id), doc]));
+
+    const allowedCategories = new Set();
+    for (const doc of categoryDocs) {
+        if (doc.isActive !== false && doc.approvalStatus === 'approved') {
+            allowedCategories.add(String(doc._id));
+        }
+    }
 
     const menusByRestaurant = new Map();
 
     for (const food of foods) {
+        const categoryId = food?.categoryId ? String(food.categoryId) : '';
+        if (categoryId && !allowedCategories.has(categoryId)) {
+            continue;
+        }
+
         const restaurantKey = String(food.restaurantId);
         if (!menusByRestaurant.has(restaurantKey)) {
             menusByRestaurant.set(restaurantKey, new Map());
         }
         const sectionMap = menusByRestaurant.get(restaurantKey);
 
-        const categoryId = food?.categoryId ? String(food.categoryId) : '';
         const categoryDoc = categoryMap.get(categoryId) || null;
         const sectionName = (categoryDoc?.name || food?.categoryName || food?.category || 'Menu').trim() || 'Menu';
         const groupKey = categoryId || `name:${sectionName.toLowerCase()}`;

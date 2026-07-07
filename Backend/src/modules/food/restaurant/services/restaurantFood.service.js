@@ -128,9 +128,11 @@ const resolveCategoryForRestaurant = async (context, body = {}) => {
         return { categoryObjectId: undefined, categoryName: '' };
     }
 
+    // Note: we intentionally do NOT filter by isActive here. An inactive category can
+    // still be resolved so we can surface a precise, professional error message instead
+    // of a generic "not found". The explicit isActive check happens after resolution.
     const baseFilter = {
-        ...getAccessibleCategoryFilter(context),
-        isActive: { $ne: false }
+        ...getAccessibleCategoryFilter(context)
     };
     if (context.pureVegRestaurant) {
         baseFilter.foodTypeScope = 'Veg';
@@ -167,6 +169,9 @@ const resolveCategoryForRestaurant = async (context, body = {}) => {
 
     await backfillLegacyCategoryWorkflow([category]);
 
+    if (category.isActive === false) {
+        throw new ValidationError('This category is currently inactive and is not available for use.');
+    }
     if (String(category.approvalStatus || '') !== 'approved') {
         throw new ValidationError('This category is awaiting admin approval');
     }
@@ -283,7 +288,28 @@ export async function updateRestaurantFood(restaurantId, foodId, body = {}) {
         update.images = img ? [img] : [];
     }
     Object.assign(update, getUpdatedFoodPricing(existing, body));
-    if (body.isAvailable !== undefined) update.isAvailable = body.isAvailable !== false;
+    const nextIsAvailable = body.isAvailable !== undefined
+        ? body.isAvailable !== false
+        : existing.isAvailable !== false;
+
+    if (body.isAvailable !== undefined) {
+        if (nextIsAvailable) {
+            const categoryIdForCheck = body.categoryId !== undefined ? body.categoryId : existing.categoryId;
+            const categoryNameForCheck = body.categoryName !== undefined ? body.categoryName : existing.categoryName;
+            const foodTypeForCheck = body.foodType !== undefined ? normalizeFoodType(body.foodType) : normalizeFoodType(existing.foodType);
+
+            if (!categoryIdForCheck && !toStr(categoryNameForCheck)) {
+                throw new ValidationError('Assign this item to a category before making it available');
+            }
+
+            await resolveCategoryForRestaurant(context, {
+                categoryId: categoryIdForCheck,
+                categoryName: categoryNameForCheck,
+                foodType: foodTypeForCheck
+            });
+        }
+        update.isAvailable = nextIsAvailable;
+    }
     if (body.preparationTime !== undefined) update.preparationTime = toStr(body.preparationTime);
 
     const targetFoodType = body.foodType !== undefined ? normalizeFoodType(body.foodType) : normalizeFoodType(existing.foodType);

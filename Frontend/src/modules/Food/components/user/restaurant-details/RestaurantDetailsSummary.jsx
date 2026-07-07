@@ -45,10 +45,10 @@ export default function RestaurantDetailsSummary({
             <div className="flex flex-col items-center shrink-0">
               <div className="flex items-center gap-1 rounded-xl bg-[#FF0000] text-white px-3 py-1.5 shadow-md">
                 <Star className="h-4 w-4 fill-white" />
-                <span className="text-base font-bold">{restaurant?.rating || "4.5"}</span>
+                <span className="text-base font-bold">{restaurant?.rating > 0 ? restaurant.rating : "New"}</span>
               </div>
               <span className="text-[11px] text-gray-500 mt-1 font-medium">
-                {(restaurant?.reviews || 0).toLocaleString()}+ ratings
+                {restaurant?.reviews > 0 ? `${restaurant.reviews.toLocaleString()}+ ratings` : "No ratings yet"}
               </span>
             </div>
           </div>

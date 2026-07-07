@@ -1,5 +1,4 @@
 import { api, restaurantAPI } from "@food/api"
-import { loadOnboardingDraft } from "@food/utils/onboardingDraftStorage"
 
 const debugError = (...args) => {}
 
@@ -269,16 +268,6 @@ export const checkOnboardingStatus = async () => {
     // No onboarding data, start from step 1
     return 1
   } catch (err) {
-    // If API call fails, check session draft storage
-    try {
-      const parsed = loadOnboardingDraft()
-      if (parsed) {
-        return parsed.currentStep || 1
-      }
-    } catch (localErr) {
-      debugError("Failed to check onboarding draft storage:", localErr)
-    }
-    // Default to step 1 if everything fails
     return 1
   }
 }

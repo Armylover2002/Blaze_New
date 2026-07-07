@@ -53,22 +53,23 @@ export default function ShareFeedback() {
   }
 
   return (
-    <div className="min-h-screen bg-white flex flex-col">
+    <div className="min-h-full bg-white lg:bg-slate-50 flex flex-col">
+      <div className="lg:max-w-lg lg:mx-auto lg:w-full lg:py-10 lg:px-8 lg:flex lg:flex-col lg:flex-1">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 pt-4 pb-3">
-        <h1 className="text-xl font-semibold text-gray-900">
+      <div className="flex items-center justify-between px-4 pt-4 pb-3 lg:px-0 lg:pt-0">
+        <h1 className="text-xl font-semibold text-gray-900 lg:text-2xl">
           Share your feedback
         </h1>
         <button
           onClick={handleClose}
-          className="p-2 rounded-full hover:bg-gray-100"
+          className="p-2 rounded-full hover:bg-gray-100 lg:hidden"
           aria-label="Close"
         >
           <X className="w-5 h-5 text-gray-900" />
         </button>
       </div>
 
-      <div className="flex-1 px-4">
+      <div className="flex-1 px-4 lg:px-0 lg:rounded-2xl lg:border lg:border-slate-200 lg:bg-white lg:p-8 lg:shadow-sm">
         {/* Question */}
         <div className="mt-6 mb-6">
           <p className="text-sm text-gray-700 mb-1">Tell us about your</p>
@@ -78,8 +79,8 @@ export default function ShareFeedback() {
         </div>
 
         {/* Rating scale */}
-        <div className="mb-3">
-          <div className="grid grid-cols-11 gap-1 rounded-xl border border-gray-300 bg-white overflow-hidden">
+        <div className="mb-3 lg:mb-6">
+          <div className="grid grid-cols-11 gap-1 rounded-xl border border-gray-300 bg-white overflow-hidden lg:gap-1.5">
             {numbers.map((num) => {
               const isActive = rating === num
               const intensity =
@@ -126,7 +127,7 @@ export default function ShareFeedback() {
         </div>
 
         {/* Illustration placeholder */}
-        <div className="mt-10 flex items-center justify-center">
+        <div className="mt-10 flex items-center justify-center lg:mt-8">
           <div className="w-full max-w-xs h-48 rounded-3xl bg-gradient-to-r from-indigo-100 via-pink-100 to-yellow-100 flex items-end justify-center px-6 pb-6">
             <div className="flex items-end gap-2 w-full justify-between">
               <div className="w-10 h-20 rounded-full bg-indigo-300" />
@@ -140,20 +141,21 @@ export default function ShareFeedback() {
       </div>
 
       {/* Bottom button */}
-      <div className="px-4 pb-6 pt-2">
+      <div className="px-4 pb-6 pt-2 lg:px-0 lg:pb-0 lg:pt-6">
         <motion.button
           type="button"
           onClick={handleContinue}
-          disabled={rating === null}
+          disabled={rating === null || isSubmitting}
           className={`w-full py-3 rounded-full text-sm font-medium transition-colors ${
-            rating === null
+            rating === null || isSubmitting
               ? "bg-gray-200 text-gray-500"
               : "bg-black text-white hover:bg-gray-900"
           }`}
-          whileTap={rating !== null ? { scale: 0.98 } : undefined}
+          whileTap={rating !== null && !isSubmitting ? { scale: 0.98 } : undefined}
         >
-          Continue
+          {isSubmitting ? "Submitting..." : "Continue"}
         </motion.button>
+      </div>
       </div>
 
       {/* Thank you popup */}

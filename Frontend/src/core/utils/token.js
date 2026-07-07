@@ -1,25 +1,9 @@
-import { jwtDecode } from 'jwt-decode';
-
-export const decodeToken = (token) => {
-    try {
-        return jwtDecode(token);
-    } catch (error) {
-        return null;
-    }
-};
-
-export const isTokenExpired = (token) => {
-    try {
-        const decoded = jwtDecode(token);
-        if (!decoded.exp) return false;
-        const now = Date.now() / 1000;
-        return decoded.exp < now;
-    } catch (error) {
-        return true;
-    }
-};
-
-export const getRoleFromToken = (token) => {
-    const decoded = decodeToken(token);
-    return decoded?.role || null;
-};
+/**
+ * @deprecated Import from `@food/utils/auth` instead.
+ * Re-exports token helpers from the canonical auth module.
+ */
+export {
+  decodeToken,
+  isTokenExpired,
+  getRoleFromToken,
+} from "@food/utils/auth";

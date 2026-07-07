@@ -387,83 +387,86 @@ export default function Feedback() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-100 flex flex-col" onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd}>
-      <div className="sticky bg-white top-0 z-40 px-4 py-3 border-b border-gray-200">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-[10px] tracking-wider text-gray-500 uppercase">Showing data for</p>
-            <p className="text-md font-bold text-gray-900">{restaurantData?.name || "Restaurant"}</p>
+    <div className="min-h-full bg-gray-100 flex flex-col lg:bg-slate-50" onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd}>
+      <div className="sticky bg-white top-0 z-40 px-4 py-3 border-b border-gray-200 lg:backdrop-blur lg:bg-white/95">
+        <div className="lg:max-w-6xl lg:mx-auto lg:px-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-[10px] tracking-wider text-gray-500 uppercase lg:text-xs">Showing data for</p>
+              <p className="text-md font-bold text-gray-900 lg:text-2xl">{restaurantData?.name || "Restaurant"}</p>
+              <p className="hidden lg:block text-sm text-gray-500 mt-0.5">Complaints and customer reviews</p>
+            </div>
+            <div className="flex items-center gap-2 lg:hidden">
+              <button
+                type="button"
+                onClick={() => navigate("/food/restaurant/notifications")}
+                className="p-1 rounded-full hover:bg-gray-100 active:scale-95 transition-all"
+                aria-label="Open notifications"
+              >
+                <Bell className="w-6 h-6 text-gray-700" />
+              </button>
+              <button
+                type="button"
+                onClick={() => navigate("/food/restaurant/help-centre/support")}
+                className="p-1 rounded-full hover:bg-gray-100 active:scale-95 transition-all"
+                aria-label="Open support"
+              >
+                <HelpCircle className="w-6 h-6 text-gray-700" />
+              </button>
+              <button
+                type="button"
+                onClick={() => navigate("/food/restaurant/explore")}
+                className="p-1 rounded-full hover:bg-gray-100 active:scale-95 transition-all"
+                aria-label="Open explore"
+              >
+                <Menu className="w-6 h-6 text-gray-700" />
+              </button>
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => navigate("/food/restaurant/notifications")}
-              className="p-1 rounded-full hover:bg-gray-100 active:scale-95 transition-all"
-              aria-label="Open notifications"
-            >
-              <Bell className="w-6 h-6 text-gray-700" />
-            </button>
-            <button
-              type="button"
-              onClick={() => navigate("/food/restaurant/help-centre/support")}
-              className="p-1 rounded-full hover:bg-gray-100 active:scale-95 transition-all"
-              aria-label="Open support"
-            >
-              <HelpCircle className="w-6 h-6 text-gray-700" />
-            </button>
-            <button
-              type="button"
-              onClick={() => navigate("/food/restaurant/explore")}
-              className="p-1 rounded-full hover:bg-gray-100 active:scale-95 transition-all"
-              aria-label="Open explore"
-            >
-              <Menu className="w-6 h-6 text-gray-700" />
-            </button>
+          
+          <div className="flex gap-2 mt-4 lg:mt-5">
+            {tabs.map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`px-6 py-2 rounded-full text-sm font-bold transition-all lg:px-8 lg:py-2.5 ${
+                  activeTab === tab.id ? "bg-[#FF0000] text-white shadow-lg shadow-[#FF0000]/20" : "bg-white text-gray-600 border border-gray-200 lg:bg-slate-100 lg:border-slate-200"
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
           </div>
-        </div>
-        
-        <div className="flex gap-2 mt-4">
-          {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`px-6 py-2 rounded-full text-sm font-bold transition-all ${
-                activeTab === tab.id ? "bg-[#FF0000] text-white shadow-lg shadow-[#FF0000]/20" : "bg-white text-gray-600 border border-gray-200"
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
         </div>
       </div>
 
-      <div className="flex-1 p-4">
+      <div className="flex-1 p-4 lg:max-w-6xl lg:mx-auto lg:px-8 lg:py-6 lg:w-full">
         {activeTab === "complaints" ? (
           <div className="space-y-4">
-            <div className="flex gap-2">
-              <button onClick={() => setIsDateSelectorOpen(true)} className="flex-1 bg-white p-3 rounded-xl border border-gray-200 flex justify-between items-center">
+            <div className="flex gap-2 lg:gap-3">
+              <button onClick={() => setIsDateSelectorOpen(true)} className="flex-1 bg-white p-3 rounded-xl border border-gray-200 flex justify-between items-center lg:max-w-xs lg:rounded-2xl lg:px-4 lg:py-3 lg:shadow-sm hover:border-gray-300 transition-colors">
                 <div className="text-left">
-                  <p className="text-xs font-bold text-gray-900">{selectedDateRange}</p>
-                  <p className="text-[10px] text-gray-500">Select date range</p>
+                  <p className="text-xs font-bold text-gray-900 lg:text-sm capitalize">{selectedDateRange.replace(/([A-Z])/g, ' $1').trim()}</p>
+                  <p className="text-[10px] text-gray-500 lg:text-xs">Select date range</p>
                 </div>
                 <Calendar className="w-4 h-4 text-gray-400" />
               </button>
-              <button onClick={() => setIsComplaintsFilterOpen(true)} className="bg-white p-3 rounded-xl border border-gray-200">
+              <button onClick={() => setIsComplaintsFilterOpen(true)} className="bg-white p-3 rounded-xl border border-gray-200 lg:rounded-2xl lg:px-4 lg:shadow-sm hover:border-gray-300 transition-colors">
                 <SlidersHorizontal className="w-4 h-4 text-gray-900" />
               </button>
             </div>
 
             <AnimatePresence mode="wait">
               {isComplaintsLoading ? (
-                <div className="flex justify-center p-10"><Loader2 className="animate-spin text-gray-400" /></div>
+                <div className="flex justify-center p-10 lg:py-20"><Loader2 className="animate-spin text-gray-400" /></div>
               ) : complaints.length === 0 ? (
-                <div className="text-center py-20 bg-gray-50 rounded-3xl border border-dashed border-gray-200">
+                <div className="text-center py-20 bg-gray-50 rounded-3xl border border-dashed border-gray-200 lg:py-24 lg:bg-white">
                   <p className="text-sm text-gray-500 font-medium">No complaints found</p>
                 </div>
               ) : (
-                <div className="space-y-4 pb-20">
+                <div className="space-y-4 pb-20 lg:grid lg:grid-cols-2 lg:gap-4 lg:space-y-0 lg:pb-0 xl:grid-cols-2">
                   {complaints.map((complaint) => (
-                    <div key={complaint._id} className="bg-white rounded-2xl p-4 border border-gray-100 shadow-sm space-y-3">
+                    <div key={complaint._id} className="bg-white rounded-2xl p-4 border border-gray-100 shadow-sm space-y-3 lg:p-5 lg:border-slate-200 lg:shadow-md hover:shadow-lg transition-shadow">
                       <div className="flex justify-between items-center">
                         <span className={`text-[9px] font-black px-2 py-0.5 rounded-full uppercase tracking-tighter ${
                           complaint.status === 'open' ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'
@@ -500,19 +503,40 @@ export default function Feedback() {
           </div>
         ) : (
           <div className="space-y-4">
-            <div className="flex gap-2">
-              <div className="flex-1 bg-white p-3 rounded-xl border border-gray-200 flex items-center gap-2">
+            {activeTab === "reviews" && ratingSummary.totalReviews > 0 && (
+              <div className="hidden lg:flex items-center gap-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[#FF0000] text-xl font-bold text-white">
+                    {ratingSummary.averageRating}
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-gray-900">Average rating</p>
+                    <p className="text-xs text-gray-500">{ratingSummary.totalReviews} reviews · {ratingSummary.totalRatings} rated orders</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="flex gap-2 lg:gap-3">
+              <div className="flex-1 bg-white p-3 rounded-xl border border-gray-200 flex items-center gap-2 lg:max-w-md lg:rounded-2xl lg:px-4 lg:shadow-sm">
                 <Search className="w-4 h-4 text-gray-400" />
                 <input type="text" placeholder="Search reviews" className="flex-1 text-sm bg-transparent focus:outline-none" />
               </div>
-              <button onClick={() => setIsFilterOpen(true)} className="bg-white p-3 rounded-xl border border-gray-200">
+              <button onClick={() => setIsFilterOpen(true)} className="bg-white p-3 rounded-xl border border-gray-200 lg:rounded-2xl lg:px-4 lg:shadow-sm hover:border-gray-300 transition-colors">
                 <SlidersHorizontal className="w-4 h-4 text-gray-900" />
               </button>
             </div>
 
-            <div className="space-y-4 pb-20">
+            {isLoadingReviews ? (
+              <div className="flex justify-center p-10 lg:py-20"><Loader2 className="animate-spin text-gray-400" /></div>
+            ) : displayedReviews.length === 0 ? (
+              <div className="text-center py-20 bg-gray-50 rounded-3xl border border-dashed border-gray-200 lg:py-24 lg:bg-white">
+                <p className="text-sm text-gray-500 font-medium">No reviews found</p>
+              </div>
+            ) : (
+            <div className="space-y-4 pb-20 lg:grid lg:grid-cols-2 lg:gap-4 lg:space-y-0 lg:pb-0 xl:grid-cols-2">
               {displayedReviews.map((review) => (
-                <div key={review.id} className="bg-white rounded-2xl p-4 border border-gray-100 shadow-sm space-y-3">
+                <div key={review.id} className="bg-white rounded-2xl p-4 border border-gray-100 shadow-sm space-y-3 lg:p-5 lg:border-slate-200 lg:shadow-md hover:shadow-lg transition-shadow">
                   <div className="flex items-center justify-between text-[10px] text-gray-400 font-bold uppercase">
                     <span>Order #{review.orderNumber}</span>
                     <span>{review.date}</span>
@@ -530,10 +554,13 @@ export default function Feedback() {
                 </div>
               ))}
             </div>
+            )}
           </div>
         )}
       </div>
-      <BottomNavOrders />
+      <div className="lg:hidden">
+        <BottomNavOrders />
+      </div>
     </div>
   )
 }

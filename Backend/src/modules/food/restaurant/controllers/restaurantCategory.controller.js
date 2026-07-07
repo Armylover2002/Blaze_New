@@ -3,7 +3,8 @@ import {
     listPublicCategories,
     createRestaurantCategory,
     updateRestaurantCategory,
-    deleteRestaurantCategory
+    deleteRestaurantCategory,
+    getRestaurantCategoryStatus
 } from '../services/restaurantCategory.service.js';
 import { sendResponse, sendError } from '../../../../utils/response.js';
 import { FoodRestaurant } from '../models/restaurant.model.js';
@@ -28,6 +29,17 @@ export const listCategoriesController = async (req, res, next) => {
         }
         const data = await listRestaurantCategories(restaurantId, query);
         return sendResponse(res, 200, 'Categories fetched successfully', data);
+    } catch (error) {
+        next(error);
+    }
+};
+
+export const getCategoryStatusController = async (req, res, next) => {
+    try {
+        const restaurantId = req.user?.userId;
+        const category = await getRestaurantCategoryStatus(restaurantId, req.params.id);
+        if (!category) return sendError(res, 404, 'Category not found');
+        return sendResponse(res, 200, 'Category status fetched successfully', { category });
     } catch (error) {
         next(error);
     }

@@ -6,6 +6,7 @@ import { QuickOrder } from '../models/order.model.js';
 import { Seller } from '../seller/models/seller.model.js';
 import { SellerOrder } from '../seller/models/sellerOrder.model.js';
 import { QuickZone } from '../models/quick_zone.model.js';
+import { assertNoZoneOverlap, ZONE_OVERLAP_MESSAGE } from '../../../utils/zoneOverlap.js';
 import { resolveQuickOrderCancellationReason } from '../utils/cancellation.helpers.js';
 import { resolveQuickOrderCustomer } from '../utils/customer.helpers.js';
 import { uploadImageBuffer } from '../../../services/cloudinary.service.js';
@@ -1314,17 +1315,27 @@ export const createAdminZone = async (req, res) => {
     return res.status(400).json({ success: false, message: 'Zone must have at least 3 coordinates' });
   }
 
+  const normalizedCoordinates = coordinates.map((coord) => ({
+    latitude: Number(coord?.latitude ?? coord?.lat),
+    longitude: Number(coord?.longitude ?? coord?.lng),
+  }));
+  const country = body.country ? String(body.country).trim() : 'India';
+
+  const overlapResult = await assertNoZoneOverlap(QuickZone, normalizedCoordinates, {
+    extraFilter: { country },
+  });
+  if (overlapResult) {
+    return res.status(409).json({ success: false, message: ZONE_OVERLAP_MESSAGE });
+  }
+
   const zone = await QuickZone.create({
     name,
     zoneName: body.zoneName && String(body.zoneName).trim() ? String(body.zoneName).trim() : name,
-    country: body.country ? String(body.country).trim() : 'India',
+    country,
     serviceLocation: body.serviceLocation ? String(body.serviceLocation).trim() : name,
     unit: body.unit === 'miles' ? 'miles' : 'kilometer',
     isActive: body.isActive !== false,
-    coordinates: coordinates.map((coord) => ({
-      latitude: Number(coord?.latitude ?? coord?.lat),
-      longitude: Number(coord?.longitude ?? coord?.lng),
-    })),
+    coordinates: normalizedCoordinates,
   });
 
   return res.status(201).json({ success: true, data: { zone } });
@@ -1344,10 +1355,18 @@ export const updateAdminZone = async (req, res) => {
   if (body.unit !== undefined) zone.unit = body.unit === 'miles' ? 'miles' : 'kilometer';
   if (body.isActive !== undefined) zone.isActive = body.isActive !== false;
   if (Array.isArray(body.coordinates) && body.coordinates.length >= 3) {
-    zone.coordinates = body.coordinates.map((coord) => ({
+    const normalizedCoordinates = body.coordinates.map((coord) => ({
       latitude: Number(coord?.latitude ?? coord?.lat),
       longitude: Number(coord?.longitude ?? coord?.lng),
     }));
+    const overlapResult = await assertNoZoneOverlap(QuickZone, normalizedCoordinates, {
+      excludeId: zone._id,
+      extraFilter: { country: zone.country },
+    });
+    if (overlapResult) {
+      return res.status(409).json({ success: false, message: ZONE_OVERLAP_MESSAGE });
+    }
+    zone.coordinates = normalizedCoordinates;
   }
   if (!zone.zoneName) zone.zoneName = zone.name;
   if (!zone.serviceLocation) zone.serviceLocation = zone.name;

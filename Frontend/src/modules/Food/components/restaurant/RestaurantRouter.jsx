@@ -71,13 +71,35 @@ const VerificationPending = lazy(() => import("@food/pages/restaurant/auth/Verif
 
 export default function RestaurantRouter() {
   useEffect(() => {
-    // Initialize restaurant app settings and favicon
     setAppType('restaurant')
     loadBusinessSettings()
   }, [])
 
+  useEffect(() => {
+    document.documentElement.classList.add("restaurant-panel")
+    return () => {
+      document.documentElement.classList.remove("restaurant-panel")
+    }
+  }, [])
+
   return (
     <ErrorBoundary>
+      <style>{`
+        html.restaurant-panel button:not(:disabled),
+        html.restaurant-panel [data-slot="button"]:not(:disabled),
+        html.restaurant-panel [role="button"]:not([aria-disabled="true"]),
+        html.restaurant-panel input[type="button"]:not(:disabled),
+        html.restaurant-panel input[type="submit"]:not(:disabled) {
+          cursor: pointer;
+        }
+        html.restaurant-panel button:disabled,
+        html.restaurant-panel [data-slot="button"]:disabled {
+          cursor: not-allowed;
+        }
+        html.restaurant-panel a[href] {
+          cursor: pointer;
+        }
+      `}</style>
       <Suspense fallback={<Loader />}>
       <Routes>
         {/* Auth Routes — redirect to dashboard if already logged in */}

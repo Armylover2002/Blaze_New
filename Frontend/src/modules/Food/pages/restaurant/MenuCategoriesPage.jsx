@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from "react-router-dom"
 import useRestaurantBackNavigation from "@food/hooks/useRestaurantBackNavigation"
 import { AnimatePresence, motion } from "framer-motion"
 import {
+  AlertTriangle,
   ArrowLeft,
   BadgeCheck,
   Clock3,
@@ -30,8 +31,11 @@ const defaultFormData = {
   foodTypeScope: "Veg",
 }
 
+const INACTIVE_CATEGORY_WARNING = "This category is currently inactive and is not available for use."
+
 const approvalBadgeClass = (status) => {
   const value = String(status || "pending").toLowerCase()
+  if (value === "deactivated") return "bg-slate-100 text-slate-700 border-slate-300"
   if (value === "approved") return "bg-emerald-50 text-emerald-700 border-emerald-200"
   if (value === "rejected") return "bg-rose-50 text-rose-700 border-rose-200"
   return "bg-amber-50 text-amber-700 border-amber-200"
@@ -56,6 +60,8 @@ export default function MenuCategoriesPage() {
   const [imagePreview, setImagePreview] = useState(null)
   const [uploadingImage, setUploadingImage] = useState(false)
   const [isPhotoPickerOpen, setIsPhotoPickerOpen] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState(null)
+  const [deletingCategory, setDeletingCategory] = useState(false)
   const fileInputRef = useRef(null)
 
   useEffect(() => {
@@ -193,19 +199,28 @@ export default function MenuCategoriesPage() {
     }
   }
 
-  const handleDeleteCategory = async (category) => {
-    if (!category?.canDelete) {
-      toast.error(category?.canEdit ? "Remove foods from this category before deleting it" : "Admin controls this category now")
+  const handleDeleteCategory = async () => {
+    const category = deleteTarget
+    if (!category?.canDelete && !category?.canEdit) {
+      toast.error("Admin controls this category now")
       return
     }
-    if (!window.confirm(`Delete "${category.name}"?`)) return
 
     try {
-      await restaurantAPI.deleteCategory(category._id || category.id)
-      toast.success("Category deleted successfully")
+      setDeletingCategory(true)
+      const response = await restaurantAPI.deleteCategory(category._id || category.id)
+      const deactivatedCount = Number(response?.data?.data?.deactivatedItemCount || 0)
+      if (deactivatedCount > 0) {
+        toast.success(`Category deleted. ${deactivatedCount} linked item(s) were marked inactive.`)
+      } else {
+        toast.success("Category deleted successfully")
+      }
+      setDeleteTarget(null)
       fetchCategories()
     } catch (error) {
       toast.error(error?.response?.data?.message || "Failed to delete category")
+    } finally {
+      setDeletingCategory(false)
     }
   }
 
@@ -218,29 +233,144 @@ export default function MenuCategoriesPage() {
       await restaurantAPI.updateCategory(category._id || category.id, {
         isActive: !(category?.isActive !== false),
       })
-      toast.success("Category updated and sent for admin approval")
+      toast.success(category?.isActive !== false ? "Category deactivated" : "Category activated")
       fetchCategories()
     } catch (error) {
       toast.error(error?.response?.data?.message || "Failed to update category")
     }
   }
 
+  const categoryFormFields = (
+    <div className="space-y-4">
+      <div>
+        <label className="mb-2 block text-sm font-medium text-slate-700">Category Name</label>
+        <input
+          type="text"
+          value={formData.name}
+          onChange={(e) => setFormData((prev) => ({ ...prev, name: e.target.value }))}
+          placeholder="Enter category name"
+          className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-slate-900"
+        />
+      </div>
+
+      <div>
+        <label className="mb-2 block text-sm font-medium text-slate-700">Diet Scope</label>
+        <select
+          value={formData.foodTypeScope}
+          onChange={(e) => setFormData((prev) => ({ ...prev, foodTypeScope: e.target.value }))}
+          className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-slate-900"
+        >
+          <option value="Veg">Veg</option>
+          <option value="Non-Veg">Non-Veg</option>
+          <option value="Both">Both</option>
+        </select>
+      </div>
+
+      <div>
+        <label className="mb-2 block text-sm font-medium text-slate-700">Optional Type Label</label>
+        <input
+          type="text"
+          value={formData.type}
+          onChange={(e) => setFormData((prev) => ({ ...prev, type: e.target.value }))}
+          placeholder="Examples: Starters, Desserts, Drinks"
+          className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-slate-900"
+        />
+      </div>
+
+      <div className="flex items-center gap-3">
+        {(imagePreview || formData.image) && (
+          <img
+            src={imagePreview || formData.image}
+            alt="Category preview"
+            className="h-16 w-16 rounded-2xl object-cover"
+          />
+        )}
+        <button
+          type="button"
+          onClick={handleImageClick}
+          className="flex items-center gap-2 rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-700"
+        >
+          <Upload className="h-4 w-4" />
+          Upload Image
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          className="hidden"
+          accept="image/*"
+          onChange={(e) => handleImageFileChange(e.target.files?.[0])}
+        />
+      </div>
+
+      <label className="flex items-center gap-2 text-sm text-slate-700">
+        <input
+          type="checkbox"
+          checked={formData.isActive}
+          onChange={() => setFormData((prev) => ({ ...prev, isActive: !prev.isActive }))}
+        />
+        Keep category active
+      </label>
+    </div>
+  )
+
+  const categoryFormActions = (
+    <div className="mt-6 flex gap-3">
+      <button onClick={resetModal} className="flex-1 rounded-xl border border-slate-300 py-3 font-medium text-slate-700">
+        Cancel
+      </button>
+      <button
+        onClick={handleSaveCategory}
+        disabled={uploadingImage}
+        className="flex-1 rounded-xl bg-slate-900 py-3 font-medium text-white disabled:opacity-60"
+      >
+        {uploadingImage ? "Uploading..." : editingCategory ? "Save & Resubmit" : "Create"}
+      </button>
+    </div>
+  )
+
+  const categoryModalHeader = (
+    <div className="mb-4 flex items-center justify-between">
+      <div>
+        <h2 className="text-lg font-bold text-slate-900">
+          {editingCategory ? "Edit Category" : "Create Category"}
+        </h2>
+        <p className="text-xs text-slate-500 lg:text-sm">
+          {editingCategory
+            ? "Any edit sends this category back for admin approval."
+            : "Choose the diet scope carefully before sending it for approval."}
+        </p>
+      </div>
+      <button onClick={resetModal} className="rounded-full p-1 hover:bg-slate-100">
+        <X className="h-5 w-5 text-slate-600" />
+      </button>
+    </div>
+  )
+
   return (
-    <div className="min-h-screen bg-slate-50 pb-24">
+    <div className="min-h-screen bg-slate-50 pb-24 lg:pb-8">
       <div className="sticky top-0 z-40 border-b border-slate-200 bg-white/95 backdrop-blur">
-        <div className="px-4 py-3 flex items-center gap-3">
-          <button onClick={goBack} className="rounded-full p-1 hover:bg-slate-100">
+        <div className="px-4 py-3 flex items-center gap-3 lg:max-w-5xl lg:mx-auto lg:px-8 lg:py-5">
+          <button onClick={goBack} className="rounded-full p-1 hover:bg-slate-100 lg:hidden">
             <ArrowLeft className="h-5 w-5 text-slate-700" />
           </button>
-          <div>
-            <h1 className="text-xl font-bold text-slate-900">Menu Categories</h1>
-            <p className="text-xs text-slate-500">Create categories, track approvals, and resubmit edits safely.</p>
+          <div className="flex-1 lg:flex lg:items-center lg:justify-between lg:gap-4">
+            <div>
+              <h1 className="text-xl font-bold text-slate-900 lg:text-2xl">Menu Categories</h1>
+              <p className="text-xs text-slate-500 lg:text-sm lg:mt-1">Create categories, track approvals, and resubmit edits safely.</p>
+            </div>
+            <button
+              onClick={openCreateModal}
+              className="hidden lg:flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 transition-colors shrink-0"
+            >
+              <Plus className="h-4 w-4" />
+              Add Category
+            </button>
           </div>
         </div>
       </div>
 
-      <div className="p-4 space-y-4">
-        <div className="rounded-2xl border border-slate-200 bg-white p-4">
+      <div className="p-4 space-y-4 lg:max-w-5xl lg:mx-auto lg:px-8 lg:py-6 lg:space-y-6">
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 lg:p-5">
           <p className="text-sm font-semibold text-slate-900">How this works</p>
           <p className="mt-2 text-sm text-slate-600">
             New categories stay pending until admin approval. Editing an approved category sends it back for review.
@@ -250,27 +380,27 @@ export default function MenuCategoriesPage() {
 
         <button
           onClick={openCreateModal}
-          className="flex w-full items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-3 font-semibold text-white"
+          className="flex w-full items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-3 font-semibold text-white lg:hidden"
         >
           <Plus className="h-5 w-5" />
           Add Category
         </button>
 
         {loading ? (
-          <div className="flex items-center justify-center py-12">
+          <div className="flex items-center justify-center py-12 lg:py-20">
             <Loader2 className="h-6 w-6 animate-spin text-slate-500" />
           </div>
         ) : ownCategories.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-6 py-12 text-center">
+          <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-6 py-12 text-center lg:py-16">
             <p className="text-lg font-semibold text-slate-900">No restaurant categories yet</p>
             <p className="mt-2 text-sm text-slate-500">
               Start with a category and choose whether it should accept veg, non-veg, or both kinds of dishes.
             </p>
           </div>
         ) : (
-          <div className="space-y-3">
+          <div className="space-y-3 lg:grid lg:grid-cols-2 lg:gap-4 lg:space-y-0 xl:grid-cols-2">
             {ownCategories.map((category) => {
-              const status = category?.approvalStatus || "pending"
+              const status = category?.isActive === false ? "deactivated" : (category?.approvalStatus || "pending")
               const isEditable = category?.canEdit
               const isGlobal = category?.isGlobal
 
@@ -278,10 +408,11 @@ export default function MenuCategoriesPage() {
                 <motion.div
                   key={category._id || category.id}
                   layout
-                  className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
+                  className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm lg:p-5"
                 >
-                  <div className="flex gap-3">
-                    <div className="h-16 w-16 shrink-0 overflow-hidden rounded-2xl bg-slate-100">
+                  <div className="flex gap-3 lg:items-start lg:justify-between">
+                    <div className="flex min-w-0 flex-1 gap-3">
+                    <div className="h-16 w-16 shrink-0 overflow-hidden rounded-2xl bg-slate-100 lg:h-14 lg:w-14">
                       {category?.image ? (
                         <img src={category.image} alt={category.name} className="h-full w-full object-cover" />
                       ) : (
@@ -295,7 +426,7 @@ export default function MenuCategoriesPage() {
                       <div className="flex flex-wrap items-center gap-2">
                         <h3 className="text-base font-semibold text-slate-900">{category.name}</h3>
                         <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold ${approvalBadgeClass(status)}`}>
-                          {status === "approved" ? <BadgeCheck className="mr-1 h-3.5 w-3.5" /> : <Clock3 className="mr-1 h-3.5 w-3.5" />}
+                          {status === "approved" ? <BadgeCheck className="mr-1 h-3.5 w-3.5" /> : status === "deactivated" ? <EyeOff className="mr-1 h-3.5 w-3.5" /> : <Clock3 className="mr-1 h-3.5 w-3.5" />}
                           {status.charAt(0).toUpperCase() + status.slice(1)}
                         </span>
                         <span className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] font-semibold ${scopePillClass(category?.foodTypeScope)}`}>
@@ -323,30 +454,33 @@ export default function MenuCategoriesPage() {
                         )}
                       </div>
                     </div>
-                  </div>
+                    </div>
 
-                  <div className="mt-4 flex items-center gap-2">
-                    <button
-                      onClick={() => handleToggleActive(category)}
-                      className="rounded-xl bg-slate-100 p-2 text-slate-700 hover:bg-slate-200 transition-colors"
-                      title={category?.isActive !== false ? "Deactivate" : "Activate"}
-                    >
-                      {category?.isActive !== false ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
-                    </button>
-                    {status !== "approved" && (
+                  {!isGlobal && isEditable && (
+                    <div className="mt-4 flex items-center gap-2 lg:mt-0 lg:shrink-0">
+                      <button
+                        onClick={() => handleToggleActive(category)}
+                        className="rounded-xl bg-slate-100 p-2 text-slate-700 hover:bg-slate-200 transition-colors"
+                        title={category?.isActive !== false ? "Deactivate" : "Activate"}
+                      >
+                        {category?.isActive !== false ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+                      </button>
                       <button
                         onClick={() => openEditModal(category)}
                         className="rounded-xl bg-blue-50 p-2 text-blue-700 hover:bg-blue-100 transition-colors"
+                        title="Edit category"
                       >
                         <Edit2 className="h-4 w-4" />
                       </button>
-                    )}
-                    <button
-                      onClick={() => handleDeleteCategory(category)}
-                      className="rounded-xl bg-rose-50 p-2 text-rose-700 hover:bg-rose-100 transition-colors"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
+                      <button
+                        onClick={() => setDeleteTarget(category)}
+                        className="rounded-xl bg-rose-50 p-2 text-rose-700 hover:bg-rose-100 transition-colors"
+                        title="Delete category"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  )}
                   </div>
                 </motion.div>
               )
@@ -365,112 +499,108 @@ export default function MenuCategoriesPage() {
               onClick={resetModal}
               className="fixed inset-0 z-50 bg-black/50"
             />
+            {/* Mobile bottom sheet */}
             <motion.div
               initial={{ y: "100%" }}
               animate={{ y: 0 }}
               exit={{ y: "100%" }}
-              className="fixed bottom-0 left-0 right-0 z-50 max-h-[90vh] overflow-y-auto rounded-t-3xl bg-white p-4 shadow-2xl"
+              className="fixed bottom-0 left-0 right-0 z-50 max-h-[90vh] overflow-y-auto rounded-t-3xl bg-white p-4 shadow-2xl lg:hidden"
             >
-              <div className="mb-4 flex items-center justify-between">
-                <div>
-                  <h2 className="text-lg font-bold text-slate-900">
-                    {editingCategory ? "Edit Category" : "Create Category"}
-                  </h2>
-                  <p className="text-xs text-slate-500">
-                    {editingCategory
-                      ? "Any edit sends this category back for admin approval."
-                      : "Choose the diet scope carefully before sending it for approval."}
-                  </p>
-                </div>
-                <button onClick={resetModal}>
-                  <X className="h-5 w-5 text-slate-600" />
-                </button>
+              {categoryModalHeader}
+              {categoryFormFields}
+              {categoryFormActions}
+            </motion.div>
+            {/* Desktop centered dialog */}
+            <div className="fixed inset-0 z-50 hidden lg:flex items-center justify-center p-6 pointer-events-none">
+              <motion.div
+                initial={{ opacity: 0, scale: 0.96, y: 12 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.96, y: 12 }}
+                className="pointer-events-auto w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {categoryModalHeader}
+                {categoryFormFields}
+                {categoryFormActions}
+              </motion.div>
+            </div>
+          </>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {deleteTarget && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => !deletingCategory && setDeleteTarget(null)}
+              className="fixed inset-0 z-50 bg-black/50"
+            />
+            <motion.div
+              initial={{ y: "100%" }}
+              animate={{ y: 0 }}
+              exit={{ y: "100%" }}
+              className="fixed bottom-0 left-0 right-0 z-50 rounded-t-3xl bg-white p-4 shadow-2xl lg:hidden"
+            >
+              <div className="mb-4">
+                <h2 className="text-lg font-bold text-slate-900">Delete category?</h2>
+                <p className="mt-2 text-sm text-slate-600">
+                  {Number(deleteTarget?.itemCount || 0) > 0
+                    ? `Deleting "${deleteTarget.name}" will remove the category and mark ${deleteTarget.itemCount} linked item(s) as inactive. You can reassign those items to another category before activating them again.`
+                    : `Are you sure you want to delete "${deleteTarget.name}"?`}
+                </p>
               </div>
-
-              <div className="space-y-4">
-                <div>
-                  <label className="mb-2 block text-sm font-medium text-slate-700">Category Name</label>
-                  <input
-                    type="text"
-                    value={formData.name}
-                    onChange={(e) => setFormData((prev) => ({ ...prev, name: e.target.value }))}
-                    placeholder="Enter category name"
-                    className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-slate-900"
-                  />
-                </div>
-
-                <div>
-                  <label className="mb-2 block text-sm font-medium text-slate-700">Diet Scope</label>
-                  <select
-                    value={formData.foodTypeScope}
-                    onChange={(e) => setFormData((prev) => ({ ...prev, foodTypeScope: e.target.value }))}
-                    className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-slate-900"
-                  >
-                    <option value="Veg">Veg</option>
-                    <option value="Non-Veg">Non-Veg</option>
-                    <option value="Both">Both</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="mb-2 block text-sm font-medium text-slate-700">Optional Type Label</label>
-                  <input
-                    type="text"
-                    value={formData.type}
-                    onChange={(e) => setFormData((prev) => ({ ...prev, type: e.target.value }))}
-                    placeholder="Examples: Starters, Desserts, Drinks"
-                    className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-slate-900"
-                  />
-                </div>
-
-                <div className="flex items-center gap-3">
-                  {(imagePreview || formData.image) && (
-                    <img
-                      src={imagePreview || formData.image}
-                      alt="Category preview"
-                      className="h-16 w-16 rounded-2xl object-cover"
-                    />
-                  )}
-                  <button
-                    type="button"
-                    onClick={handleImageClick}
-                    className="flex items-center gap-2 rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-700"
-                  >
-                    <Upload className="h-4 w-4" />
-                    Upload Image
-                  </button>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    className="hidden"
-                    accept="image/*"
-                    onChange={(e) => handleImageFileChange(e.target.files?.[0])}
-                  />
-                </div>
-
-                <label className="flex items-center gap-2 text-sm text-slate-700">
-                  <input
-                    type="checkbox"
-                    checked={formData.isActive}
-                    onChange={() => setFormData((prev) => ({ ...prev, isActive: !prev.isActive }))}
-                  />
-                  Keep category active
-                </label>
-              </div>
-
-              <div className="mt-6 flex gap-3">
-                <button onClick={resetModal} className="flex-1 rounded-xl border border-slate-300 py-3 font-medium text-slate-700">
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setDeleteTarget(null)}
+                  disabled={deletingCategory}
+                  className="flex-1 rounded-xl border border-slate-300 py-3 font-medium text-slate-700 disabled:opacity-60"
+                >
                   Cancel
                 </button>
                 <button
-                  onClick={handleSaveCategory}
-                  disabled={uploadingImage}
-                  className="flex-1 rounded-xl bg-slate-900 py-3 font-medium text-white disabled:opacity-60"
+                  onClick={handleDeleteCategory}
+                  disabled={deletingCategory}
+                  className="flex-1 rounded-xl bg-rose-600 py-3 font-medium text-white disabled:opacity-60"
                 >
-                  {uploadingImage ? "Uploading..." : editingCategory ? "Save & Resubmit" : "Create"}
+                  {deletingCategory ? "Deleting..." : "Delete category"}
                 </button>
               </div>
             </motion.div>
+            <div className="fixed inset-0 z-50 hidden lg:flex items-center justify-center p-6 pointer-events-none">
+              <motion.div
+                initial={{ opacity: 0, scale: 0.96, y: 12 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.96, y: 12 }}
+                className="pointer-events-auto w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <h2 className="text-lg font-bold text-slate-900">Delete category?</h2>
+                <p className="mt-2 text-sm text-slate-600">
+                  {Number(deleteTarget?.itemCount || 0) > 0
+                    ? `Deleting "${deleteTarget.name}" will remove the category and mark ${deleteTarget.itemCount} linked item(s) as inactive. You can reassign those items to another category before activating them again.`
+                    : `Are you sure you want to delete "${deleteTarget.name}"?`}
+                </p>
+                <div className="mt-6 flex gap-3">
+                  <button
+                    onClick={() => setDeleteTarget(null)}
+                    disabled={deletingCategory}
+                    className="flex-1 rounded-xl border border-slate-300 py-3 font-medium text-slate-700 disabled:opacity-60"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleDeleteCategory}
+                    disabled={deletingCategory}
+                    className="flex-1 rounded-xl bg-rose-600 py-3 font-medium text-white disabled:opacity-60"
+                  >
+                    {deletingCategory ? "Deleting..." : "Delete category"}
+                  </button>
+                </div>
+              </motion.div>
+            </div>
           </>
         )}
       </AnimatePresence>

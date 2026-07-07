@@ -225,49 +225,29 @@ export default function AdminNavbar({ onMenuClick }) {
     }
   }, [searchOpen]);
 
+  const clearAdminLocalSession = () => {
+    clearModuleAuth("admin");
+    localStorage.removeItem("admin_sidebar_state");
+    localStorage.removeItem("admin_recent_searches");
+    sessionStorage.removeItem("adminAuthData");
+    window.dispatchEvent(new Event("adminAuthChanged"));
+  };
+
   // Handle logout
   const handleLogout = async () => {
+    const refreshToken = localStorage.getItem("admin_refreshToken");
+
     try {
-      // Call backend logout API to clear refresh token cookie
-      try {
-        await adminAPI.logout();
-      } catch (apiError) {
-        // Continue with logout even if API call fails (network issues, etc.)
-        debugWarn("Logout API call failed, continuing with local cleanup:", apiError);
+      if (refreshToken) {
+        try {
+          await adminAPI.logout(refreshToken);
+        } catch (apiError) {
+          debugWarn("Logout API call failed after retries, continuing with local cleanup:", apiError);
+        }
       }
-
-      // Clear admin authentication and preference data from localStorage
-      clearModuleAuth('admin');
-      localStorage.removeItem('admin_accessToken');
-      localStorage.removeItem('admin_authenticated');
-      localStorage.removeItem('admin_user');
-      localStorage.removeItem('admin_sidebar_state');
-      localStorage.removeItem('admin_recent_searches');
-
-      // Clear sessionStorage if any
-      sessionStorage.removeItem('adminAuthData');
-
-      // Dispatch auth change event to notify other components
-      window.dispatchEvent(new Event('adminAuthChanged'));
-
-      // Navigate to admin login page
-      navigate('/admin/login', { replace: true });
-    } catch (error) {
-      // Even if there's an error, we should still clear local data and logout
-      debugError("Error during logout:", error);
-
-      // Clear local data anyway
-      clearModuleAuth('admin');
-      localStorage.removeItem('admin_accessToken');
-      localStorage.removeItem('admin_authenticated');
-      localStorage.removeItem('admin_user');
-      localStorage.removeItem('admin_sidebar_state');
-      localStorage.removeItem('admin_recent_searches');
-      sessionStorage.removeItem('adminAuthData');
-      window.dispatchEvent(new Event('adminAuthChanged'));
-
-      // Navigate to login
-      navigate('/admin/login', { replace: true });
+    } finally {
+      clearAdminLocalSession();
+      navigate("/admin/login", { replace: true });
     }
   };
 

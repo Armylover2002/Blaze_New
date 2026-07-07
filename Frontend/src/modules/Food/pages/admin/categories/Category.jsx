@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from "framer-motion"
 import {
   BadgeCheck,
   Download,
+  EyeOff,
   Globe,
   Loader2,
   Pencil,
@@ -33,6 +34,7 @@ const defaultFormData = {
 
 const approvalBadgeClass = (status) => {
   const value = String(status || "pending").toLowerCase()
+  if (value === "deactivated") return "bg-slate-100 text-slate-700 border-slate-300"
   if (value === "approved") return "bg-emerald-50 text-emerald-700 border-emerald-200"
   if (value === "rejected") return "bg-rose-50 text-rose-700 border-rose-200"
   return "bg-amber-50 text-amber-700 border-amber-200"
@@ -52,6 +54,25 @@ const zoneLabel = (zone) => {
     return value
   }
   return zone?.name || zone?.zoneName || zone?.serviceLocation || "Zone"
+}
+
+const formatDateTime = (value) => {
+  if (!value) return "-"
+  try {
+    const d = new Date(value)
+    if (Number.isNaN(d.getTime())) return "-"
+    const day = String(d.getDate()).padStart(2, "0")
+    const month = d.toLocaleString("en-GB", { month: "short" })
+    const year = d.getFullYear()
+    const time = d.toLocaleString("en-GB", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true,
+    })
+    return `${day} ${month} ${year}, ${time}`
+  } catch {
+    return "-"
+  }
 }
 
 export default function Category() {
@@ -553,7 +574,7 @@ export default function Category() {
               ) : (
                 filteredCategories.map((category) => {
                   const creatorName = category?.createdByRestaurant?.name || category?.restaurant?.name || "Admin"
-                  const approvalStatus = category?.approvalStatus || "pending"
+                  const approvalStatus = category?.status === false ? "deactivated" : (category?.approvalStatus || "pending")
                   const isRestaurantCategory = Boolean(category?.createdByRestaurantId || category?.restaurantId)
                   const zoneText = zoneLabel(category?.zoneId)
 
@@ -620,11 +641,22 @@ export default function Category() {
                         <div className="space-y-2">
                           <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold ${approvalBadgeClass(approvalStatus)}`}>
                             {approvalStatus === "approved" && <BadgeCheck className="mr-1 h-3.5 w-3.5" />}
+                            {approvalStatus === "deactivated" && <EyeOff className="mr-1 h-3.5 w-3.5" />}
                             {approvalStatus.charAt(0).toUpperCase() + approvalStatus.slice(1)}
                           </span>
                           {category?.rejectionReason && (
                             <p className="max-w-[180px] text-xs leading-5 text-rose-600">{category.rejectionReason}</p>
                           )}
+                          <div className="space-y-1 text-xs leading-5 text-slate-500">
+                            <p>
+                              <span className="font-medium text-slate-600">Created At:</span>{" "}
+                              {formatDateTime(category?.createdAt || category?.created_at)}
+                            </p>
+                            <p>
+                              <span className="font-medium text-slate-600">Updated At:</span>{" "}
+                              {formatDateTime(category?.updatedAt || category?.updated_at)}
+                            </p>
+                          </div>
                         </div>
                       </td>
                       <td className="px-5 py-5">

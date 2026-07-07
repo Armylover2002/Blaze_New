@@ -105,7 +105,7 @@ export default function RestaurantDishCard({
             <div className="h-1 w-14 bg-gray-200 rounded-full overflow-hidden">
               <div className="h-full w-3/4 bg-[#FF0000] rounded-full" />
             </div>
-            <span className="text-[11px] text-gray-500 font-medium">Highly reordered</span>
+            <span className="text-[11px] text-gray-500 font-medium">Highly recommended</span>
           </div>
         )}
 
