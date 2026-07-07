@@ -49,9 +49,9 @@ export default function Favorites() {
           <h1 className="text-lg sm:text-xl md:text-2xl font-bold">My Favorites</h1>
         </div>
       </ScrollReveal>
-      <Card>
+        <Card>
           <CardContent className="py-12 text-center">
-            <Heart className="h-16 w-16 mx-auto text-muted-foreground mb-4" />
+            <Bookmark className="h-16 w-16 mx-auto text-muted-foreground mb-4" />
             <p className="text-muted-foreground text-lg mb-4">You haven't added any favorites yet</p>
             <Link to="/user">
               <Button className="bg-gradient-to-r bg-primary-orange hover:opacity-90 text-white">
@@ -115,7 +115,7 @@ export default function Favorites() {
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
             {restaurantFavorites.length === 0 ? (
               <div className="col-span-full text-center py-12">
-                <Heart className="h-16 w-16 mx-auto text-muted-foreground mb-4" />
+                <Bookmark className="h-16 w-16 mx-auto text-muted-foreground mb-4" />
                 <p className="text-muted-foreground text-lg mb-4">No restaurants saved yet</p>
                 <Link to="/user">
                   <Button className="bg-gradient-to-r bg-primary-orange hover:opacity-90 text-white">
@@ -146,7 +146,7 @@ export default function Favorites() {
                         className="h-7 w-7 rounded-full bg-white/90 backdrop-blur-sm hover:bg-white text-red-500"
                         onClick={(e) => handleRemoveFavorite(e, restaurant.slug)}
                       >
-                        <Heart className="h-4 w-4 fill-red-500" />
+                        <Bookmark className="h-4 w-4 fill-red-500" />
                       </Button>
                     </div>
                     <div className="absolute bottom-2 left-2">

@@ -163,14 +163,14 @@ export default function RestaurantItemDetailSheet({
                       {selectedItem.description}
                     </p>
 
-                    {/* Highly Reordered Progress Bar */}
+                    {/* Highly Recommended Progress Bar */}
                     {isRecommendedItem(selectedItem) && (
                       <div className="flex items-center gap-2 mb-4">
                         <div className="flex-1 h-0.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
                           <div className="h-full bg-green-500 dark:bg-green-400 rounded-full" style={{ width: '50%' }} />
                         </div>
                         <span className="text-xs text-gray-600 dark:text-gray-400 font-medium whitespace-nowrap">
-                          highly reordered
+                          highly recommended
                         </span>
                       </div>
                     )}

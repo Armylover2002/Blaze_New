@@ -1,5 +1,6 @@
 import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
+import { useEffect } from "react";
 
 const DEFAULT_SHEET_CLASS =
   "fixed left-0 right-0 bottom-0 md:left-1/2 md:right-auto md:-translate-x-1/2 md:bottom-auto md:top-1/2 md:-translate-y-1/2 z-[10000] bg-white dark:bg-[#1a1a1a] rounded-t-3xl md:rounded-3xl shadow-2xl w-full md:w-auto flex flex-col";
@@ -12,6 +13,17 @@ export default function BottomSheetPortal({
   backdropClassName = "fixed inset-0 bg-black/40 z-[9999]",
   transitionDuration = 0.2,
 }) {
+  useEffect(() => {
+    if (open) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "unset";
+    }
+    return () => {
+      document.body.style.overflow = "unset";
+    };
+  }, [open]);
+
   if (typeof window === "undefined") return null;
 
   return createPortal(

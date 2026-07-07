@@ -32,6 +32,7 @@ const defaultFormData = {
 
 const approvalBadgeClass = (status) => {
   const value = String(status || "pending").toLowerCase()
+  if (value === "deactivated") return "bg-slate-100 text-slate-700 border-slate-300"
   if (value === "approved") return "bg-emerald-50 text-emerald-700 border-emerald-200"
   if (value === "rejected") return "bg-rose-50 text-rose-700 border-rose-200"
   return "bg-amber-50 text-amber-700 border-amber-200"
@@ -218,7 +219,7 @@ export default function MenuCategoriesPage() {
       await restaurantAPI.updateCategory(category._id || category.id, {
         isActive: !(category?.isActive !== false),
       })
-      toast.success("Category updated and sent for admin approval")
+      toast.success(category?.isActive !== false ? "Category deactivated" : "Category activated")
       fetchCategories()
     } catch (error) {
       toast.error(error?.response?.data?.message || "Failed to update category")
@@ -270,7 +271,7 @@ export default function MenuCategoriesPage() {
         ) : (
           <div className="space-y-3">
             {ownCategories.map((category) => {
-              const status = category?.approvalStatus || "pending"
+              const status = category?.isActive === false ? "deactivated" : (category?.approvalStatus || "pending")
               const isEditable = category?.canEdit
               const isGlobal = category?.isGlobal
 
@@ -295,7 +296,7 @@ export default function MenuCategoriesPage() {
                       <div className="flex flex-wrap items-center gap-2">
                         <h3 className="text-base font-semibold text-slate-900">{category.name}</h3>
                         <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold ${approvalBadgeClass(status)}`}>
-                          {status === "approved" ? <BadgeCheck className="mr-1 h-3.5 w-3.5" /> : <Clock3 className="mr-1 h-3.5 w-3.5" />}
+                          {status === "approved" ? <BadgeCheck className="mr-1 h-3.5 w-3.5" /> : status === "deactivated" ? <EyeOff className="mr-1 h-3.5 w-3.5" /> : <Clock3 className="mr-1 h-3.5 w-3.5" />}
                           {status.charAt(0).toUpperCase() + status.slice(1)}
                         </span>
                         <span className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] font-semibold ${scopePillClass(category?.foodTypeScope)}`}>

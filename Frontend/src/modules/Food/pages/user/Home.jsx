@@ -10,6 +10,8 @@ import React, {
   startTransition,
 } from "react";
 import { createPortal } from "react-dom";
+import { toast } from "sonner";
+import { isModuleAuthenticated } from "@food/utils/auth";
 import {
   Star,
   Clock,
@@ -317,13 +319,18 @@ export default function Home() {
   }, [activeTab, heroSearch, navigate, openSearch, setSearchValue]);
 
   const handleFavoriteToggle = useCallback((e, restaurant, slug, favorite) => {
+    if (!isModuleAuthenticated('user')) {
+      toast.error("Please login to save restaurants");
+      navigate('/user/auth/login', { state: { from: window.location.pathname } });
+      return;
+    }
     if (favorite) removeFavorite(slug);
     else {
-      addFavorite(restaurant);
+      addFavorite({ ...restaurant, slug });
       setShowToast(true);
       setTimeout(() => setShowToast(false), 2000);
     }
-  }, [addFavorite, removeFavorite]);
+  }, [addFavorite, removeFavorite, navigate]);
 
   // --- Render ---
   return (

@@ -174,23 +174,8 @@ export const requestUserOtp = async (phone) => {
     }
   }
 
-<<<<<<< Updated upstream
   const existingUser = await findExistingFoodUserByIdentifier(phone);
   assertUserEligibleForOtp(existingUser);
-=======
-  // Check if the user exists and is deactivated
-  let userDoc;
-  if (isEmail) {
-    const emailLower = String(phone || "").trim().toLowerCase();
-    userDoc = await FoodUser.findOne({ email: emailLower });
-  } else {
-    userDoc = await FoodUser.findOne({ phone });
-  }
-
-  if (userDoc && (userDoc.isActive === false || userDoc.isDeleted === true || userDoc.accountStatus === 'deleted')) {
-    throw new AuthError("Your account has been deleted/deactivated. Please contact support.");
-  }
->>>>>>> Stashed changes
 
   const otp = await createOrUpdateOtp(phone);
   const shouldExposeOtp =
@@ -220,9 +205,15 @@ export const verifyUserOtpAndLogin = async (
     const emailLower = String(phone || "").trim().toLowerCase();
     userDoc = await FoodUser.findOne({ email: emailLower });
   } else {
-    userDoc = await FoodUser.findOne({ phone });
+    const candidates = getPhoneCandidates(phone);
+    const last10 = String(phone || "").replace(/\D/g, "").slice(-10);
+    const orClauses = [{ phone: { $in: candidates } }];
+    if (last10) {
+      orClauses.push({ phone: { $regex: new RegExp(`${last10}$`) } });
+    }
+    userDoc = await FoodUser.findOne({ $or: orClauses });
   }
-  
+
   // Ensure user exists and mark as verified on successful OTP.
   // Check if user is new or hasn't provided a name yet
   const needsNamePrompt = !userDoc || !userDoc.name || String(userDoc.name).trim() === "" || String(userDoc.name).toLowerCase() === "null";
@@ -695,25 +686,25 @@ export const verifyDeliveryOtpAndLogin = async (phone, otp, fcmToken, platform) 
     token: refreshToken,
     expiresAt,
   });
-  
+
   const userObj = deliveryPartner.toObject();
-  
+
   // Reconstruct active vehicle and strip internal data for backward compatibility
   try {
-      if (userObj.driverVehicles && userObj.driverVehicles.length > 0) {
-          const activeId = userObj.activeVehicleId ? String(userObj.activeVehicleId) : null;
-          const activeVeh = activeId 
-              ? userObj.driverVehicles.find(v => String(v._id) === activeId || String(v.id) === activeId) 
-              : userObj.driverVehicles.find(v => v.isDefault) || userObj.driverVehicles[0];
-          
-          if (activeVeh) {
-              userObj.vehicleNumber = activeVeh.vehicleNumber;
-              userObj.vehicleType = activeVeh.vehicleCode;
-              userObj.vehicleName = activeVeh.vehicleName;
-              userObj.supportedServices = activeVeh.supportedServices;
-          }
+    if (userObj.driverVehicles && userObj.driverVehicles.length > 0) {
+      const activeId = userObj.activeVehicleId ? String(userObj.activeVehicleId) : null;
+      const activeVeh = activeId
+        ? userObj.driverVehicles.find(v => String(v._id) === activeId || String(v.id) === activeId)
+        : userObj.driverVehicles.find(v => v.isDefault) || userObj.driverVehicles[0];
+
+      if (activeVeh) {
+        userObj.vehicleNumber = activeVeh.vehicleNumber;
+        userObj.vehicleType = activeVeh.vehicleCode;
+        userObj.vehicleName = activeVeh.vehicleName;
+        userObj.supportedServices = activeVeh.supportedServices;
       }
-  } catch(e) {}
+    }
+  } catch (e) { }
 
   return {
     accessToken,
@@ -731,12 +722,12 @@ export const logout = async (refreshToken, fcmToken, platform) => {
   // 1. Remove specific FCM token from ALL collections if provided
   if (fcmToken) {
     console.log(`[FCM-Logout] Starting logout-driven token removal: platform=${platform}, tokenPreview=${fcmToken?.slice(0, 10)}...`);
-    
+
     // We try to remove the token from all 4 possible models regardless of the user ID, 
     // ensuring no stale connections are left across any role or app the user was logged into.
     const field = platform === "mobile" ? "fcmTokenMobile" : "fcmTokens";
     const models = [FoodUser, FoodRestaurant, FoodDeliveryPartner, FoodAdmin];
-    
+
     try {
       await Promise.all(
         models.map((model) =>
@@ -834,28 +825,28 @@ export const getProfile = async (userId, role) => {
 
         const location =
           doc.addressLine1 ||
-          doc.addressLine2 ||
-          doc.area ||
-          doc.city ||
-          doc.state ||
-          doc.pincode ||
-          doc.landmark
+            doc.addressLine2 ||
+            doc.area ||
+            doc.city ||
+            doc.state ||
+            doc.pincode ||
+            doc.landmark
             ? {
-                addressLine1: doc.addressLine1 || "",
-                addressLine2: doc.addressLine2 || "",
-                area: doc.area || "",
-                city: doc.city || "",
-                state: doc.state || "",
-                pincode: doc.pincode || "",
-                landmark: doc.landmark || "",
-              }
+              addressLine1: doc.addressLine1 || "",
+              addressLine2: doc.addressLine2 || "",
+              area: doc.area || "",
+              city: doc.city || "",
+              state: doc.state || "",
+              pincode: doc.pincode || "",
+              landmark: doc.landmark || "",
+            }
             : null;
 
         const menuImages = Array.isArray(doc.menuImages)
           ? doc.menuImages
-              .map((m) => (m && (typeof m === "string" ? m : m.url)) || null)
-              .filter(Boolean)
-              .map((url) => ({ url, publicId: null }))
+            .map((m) => (m && (typeof m === "string" ? m : m.url)) || null)
+            .filter(Boolean)
+            .map((url) => ({ url, publicId: null }))
           : [];
 
         profile = {
@@ -920,56 +911,56 @@ export const getProfile = async (userId, role) => {
           aadhar:
             partner.aadharPhoto || partner.aadharNumber
               ? {
-                  number: partner.aadharNumber || null,
-                  document: partner.aadharPhoto || null,
-                }
+                number: partner.aadharNumber || null,
+                document: partner.aadharPhoto || null,
+              }
               : null,
           pan:
             partner.panPhoto || partner.panNumber
               ? {
-                  number: partner.panNumber || null,
-                  document: partner.panPhoto || null,
-                }
+                number: partner.panNumber || null,
+                document: partner.panPhoto || null,
+              }
               : null,
           drivingLicense: partner.drivingLicensePhoto || partner.drivingLicenseNumber
             ? {
-                number: partner.drivingLicenseNumber || null,
-                document: partner.drivingLicensePhoto || null,
-              }
+              number: partner.drivingLicenseNumber || null,
+              document: partner.drivingLicensePhoto || null,
+            }
             : null,
           bankDetails:
             partner.bankAccountHolderName ||
-            partner.bankAccountNumber ||
-            partner.bankIfscCode ||
-            partner.bankName ||
-            partner.upiId ||
-            partner.upiQrCode
+              partner.bankAccountNumber ||
+              partner.bankIfscCode ||
+              partner.bankName ||
+              partner.upiId ||
+              partner.upiQrCode
               ? {
-                  accountHolderName: partner.bankAccountHolderName || null,
-                  accountNumber: partner.bankAccountNumber || null,
-                  ifscCode: partner.bankIfscCode || null,
-                  bankName: partner.bankName || null,
-                  upiId: partner.upiId || null,
-                  upiQrCode: partner.upiQrCode || null,
-                }
+                accountHolderName: partner.bankAccountHolderName || null,
+                accountNumber: partner.bankAccountNumber || null,
+                ifscCode: partner.bankIfscCode || null,
+                bankName: partner.bankName || null,
+                upiId: partner.upiId || null,
+                upiQrCode: partner.upiQrCode || null,
+              }
               : null,
         },
         location:
           partner.address || partner.city || partner.state
             ? {
-                addressLine1: partner.address,
-                city: partner.city,
-                state: partner.state,
-              }
+              addressLine1: partner.address,
+              city: partner.city,
+              state: partner.state,
+            }
             : null,
         vehicle:
           partner.vehicleType || partner.vehicleName || partner.vehicleNumber
             ? {
-                type: partner.vehicleType,
-                brand: partner.vehicleName,
-                model: partner.vehicleName,
-                number: partner.vehicleNumber,
-              }
+              type: partner.vehicleType,
+              brand: partner.vehicleName,
+              model: partner.vehicleName,
+              number: partner.vehicleNumber,
+            }
             : null,
       };
       break;
