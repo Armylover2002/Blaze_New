@@ -32,6 +32,7 @@ import {
 } from "recharts"
 import { Activity, ShoppingBag, CreditCard, Truck, Receipt, IndianRupee, Store, UserCheck, Package, UserCircle, Clock, CheckCircle, Plus, XCircle } from "lucide-react"
 import { adminAPI } from "@food/api"
+import { toast } from "sonner"
 import { useAuth } from "@core/context/AuthContext"
 import { getCurrentUser } from "@food/utils/auth"
 import { canAccessAdminPath, extractAdminPermissions, extractAdminRoleId, fetchAdminRolePermissions } from "@food/utils/adminPermissions"
@@ -55,6 +56,7 @@ export default function AdminHome() {
   const [selectedPeriod, setSelectedPeriod] = useState("overall")
   const [isLoading, setIsLoading] = useState(true)
   const [dashboardData, setDashboardData] = useState(null)
+  const [hasError, setHasError] = useState(false)
   const [zones, setZones] = useState([])
   const [resolvedPermissions, setResolvedPermissions] = useState({})
 
@@ -117,32 +119,35 @@ export default function AdminHome() {
   }, [])
 
   // Fetch dashboard stats from backend when filters change
-  useEffect(() => {
-    const fetchDashboardStats = async () => {
-      try {
-        setIsLoading(true)
-        const params = {
-          period: selectedPeriod,
-          ...(selectedZone !== "all" ? { zoneId: selectedZone } : {}),
-        }
-        const response = await adminAPI.getDashboardStats(params)
-        if (response.data?.success && response.data?.data) {
-          setDashboardData(response.data.data)
-          debugLog("Dashboard stats fetched:", response.data.data)
-        } else {
-          setDashboardData(null)
-          debugError("Invalid dashboard response format:", response.data)
-        }
-      } catch (error) {
-        setDashboardData(null)
-        debugError("Error fetching dashboard stats:", error)
-      } finally {
-        setIsLoading(false)
+  const fetchDashboardStats = useCallback(async () => {
+    try {
+      setIsLoading(true)
+      const params = {
+        period: selectedPeriod,
+        ...(selectedZone !== "all" ? { zoneId: selectedZone } : {}),
       }
+      const response = await adminAPI.getDashboardStats(params)
+      if (response.data?.success && response.data?.data) {
+        setDashboardData(response.data.data)
+        setHasError(false)
+        debugLog("Dashboard stats fetched:", response.data.data)
+      } else {
+        setHasError(true)
+        debugError("Invalid dashboard response format:", response.data)
+        toast.error(response?.data?.message || "Failed to load dashboard metrics")
+      }
+    } catch (err) {
+      setHasError(true)
+      debugError("Error fetching dashboard stats:", err)
+      toast.error("Failed to load dashboard metrics")
+    } finally {
+      setIsLoading(false)
     }
-
-    fetchDashboardStats()
   }, [selectedZone, selectedPeriod])
+
+  useEffect(() => {
+    fetchDashboardStats()
+  }, [fetchDashboardStats])
 
   // Get order stats from real data
   const orderStats = useMemo(() => {
@@ -275,6 +280,19 @@ export default function AdminHome() {
           </>
         }
       />
+
+      {hasError && (
+        <div className="mb-4 flex flex-col gap-3 rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive sm:flex-row sm:items-center sm:justify-between">
+          <span>Couldn't refresh dashboard metrics. Showing the last available values.</span>
+          <button
+            type="button"
+            onClick={fetchDashboardStats}
+            className="self-start rounded-lg border border-destructive/40 px-3 py-1.5 text-xs font-medium transition hover:bg-destructive/20 sm:self-auto"
+          >
+            Retry
+          </button>
+        </div>
+      )}
 
       {/* KPI grid */}
       {showInitialSkeleton ? (
