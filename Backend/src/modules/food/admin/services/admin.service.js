@@ -161,6 +161,54 @@ const detectZoneFromPartner = (partner, zones) => {
     return detectedZone;
 };
 
+const partnerMatchesZone = (partner, zone) => {
+    if (!partner || !zone) return false;
+    const detected = detectZoneFromPartner(partner, [zone]);
+    if (!detected) return false;
+    const detectedKey = String(detected).trim().toLowerCase();
+    return [zone.zoneName, zone.name, zone.serviceLocation]
+        .filter(Boolean)
+        .some((label) => String(label).trim().toLowerCase() === detectedKey);
+};
+
+async function getZoneDeliveryPartnerStats(zoneId, zoneDoc) {
+    if (!zoneId || !zoneDoc) return { approved: 0, pending: 0 };
+
+    const zoneObjectId = new mongoose.Types.ObjectId(zoneId);
+    const orderPartnerIds = await FoodOrder.distinct('dispatch.deliveryPartnerId', {
+        zoneId: zoneObjectId,
+        orderType: 'food',
+        'dispatch.deliveryPartnerId': { $ne: null },
+    });
+
+    const [approvedFromOrders, partners] = await Promise.all([
+        orderPartnerIds.length
+            ? FoodDeliveryPartner.countDocuments({ _id: { $in: orderPartnerIds }, status: 'approved' })
+            : Promise.resolve(0),
+        FoodDeliveryPartner.find({ status: { $in: ['approved', 'pending'] } })
+            .select('status lastLat lastLng city state address')
+            .lean(),
+    ]);
+
+    const orderPartnerIdSet = new Set(orderPartnerIds.map((id) => String(id)));
+    let approvedByLocation = 0;
+    let pending = 0;
+
+    for (const partner of partners) {
+        if (!partnerMatchesZone(partner, zoneDoc)) continue;
+        if (partner.status === 'pending') {
+            pending += 1;
+        } else if (partner.status === 'approved' && !orderPartnerIdSet.has(String(partner._id))) {
+            approvedByLocation += 1;
+        }
+    }
+
+    return {
+        approved: Number(approvedFromOrders) + approvedByLocation,
+        pending,
+    };
+};
+
 const timeToMinutes = (value) => {
     const normalized = normalizeRestaurantTime(value);
     if (!normalized) return null;
@@ -519,11 +567,17 @@ export async function getDashboardStats(query = {}) {
     const zoneRestaurantIds = zoneId
         ? await FoodRestaurant.find({ zoneId }).distinct('_id')
         : null;
+    const zoneDoc = zoneId
+        ? await FoodZone.findById(zoneId).select('zoneName name serviceLocation coordinates').lean()
+        : null;
     const zoneScopedRestaurantMatch = zoneId
         ? { restaurantId: { $in: zoneRestaurantIds || [] } }
         : {};
 
     const trendConfig = getDashboardTrendConfig(query.period, periodRange);
+    const zoneDeliveryStatsPromise = zoneId && zoneDoc
+        ? getZoneDeliveryPartnerStats(zoneId, zoneDoc)
+        : null;
 
     const [
         orderTotalsAgg,
@@ -665,15 +719,26 @@ export async function getDashboardStats(query = {}) {
         ]),
         FoodRestaurant.countDocuments({ ...restaurantMatch, status: 'approved' }),
         FoodRestaurant.countDocuments({ ...restaurantMatch, status: 'pending' }),
-        FoodDeliveryPartner.countDocuments({ status: 'approved' }),
-        FoodDeliveryPartner.countDocuments({ status: 'pending' }),
+        zoneDeliveryStatsPromise
+            ? zoneDeliveryStatsPromise.then((stats) => stats.approved)
+            : FoodDeliveryPartner.countDocuments({ status: 'approved' }),
+        zoneDeliveryStatsPromise
+            ? zoneDeliveryStatsPromise.then((stats) => stats.pending)
+            : FoodDeliveryPartner.countDocuments({ status: 'pending' }),
         FoodItem.countDocuments({ approvalStatus: 'approved', ...zoneScopedRestaurantMatch }),
         FoodAddon.countDocuments({ approvalStatus: 'approved', isDeleted: { $ne: true }, ...zoneScopedRestaurantMatch }),
         zoneId
             ? FoodOrder.distinct('userId', { ...orderMatch, userId: { $ne: null } }).then((ids) => ids.length)
             : FoodUser.countDocuments({}),
         FoodRestaurant.find({ ...restaurantMatch, status: 'pending' }).sort({ createdAt: -1 }).limit(5).select('restaurantName createdAt').lean(),
-        FoodDeliveryPartner.find({ status: 'pending' }).sort({ createdAt: -1 }).limit(5).select('name createdAt').lean(),
+        zoneId && zoneDoc
+            ? FoodDeliveryPartner.find({ status: 'pending' })
+                .sort({ createdAt: -1 })
+                .limit(25)
+                .select('name createdAt lastLat lastLng city state address')
+                .lean()
+                .then((list) => list.filter((partner) => partnerMatchesZone(partner, zoneDoc)).slice(0, 5))
+            : FoodDeliveryPartner.find({ status: 'pending' }).sort({ createdAt: -1 }).limit(5).select('name createdAt').lean(),
         FoodOrder.find({ 
             ...orderMatch,
             orderStatus: { $in: [...PENDING_ORDER_STATUSES, ...PROCESSING_ORDER_STATUSES] },
