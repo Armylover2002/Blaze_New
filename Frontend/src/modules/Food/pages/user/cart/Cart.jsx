@@ -2863,31 +2863,30 @@ export default function Cart() {
                             Other: {RUPEE_SYMBOL}{otherPlatformSubtotal.toFixed(0)}
                           </span>
                         )}
-                        <span className="text-gray-800 dark:text-gray-200 font-medium">{RUPEE_SYMBOL}{subtotal.toFixed(2)}</span>
+                        <span className="text-gray-800 dark:text-gray-200 font-medium">{RUPEE_SYMBOL}{subtotal.toFixed(0)}</span>
                       </div>
                     </div>
                     <div className="flex justify-between text-sm">
-                      <span className="text-gray-600 dark:text-gray-400">Delivery Fee</span>
+                      <span className="text-gray-600 dark:text-gray-400 border-b border-dashed border-gray-400 pb-[1px]">
+                        Delivery Fee {hasDistanceDeliveryBreakdown ? `| ${Number(deliveryFeeBreakdown.distanceKm).toFixed(1)} kms` : ""}
+                      </span>
                       <div className="text-right">
                         <span className={deliveryFee === 0 ? "text-[#FF0000] font-semibold" : "text-gray-800 dark:text-gray-200 font-medium"}>
-                          {deliveryFee === 0 ? "FREE" : `${RUPEE_SYMBOL}${deliveryFee.toFixed(2)}`}
+                          {deliveryFee === 0 ? "FREE" : `${RUPEE_SYMBOL}${deliveryFee.toFixed(0)}`}
                         </span>
                       </div>
                     </div>
 
-                    {deliveryFeeBreakdownText && (
-                      <div className="text-[11px] text-gray-500 dark:text-gray-400 -mt-1.5 ml-1 border-l-2 border-gray-100 pl-2">
-                        {deliveryFeeBreakdownText}
+                    {platformFee > 0 && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-600 dark:text-gray-400">Platform Fee</span>
+                        <div className="text-right">
+                          <span className="text-gray-800 dark:text-gray-200 font-medium">{RUPEE_SYMBOL}{platformFee.toFixed(0)}</span>
+                        </div>
                       </div>
                     )}
                     <div className="flex justify-between text-sm">
-                      <span className="text-gray-600 dark:text-gray-400">Platform Fee</span>
-                      <div className="text-right">
-                        <span className="text-gray-800 dark:text-gray-200 font-medium">{RUPEE_SYMBOL}{platformFee.toFixed(2)}</span>
-                      </div>
-                    </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-gray-600 dark:text-gray-400">GST and Restaurant Charges</span>
+                      <span className="text-gray-600 dark:text-gray-400 border-b border-dashed border-gray-400 pb-[1px]">Government Taxes</span>
                       <span className="text-gray-800 dark:text-gray-200 font-medium">{RUPEE_SYMBOL}{gstCharges.toFixed(2)}</span>
                     </div>
                     {discount > 0 && (
