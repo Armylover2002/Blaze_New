@@ -2459,12 +2459,17 @@ export async function toggleRestaurantListing(id, isListed) {
         throw new ValidationError('Invalid restaurant ID');
     }
     const { FoodRestaurant } = await import('../../restaurant/models/restaurant.model.js');
+    const { FoodItem } = await import('../../admin/models/food.model.js');
     const restaurant = await FoodRestaurant.findById(id);
     if (!restaurant) {
         throw new ValidationError('Restaurant not found');
     }
-    if (isListed && restaurant.productCount <= 0) {
-        throw new ValidationError('Cannot list a restaurant with 0 products.');
+    
+    if (isListed) {
+        const itemCount = await FoodItem.countDocuments({ restaurantId: id });
+        if (itemCount <= 0) {
+            throw new ValidationError('Cannot make visible. Restaurant has no menu items.');
+        }
     }
     restaurant.isListed = Boolean(isListed);
     await restaurant.save();

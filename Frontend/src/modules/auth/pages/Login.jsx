@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from "react"
 import { motion } from "framer-motion"
 import { Routes, Route, Navigate, Link, useLocation, useNavigate } from "react-router-dom"
-import { Phone, Lock, ArrowRight, ArrowLeft, ShieldCheck, Loader2, UserRound } from "lucide-react"
+import { Phone, Lock, ArrowRight, ArrowLeft, ShieldCheck, Loader2, UserRound, Headset } from "lucide-react"
 import { toast } from "sonner"
 import { authAPI, userAPI } from "@food/api"
 import { isModuleAuthenticated, setAuthData, clearModuleAuth } from "@food/utils/auth"
@@ -19,6 +19,7 @@ export default function UnifiedOTPFastLogin() {
   const [emailAddress, setEmailAddress] = useState("")
   const [otp, setOtp] = useState("")
   const [step, setStep] = useState(1)
+  const [otpError, setOtpError] = useState("")
 
   const getIdentifier = () => {
     return loginType === "email" ? emailAddress.trim().toLowerCase() : phoneNumber;
@@ -133,6 +134,7 @@ export default function UnifiedOTPFastLogin() {
     setLoading(true)
     try {
       clearNameFlow()
+      setOtpError("")
       await authAPI.sendOTP(identifier, "login", null)
       setOtp("")
       setOtpSent(true)
@@ -156,10 +158,11 @@ export default function UnifiedOTPFastLogin() {
 
   const handleVerifyOTP = async (e) => {
     e.preventDefault()
+    setOtpError("")
     const identifier = getIdentifier()
     const otpDigits = String(otp).replace(/\D/g, "").slice(0, 4)
     if (otpDigits.length !== 4) {
-      toast.error("Please enter the 4-digit OTP")
+      setOtpError("Please enter the 4-digit OTP")
       return
     }
     if (submitting.current) return
@@ -235,15 +238,15 @@ export default function UnifiedOTPFastLogin() {
       navigate(redirectTo, { replace: true })
     } catch (err) {
       const status = err?.response?.status
-      let msg = err?.response?.data?.message || err?.response?.data?.error || err?.message || "Invalid OTP. Please try again."
+      let msg = err?.response?.data?.message || err?.response?.data?.error || err?.message || "Invalid OTP"
       if (status === 401) {
         if (/deactivat(ed|e)/i.test(String(msg))) {
           msg = "Your account is deactivated. Please contact support."
         } else {
-          msg = "Invalid or expired code, or account not active."
+          msg = "Invalid OTP"
         }
       }
-      toast.error(msg)
+      setOtpError(msg)
     } finally {
       setLoading(false)
       submitting.current = false
@@ -256,6 +259,11 @@ export default function UnifiedOTPFastLogin() {
     const trimmedName = name.trim()
     if (!trimmedName) {
       setNameError("Please enter your name")
+      return
+    }
+
+    if (!/^[a-zA-Z\s]+$/.test(trimmedName)) {
+      setNameError("Name can only contain letters and spaces")
       return
     }
 
@@ -455,9 +463,12 @@ export default function UnifiedOTPFastLogin() {
                       type="text"
                       required
                       autoFocus
+                      maxLength={50}
                       value={name}
                       onChange={(e) => {
-                        setName(e.target.value)
+                        const val = e.target.value;
+                        if (val && !/^[a-zA-Z\s]*$/.test(val)) return;
+                        setName(val)
                         if (nameError) setNameError("")
                       }}
                       className={`block w-full pl-10 pr-4 py-3 bg-transparent text-gray-900 dark:text-white border-b-2 border-gray-100 dark:border-gray-800 focus:border-primary-orange outline-none transition-all placeholder:text-gray-300 font-bold text-lg ${nameError ? "border-red-500" : ""}`}
@@ -501,20 +512,30 @@ export default function UnifiedOTPFastLogin() {
                         autoFocus={index === 0}
                         value={otp[index] || ""}
                         onChange={(e) => {
-                          const val = e.target.value.replace(/\D/g, "").slice(-1);
-                          if (!val) return;
+                          const val = e.target.value;
+                          // If there's already a digit and they type another, length > 1. 
+                          // We ignore it so they must backspace first.
+                          if (val.length > 1) return;
+                          
+                          const digit = val.replace(/\D/g, "");
+                          // We still allow deleting, which is handled via backspace, but if val is empty (e.g., they highlight and press delete) we should handle it
+                          if (!digit && val) return;
+                          
+                          if (otpError) setOtpError("");
+
                           const newOtp = otp.split("");
-                          newOtp[index] = val;
+                          newOtp[index] = digit || "";
                           const combined = newOtp.join("").slice(0, 4);
                           setOtp(combined);
                           
                           // Focus next
-                          if (index < 3 && val) {
+                          if (index < 3 && digit) {
                             document.getElementById(`otp-${index + 1}`)?.focus();
                           }
                         }}
                         onKeyDown={(e) => {
                           if (e.key === "Backspace") {
+                            if (otpError) setOtpError("");
                             if (!otp[index] && index > 0) {
                               document.getElementById(`otp-${index - 1}`)?.focus();
                             } else {
@@ -526,6 +547,7 @@ export default function UnifiedOTPFastLogin() {
                         }}
                         onPaste={(e) => {
                           e.preventDefault();
+                          if (otpError) setOtpError("");
                           const pasteData = e.clipboardData.getData("text").replace(/\D/g, "").slice(0, 4);
                           if (pasteData) {
                             setOtp(pasteData);
@@ -537,6 +559,11 @@ export default function UnifiedOTPFastLogin() {
                       />
                     ))}
                   </div>
+                  {otpError && (
+                    <div className="text-center mt-2">
+                      <p className="text-sm font-bold text-red-500">{otpError}</p>
+                    </div>
+                  )}
                   <div className="text-center mt-4">
                     {resendTimer > 0 ? (
                       <p className="text-xs font-semibold text-gray-500 dark:text-gray-400">
@@ -576,10 +603,10 @@ export default function UnifiedOTPFastLogin() {
         </div>
 
         {step === 1 && (
-          <div className="mt-6 text-center space-y-2">
+          <div className="mt-6 text-center space-y-4">
              <p className="text-[10px] text-gray-400 font-bold uppercase tracking-[0.2em] leading-relaxed">
                By continuing, you agree to our <br />
-               <Link to="/food/user/profile/terms" className="text-gray-900 dark:text-white underline cursor-pointer hover:text-primary-orange transition-colors">Terms And Condition</Link> & <Link to="/food/user/profile/privacy" className="text-gray-900 dark:text-white underline cursor-pointer hover:text-primary-orange transition-colors">Privacy Policy</Link>
+               <Link to="/food/user/profile/terms" className="text-gray-900 dark:text-white underline cursor-pointer hover:text-primary-orange transition-colors">Terms And Condition</Link>, <Link to="/food/user/profile/privacy" className="text-gray-900 dark:text-white underline cursor-pointer hover:text-primary-orange transition-colors">Privacy Policy</Link> & <Link to="/food/user/support" className="text-gray-900 dark:text-white underline cursor-pointer hover:text-primary-orange transition-colors">Support</Link>
              </p>
           </div>
         )}

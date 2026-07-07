@@ -1704,10 +1704,10 @@ export default function RestaurantsList() {
                         <td className="px-6 py-4 whitespace-nowrap text-center">
                           <button
                             onClick={() => handleToggleVisibility(restaurant)}
-                            disabled={!canEdit || restaurant.productCount <= 0}
-                            title={restaurant.productCount <= 0 ? "Cannot make visible. Restaurant has no products." : "Toggle Visibility"}
+                            disabled={!canEdit}
+                            title={!canEdit ? "Cannot edit visibility" : "Toggle Visibility"}
                             className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 ${
-                              !canEdit || restaurant.productCount <= 0 ? 'opacity-50 cursor-not-allowed' : ''
+                              !canEdit ? 'opacity-50 cursor-not-allowed' : ''
                             }`}
                           >
                             <span aria-hidden="true" className={`absolute mx-auto h-full w-9 rounded-full transition-colors ${restaurant.isListed ? 'bg-green-500' : 'bg-slate-200'}`} />

@@ -174,8 +174,23 @@ export const requestUserOtp = async (phone) => {
     }
   }
 
+<<<<<<< Updated upstream
   const existingUser = await findExistingFoodUserByIdentifier(phone);
   assertUserEligibleForOtp(existingUser);
+=======
+  // Check if the user exists and is deactivated
+  let userDoc;
+  if (isEmail) {
+    const emailLower = String(phone || "").trim().toLowerCase();
+    userDoc = await FoodUser.findOne({ email: emailLower });
+  } else {
+    userDoc = await FoodUser.findOne({ phone });
+  }
+
+  if (userDoc && (userDoc.isActive === false || userDoc.isDeleted === true || userDoc.accountStatus === 'deleted')) {
+    throw new AuthError("Your account has been deleted/deactivated. Please contact support.");
+  }
+>>>>>>> Stashed changes
 
   const otp = await createOrUpdateOtp(phone);
   const shouldExposeOtp =
