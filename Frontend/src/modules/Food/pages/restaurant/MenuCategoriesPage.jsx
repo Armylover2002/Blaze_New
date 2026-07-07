@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from "react-router-dom"
 import useRestaurantBackNavigation from "@food/hooks/useRestaurantBackNavigation"
 import { AnimatePresence, motion } from "framer-motion"
 import {
+  AlertTriangle,
   ArrowLeft,
   BadgeCheck,
   Clock3,
@@ -29,6 +30,8 @@ const defaultFormData = {
   sortOrder: 0,
   foodTypeScope: "Veg",
 }
+
+const INACTIVE_CATEGORY_WARNING = "This category is currently inactive and is not available for use."
 
 const approvalBadgeClass = (status) => {
   const value = String(status || "pending").toLowerCase()
@@ -324,6 +327,13 @@ export default function MenuCategoriesPage() {
                       </div>
                     </div>
                   </div>
+
+                  {category?.isActive === false && (
+                    <div className="mt-3 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm font-medium text-amber-800">
+                      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                      <span>{INACTIVE_CATEGORY_WARNING}</span>
+                    </div>
+                  )}
 
                   <div className="mt-4 flex items-center gap-2">
                     <button

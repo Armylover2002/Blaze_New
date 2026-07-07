@@ -57,6 +57,7 @@ import {
     normalizeFoodVariantsInput,
     serializeFoodVariants
 } from './foodVariant.service.js';
+import { notifyCategoryStatusChange } from './categoryStatusNotification.service.js';
 
 const parseBooleanLike = (value, fieldName) => {
     if (typeof value === 'boolean') return value;
@@ -2722,6 +2723,8 @@ export async function updateCategory(id, body) {
     const doc = await FoodCategory.findById(id);
     if (!doc) return null;
 
+    const previousIsActive = doc.isActive !== false;
+
     const nextFoodTypeScope = body.foodTypeScope !== undefined
         ? normalizeCategoryFoodTypeScope(body.foodTypeScope, doc.foodTypeScope || 'Both')
         : normalizeCategoryFoodTypeScope(doc.foodTypeScope, 'Both');
@@ -2757,6 +2760,12 @@ export async function updateCategory(id, body) {
         doc.createdByRestaurantId = doc.restaurantId;
     }
     await doc.save();
+
+    const nextIsActive = doc.isActive !== false;
+    if (previousIsActive !== nextIsActive) {
+        await notifyCategoryStatusChange(doc, { isActive: nextIsActive });
+    }
+
     return doc.toObject();
 }
 
@@ -2774,11 +2783,18 @@ export async function toggleCategoryStatus(id) {
     if (!id || !mongoose.Types.ObjectId.isValid(id)) return null;
     const doc = await FoodCategory.findById(id);
     if (!doc) return null;
+    const previousIsActive = doc.isActive !== false;
     doc.isActive = !doc.isActive;
     if (!doc.createdByRestaurantId && doc.restaurantId) {
         doc.createdByRestaurantId = doc.restaurantId;
     }
     await doc.save();
+
+    const nextIsActive = doc.isActive !== false;
+    if (previousIsActive !== nextIsActive) {
+        await notifyCategoryStatusChange(doc, { isActive: nextIsActive });
+    }
+
     return doc.toObject();
 }
 

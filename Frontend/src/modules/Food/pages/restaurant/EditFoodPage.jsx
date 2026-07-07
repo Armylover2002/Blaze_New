@@ -55,6 +55,10 @@ const fallbackCategoryOptions = [
   { id: "fallback-beverages", name: "Beverages", foodTypeScope: "Both" },
 ]
 
+const INACTIVE_CATEGORY_WARNING = "This category is currently inactive and is not available for use."
+
+const isRealCategoryId = (value) => /^[a-f0-9]{24}$/i.test(String(value || "").trim())
+
 export default function EditFoodPage() {
   const navigate = useNavigate()
   const { id } = useParams()
@@ -63,6 +67,7 @@ export default function EditFoodPage() {
   const [menuSections, setMenuSections] = useState([])
   const [availableCategories, setAvailableCategories] = useState([])
   const [isPureVegRestaurant, setIsPureVegRestaurant] = useState(false)
+  const [isCategoryInactive, setIsCategoryInactive] = useState(false)
 
   // Lenis smooth scrolling
   useEffect(() => {
@@ -205,6 +210,38 @@ export default function EditFoodPage() {
       isMounted = false
     }
   }, [isNewFood])
+
+  // Dynamically verify the selected category's live status so we can warn (and block)
+  // when the admin has deactivated it. The status is always fetched fresh from the
+  // backend so the warning clears automatically once the category is reactivated.
+  useEffect(() => {
+    let isMounted = true
+    const categoryId = String(formData.category || "").trim()
+
+    if (!isRealCategoryId(categoryId)) {
+      setIsCategoryInactive(false)
+      return () => {
+        isMounted = false
+      }
+    }
+
+    const checkCategoryStatus = async () => {
+      try {
+        const response = await restaurantAPI.getCategoryStatus(categoryId)
+        const category = response?.data?.data?.category
+        if (!isMounted) return
+        setIsCategoryInactive(category ? category.isActive === false : false)
+      } catch {
+        if (isMounted) setIsCategoryInactive(false)
+      }
+    }
+
+    checkCategoryStatus()
+
+    return () => {
+      isMounted = false
+    }
+  }, [formData.category])
 
   useEffect(() => {
     let isMounted = true
@@ -436,6 +473,11 @@ export default function EditFoodPage() {
       return
     }
 
+    if (isCategoryInactive) {
+      toast.error(INACTIVE_CATEGORY_WARNING)
+      return
+    }
+
     if (
       matchedCategory?.foodTypeScope &&
       matchedCategory.foodTypeScope !== "Both" &&
@@ -460,8 +502,8 @@ export default function EditFoodPage() {
         } else {
           navigate(`/food/restaurant/inventory`)
         }
-      } catch {
-        alert("Error saving food. Please try again.")
+      } catch (error) {
+        toast.error(error?.response?.data?.message || "Error saving food. Please try again.")
       }
       return
     }
@@ -480,8 +522,8 @@ export default function EditFoodPage() {
       } else {
         navigate(`/restaurant/food/${String(id)}`)
       }
-    } catch {
-      alert("Error saving food. Please try again.")
+    } catch (error) {
+      toast.error(error?.response?.data?.message || "Error saving food. Please try again.")
     }
   }
 
@@ -603,6 +645,11 @@ export default function EditFoodPage() {
                     <p className="mt-2 text-xs text-amber-700">
                       Add restaurant categories in Menu Categories before saving new dishes.
                     </p>
+                  )}
+                  {isCategoryInactive && (
+                    <div className="mt-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
+                      {INACTIVE_CATEGORY_WARNING}
+                    </div>
                   )}
                 </div>
 

@@ -204,6 +204,38 @@ export async function listPublicCategories(query = {}) {
     return { categories, total, page, limit };
 }
 
+/**
+ * Return the live status of a single category for a restaurant. Used by the
+ * restaurant dashboard to dynamically warn when a previously-used category has
+ * been deactivated by the admin, without relying on cached/stale values.
+ */
+export async function getRestaurantCategoryStatus(restaurantId, id) {
+    const context = await getRestaurantContext(restaurantId);
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+        throw new ValidationError('Invalid category id');
+    }
+
+    const category = await FoodCategory.findById(id)
+        .select('name image foodTypeScope approvalStatus isActive restaurantId createdByRestaurantId zoneId')
+        .lean();
+
+    if (!category?._id) return null;
+
+    await backfillLegacyCategoryWorkflow([category]);
+
+    return {
+        id: String(category._id),
+        _id: String(category._id),
+        name: category.name || '',
+        isActive: category.isActive !== false,
+        approvalStatus: category.approvalStatus || 'approved',
+        foodTypeScope: normalizeCategoryFoodTypeScope(category.foodTypeScope, 'Both'),
+        ownedByRestaurant:
+            String(category.restaurantId || '') === String(context.restaurantId) ||
+            String(category.createdByRestaurantId || '') === String(context.restaurantId)
+    };
+}
+
 export async function createRestaurantCategory(restaurantId, body = {}) {
     const context = await getRestaurantContext(restaurantId);
 

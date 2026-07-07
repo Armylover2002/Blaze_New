@@ -1254,6 +1254,12 @@ export const restaurantAPI = {
       },
       contextModule: "restaurant",
     }),
+  // Live status of a single category (used to dynamically warn when a category
+  // has been deactivated by the admin).
+  getCategoryStatus: (id) =>
+    apiClient.get(`/food/restaurant/categories/${String(id)}/status`, {
+      contextModule: "restaurant",
+    }),
   createCategory: (body) =>
     apiClient.post("/food/restaurant/categories", body ?? {}, {
       contextModule: "restaurant",
