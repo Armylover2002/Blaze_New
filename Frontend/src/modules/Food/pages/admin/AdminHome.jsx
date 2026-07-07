@@ -429,7 +429,7 @@ export default function AdminHome() {
         <SectionCard
           className="lg:col-span-2"
           title="Revenue trajectory"
-          subtitle="Commission and gross revenue with monthly order volume"
+          subtitle="Commission and gross revenue with order volume"
         >
           <div className="h-80 w-full min-w-0">
             <ResponsiveContainer width="100%" height="100%" minWidth={0}>

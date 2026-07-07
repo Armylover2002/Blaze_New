@@ -411,6 +411,86 @@ const getDateRangeByPeriod = (periodRaw) => {
 const formatMonthShort = (year, monthIndex) =>
     new Date(year, monthIndex, 1).toLocaleString('en-IN', { month: 'short' });
 
+// Builds a period-aware trend configuration for the dashboard chart so the
+// trajectory series matches the selected filter:
+//   today  -> hourly buckets
+//   week   -> daily buckets (the selected week)
+//   month  -> daily buckets (the selected month)
+//   year   -> monthly buckets (current year)
+//   overall-> rolling last 12 months
+// The bucket `label` is always returned in the response `month` field to keep
+// the existing frontend chart contract unchanged.
+const getDashboardTrendConfig = (periodRaw, periodRange, now = new Date()) => {
+    const period = String(periodRaw || 'overall').trim().toLowerCase();
+
+    if (period === 'today' && periodRange) {
+        const buckets = [];
+        for (let h = 0; h < 24; h += 1) {
+            buckets.push({ key: `${h}`, label: `${String(h).padStart(2, '0')}:00` });
+        }
+        return {
+            groupId: { hour: { $hour: '$createdAt' } },
+            keyOf: (id) => `${id?.hour}`,
+            buckets,
+            extraMatch: null,
+        };
+    }
+
+    if ((period === 'week' || period === 'month') && periodRange) {
+        const buckets = [];
+        const cursor = new Date(periodRange.start);
+        const end = new Date(periodRange.end);
+        while (cursor <= end) {
+            buckets.push({
+                key: `${cursor.getFullYear()}-${cursor.getMonth() + 1}-${cursor.getDate()}`,
+                label: cursor.toLocaleString('en-IN', { day: '2-digit', month: 'short' }),
+            });
+            cursor.setDate(cursor.getDate() + 1);
+        }
+        return {
+            groupId: {
+                year: { $year: '$createdAt' },
+                month: { $month: '$createdAt' },
+                day: { $dayOfMonth: '$createdAt' },
+            },
+            keyOf: (id) => `${id?.year}-${id?.month}-${id?.day}`,
+            buckets,
+            extraMatch: null,
+        };
+    }
+
+    if (period === 'year' && periodRange) {
+        const buckets = [];
+        for (let m = 0; m < 12; m += 1) {
+            buckets.push({ key: `${now.getFullYear()}-${m + 1}`, label: formatMonthShort(now.getFullYear(), m) });
+        }
+        return {
+            groupId: { year: { $year: '$createdAt' }, month: { $month: '$createdAt' } },
+            keyOf: (id) => `${id?.year}-${id?.month}`,
+            buckets,
+            extraMatch: null,
+        };
+    }
+
+    // overall (default) -> rolling last 12 months
+    const buckets = [];
+    for (let i = 11; i >= 0; i -= 1) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        buckets.push({ key: `${d.getFullYear()}-${d.getMonth() + 1}`, label: formatMonthShort(d.getFullYear(), d.getMonth()) });
+    }
+    return {
+        groupId: { year: { $year: '$createdAt' }, month: { $month: '$createdAt' } },
+        keyOf: (id) => `${id?.year}-${id?.month}`,
+        buckets,
+        extraMatch: {
+            createdAt: {
+                $gte: new Date(now.getFullYear(), now.getMonth() - 11, 1),
+                $lte: new Date(),
+            },
+        },
+    };
+};
+
 export async function getDashboardStats(query = {}) {
     const periodRange = getDateRangeByPeriod(query.period);
     const zoneId = query.zoneId && mongoose.Types.ObjectId.isValid(query.zoneId)
@@ -442,6 +522,8 @@ export async function getDashboardStats(query = {}) {
     const zoneScopedRestaurantMatch = zoneId
         ? { restaurantId: { $in: zoneRestaurantIds || [] } }
         : {};
+
+    const trendConfig = getDashboardTrendConfig(query.period, periodRange);
 
     const [
         orderTotalsAgg,
@@ -551,18 +633,12 @@ export async function getDashboardStats(query = {}) {
             {
                 $match: {
                     ...orderMatch,
-                    createdAt: {
-                        $gte: new Date(new Date().getFullYear(), new Date().getMonth() - 11, 1),
-                        $lte: new Date()
-                    }
+                    ...(trendConfig.extraMatch || {})
                 }
             },
             {
                 $group: {
-                    _id: {
-                        year: { $year: '$createdAt' },
-                        month: { $month: '$createdAt' }
-                    },
+                    _id: trendConfig.groupId,
                     orders: { $sum: 1 },
                     revenue: { 
                         $sum: { 
@@ -585,8 +661,7 @@ export async function getDashboardStats(query = {}) {
                         }
                     }
                 }
-            },
-            { $sort: { '_id.year': 1, '_id.month': 1 } }
+            }
         ]),
         FoodRestaurant.countDocuments({ ...restaurantMatch, status: 'approved' }),
         FoodRestaurant.countDocuments({ ...restaurantMatch, status: 'pending' }),
@@ -708,28 +783,19 @@ export async function getDashboardStats(query = {}) {
 
     const totals = orderTotalsAgg?.[0] || {};
 
-    const now = new Date();
     const monthlyMap = new Map(
-        (monthlyAgg || []).map((row) => {
-            const key = `${row._id?.year}-${row._id?.month}`;
-            return [key, row];
-        })
+        (monthlyAgg || []).map((row) => [trendConfig.keyOf(row._id), row])
     );
 
-    const monthlyData = [];
-    for (let i = 11; i >= 0; i -= 1) {
-        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-        const year = d.getFullYear();
-        const month = d.getMonth() + 1;
-        const key = `${year}-${month}`;
-        const row = monthlyMap.get(key);
-        monthlyData.push({
-            month: formatMonthShort(year, month - 1),
+    const monthlyData = trendConfig.buckets.map((bucket) => {
+        const row = monthlyMap.get(bucket.key);
+        return {
+            month: bucket.label,
             orders: Number(row?.orders || 0),
             revenue: Number(row?.revenue || 0),
             commission: Number(row?.commission || 0)
-        });
-    }
+        };
+    });
 
     return {
         orders: {
