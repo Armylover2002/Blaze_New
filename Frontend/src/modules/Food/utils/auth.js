@@ -4,6 +4,7 @@
  */
 
 import { clearOnboardingDraft } from "@food/utils/onboardingDraftStorage"
+import { isRestaurantInitialPendingApproval } from "@food/utils/restaurantApproval"
 
 /**
  * Decode JWT token without verification (client-side only)
@@ -154,7 +155,7 @@ export function updateStoredModuleUser(module, user) {
 }
 
 export function isRestaurantPendingApproval(user) {
-  return String(user?.status || "").toLowerCase() === "pending";
+  return isRestaurantInitialPendingApproval(user)
 }
 
 /**

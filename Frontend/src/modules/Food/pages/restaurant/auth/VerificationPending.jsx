@@ -25,6 +25,7 @@ import {
 import {
   extractRestaurantFromResponse,
   isRestaurantApproved,
+  isRestaurantInitialPendingApproval,
 } from "@food/utils/restaurantApproval"
 import { getAppLogo, loadBusinessSettings } from "@common/utils/businessSettings"
 import { toast } from "sonner"
@@ -92,6 +93,11 @@ export default function VerificationPending() {
           syncRestaurantStoredUser(restaurant)
           clearRestaurantPendingPhone()
           toast.success("Your restaurant has been approved!")
+          navigate("/food/restaurant", { replace: true })
+          return
+        }
+
+        if (restaurant && !isRestaurantInitialPendingApproval(restaurant)) {
           navigate("/food/restaurant", { replace: true })
           return
         }

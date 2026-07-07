@@ -3448,6 +3448,7 @@ export async function approveRestaurant(id, performer = null) {
             $set: {
                 status: 'approved',
                 isActive: true,
+                wasEverApproved: true,
                 approvedAt: new Date(),
                 rejectedAt: undefined,
                 rejectionReason: undefined,

@@ -107,25 +107,25 @@ export default function RestaurantSupport() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col">
-      <div className="sticky top-0 z-40 bg-white border-b border-slate-200">
-        <div className="px-4 py-3 flex items-center gap-3">
+    <div className="min-h-full bg-slate-50 flex flex-col lg:pb-8">
+      <div className="sticky top-0 z-40 bg-white border-b border-slate-200 backdrop-blur bg-white/95">
+        <div className="px-4 py-3 flex items-center gap-3 lg:max-w-6xl lg:mx-auto lg:px-8 lg:py-5 lg:w-full">
           <button
             onClick={goBack}
-            className="p-1 hover:bg-slate-100 rounded-full transition-colors"
+            className="p-1 hover:bg-slate-100 rounded-full transition-colors lg:hidden"
             aria-label="Go back"
           >
             <ChevronLeft className="w-6 h-6 text-slate-900" />
           </button>
           <div>
-            <h1 className="text-lg font-bold text-slate-900">Support</h1>
-            <p className="text-xs text-slate-500">Raise issue and track admin response</p>
+            <h1 className="text-lg font-bold text-slate-900 lg:text-2xl">Support</h1>
+            <p className="text-xs text-slate-500 lg:text-sm">Raise issue and track admin response</p>
           </div>
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 pb-28">
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 pb-28 lg:max-w-6xl lg:mx-auto lg:px-8 lg:py-6 lg:pb-8 lg:w-full lg:grid lg:grid-cols-2 lg:gap-6 lg:items-start lg:space-y-0">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 lg:col-span-2">
           <div className="rounded-xl border border-slate-200 bg-white p-3">
             <p className="text-xs text-slate-500">Total</p>
             <p className="text-lg font-bold text-slate-900">{stats.total}</p>
@@ -276,7 +276,9 @@ export default function RestaurantSupport() {
         </div>
       </div>
 
-      <BottomNavOrders />
+      <div className="lg:hidden">
+        <BottomNavOrders />
+      </div>
     </div>
   )
 }

@@ -306,6 +306,12 @@ const restaurantSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
+    /** Set on first admin approval; never cleared — used to keep panel accessible during re-verification */
+    wasEverApproved: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
     reVerification: {
       isZoneUpdate: { type: Boolean, default: false },
       previousAddress: { type: String },

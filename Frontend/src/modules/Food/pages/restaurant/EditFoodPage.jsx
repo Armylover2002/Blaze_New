@@ -156,6 +156,7 @@ export default function EditFoodPage() {
             id: category?._id || category?.id,
             name: String(category?.name || "").trim(),
             foodTypeScope: category?.foodTypeScope || "Both",
+            isGlobal: Boolean(category?.isGlobal),
           }))
           .filter((category) => category.id && category.name)
 
@@ -637,7 +638,9 @@ export default function EditFoodPage() {
                   >
                     {categoryOptions.map((category) => (
                       <option key={category.id} value={category.id}>
-                        {category.name}{category.foodTypeScope ? ` (${category.foodTypeScope})` : ""}
+                        {category.name}
+                        {category.foodTypeScope ? ` · ${category.foodTypeScope}` : ""}
+                        {category.isGlobal ? " · Global" : " · Local"}
                       </option>
                     ))}
                   </select>

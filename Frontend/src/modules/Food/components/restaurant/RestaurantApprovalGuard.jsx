@@ -11,6 +11,7 @@ import {
 import {
   extractRestaurantFromResponse,
   isRestaurantApproved,
+  isRestaurantInitialPendingApproval,
 } from "@food/utils/restaurantApproval"
 
 export default function RestaurantApprovalGuard({ children }) {
@@ -45,7 +46,7 @@ export default function RestaurantApprovalGuard({ children }) {
         if (restaurant) {
           updateStoredModuleUser("restaurant", restaurant)
 
-          if (!isRestaurantApproved(restaurant)) {
+          if (!isRestaurantApproved(restaurant) && isRestaurantInitialPendingApproval(restaurant)) {
             setRedirectToPending(true)
           }
         }

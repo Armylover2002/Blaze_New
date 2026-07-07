@@ -2,7 +2,6 @@ import { useState, useEffect, useRef } from "react"
 import { useNavigate } from "react-router-dom"
 import useRestaurantBackNavigation from "@food/hooks/useRestaurantBackNavigation"
 import { motion, AnimatePresence } from "framer-motion"
-import Lenis from "lenis"
 import {
   ArrowLeft,
   Edit,
@@ -220,26 +219,6 @@ export default function OutletInfo() {
     }
   }, [])
 
-  // Lenis smooth scrolling
-  useEffect(() => {
-    const lenis = new Lenis({
-      duration: 1.2,
-      easing: (t) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
-      smoothWheel: true,
-    })
-
-    function raf(time) {
-      lenis.raf(time)
-      requestAnimationFrame(raf)
-    }
-
-    requestAnimationFrame(raf)
-
-    return () => {
-      lenis.destroy()
-    }
-  }, [])
-
   // Handle profile image replacement
   const handleProfileImageReplace = async (file) => {
     if (!file) return
@@ -426,26 +405,30 @@ export default function OutletInfo() {
 
   return (
     <>
-      <div className="min-h-screen bg-white overflow-x-hidden">
+      <div className="min-h-full overflow-x-hidden bg-white lg:bg-slate-50 lg:pb-10">
         {/* Header */}
-        <div className="bg-white border-b border-gray-200 px-4 py-3 sticky top-0 z-50">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3 flex-1">
-              <button onClick={goBack} className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors">
-                <ArrowLeft className="w-6 h-6 text-gray-900" />
+        <div className="sticky top-0 z-50 border-b border-gray-200 bg-white/95 backdrop-blur">
+          <div className="flex items-center justify-between px-4 py-3 lg:mx-auto lg:max-w-6xl lg:px-8 lg:py-5">
+            <div className="flex flex-1 items-center gap-3">
+              <button onClick={goBack} className="rounded-lg p-1.5 transition-colors hover:bg-gray-100 lg:hidden">
+                <ArrowLeft className="h-6 w-6 text-gray-900" />
               </button>
-              <h1 className="text-lg font-bold text-gray-900">Outlet info</h1>
+              <div>
+                <h1 className="text-lg font-bold text-gray-900 lg:text-2xl">Outlet info</h1>
+                <p className="hidden text-sm text-gray-500 lg:block">Manage your restaurant profile, contact, and compliance details</p>
+              </div>
             </div>
             <div className="flex items-center gap-2">
-              <span className="text-sm text-gray-900 font-normal">
+              <span className="text-sm font-normal text-gray-900">
                 Restaurant id: {loading ? "Loading..." : (restaurantMongoId && restaurantMongoId.length >= 5 ? restaurantMongoId.slice(-5) : (restaurantId || "N/A"))}
               </span>
             </div>
           </div>
         </div>
 
+        <div className="lg:mx-auto lg:max-w-6xl lg:px-8 lg:pt-6">
         {/* Main Image Section */}
-        <div className="relative w-full h-[200px] overflow-visible">
+        <div className="relative h-[200px] w-full overflow-visible lg:h-[280px] lg:overflow-hidden lg:rounded-2xl lg:border lg:border-slate-200 lg:shadow-sm">
           <img src={mainImage} alt="Restaurant banner" className="w-full h-full object-cover" />
           
           <button
@@ -502,7 +485,7 @@ export default function OutletInfo() {
         </div>
 
         {/* Restaurant Header Info */}
-        <div className="px-4 -mt-12 mb-8 relative z-30">
+        <div className="relative z-30 mb-8 px-4 -mt-12 lg:px-0 lg:-mt-14">
           <div className="flex items-end gap-4">
             <div className="relative group">
               <div className="w-24 h-24 rounded-2xl border-4 border-white bg-white shadow-lg overflow-hidden">
@@ -549,14 +532,14 @@ export default function OutletInfo() {
         </div>
 
         {/* Info Sections */}
-        <div className="px-4 pb-20 space-y-8">
+        <div className="space-y-8 px-4 pb-20 lg:grid lg:grid-cols-2 lg:gap-6 lg:space-y-0 lg:px-0 lg:pb-10">
           {/* Basic Information */}
           <section className="space-y-4">
             <div className="flex items-center gap-2 ml-1">
                <div className="w-1 h-4 bg-gray-300 rounded-full" />
                <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider">Details</h3>
             </div>
-            <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm">
+            <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm lg:shadow-md lg:border-slate-200">
               <div className="p-4 border-b border-gray-100 flex justify-between items-start">
                 <div className="flex-1 min-w-0">
                   <p className="text-xs text-gray-400 font-medium mb-1">Restaurant Name</p>
@@ -584,7 +567,7 @@ export default function OutletInfo() {
           {/* Location & Contact */}
           <section className="space-y-3">
             <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">Location & Contact</h3>
-            <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm">
+            <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm lg:shadow-md lg:border-slate-200">
               <div className="p-4 border-b border-gray-100 flex justify-between items-start">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-1">
@@ -613,7 +596,7 @@ export default function OutletInfo() {
           {/* Owner Details */}
           <section className="space-y-3">
             <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">Owner Details</h3>
-            <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm">
+            <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm lg:shadow-md lg:border-slate-200">
               <div className="p-4 border-b border-gray-100 flex justify-between items-start">
                 <div className="flex-1 min-w-0">
                   <p className="text-xs text-gray-400 font-medium mb-1">Owner Name</p>
@@ -639,7 +622,7 @@ export default function OutletInfo() {
           {/* Legal & Compliance */}
           <section className="space-y-3">
             <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">Legal & Compliance</h3>
-            <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm">
+            <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm lg:shadow-md lg:border-slate-200">
               <div className="p-4 border-b border-gray-100 flex justify-between items-start">
                 <div className="flex-1 min-w-0">
                   <p className="text-xs text-gray-400 font-medium mb-1">FSSAI License</p>
@@ -665,7 +648,7 @@ export default function OutletInfo() {
           {/* Operational Settings */}
           <section className="space-y-3">
             <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">Operational</h3>
-            <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm">
+            <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm lg:shadow-md lg:border-slate-200">
               <div className="p-4 border-b border-gray-100 flex justify-between items-center">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-1">
@@ -693,7 +676,7 @@ export default function OutletInfo() {
           {/* Bank Account */}
           <section className="space-y-3">
             <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">Bank Account</h3>
-            <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm">
+            <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm lg:shadow-md lg:border-slate-200">
               <div className="p-4 border-b border-gray-100 flex justify-between items-start">
                 <div className="flex-1 min-w-0">
                   <p className="text-xs text-gray-400 font-medium mb-1">Account Number</p>
@@ -715,6 +698,7 @@ export default function OutletInfo() {
               </div>
             </div>
           </section>
+        </div>
         </div>
       </div>
 

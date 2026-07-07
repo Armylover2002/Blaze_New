@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { useNavigate } from "react-router-dom"
-import Lenis from "lenis"
 import {
   ArrowLeft,
   Search,
@@ -714,26 +713,6 @@ export default function ExploreMore() {
     }
   }, [profileOpen, scheduleOffOpen, dateTimePickerOpen, successPopupOpen, existingScheduleOpen, searchOpen])
 
-  // Lenis smooth scrolling
-  useEffect(() => {
-    const lenis = new Lenis({
-      duration: 1.2,
-      easing: (t) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
-      smoothWheel: true,
-    })
-
-    function raf(time) {
-      lenis.raf(time)
-      requestAnimationFrame(raf)
-    }
-
-    requestAnimationFrame(raf)
-
-    return () => {
-      lenis.destroy()
-    }
-  }, [])
-
   // Section data
   const manageOutletItems = [
     { id: 1, label: "Outlet info", icon: Info, route: "/restaurant/outlet-info" },
@@ -810,11 +789,11 @@ export default function ExploreMore() {
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ duration: 0.2, delay: delay + 0.05 }}
-        className="text-base font-bold text-gray-900 mb-4"
+        className="text-base font-bold text-gray-900 mb-4 lg:text-lg"
       >
         {title}
       </motion.h2>
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-3 gap-4 lg:grid-cols-4 xl:grid-cols-5 lg:gap-5">
         {items.map((item, index) => {
           const IconComponent = item.icon
           return (
@@ -878,7 +857,7 @@ export default function ExploreMore() {
         duration: 0.2,
         ease: [0.25, 0.1, 0.25, 1]
       }}
-      className="min-h-screen bg-white overflow-x-hidden pb-24"
+      className="min-h-full bg-white overflow-x-hidden pb-24 lg:pb-8 lg:bg-slate-50"
     >
       {/* Header */}
       <motion.div
@@ -888,18 +867,21 @@ export default function ExploreMore() {
           duration: 0.25,
           ease: [0.25, 0.1, 0.25, 1]
         }}
-        className="bg-white border-b border-gray-200 px-4 py-3 sticky top-0 z-50"
+        className="bg-white border-b border-gray-200 px-4 py-3 sticky top-0 z-50 backdrop-blur bg-white/95"
       >
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between lg:max-w-6xl lg:mx-auto lg:px-4 lg:py-2 lg:w-full">
           <div className="flex items-center gap-3 flex-1">
             <button
               onClick={() => navigate("/food/restaurant")}
-              className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors"
+              className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors lg:hidden"
               aria-label="Go back"
             >
               <ArrowLeft className="w-6 h-6 text-gray-900" />
             </button>
-            <h1 className="text-lg font-bold text-gray-900">Explore more</h1>
+            <div>
+              <h1 className="text-lg font-bold text-gray-900 lg:text-2xl">Explore more</h1>
+              <p className="hidden text-sm text-gray-500 lg:block">Manage outlet, settings, orders, and account tools</p>
+            </div>
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -925,7 +907,7 @@ export default function ExploreMore() {
       </motion.div>
 
       {/* Main Content */}
-      <div className="px-4 py-6">
+      <div className="px-4 py-6 lg:max-w-6xl lg:mx-auto lg:px-8 lg:py-8">
         {/* Restaurant Information Card */}
         <motion.div
           initial={{ opacity: 0, y: 8 }}
@@ -936,7 +918,7 @@ export default function ExploreMore() {
             ease: [0.25, 0.1, 0.25, 1]
           }}
         >
-          <Card className="bg-white border-gray-200 py-3 mb-6 rounded-lg shadow-0">
+          <Card className="bg-white border-gray-200 py-3 mb-6 rounded-lg shadow-0 lg:shadow-sm lg:border-slate-200 lg:rounded-2xl">
             <CardContent className="px-4">
               <div className="w-full flex items-center justify-between">
                 <div className="flex items-center gap-3 flex-1">
@@ -1563,7 +1545,9 @@ export default function ExploreMore() {
           </>
         )}
       </AnimatePresence>
-      <BottomNavOrders />
+      <div className="lg:hidden">
+        <BottomNavOrders />
+      </div>
     </motion.div>
   )
 }

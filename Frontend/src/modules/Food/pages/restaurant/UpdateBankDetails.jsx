@@ -180,22 +180,27 @@ export default function UpdateBankDetails() {
     }`
 
   return (
-    <div className="min-h-screen bg-white flex flex-col">
-      <div className="px-4 pt-4 pb-3 flex items-center gap-3 border-b border-gray-200">
-        <button onClick={goBack} className="p-2 rounded-full hover:bg-gray-100" aria-label="Back">
-          <ArrowLeft className="w-5 h-5 text-gray-900" />
-        </button>
-        <h1 className="text-lg font-bold text-gray-900">Bank & UPI Details</h1>
+    <div className="min-h-full bg-white lg:bg-slate-50 flex flex-col">
+      <div className="sticky top-0 z-40 border-b border-gray-200 bg-white/95 backdrop-blur">
+        <div className="px-4 pt-4 pb-3 flex items-center gap-3 lg:max-w-2xl lg:mx-auto lg:px-8 lg:py-5 lg:w-full">
+          <button onClick={goBack} className="p-2 rounded-full hover:bg-gray-100 lg:hidden" aria-label="Back">
+            <ArrowLeft className="w-5 h-5 text-gray-900" />
+          </button>
+          <div>
+            <h1 className="text-lg font-bold text-gray-900 lg:text-2xl">Bank & UPI Details</h1>
+            <p className="hidden text-sm text-gray-500 lg:block">Update payout account and UPI information</p>
+          </div>
+        </div>
       </div>
 
-      <div className="flex-1 px-4 pt-4 pb-6">
+      <div className="flex-1 px-4 pt-4 pb-6 lg:max-w-2xl lg:mx-auto lg:px-8 lg:py-8 lg:w-full">
         {loading ? (
           <div className="py-12 flex items-center justify-center gap-2 text-gray-600">
             <Loader2 className="w-4 h-4 animate-spin" />
             <span>Loading details...</span>
           </div>
         ) : (
-          <form onSubmit={handleSubmit} className="space-y-5">
+          <form onSubmit={handleSubmit} className="space-y-5 lg:rounded-2xl lg:border lg:border-slate-200 lg:bg-white lg:p-8 lg:shadow-sm">
             <div className="mb-2">
               <h2 className="text-base font-bold text-gray-900">Account details</h2>
               {formattedUpdatedAt ? (
@@ -203,6 +208,7 @@ export default function UpdateBankDetails() {
               ) : null}
             </div>
 
+            <div className="grid gap-5 lg:grid-cols-2">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">Account holder name</label>
               <input
@@ -270,7 +276,7 @@ export default function UpdateBankDetails() {
               ) : null}
             </div>
 
-            <div className="pt-2 border-t border-gray-200">
+            <div className="pt-2 border-t border-gray-200 lg:col-span-2">
               <h2 className="text-base font-bold text-gray-900 mb-3">UPI details</h2>
 
               <label className="block text-sm font-medium text-gray-700 mb-2">UPI ID</label>
@@ -331,10 +337,11 @@ export default function UpdateBankDetails() {
             <button
               type="submit"
               disabled={saving || uploadingQr}
-              className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed text-white font-bold py-4 rounded-lg text-base transition-colors"
+              className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed text-white font-bold py-4 rounded-lg text-base transition-colors lg:col-span-2"
             >
               {saving ? "Saving..." : "Submit"}
             </button>
+            </div>
           </form>
         )}
       </div>

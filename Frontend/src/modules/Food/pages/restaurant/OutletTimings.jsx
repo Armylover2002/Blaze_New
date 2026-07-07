@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from "react"
 import { useNavigate } from "react-router-dom"
 import { motion, AnimatePresence } from "framer-motion"
-import Lenis from "lenis"
 import { ArrowLeft, ChevronUp, ChevronDown, Clock, Edit2 } from "lucide-react"
 import { Switch } from "@food/components/ui/switch"
 import { MobileTimePicker } from "@mui/x-date-pickers/MobileTimePicker"
@@ -113,26 +112,6 @@ export default function OutletTimings() {
     }
   }, [days, loading])
 
-  // Lenis smooth scrolling
-  useEffect(() => {
-    const lenis = new Lenis({
-      duration: 1.2,
-      easing: (t) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
-      smoothWheel: true,
-    })
-
-    function raf(time) {
-      lenis.raf(time)
-      requestAnimationFrame(raf)
-    }
-
-    requestAnimationFrame(raf)
-
-    return () => {
-      lenis.destroy()
-    }
-  }, [])
-
   const toggleDay = (day) => {
     setExpandedDay(expandedDay === day ? null : day)
   }
@@ -181,9 +160,76 @@ export default function OutletTimings() {
 
   const dayNames = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 
+  const timePickerSx = {
+    "& .MuiOutlinedInput-root": {
+      height: "36px",
+      fontSize: "12px",
+      backgroundColor: "white",
+      "& fieldset": { borderColor: "#e5e7eb" },
+      "&:hover fieldset": { borderColor: "#d1d5db" },
+      "&.Mui-focused fieldset": { borderColor: "#000" },
+    },
+    "& .MuiInputBase-input": { padding: "8px 12px", fontSize: "12px" },
+  }
+
+  const renderTimeFields = (day, dayData) => (
+    dayData.isOpen ? (
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-2">
+        <div className="space-y-2">
+          <label className="text-sm font-medium text-gray-700 flex items-center gap-2">
+            <Clock className="w-4 h-4" />
+            Opening time
+          </label>
+          <div className="border border-gray-200 rounded-md px-3 py-2 bg-gray-50/60">
+            <MobileTimePicker
+              value={stringToTime(dayData.openingTime)}
+              onChange={(newValue) => { if (newValue) handleTimeChange(day, "openingTime", newValue) }}
+              onAccept={(newValue) => { if (newValue) handleTimeChange(day, "openingTime", newValue) }}
+              slotProps={{
+                textField: {
+                  variant: "outlined",
+                  size: "small",
+                  placeholder: "Select opening time",
+                  sx: timePickerSx,
+                },
+              }}
+              format="hh:mm a"
+            />
+          </div>
+          <p className="text-xs text-gray-500">Current: {formatTime12Hour(dayData.openingTime)}</p>
+        </div>
+        <div className="space-y-2">
+          <label className="text-sm font-medium text-gray-700 flex items-center gap-2">
+            <Clock className="w-4 h-4" />
+            Closing time
+          </label>
+          <div className="border border-gray-200 rounded-md px-3 py-2 bg-gray-50/60">
+            <MobileTimePicker
+              value={stringToTime(dayData.closingTime)}
+              onChange={(newValue) => { if (newValue) handleTimeChange(day, "closingTime", newValue) }}
+              onAccept={(newValue) => { if (newValue) handleTimeChange(day, "closingTime", newValue) }}
+              slotProps={{
+                textField: {
+                  variant: "outlined",
+                  size: "small",
+                  placeholder: "Select closing time",
+                  sx: timePickerSx,
+                },
+              }}
+              format="hh:mm a"
+            />
+          </div>
+          <p className="text-xs text-gray-500">Current: {formatTime12Hour(dayData.closingTime)}</p>
+        </div>
+      </div>
+    ) : (
+      <p className="text-sm text-gray-500 lg:pl-0 pl-6">This day is closed</p>
+    )
+  )
+
   if (loading) {
     return (
-      <div className="min-h-screen bg-white flex items-center justify-center">
+      <div className="min-h-full bg-white flex items-center justify-center lg:bg-slate-50">
         <div className="text-sm text-gray-600">Loading outlet timings...</div>
       </div>
     )
@@ -191,47 +237,96 @@ export default function OutletTimings() {
 
   return (
     <LocalizationProvider dateAdapter={AdapterDateFns}>
-      <div className="min-h-screen bg-white overflow-x-hidden">
+      <div className="min-h-full bg-white overflow-x-hidden lg:bg-slate-50 lg:pb-10">
         {/* Header */}
-        <div className="bg-white border-b border-gray-200 px-4 py-3 sticky top-0 z-50">
-          <div className="flex items-center gap-3">
+        <div className="bg-white border-b border-gray-200 px-4 py-3 sticky top-0 z-50 backdrop-blur bg-white/95">
+          <div className="flex items-center gap-3 lg:max-w-4xl lg:mx-auto lg:px-8 lg:py-2">
             <button
               onClick={() => navigate("/food/restaurant/explore")}
-              className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors"
+              className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors lg:hidden"
               aria-label="Go back"
             >
               <ArrowLeft className="w-6 h-6 text-gray-900" />
             </button>
-            <h1 className="text-lg font-bold text-gray-900">Outlet timings</h1>
+            <div>
+              <h1 className="text-lg font-bold text-gray-900 lg:text-2xl">Outlet timings</h1>
+              <p className="hidden text-sm text-gray-500 lg:block">Set your weekly opening and closing hours for delivery</p>
+            </div>
           </div>
         </div>
 
         {/* Main Content */}
-        <div className="px-4 py-6">
-          {/* Appzeto delivery Section Header */}
-          <div className="mb-6">
-            <div className="text-center mb-2">
-              <h2 className="text-base font-semibold text-blue-600">{companyName} delivery</h2>
+        <div className="px-4 py-6 lg:max-w-4xl lg:mx-auto lg:px-8 lg:py-8">
+          {/* Delivery Section Header */}
+          <div className="mb-6 lg:mb-8">
+            <div className="text-center mb-2 lg:text-left">
+              <h2 className="text-base font-semibold text-blue-600 lg:text-lg">{companyName} delivery</h2>
+              <p className="hidden lg:block text-sm text-gray-500 mt-1">Changes are saved automatically</p>
             </div>
-            <div className="h-0.5 bg-blue-600"></div>
+            <div className="h-0.5 bg-blue-600 lg:max-w-xs"></div>
           </div>
 
-          {/* Pending re-approval notice */}
-          {pendingApproval && (
-            <div className="mb-6 flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
-              <Clock className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-              <div>
-                <p className="text-sm font-semibold text-amber-900">Opening days pending approval</p>
-                <p className="text-xs text-amber-800 mt-0.5">
-                  Your updated opening days have been sent to the admin for review. Your
-                  currently approved schedule stays live for customers until the change is approved.
-                </p>
-              </div>
+          {/* Desktop table layout */}
+          <div className="hidden lg:block rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+            <div className="grid grid-cols-[140px_100px_1fr_1fr] gap-4 px-6 py-3 border-b border-slate-100 bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">
+              <span>Day</span>
+              <span>Status</span>
+              <span>Opening</span>
+              <span>Closing</span>
             </div>
-          )}
+            {dayNames.map((day) => {
+              const dayData = days[day] || { isOpen: true, openingTime: "09:00", closingTime: "22:00" }
+              return (
+                <div
+                  key={`desktop-${day}`}
+                  className="grid grid-cols-[140px_100px_1fr_1fr] gap-4 px-6 py-5 border-b border-slate-100 items-start last:border-b-0"
+                >
+                  <span className="text-sm font-semibold text-gray-900 pt-2">{day}</span>
+                  <div className="flex flex-col gap-1.5 pt-1">
+                    <span className="text-xs font-medium text-gray-600">{dayData.isOpen ? "Open" : "Closed"}</span>
+                    <Switch
+                      checked={dayData.isOpen}
+                      onCheckedChange={() => toggleDayOpen(day)}
+                      className="data-[state=checked]:bg-green-500 data-[state=unchecked]:bg-gray-300"
+                    />
+                  </div>
+                  <div className="min-w-0">
+                    {dayData.isOpen ? (
+                      <div className="border border-gray-200 rounded-lg px-3 py-2 bg-gray-50/60 max-w-[200px]">
+                        <MobileTimePicker
+                          value={stringToTime(dayData.openingTime)}
+                          onChange={(newValue) => { if (newValue) handleTimeChange(day, "openingTime", newValue) }}
+                          onAccept={(newValue) => { if (newValue) handleTimeChange(day, "openingTime", newValue) }}
+                          slotProps={{ textField: { variant: "outlined", size: "small", sx: timePickerSx } }}
+                          format="hh:mm a"
+                        />
+                      </div>
+                    ) : (
+                      <span className="text-sm text-gray-400 pt-2 block">—</span>
+                    )}
+                  </div>
+                  <div className="min-w-0">
+                    {dayData.isOpen ? (
+                      <div className="border border-gray-200 rounded-lg px-3 py-2 bg-gray-50/60 max-w-[200px]">
+                        <MobileTimePicker
+                          value={stringToTime(dayData.closingTime)}
+                          onChange={(newValue) => { if (newValue) handleTimeChange(day, "closingTime", newValue) }}
+                          onAccept={(newValue) => { if (newValue) handleTimeChange(day, "closingTime", newValue) }}
+                          slotProps={{ textField: { variant: "outlined", size: "small", sx: timePickerSx } }}
+                          format="hh:mm a"
+                        />
+                      </div>
+                    ) : (
+                      <span className="text-sm text-gray-400 pt-2 block">—</span>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
 
-          {/* Day-wise Accordion */}
-          <div className="space-y-2">
+          {/* Mobile accordion */}
+          <div className="space-y-2 lg:hidden">
             {dayNames.map((day, index) => {
               const dayData = days[day] || { isOpen: true, openingTime: "09:00", closingTime: "22:00" }
               const isExpanded = expandedDay === day
@@ -282,123 +377,7 @@ export default function OutletTimings() {
                         className="overflow-hidden"
                       >
                         <div className="p-4 space-y-4 border-t border-gray-100">
-                          {dayData.isOpen ? (
-                            <>
-                              {/* Opening Time */}
-                              <div className="space-y-2">
-                                <label className="text-sm font-medium text-gray-700 flex items-center gap-2">
-                                  <Clock className="w-4 h-4" />
-                                  Opening time
-                                </label>
-                                <div className="border border-gray-200 rounded-md px-3 py-2 bg-gray-50/60">
-                                  <MobileTimePicker
-                                    value={stringToTime(dayData.openingTime)}
-                                    onChange={(newValue) => {
-                                      debugLog('?? Opening time picker onChange:', newValue)
-                                      if (newValue) {
-                                        handleTimeChange(day, "openingTime", newValue)
-                                      }
-                                    }}
-                                    onAccept={(newValue) => {
-                                      debugLog('? Opening time picker onAccept:', newValue)
-                                      if (newValue) {
-                                        handleTimeChange(day, "openingTime", newValue)
-                                      }
-                                    }}
-                                    slotProps={{
-                                      textField: {
-                                        variant: "outlined",
-                                        size: "small",
-                                        placeholder: "Select opening time",
-                                        sx: {
-                                          "& .MuiOutlinedInput-root": {
-                                            height: "36px",
-                                            fontSize: "12px",
-                                            backgroundColor: "white",
-                                            "& fieldset": {
-                                              borderColor: "#e5e7eb",
-                                            },
-                                            "&:hover fieldset": {
-                                              borderColor: "#d1d5db",
-                                            },
-                                            "&.Mui-focused fieldset": {
-                                              borderColor: "#000",
-                                            },
-                                          },
-                                          "& .MuiInputBase-input": {
-                                            padding: "8px 12px",
-                                            fontSize: "12px",
-                                          },
-                                        },
-                                      },
-                                    }}
-                                    format="hh:mm a"
-                                  />
-                                </div>
-                                <p className="text-xs text-gray-500">
-                                  Current: {formatTime12Hour(dayData.openingTime)}
-                                </p>
-                              </div>
-
-                              {/* Closing Time */}
-                              <div className="space-y-2">
-                                <label className="text-sm font-medium text-gray-700 flex items-center gap-2">
-                                  <Clock className="w-4 h-4" />
-                                  Closing time
-                                </label>
-                                <div className="border border-gray-200 rounded-md px-3 py-2 bg-gray-50/60">
-                                  <MobileTimePicker
-                                    value={stringToTime(dayData.closingTime)}
-                                    onChange={(newValue) => {
-                                      debugLog('?? Closing time picker onChange:', newValue)
-                                      if (newValue) {
-                                        handleTimeChange(day, "closingTime", newValue)
-                                      }
-                                    }}
-                                    onAccept={(newValue) => {
-                                      debugLog('? Closing time picker onAccept:', newValue)
-                                      if (newValue) {
-                                        handleTimeChange(day, "closingTime", newValue)
-                                      }
-                                    }}
-                                    slotProps={{
-                                      textField: {
-                                        variant: "outlined",
-                                        size: "small",
-                                        placeholder: "Select closing time",
-                                        sx: {
-                                          "& .MuiOutlinedInput-root": {
-                                            height: "36px",
-                                            fontSize: "12px",
-                                            backgroundColor: "white",
-                                            "& fieldset": {
-                                              borderColor: "#e5e7eb",
-                                            },
-                                            "&:hover fieldset": {
-                                              borderColor: "#d1d5db",
-                                            },
-                                            "&.Mui-focused fieldset": {
-                                              borderColor: "#000",
-                                            },
-                                          },
-                                          "& .MuiInputBase-input": {
-                                            padding: "8px 12px",
-                                            fontSize: "12px",
-                                          },
-                                        },
-                                      },
-                                    }}
-                                    format="hh:mm a"
-                                  />
-                                </div>
-                                <p className="text-xs text-gray-500">
-                                  Current: {formatTime12Hour(dayData.closingTime)}
-                                </p>
-                              </div>
-                            </>
-                          ) : (
-                            <p className="text-sm text-gray-500 pl-6">This day is closed</p>
-                          )}
+                          {renderTimeFields(day, dayData)}
                         </div>
                       </motion.div>
                     )}

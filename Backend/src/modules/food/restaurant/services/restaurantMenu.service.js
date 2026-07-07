@@ -62,6 +62,8 @@ const buildMenuFromFoods = async (foods = [], filterPublicOnly = false) => {
             categoryId: categoryId || null,
             categoryName: sectionName,
             category: sectionName,
+            hasValidCategory: Boolean(categoryDoc),
+            needsCategoryAssignment: !categoryDoc,
             name: food.name,
             description: food.description || '',
             price: getFoodDisplayPrice(food),

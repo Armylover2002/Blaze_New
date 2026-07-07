@@ -138,23 +138,147 @@ export default function CreateCouponsPage() {
     }
   }
 
+  const couponModalHeader = (
+    <div className="mb-4 flex items-center justify-between border-b border-slate-100 pb-3">
+      <div>
+        <h2 className="text-lg font-bold text-slate-900 lg:text-xl">
+          {editingCoupon ? "Edit Coupon" : "Create Coupon"}
+        </h2>
+        <p className="text-xs text-slate-500 lg:text-sm">
+          Configure your promo campaign. Resubmitting will reset status to pending.
+        </p>
+      </div>
+      <button onClick={resetModal} className="p-1 hover:bg-slate-100 rounded-full">
+        <X className="h-5 w-5 text-slate-600" />
+      </button>
+    </div>
+  )
+
+  const couponFormFields = (
+    <div className="space-y-4">
+      <div>
+        <label className="mb-1 block text-sm font-medium text-slate-700">Coupon Code</label>
+        <input
+          type="text"
+          value={formData.couponCode}
+          onChange={(e) => setFormData((prev) => ({ ...prev, couponCode: e.target.value.toUpperCase() }))}
+          placeholder="E.g. GET50, FESTIVE100"
+          className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-red-600 focus:ring-2 focus:ring-red-600/10 font-bold tracking-wider"
+        />
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <label className="mb-1 block text-sm font-medium text-slate-700">Discount Type</label>
+          <select
+            value={formData.discountType}
+            onChange={(e) => setFormData((prev) => ({ ...prev, discountType: e.target.value }))}
+            className="w-full rounded-xl border border-slate-300 px-3 py-3 outline-none focus:border-red-600 focus:ring-2 focus:ring-red-600/10"
+          >
+            <option value="percentage">Percentage (%)</option>
+            <option value="fixed">Fixed Flat (₹)</option>
+          </select>
+        </div>
+
+        <div>
+          <label className="mb-1 block text-sm font-medium text-slate-700">Discount Value</label>
+          <input
+            type="number"
+            value={formData.discountValue}
+            onChange={(e) => setFormData((prev) => ({ ...prev, discountValue: e.target.value }))}
+            placeholder={formData.discountType === "percentage" ? "10 for 10%" : "50 for ₹50"}
+            className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-red-600 focus:ring-2 focus:ring-red-600/10"
+          />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <label className="mb-1 block text-sm font-medium text-slate-700">Min. Order Amount (₹)</label>
+          <input
+            type="number"
+            value={formData.minOrderAmount}
+            onChange={(e) => setFormData((prev) => ({ ...prev, minOrderAmount: e.target.value }))}
+            placeholder="E.g. 199"
+            className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-red-600 focus:ring-2 focus:ring-red-600/10"
+          />
+        </div>
+
+        <div>
+          <label className="mb-1 block text-sm font-medium text-slate-700">Usage Limit (Optional)</label>
+          <input
+            type="number"
+            value={formData.usageLimit}
+            onChange={(e) => setFormData((prev) => ({ ...prev, usageLimit: e.target.value }))}
+            placeholder="Total uses allowed"
+            className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-red-600 focus:ring-2 focus:ring-red-600/10"
+          />
+        </div>
+      </div>
+
+      <div>
+        <label className="mb-1 block text-sm font-medium text-slate-700">Expiry Date</label>
+        <input
+          type="date"
+          value={formData.expiryDate}
+          onChange={(e) => setFormData((prev) => ({ ...prev, expiryDate: e.target.value }))}
+          className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-red-600 focus:ring-2 focus:ring-red-600/10"
+        />
+      </div>
+
+      <div>
+        <label className="mb-1 block text-sm font-medium text-slate-700">Description</label>
+        <textarea
+          value={formData.description}
+          onChange={(e) => setFormData((prev) => ({ ...prev, description: e.target.value }))}
+          placeholder="Enter details like 'Get flat 10% off up to ₹100'"
+          rows={3}
+          className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-red-600 focus:ring-2 focus:ring-red-600/10"
+        />
+      </div>
+    </div>
+  )
+
+  const couponFormActions = (
+    <div className="mt-6 flex gap-3">
+      <button onClick={resetModal} className="flex-1 rounded-xl border border-slate-300 py-3 font-semibold text-slate-700 hover:bg-slate-50 transition-colors">
+        Cancel
+      </button>
+      <button
+        onClick={handleSaveCoupon}
+        className="flex-1 rounded-xl bg-red-600 hover:bg-red-700 py-3 font-semibold text-white shadow-lg shadow-red-600/10 transition-colors"
+      >
+        {editingCoupon ? "Save Changes" : "Submit Coupon"}
+      </button>
+    </div>
+  )
+
   return (
-    <div className="min-h-screen bg-slate-50 pb-24">
+    <div className="min-h-full bg-slate-50 pb-24 lg:pb-8">
       <div className="sticky top-0 z-40 border-b border-slate-200 bg-white/95 backdrop-blur">
-        <div className="px-4 py-3 flex items-center gap-3">
-          <button onClick={goBack} className="rounded-full p-1 hover:bg-slate-100">
+        <div className="px-4 py-3 flex items-center gap-3 lg:max-w-5xl lg:mx-auto lg:px-8 lg:py-5">
+          <button onClick={goBack} className="rounded-full p-1 hover:bg-slate-100 lg:hidden">
             <ArrowLeft className="h-5 w-5 text-slate-700" />
           </button>
-          <div>
-            <h1 className="text-xl font-bold text-slate-900">Create Coupons</h1>
-            <p className="text-xs text-slate-500">Submit coupon campaigns for admin review & approval.</p>
+          <div className="flex-1 lg:flex lg:items-center lg:justify-between lg:gap-4">
+            <div>
+              <h1 className="text-xl font-bold text-slate-900 lg:text-2xl">Create Coupons</h1>
+              <p className="text-xs text-slate-500 lg:text-sm lg:mt-1">Submit coupon campaigns for admin review & approval.</p>
+            </div>
+            <button
+              onClick={openCreateModal}
+              className="hidden lg:flex items-center justify-center gap-2 rounded-xl bg-red-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-red-700 transition-colors shrink-0"
+            >
+              <Plus className="h-4 w-4" />
+              Create Coupon
+            </button>
           </div>
         </div>
       </div>
 
-      <div className="p-4 space-y-4">
+      <div className="p-4 space-y-4 lg:max-w-5xl lg:mx-auto lg:px-8 lg:py-6 lg:space-y-6">
         {/* Info Card */}
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm lg:p-5">
           <div className="flex gap-3">
             <AlertCircle className="h-5 w-5 text-amber-500 shrink-0 mt-0.5" />
             <div>
@@ -166,28 +290,28 @@ export default function CreateCouponsPage() {
           </div>
         </div>
 
-        {/* Create Button */}
+        {/* Create Button - mobile only */}
         <button
           onClick={openCreateModal}
-          className="flex w-full items-center justify-center gap-2 rounded-xl bg-red-600 hover:bg-red-700 px-4 py-3 font-semibold text-white shadow-lg shadow-red-600/10 transition-colors"
+          className="flex w-full items-center justify-center gap-2 rounded-xl bg-red-600 hover:bg-red-700 px-4 py-3 font-semibold text-white shadow-lg shadow-red-600/10 transition-colors lg:hidden"
         >
           <Plus className="h-5 w-5" />
           Create Coupon
         </button>
 
         {loading ? (
-          <div className="flex items-center justify-center py-12">
+          <div className="flex items-center justify-center py-12 lg:py-20">
             <Loader2 className="h-6 w-6 animate-spin text-slate-500" />
           </div>
         ) : coupons.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-6 py-12 text-center shadow-sm">
+          <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-6 py-12 text-center shadow-sm lg:py-16">
             <p className="text-lg font-semibold text-slate-900">No coupons yet</p>
             <p className="mt-2 text-sm text-slate-500">
               Create a custom campaign code and increase your orders.
             </p>
           </div>
         ) : (
-          <div className="space-y-3">
+          <div className="space-y-3 lg:grid lg:grid-cols-2 lg:gap-4 lg:space-y-0">
             {coupons.map((coupon) => {
               const status = coupon?.status || "Pending"
               const expiryFormatted = coupon?.expiryDate ? new Date(coupon.expiryDate).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' }) : 'N/A'
@@ -196,7 +320,7 @@ export default function CreateCouponsPage() {
                 <motion.div
                   key={coupon._id || coupon.id}
                   layout
-                  className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm relative overflow-hidden"
+                  className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm relative overflow-hidden lg:p-5"
                 >
                   <div className="flex justify-between items-start gap-2">
                     <div>
@@ -265,123 +389,33 @@ export default function CreateCouponsPage() {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={resetModal}
-              className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm"
+              className="fixed inset-0 z-50 bg-black/50"
             />
+            {/* Mobile bottom sheet */}
             <motion.div
               initial={{ y: "100%" }}
               animate={{ y: 0 }}
               exit={{ y: "100%" }}
-              className="fixed bottom-0 left-0 right-0 z-50 max-h-[95vh] overflow-y-auto rounded-t-3xl bg-white p-5 shadow-2xl pb-10"
+              className="fixed bottom-0 left-0 right-0 z-50 max-h-[95vh] overflow-y-auto rounded-t-3xl bg-white p-5 shadow-2xl pb-10 lg:hidden"
             >
-              <div className="mb-4 flex items-center justify-between border-b border-slate-100 pb-3">
-                <div>
-                  <h2 className="text-lg font-bold text-slate-900">
-                    {editingCoupon ? "Edit Coupon" : "Create Coupon"}
-                  </h2>
-                  <p className="text-xs text-slate-500">
-                    Configure your promo campaign. Resubmitting will reset status to pending.
-                  </p>
-                </div>
-                <button onClick={resetModal} className="p-1 hover:bg-slate-100 rounded-full">
-                  <X className="h-5 w-5 text-slate-600" />
-                </button>
-              </div>
-
-              <div className="space-y-4">
-                <div>
-                  <label className="mb-1 block text-sm font-medium text-slate-700">Coupon Code</label>
-                  <input
-                    type="text"
-                    value={formData.couponCode}
-                    onChange={(e) => setFormData((prev) => ({ ...prev, couponCode: e.target.value.toUpperCase() }))}
-                    placeholder="E.g. GET50, FESTIVE100"
-                    className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-red-600 focus:ring-2 focus:ring-red-600/10 font-bold tracking-wider"
-                  />
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="mb-1 block text-sm font-medium text-slate-700">Discount Type</label>
-                    <select
-                      value={formData.discountType}
-                      onChange={(e) => setFormData((prev) => ({ ...prev, discountType: e.target.value }))}
-                      className="w-full rounded-xl border border-slate-300 px-3 py-3 outline-none focus:border-red-600 focus:ring-2 focus:ring-red-600/10"
-                    >
-                      <option value="percentage">Percentage (%)</option>
-                      <option value="fixed">Fixed Flat (₹)</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="mb-1 block text-sm font-medium text-slate-700">Discount Value</label>
-                    <input
-                      type="number"
-                      value={formData.discountValue}
-                      onChange={(e) => setFormData((prev) => ({ ...prev, discountValue: e.target.value }))}
-                      placeholder={formData.discountType === "percentage" ? "10 for 10%" : "50 for ₹50"}
-                      className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-red-600 focus:ring-2 focus:ring-red-600/10"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="mb-1 block text-sm font-medium text-slate-700">Min. Order Amount (₹)</label>
-                    <input
-                      type="number"
-                      value={formData.minOrderAmount}
-                      onChange={(e) => setFormData((prev) => ({ ...prev, minOrderAmount: e.target.value }))}
-                      placeholder="E.g. 199"
-                      className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-red-600 focus:ring-2 focus:ring-red-600/10"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="mb-1 block text-sm font-medium text-slate-700">Usage Limit (Optional)</label>
-                    <input
-                      type="number"
-                      value={formData.usageLimit}
-                      onChange={(e) => setFormData((prev) => ({ ...prev, usageLimit: e.target.value }))}
-                      placeholder="Total uses allowed"
-                      className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-red-600 focus:ring-2 focus:ring-red-600/10"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="mb-1 block text-sm font-medium text-slate-700">Expiry Date</label>
-                  <input
-                    type="date"
-                    value={formData.expiryDate}
-                    onChange={(e) => setFormData((prev) => ({ ...prev, expiryDate: e.target.value }))}
-                    className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-red-600 focus:ring-2 focus:ring-red-600/10"
-                  />
-                </div>
-
-                <div>
-                  <label className="mb-1 block text-sm font-medium text-slate-700">Description</label>
-                  <textarea
-                    value={formData.description}
-                    onChange={(e) => setFormData((prev) => ({ ...prev, description: e.target.value }))}
-                    placeholder="Enter details like 'Get flat 10% off up to ₹100'"
-                    rows={3}
-                    className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-red-600 focus:ring-2 focus:ring-red-600/10"
-                  />
-                </div>
-              </div>
-
-              <div className="mt-6 flex gap-3">
-                <button onClick={resetModal} className="flex-1 rounded-xl border border-slate-300 py-3 font-semibold text-slate-700 hover:bg-slate-50 transition-colors">
-                  Cancel
-                </button>
-                <button
-                  onClick={handleSaveCoupon}
-                  className="flex-1 rounded-xl bg-red-600 hover:bg-red-700 py-3 font-semibold text-white shadow-lg shadow-red-600/10 transition-colors"
-                >
-                  {editingCoupon ? "Save Changes" : "Submit Coupon"}
-                </button>
-              </div>
+              {couponModalHeader}
+              {couponFormFields}
+              {couponFormActions}
             </motion.div>
+            {/* Desktop centered dialog */}
+            <div className="fixed inset-0 z-50 hidden lg:flex items-center justify-center p-6 pointer-events-none">
+              <motion.div
+                initial={{ opacity: 0, scale: 0.96, y: 12 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.96, y: 12 }}
+                className="pointer-events-auto w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {couponModalHeader}
+                {couponFormFields}
+                {couponFormActions}
+              </motion.div>
+            </div>
           </>
         )}
       </AnimatePresence>

@@ -213,10 +213,37 @@ const toRestaurantProfile = (doc) => {
         isAcceptingOrders: doc.isAcceptingOrders !== false,
         status: doc.status || null,
         onboardingStep: doc.onboardingStep ?? 1,
+        isActive: doc.isActive !== false,
+        wasEverApproved: doc.wasEverApproved === true,
+        approvedAt: doc.approvedAt || null,
+        rejectionReason: doc.rejectionReason || '',
+        reVerification: doc.reVerification || null,
+        onboarding: doc.onboarding || null,
         createdAt: doc.createdAt,
         updatedAt: doc.updatedAt,
         rating: normalizeRatingValue(doc.rating),
         totalRatings: normalizeTotalRatingsValue(doc.totalRatings)
+    };
+};
+
+const restaurantHadPriorApproval = (restaurant) =>
+    restaurant?.wasEverApproved === true ||
+    restaurant?.approvedAt != null ||
+    String(restaurant?.status || '').toLowerCase() === 'approved';
+
+const buildPendingReviewMutation = (restaurant, setFields = {}) => {
+    const hadPriorApproval = restaurantHadPriorApproval(restaurant);
+    return {
+        $set: {
+            ...setFields,
+            status: 'pending',
+            ...(hadPriorApproval ? { wasEverApproved: true, isActive: true } : {}),
+        },
+        $unset: {
+            rejectedAt: 1,
+            rejectionReason: 1,
+            ...(hadPriorApproval ? {} : { approvedAt: 1 }),
+        },
     };
 };
 
@@ -1319,6 +1346,13 @@ export const getCurrentRestaurantProfile = async (restaurantId) => {
                 'estimatedDeliveryTimeMinutes',
                 'diningSettings',
                 'isAcceptingOrders',
+                'isActive',
+                'wasEverApproved',
+                'approvedAt',
+                'rejectionReason',
+                'reVerification',
+                'onboarding',
+                'onboardingStep',
                 'status',
                 'fssaiNumber',
                 'fssaiExpiry',
@@ -1338,6 +1372,14 @@ export const getCurrentRestaurantProfile = async (restaurantId) => {
         .populate('zoneId', 'name zoneName serviceLocation')
         .lean();
     if (!doc) return null;
+
+    if (String(doc.status || '').toLowerCase() === 'approved' && doc.wasEverApproved !== true) {
+        FoodRestaurant.updateOne(
+            { _id: restaurantId },
+            { $set: { wasEverApproved: true } }
+        ).catch(() => {});
+        doc.wasEverApproved = true;
+    }
 
     // Determine derived acceptsOrders status using the pure read-only check
     let isAcceptingOrders = doc.isAcceptingOrders !== false;
@@ -1463,12 +1505,14 @@ export const updateRestaurantProfile = async (restaurantId, body = {}) => {
     }
 
     const currentRestaurant = await FoodRestaurant.findById(restaurantId)
-        .select('restaurantName restaurantNameNormalized ownerPhone ownerPhoneDigits ownerPhoneLast10 primaryContactNumber status fssaiNumber fssaiImage zoneId')
+        .select('restaurantName restaurantNameNormalized ownerPhone ownerPhoneDigits ownerPhoneLast10 primaryContactNumber status fssaiNumber fssaiImage fssaiExpiry zoneId wasEverApproved approvedAt isActive reVerification')
         .lean();
 
     if (!currentRestaurant) {
         throw new ValidationError('Restaurant not found');
     }
+
+    const hadPriorApproval = restaurantHadPriorApproval(currentRestaurant);
 
     const update = {};
 
@@ -1835,15 +1879,20 @@ export const updateRestaurantProfile = async (restaurantId, body = {}) => {
         update.status = 'pending';
     }
 
+    if (hadPriorApproval && (fssaiChanged || body.reVerification !== undefined)) {
+        update.wasEverApproved = true;
+        update.isActive = true;
+    }
+
     try {
         const doc = await FoodRestaurant.findByIdAndUpdate(
             restaurantId,
             {
                 $set: update,
                 $unset: {
-                    approvedAt: 1,
                     rejectedAt: 1,
-                    rejectionReason: 1
+                    rejectionReason: 1,
+                    ...(hadPriorApproval ? {} : { approvedAt: 1 }),
                 }
             },
             {
@@ -1895,7 +1944,12 @@ export const updateRestaurantProfile = async (restaurantId, body = {}) => {
                     'estimatedDeliveryTime',
                     'estimatedDeliveryTimeMinutes',
                     'zoneId',
-                    'reVerification'
+                    'reVerification',
+                    'wasEverApproved',
+                    'isActive',
+                    'onboarding',
+                    'rejectionReason',
+                    'approvedAt'
                 ].join(' ')
             }
         ).lean();
@@ -1928,7 +1982,7 @@ export const updateRestaurantProfile = async (restaurantId, body = {}) => {
         }
 
         const profile = toRestaurantProfile(doc);
-        if (fssaiChanged) {
+        if (fssaiChanged && !hadPriorApproval) {
             profile.requireLogout = true;
             profile.logoutReason = 'fssai_update';
         }
@@ -1946,23 +2000,15 @@ export const uploadRestaurantProfileImage = async (restaurantId, file) => {
     if (!file?.buffer) throw new ValidationError('Image file is required');
 
     const currentRestaurant = await FoodRestaurant.findById(restaurantId)
-        .select('restaurantName status')
+        .select('restaurantName status wasEverApproved approvedAt')
         .lean();
     if (!currentRestaurant) throw new ValidationError('Restaurant not found');
 
+    const url = await uploadImageBuffer(file.buffer, 'food/restaurants/profile');
+
     const doc = await FoodRestaurant.findByIdAndUpdate(
         restaurantId,
-        {
-            $set: {
-                profileImage: url,
-                status: 'pending'
-            },
-            $unset: {
-                approvedAt: 1,
-                rejectedAt: 1,
-                rejectionReason: 1
-            }
-        },
+        buildPendingReviewMutation(currentRestaurant, { profileImage: url }),
         { new: true, projection: 'restaurantId profileImage coverImages restaurantName cuisines location menuImages addressLine1 addressLine2 area city state pincode landmark ownerName ownerEmail ownerPhone primaryContactNumber pureVegRestaurant openingTime closingTime openDays status createdAt updatedAt' }
     ).lean();
 
@@ -1993,7 +2039,7 @@ export const uploadRestaurantCoverImages = async (restaurantId, files = []) => {
     }
 
     const currentRestaurant = await FoodRestaurant.findById(restaurantId)
-        .select('restaurantName status profileImage coverImages')
+        .select('restaurantName status profileImage coverImages wasEverApproved approvedAt')
         .lean();
     if (!currentRestaurant) throw new ValidationError('Restaurant not found');
 
@@ -2011,7 +2057,6 @@ export const uploadRestaurantCoverImages = async (restaurantId, files = []) => {
 
     const update = {
         coverImages: nextCoverImages.slice(0, 20),
-        status: 'pending'
     };
 
     if (!toUrl(currentRestaurant.profileImage) && uploadedUrls[0]) {
@@ -2020,14 +2065,7 @@ export const uploadRestaurantCoverImages = async (restaurantId, files = []) => {
 
     await FoodRestaurant.findByIdAndUpdate(
         restaurantId,
-        {
-            $set: update,
-            $unset: {
-                approvedAt: 1,
-                rejectedAt: 1,
-                rejectionReason: 1
-            }
-        },
+        buildPendingReviewMutation(currentRestaurant, update),
         { new: true }
     ).lean();
 
@@ -2053,7 +2091,7 @@ export const uploadRestaurantMenuImages = async (restaurantId, files = []) => {
     }
 
     const currentRestaurant = await FoodRestaurant.findById(restaurantId)
-        .select('restaurantName status menuImages')
+        .select('restaurantName status menuImages wasEverApproved approvedAt')
         .lean();
     if (!currentRestaurant) throw new ValidationError('Restaurant not found');
 
@@ -2071,17 +2109,9 @@ export const uploadRestaurantMenuImages = async (restaurantId, files = []) => {
 
     await FoodRestaurant.findByIdAndUpdate(
         restaurantId,
-        {
-            $set: {
-                menuImages: nextMenuImages.slice(0, 20),
-                status: 'pending'
-            },
-            $unset: {
-                approvedAt: 1,
-                rejectedAt: 1,
-                rejectionReason: 1
-            }
-        },
+        buildPendingReviewMutation(currentRestaurant, {
+            menuImages: nextMenuImages.slice(0, 20),
+        }),
         { new: true }
     ).lean();
 

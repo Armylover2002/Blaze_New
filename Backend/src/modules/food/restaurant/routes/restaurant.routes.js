@@ -189,7 +189,11 @@ router.get('/categories', authMiddleware, requireRestaurant, listCategoriesContr
 router.get('/categories/:id/status', authMiddleware, requireRestaurant, getCategoryStatusController);
 router.post('/categories', authMiddleware, requireRestaurant, createCategoryController);
 router.patch('/categories/:id', authMiddleware, requireRestaurant, updateCategoryController);
-router.delete('/categories/:id', authMiddleware, requireRestaurant, deleteCategoryController);
+router.delete('/categories/:id', authMiddleware, requireRestaurant, async (req, res, next) => {
+    await invalidateCache('restaurant_menu:*');
+    await invalidateCache('restaurant_menus_batch:*');
+    next();
+}, deleteCategoryController);
 
 // Menu (restaurant dashboard) - only fields needed by UI
 router.get('/menu', authMiddleware, requireRestaurant, getMenuController);

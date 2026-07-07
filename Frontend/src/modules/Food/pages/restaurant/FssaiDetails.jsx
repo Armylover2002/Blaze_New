@@ -49,7 +49,7 @@ export default function FssaiDetails() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-white flex flex-col items-center justify-center">
+      <div className="min-h-full bg-white lg:bg-slate-50 flex flex-col items-center justify-center">
         <Loader2 className="w-8 h-8 text-blue-600 animate-spin mb-2" />
         <p className="text-sm text-gray-500 font-medium">Loading FSSAI details...</p>
       </div>
@@ -57,26 +57,26 @@ export default function FssaiDetails() {
   }
 
   return (
-    <div className="min-h-screen bg-white flex flex-col">
-      <div className="px-4 pt-4 pb-3 flex items-center gap-3 border-b border-gray-200">
-        <button
-          onClick={goBack}
-          className="p-2 rounded-full hover:bg-gray-100"
-          aria-label="Back"
-        >
-          <ArrowLeft className="w-5 h-5 text-gray-900" />
-        </button>
-        <div className="flex-1">
-          <div className="flex items-center gap-1">
-            <h1 className="text-base font-semibold text-gray-900">FSSAI Details</h1>
+    <div className="min-h-full bg-white lg:bg-slate-50 flex flex-col">
+      <div className="sticky top-0 z-40 border-b border-gray-200 bg-white/95 backdrop-blur">
+        <div className="px-4 pt-4 pb-3 flex items-center gap-3 lg:max-w-2xl lg:mx-auto lg:px-8 lg:py-5 lg:w-full">
+          <button
+            onClick={goBack}
+            className="p-2 rounded-full hover:bg-gray-100 lg:hidden"
+            aria-label="Back"
+          >
+            <ArrowLeft className="w-5 h-5 text-gray-900" />
+          </button>
+          <div className="flex-1">
+            <h1 className="text-base font-semibold text-gray-900 lg:text-2xl lg:font-bold">FSSAI Details</h1>
+            <p className="text-xs text-gray-500 lg:text-sm">
+              {hasFssai ? "Manage your restaurant license data." : "No live restaurant license data available."}
+            </p>
           </div>
-          <p className="text-xs text-gray-500">
-            {hasFssai ? "Manage your restaurant license data." : "No live restaurant license data available."}
-          </p>
         </div>
       </div>
 
-      <div className="flex-1 px-4 pt-4 pb-28 space-y-4">
+      <div className="flex-1 px-4 pt-4 pb-28 lg:max-w-2xl lg:mx-auto lg:px-8 lg:py-6 lg:pb-8 lg:w-full space-y-4">
         {!hasFssai && (
           <div className="rounded-2xl bg-[#ffe9b3] px-4 py-3 flex items-start gap-3">
             <div className="mt-1 h-6 w-6 rounded-full bg-black/80 flex items-center justify-center text-white text-xs font-semibold">
@@ -93,7 +93,7 @@ export default function FssaiDetails() {
           </div>
         )}
 
-        <div className="rounded-2xl bg-white shadow-sm border border-gray-100 p-4 space-y-3">
+        <div className="rounded-2xl bg-white shadow-sm border border-gray-100 p-4 space-y-3 lg:p-6 lg:shadow-md lg:border-slate-200">
           <div>
             <p className="text-xs text-gray-500 mb-1">FSSAI registration number</p>
             <p className={`text-sm font-semibold ${hasFssai ? "text-gray-900" : "text-gray-500"}`}>
@@ -133,10 +133,10 @@ export default function FssaiDetails() {
         </div>
       </div>
 
-      <div className="px-4 pb-6 pt-3 border-t border-gray-200 bg-white">
+      <div className="px-4 pb-6 pt-3 border-t border-gray-200 bg-white lg:max-w-2xl lg:mx-auto lg:px-8 lg:w-full lg:border-t-0 lg:bg-transparent lg:pb-8">
         <button
           type="button"
-          className="w-full py-3 rounded-full bg-black text-white text-sm font-medium mb-2"
+          className="w-full py-3 rounded-full bg-black text-white text-sm font-medium mb-2 lg:rounded-xl lg:py-3.5"
           onClick={() => navigate("/food/restaurant/fssai/update")}
         >
           {hasFssai ? "Update FSSAI license" : "Add FSSAI license"}

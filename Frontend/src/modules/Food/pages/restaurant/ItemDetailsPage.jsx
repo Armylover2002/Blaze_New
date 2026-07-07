@@ -14,7 +14,8 @@ import {
   ThumbsUp,
   ChevronLeft,
   ChevronRight,
-  Loader2
+  Loader2,
+  Globe,
 } from "lucide-react"
 import { Switch } from "@food/components/ui/switch"
 // Removed getAllFoods and saveFood - now using menu API
@@ -31,6 +32,23 @@ import {
   DEFAULT_FOOD_VARIANT_UNIT,
   normalizeFoodVariantUnit,
 } from "@food/constants/foodVariantUnits"
+
+const scopePillClass = (scope, selected = false) => {
+  if (selected) return "border-white/30 bg-white/10 text-white"
+  if (scope === "Veg") return "border-green-200 bg-green-50 text-green-700"
+  if (scope === "Non-Veg") return "border-red-200 bg-red-50 text-red-700"
+  return "border-slate-200 bg-slate-100 text-slate-700"
+}
+
+const scopePillLabel = (scope) => scope || "Both"
+
+const globalPillClass = (isGlobal, selected = false) => {
+  if (selected) return "border-white/30 bg-white/10 text-white"
+  return isGlobal
+    ? "border-sky-200 bg-sky-50 text-sky-700"
+    : "border-violet-200 bg-violet-50 text-violet-700"
+}
+
 const debugLog = (...args) => { }
 const debugWarn = (...args) => { }
 const debugError = (...args) => { }
@@ -219,6 +237,12 @@ export default function ItemDetailsPage() {
     }
   }, [])
 
+  useEffect(() => {
+    if (location.state?.focusCategory) {
+      setIsCategoryPopupOpen(true)
+    }
+  }, [location.state?.focusCategory])
+
   const maxNameLength = 70
   const maxDescriptionLength = 1000
   const descriptionLength = itemDescription.length
@@ -365,6 +389,7 @@ export default function ItemDetailsPage() {
             id: cat._id || cat.id,
             name: cat.name,
             foodTypeScope: cat.foodTypeScope || "Both",
+            isGlobal: Boolean(cat.isGlobal),
           }))
 
           debugLog('Formatted restaurant categories:', formattedCategories)
@@ -988,6 +1013,113 @@ export default function ItemDetailsPage() {
     )
   }
 
+  const handleNavigateToAddCategory = () => {
+    const currentDraft = {
+      itemName,
+      category,
+      selectedCategoryId,
+      itemDescription,
+      foodType,
+      basePrice,
+      variants,
+      preparationTime,
+      images,
+    }
+    sessionStorage.setItem("item_form_draft", JSON.stringify(currentDraft))
+    setIsCategoryPopupOpen(false)
+    navigate("/food/restaurant/menu-categories", {
+      state: {
+        backTo: location.pathname,
+        id: id,
+      },
+    })
+  }
+
+  const categoryPickerHeader = (
+    <div className="flex items-center justify-between px-4 py-4 border-b border-gray-200 lg:px-5">
+      <div>
+        <h2 className="text-lg font-bold text-gray-900">Select category</h2>
+        <p className="mt-0.5 text-xs text-gray-500">Diet scope and whether the category is global or local</p>
+      </div>
+      <div className="flex items-center gap-2">
+        <button
+          onClick={handleNavigateToAddCategory}
+          className="p-2 rounded-lg bg-black text-white hover:bg-gray-800 transition-colors flex items-center gap-1.5"
+          title="Add Category"
+        >
+          <Plus className="w-4 h-4" />
+          <span className="text-sm font-medium">Add</span>
+        </button>
+        <button
+          onClick={() => setIsCategoryPopupOpen(false)}
+          className="p-1 rounded-full hover:bg-gray-100"
+        >
+          <X className="w-5 h-5 text-gray-600" />
+        </button>
+      </div>
+    </div>
+  )
+
+  const categoryPickerBody = (
+    <div className="flex-1 overflow-y-auto p-2 lg:max-h-[50vh]">
+      {loadingCategories ? (
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="w-6 h-6 animate-spin text-gray-600" />
+        </div>
+      ) : categories.length === 0 ? (
+        <div className="text-center py-12 space-y-4">
+          <p className="text-sm text-gray-500">No categories available</p>
+          <button
+            onClick={() => {
+              setIsCategoryPopupOpen(false)
+              navigate("/food/restaurant/menu-categories")
+            }}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-black text-white rounded-lg font-semibold hover:bg-gray-800 transition-colors"
+          >
+            <Plus className="w-5 h-5" />
+            Add Category
+          </button>
+        </div>
+      ) : (
+        <div className="space-y-2 p-2">
+          {categories.map((cat) => {
+            const isSelected = String(selectedCategoryId || "") === String(cat.id)
+            return (
+              <button
+                key={cat.id}
+                onClick={() => handleCategorySelect(cat.id, cat.name)}
+                className={`w-full rounded-xl border px-4 py-3 text-left transition-colors ${isSelected
+                  ? "border-gray-900 bg-gray-900 text-white"
+                  : "border-gray-200 bg-white text-gray-900 hover:border-gray-300 hover:bg-gray-50"
+                  }`}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-sm font-medium truncate">{cat.name}</span>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold ${scopePillClass(cat.foodTypeScope, isSelected)}`}>
+                      {scopePillLabel(cat.foodTypeScope)}
+                    </span>
+                    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${globalPillClass(cat.isGlobal, isSelected)}`}>
+                      {cat.isGlobal ? (
+                        <>
+                          <Globe className="mr-1 h-3 w-3" />
+                          Global
+                        </>
+                      ) : (
+                        "Local"
+                      )}
+                    </span>
+                    {isSelected && <Check className="h-4 w-4 text-white shrink-0" />}
+                  </div>
+                </div>
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+
   return (
     <div className="h-screen bg-white flex flex-col overflow-hidden lg:bg-slate-50">
       <style>{`
@@ -1218,12 +1350,44 @@ export default function ItemDetailsPage() {
             </label>
             <button
               onClick={() => setIsCategoryPopupOpen(true)}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg text-left flex items-center justify-between bg-white hover:bg-gray-50 transition-colors"
+              className="w-full px-4 py-3 border border-gray-300 rounded-xl text-left flex items-center justify-between gap-3 bg-white hover:bg-gray-50 transition-colors"
             >
-              <span className="text-sm text-gray-900">
-                {category || "Select category"}
-              </span>
-              <ChevronDown className="w-5 h-5 text-gray-500" />
+              {(() => {
+                const selected = categories.find(
+                  (cat) => String(cat.id) === String(selectedCategoryId || "")
+                )
+                if (!selected) {
+                  return (
+                    <>
+                      <span className="text-sm text-gray-500">Select category</span>
+                      <ChevronDown className="w-5 h-5 text-gray-500 shrink-0" />
+                    </>
+                  )
+                }
+                return (
+                  <>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-sm font-medium text-gray-900 truncate">{selected.name}</span>
+                        <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold ${scopePillClass(selected.foodTypeScope)}`}>
+                          {scopePillLabel(selected.foodTypeScope)}
+                        </span>
+                        <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${globalPillClass(selected.isGlobal)}`}>
+                          {selected.isGlobal ? (
+                            <>
+                              <Globe className="mr-1 h-3 w-3" />
+                              Global
+                            </>
+                          ) : (
+                            "Local"
+                          )}
+                        </span>
+                      </div>
+                    </div>
+                    <ChevronDown className="w-5 h-5 text-gray-500 shrink-0" />
+                  </>
+                )
+              })()}
             </button>
           </div>
 
@@ -1544,100 +1708,32 @@ export default function ItemDetailsPage() {
               onClick={() => setIsCategoryPopupOpen(false)}
               className="fixed inset-0 bg-black/50 z-50"
             />
+            {/* Mobile bottom sheet */}
             <motion.div
               initial={{ y: "100%" }}
               animate={{ y: 0 }}
               exit={{ y: "100%" }}
               transition={{ type: "spring", damping: 30, stiffness: 300 }}
-              className="fixed bottom-0 left-0 right-0 bg-white rounded-t-2xl shadow-2xl z-50 max-h-[85vh] flex flex-col"
+              className="fixed bottom-0 left-0 right-0 bg-white rounded-t-2xl shadow-2xl z-50 max-h-[85vh] flex flex-col lg:hidden"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="flex items-center justify-between px-4 py-4 border-b border-gray-200">
-                <h2 className="text-lg font-bold text-gray-900">Select category</h2>
-                <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => {
-                        const currentDraft = {
-                          itemName,
-                          category,
-                          selectedCategoryId,
-                          itemDescription,
-                          foodType,
-                          basePrice,
-                          variants,
-                          preparationTime,
-                          images,
-                        }
-                        sessionStorage.setItem('item_form_draft', JSON.stringify(currentDraft))
-                        setIsCategoryPopupOpen(false)
-                        navigate('/food/restaurant/menu-categories', {
-                          state: {
-                            backTo: location.pathname,
-                            id: id, // Pass current ID to help return
-                          }
-                        })
-                      }}
-                      className="p-2 rounded-lg bg-black text-white hover:bg-gray-800 transition-colors flex items-center gap-1.5"
-                      title="Add Category"
-                    >
-                      <Plus className="w-4 h-4" />
-                      <span className="text-sm font-medium">Add</span>
-                    </button>
-                  <button
-                    onClick={() => setIsCategoryPopupOpen(false)}
-                    className="p-1 rounded-full hover:bg-gray-100"
-                  >
-                    <X className="w-5 h-5 text-gray-600" />
-                  </button>
-                </div>
-              </div>
-              <div className="flex-1 overflow-y-auto p-2">
-                {loadingCategories ? (
-                  <div className="flex items-center justify-center py-12">
-                    <Loader2 className="w-6 h-6 animate-spin text-gray-600" />
-                  </div>
-                ) : categories.length === 0 ? (
-                  <div className="text-center py-12 space-y-4">
-                    <p className="text-sm text-gray-500">No categories available</p>
-                    <button
-                      onClick={() => {
-                        setIsCategoryPopupOpen(false)
-                        navigate('/restaurant/menu-categories')
-                      }}
-                      className="inline-flex items-center gap-2 px-4 py-2 bg-black text-white rounded-lg font-semibold hover:bg-gray-800 transition-colors"
-                    >
-                      <Plus className="w-5 h-5" />
-                      Add Category
-                    </button>
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    {categories.map((cat) => (
-                      <button
-                        key={cat.id}
-                        onClick={() => handleCategorySelect(cat.id, cat.name)}
-                        className={`w-full rounded-lg px-4 py-3 text-left transition-colors ${String(selectedCategoryId || "") === String(cat.id)
-                          ? "bg-gray-900 text-white"
-                          : "bg-gray-50 text-gray-900 hover:bg-gray-100"
-                          }`}
-                      >
-                        <div className="flex items-center justify-between gap-3">
-                          <span className="text-sm font-medium">{cat.name}</span>
-                          <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${cat.foodTypeScope === "Veg"
-                            ? "border-green-200 bg-green-50 text-green-700"
-                            : cat.foodTypeScope === "Non-Veg"
-                              ? "border-red-200 bg-red-50 text-red-700"
-                              : "border-slate-200 bg-slate-100 text-slate-700"
-                            }`}>
-                            {cat.foodTypeScope || "Both"}
-                          </span>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
+              {categoryPickerHeader}
+              {categoryPickerBody}
             </motion.div>
+            {/* Desktop centered dialog */}
+            <div className="fixed inset-0 z-50 hidden lg:flex items-center justify-center p-6 pointer-events-none">
+              <motion.div
+                initial={{ opacity: 0, scale: 0.96, y: 12 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.96, y: 12 }}
+                transition={{ type: "spring", damping: 30, stiffness: 300 }}
+                className="pointer-events-auto w-full max-w-md max-h-[70vh] flex flex-col rounded-2xl bg-white shadow-2xl overflow-hidden"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {categoryPickerHeader}
+                {categoryPickerBody}
+              </motion.div>
+            </div>
           </>
         )}
       </AnimatePresence>
