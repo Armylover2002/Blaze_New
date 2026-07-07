@@ -366,6 +366,9 @@ export async function getRestaurants(query) {
 const CANCELLED_ORDER_STATUSES = ['cancelled_by_user', 'cancelled_by_restaurant', 'cancelled_by_admin'];
 const PENDING_ORDER_STATUSES = ['placed', 'created'];
 const PROCESSING_ORDER_STATUSES = ['confirmed', 'preparing', 'ready_for_pickup', 'picked_up'];
+// Fallback commission rate applied to a delivered order's subtotal when the order
+// has no stored restaurantCommission (e.g. legacy orders created before commission tracking).
+const DEFAULT_RESTAURANT_COMMISSION_RATE = 0.15;
 
 const getDateRangeByPeriod = (periodRaw) => {
     const period = String(periodRaw || 'overall').trim().toLowerCase();
@@ -486,7 +489,17 @@ export async function getDashboardStats(query = {}) {
                     },
                     commissionTotal: { 
                         $sum: { 
-                            $cond: [{ $eq: ['$orderStatus', 'delivered'] }, { $ifNull: ['$pricing.restaurantCommission', 0] }, 0] 
+                            $cond: [
+                                { $eq: ['$orderStatus', 'delivered'] },
+                                {
+                                    $cond: [
+                                        { $gt: [{ $ifNull: ['$pricing.restaurantCommission', 0] }, 0] },
+                                        '$pricing.restaurantCommission',
+                                        { $multiply: [{ $ifNull: ['$pricing.subtotal', 0] }, DEFAULT_RESTAURANT_COMMISSION_RATE] }
+                                    ]
+                                },
+                                0
+                            ]
                         } 
                     },
                     platformFeeTotal: { 
@@ -546,7 +559,13 @@ export async function getDashboardStats(query = {}) {
                         $sum: {
                             $cond: [
                                 { $eq: ['$orderStatus', 'delivered'] },
-                                { $ifNull: ['$platformProfit', { $ifNull: ['$pricing.platformFee', 0] }] },
+                                {
+                                    $cond: [
+                                        { $gt: [{ $ifNull: ['$pricing.restaurantCommission', 0] }, 0] },
+                                        '$pricing.restaurantCommission',
+                                        { $multiply: [{ $ifNull: ['$pricing.subtotal', 0] }, DEFAULT_RESTAURANT_COMMISSION_RATE] }
+                                    ]
+                                },
                                 0
                             ]
                         }
@@ -709,7 +728,7 @@ export async function getDashboardStats(query = {}) {
             }
         },
         revenue: { total: Number(totals.revenueTotal || 0) },
-        commission: { total: 0 },
+        commission: { total: Number(totals.commissionTotal || 0) },
         platformFee: { total: Number(totals.platformFeeTotal || 0) },
         deliveryFee: { total: Number(totals.deliveryFeeTotal || 0) },
         gst: { total: Number(totals.gstTotal || 0) },
