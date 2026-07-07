@@ -469,7 +469,21 @@ export async function getDashboardStats(query = {}) {
                     delivered: { $sum: { $cond: [{ $eq: ['$orderStatus', 'delivered'] }, 1, 0] } },
                     cancelled: {
                         $sum: {
-                            $cond: [{ $in: ['$orderStatus', CANCELLED_ORDER_STATUSES] }, 1, 0]
+                            $cond: [
+                                {
+                                    $and: [
+                                        { $in: ['$orderStatus', CANCELLED_ORDER_STATUSES] },
+                                        { $ne: ['$payment.status', 'refunded'] }
+                                    ]
+                                },
+                                1,
+                                0
+                            ]
+                        }
+                    },
+                    refunded: {
+                        $sum: {
+                            $cond: [{ $eq: ['$payment.status', 'refunded'] }, 1, 0]
                         }
                     },
                     pendingOnly: {
@@ -723,6 +737,7 @@ export async function getDashboardStats(query = {}) {
             byStatus: {
                 delivered: Number(totals.delivered || 0),
                 cancelled: Number(totals.cancelled || 0),
+                refunded: Number(totals.refunded || 0),
                 pending: Number(totals.pendingOnly || 0),
                 processing: Number(totals.processing || 0)
             }

@@ -154,9 +154,10 @@ export default function AdminHome() {
     if (!dashboardData?.orders?.byStatus) {
       return [
         { label: "Delivered", value: 0, color: BLAZE_CHART.success },
+        { label: "Processing", value: 0, color: BLAZE_CHART.info },
         { label: "Cancelled", value: 0, color: BLAZE_CHART.danger },
-        { label: "Refunded", value: 0, color: BLAZE_CHART.warning },
-        { label: "Pending", value: 0, color: BLAZE_CHART.info },
+        { label: "Pending", value: 0, color: BLAZE_CHART.warning },
+        { label: "Refunded", value: 0, color: BLAZE_CHART.violet },
       ]
     }
 
@@ -166,6 +167,7 @@ export default function AdminHome() {
       { label: "Processing", value: byStatus.processing || 0, color: BLAZE_CHART.info },
       { label: "Cancelled", value: byStatus.cancelled || 0, color: BLAZE_CHART.danger },
       { label: "Pending", value: byStatus.pending || 0, color: BLAZE_CHART.warning },
+      { label: "Refunded", value: byStatus.refunded || 0, color: BLAZE_CHART.violet },
     ]
   }, [dashboardData]);
 
@@ -233,6 +235,7 @@ export default function AdminHome() {
     Processing: "/admin/food/orders/processing",
     Cancelled: "/admin/food/orders/canceled",
     Pending: "/admin/food/orders/pending",
+    Refunded: "/admin/food/orders/refunded",
   }
 
   return (
