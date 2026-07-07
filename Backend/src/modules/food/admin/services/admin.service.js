@@ -2614,7 +2614,8 @@ export async function getCategories(query) {
         FoodCategory.countDocuments(filter)
     ]);
 
-    const statsById = await backfillLegacyCategoryWorkflow(list);
+    // Read-only: normalize legacy records in-memory for the response, but do NOT write on a GET.
+    const statsById = await backfillLegacyCategoryWorkflow(list, { persist: false });
     const restaurantIds = Array.from(
         new Set(
             list

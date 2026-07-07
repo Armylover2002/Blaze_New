@@ -122,7 +122,8 @@ export async function listRestaurantCategories(restaurantId, query = {}) {
         FoodCategory.countDocuments(filter)
     ]);
 
-    const statsById = await backfillLegacyCategoryWorkflow(list);
+    // Read-only: normalize legacy records in-memory for the response, but never write on a GET.
+    const statsById = await backfillLegacyCategoryWorkflow(list, { persist: false });
     const restaurantIds = !compact
         ? Array.from(
             new Set(
@@ -198,7 +199,9 @@ export async function listPublicCategories(query = {}) {
         FoodCategory.countDocuments(filter)
     ]);
 
-    await backfillLegacyCategoryWorkflow(list);
+    // Read-only path; this projection omits fields the backfill would infer from, so persisting
+    // here could write wrong values. Normalize in-memory only.
+    await backfillLegacyCategoryWorkflow(list, { persist: false });
     const categories = list.map((category) => serializeCategoryForResponse(category));
 
     return { categories, total, page, limit };
@@ -221,7 +224,8 @@ export async function getRestaurantCategoryStatus(restaurantId, id) {
 
     if (!category?._id) return null;
 
-    await backfillLegacyCategoryWorkflow([category]);
+    // Read-only status check: normalize in-memory without writing on a GET.
+    await backfillLegacyCategoryWorkflow([category], { persist: false });
 
     return {
         id: String(category._id),
