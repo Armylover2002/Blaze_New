@@ -11,6 +11,7 @@ import dayjs from 'dayjs';
 import { OnboardingPaymentLog } from '../../../modules/common/models/onboardingPaymentLog.model.js';
 
 import * as walletService from '../../../modules/food/subscriptions/services/wallet.service.js';
+import { invalidateSubscriptionStatsCache } from '../../../modules/food/admin/utils/subscriptionStatsCache.js';
 
 /**
  * ✅ NEW: Centralized Razorpay Webhook Handler (Core Layer)
@@ -112,6 +113,7 @@ export const handleRazorpayWebhook = async (req, res) => {
                             }
                         }
                     );
+                    invalidateSubscriptionStatsCache();
                 }
                 return res.status(200).json({ status: 'ok' });
             }
@@ -293,6 +295,7 @@ export const handleRazorpayWebhook = async (req, res) => {
                             if (e?.code !== 11000) logger.error(`Webhook [${event}]: Failed to record dedupe`, { error: e?.message });
                         }
                         logger.info(`Webhook [${event}]: Activated subscription`, { rzSubId, expiryDate });
+                        invalidateSubscriptionStatsCache();
                     } else {
                         logger.info(`Webhook [${event}]: Already processed`, { dedupeKey, rzSubId });
                     }
@@ -345,6 +348,7 @@ export const handleRazorpayWebhook = async (req, res) => {
                             if (e?.code !== 11000) logger.error(`Webhook [${event}]: Failed to record dedupe`, { error: e?.message });
                         }
                         logger.info(`Webhook [${event}]: Renewal applied`, { rzSubId, expiryDate });
+                        invalidateSubscriptionStatsCache();
                     } else {
                         logger.info(`Webhook [${event}]: Already processed`, { dedupeKey, rzSubId });
                     }
@@ -419,6 +423,7 @@ export const handleRazorpayWebhook = async (req, res) => {
                             if (e?.code !== 11000) logger.error(`Webhook [${event}]: Failed to record dedupe`, { error: e?.message });
                         }
                         logger.info(`Webhook [${event}]: Completed -> expired`, { rzSubId });
+                        invalidateSubscriptionStatsCache();
                     } else {
                         logger.info(`Webhook [${event}]: Already processed`, { dedupeKey, rzSubId });
                     }

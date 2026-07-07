@@ -11,6 +11,7 @@ import { SubscriptionPlan } from '../../admin/models/subscriptionPlan.model.js';
 import { ValidationError, NotFoundError } from '../../../../core/auth/errors.js';
 import { createRazorpayOrder, isRazorpayConfigured, getRazorpayKeyId } from '../../orders/helpers/razorpay.helper.js';
 import { logger } from '../../../../utils/logger.js';
+import { invalidateSubscriptionStatsCache } from '../../admin/utils/subscriptionStatsCache.js';
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -161,6 +162,7 @@ export async function verifyTopup(payload) {
 
         await session.commitTransaction();
         logger.info(`verifyTopup: Successfully credited ₹${topupAmount} to ${ownerType} ${ownerId}`);
+        invalidateSubscriptionStatsCache();
     } catch (error) {
         await session.abortTransaction();
         logger.error('verifyTopup: Transaction failed', { error: error.message, ownerId, rzPaymentId });
@@ -337,6 +339,7 @@ export async function activateDailyPass(userId, userType, retryCount = 0) {
             metadata: { planId: dayPlan._id, date: todayIST }
         }]);
         logDailyPassEvent('LEDGER_CREATE_SUCCESS', { userId, userType, retryCount, passId: String(newPass._id), walletBefore: beforeBalance, walletAfter: afterBalance });
+        invalidateSubscriptionStatsCache();
     } catch (ledgerErr) {
         // Self-Healing Strategy: Log ledger failure but keep pass active to prevent double-charging loop
         logDailyPassEvent('LEDGER_CREATE_FAILED', { userId, userType, retryCount, passId: String(newPass._id), walletBefore: beforeBalance, walletAfter: afterBalance, extra: { error: ledgerErr.message } });
