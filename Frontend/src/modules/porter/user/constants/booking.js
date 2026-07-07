@@ -41,6 +41,9 @@ export const TRACKING_STAGES = [
 
 export function resolveTrackingStage(status) {
   const s = String(status || "").toLowerCase();
+  if (["cancelled_by_user", "cancelled_by_admin", "cancelled_by_driver", "cancelled", "failed", "refunded"].includes(s)) {
+    return "cancelled";
+  }
   const found = TRACKING_STAGES.find((stage) => stage.statuses.includes(s));
   return found?.id || "searching_partner";
 }

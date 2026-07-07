@@ -12,7 +12,8 @@ import LiveMap from '@/modules/DeliveryV2/components/map/LiveMap';
 import { NewOrderModal } from '@/modules/DeliveryV2/components/modals/NewOrderModal';
 import { PickupActionModal } from '@/modules/DeliveryV2/components/modals/PickupActionModal';
 import { DeliveryVerificationModal } from '@/modules/DeliveryV2/components/modals/DeliveryVerificationModal';
-import { isReturnPickupTrip, getReturnPickupStopLabels, enrichReturnDeliveryOrder } from '@/modules/DeliveryV2/utils/orderRouting';
+import PorterDeliveryVerificationModal from '@/modules/DeliveryV2/components/modals/PorterDeliveryVerificationModal';
+import { isReturnPickupTrip, getReturnPickupStopLabels, enrichReturnDeliveryOrder, enrichIncomingDeliveryOrder, enrichPorterDeliveryOrder, isPorterParcelTrip, mapPorterStatusToTripStatus } from '@/modules/DeliveryV2/utils/orderRouting';
 import { OrderSummaryModal } from '@/modules/DeliveryV2/components/modals/OrderSummaryModal';
 import ActionSlider from '@/modules/DeliveryV2/components/ui/ActionSlider';
 import VehicleSwitcherSheet from '@/modules/DeliveryV2/components/modals/VehicleSwitcherSheet';
@@ -37,7 +38,7 @@ import {
 import porterDriverApi from '@/modules/porter/driver/services/driverApi';
 
 import { getHaversineDistance, calculateETA, calculateHeading } from '@/modules/DeliveryV2/utils/geo';
-import { formatDeliveryAddressText, getPrimaryPickupLocation, normalizeLocationPoint, normalizePickupPoints, enrichPorterDeliveryOrder, isPorterParcelTrip } from '@/modules/DeliveryV2/utils/orderRouting';
+import { getPrimaryPickupLocation, normalizeLocationPoint, normalizePickupPoints } from '@/modules/DeliveryV2/utils/orderRouting';
 import { useCompanyName } from "@food/hooks/useCompanyName";
 import { useNavigate } from 'react-router-dom';
 import useNotificationInbox from "@food/hooks/useNotificationInbox";
@@ -242,7 +243,7 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
   const [showVehicleSwitcher, setShowVehicleSwitcher] = useState(false);
   const [vehicleSelectMode, setVehicleSelectMode] = useState('switch');
   const { isWithinRange, distanceToTarget } = useProximityCheck();
-  const { acceptOrder, reachPickup, pickUpOrder, reachDrop, completeDelivery, resetTrip } = useOrderManager();
+  const { acceptOrder, reachPickup, pickUpOrder, reachDrop, completeDelivery, resetTrip, cancelPorterTrip } = useOrderManager();
   const { newOrder, clearNewOrder, orderStatusUpdate, clearOrderStatusUpdate, isConnected: isSocketConnected, emitLocation, forcedOfflineEvent, clearForcedOfflineEvent } = useDeliveryNotifications();
   const [isProcessingToggle, setIsProcessingToggle] = useState(false);
 
@@ -338,28 +339,93 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
     }
   }, [completeGoOnline]);
 
-  useEffect(() => {
-    let cancelled = false;
-    if (activeOrder) return undefined;
+  const syncActiveTripFromServer = useCallback(async () => {
+    try {
+      const porterResult = await porterDriverApi.getActiveOrder().catch(() => null);
+      const porterOrder = porterResult?.order || porterResult;
+      if (porterOrder?.id || porterOrder?.orderId) {
+        const enriched = enrichPorterDeliveryOrder(porterOrder);
+        if (isPorterParcelTrip(enriched)) {
+          setActiveOrder(enriched);
+          updateTripStatus(mapPorterStatusToTripStatus(enriched.status));
+          return;
+        }
+      }
 
-    porterDriverApi.getActiveOrder()
-      .then((data) => {
-        if (cancelled) return;
-        const order = data?.order || data;
-        if (!order?.id && !order?.orderId) return;
-        const enriched = enrichPorterDeliveryOrder(order);
-        if (!isPorterParcelTrip(enriched)) return;
-        setActiveOrder(enriched);
-        const status = enriched.status;
-        if (status === 'at_pickup') updateTripStatus('at_pickup');
-        else if (status === 'picked_up' || status === 'in_transit') updateTripStatus('picked_up');
-        else if (status === 'at_drop') updateTripStatus('at_drop');
-        else updateTripStatus('accepted');
-      })
-      .catch(() => {});
+      const response = await deliveryAPI.getCurrentDelivery();
+      const rawData = response?.data?.data?.activeOrder || response?.data?.data;
+      const serverData = (rawData && (rawData._id || rawData.orderId)) ? rawData : null;
 
-    return () => { cancelled = true; };
-  }, [activeOrder, setActiveOrder, updateTripStatus]);
+      if (serverData && !isPorterParcelTrip(serverData)) {
+        const getLoc = (ref, keysLat, keysLng) => {
+          if (!ref) return null;
+          if (ref.location) {
+            if (Array.isArray(ref.location.coordinates) && ref.location.coordinates.length >= 2) {
+              return {
+                lat: ref.location.coordinates[1],
+                lng: ref.location.coordinates[0],
+              };
+            }
+            return {
+              lat: ref.location.latitude || ref.location.lat,
+              lng: ref.location.longitude || ref.location.lng,
+            };
+          }
+          for (const k of keysLat) {
+            if (ref[k] != null) {
+              return { lat: ref[k], lng: ref[keysLng[keysLat.indexOf(k)]] };
+            }
+          }
+          return null;
+        };
+
+        const resLoc = getLoc(serverData.restaurantId, ['latitude', 'lat'], ['longitude', 'lng'])
+          || getLoc(serverData, ['restaurant_lat', 'restaurantLat', 'latitude'], ['restaurant_lng', 'restaurantLng', 'longitude']);
+        const cusLoc = getLoc(serverData.deliveryAddress, ['latitude', 'lat'], ['longitude', 'lng'])
+          || getLoc(serverData, ['customer_lat', 'customerLat', 'latitude'], ['customer_lng', 'customerLng', 'longitude']);
+
+        const syncedOrder = enrichReturnDeliveryOrder({
+          ...serverData,
+          pickupPoints: normalizePickupPoints(serverData),
+          restaurantLocation: getPrimaryPickupLocation(serverData) || resLoc,
+          customerLocation: cusLoc,
+        });
+
+        setActiveOrder(syncedOrder);
+
+        const returnTrip = isReturnPickupTrip(syncedOrder);
+        const backendStatus =
+          syncedOrder.deliveryState?.status ||
+          syncedOrder.deliveryStatus ||
+          syncedOrder.orderState?.status ||
+          syncedOrder.orderStatus ||
+          syncedOrder.status;
+        const currentPhase = syncedOrder.deliveryState?.currentPhase;
+
+        if (['delivered', 'completed', 'DELIVERED', 'returned', 'refund_completed'].includes(String(backendStatus || '').toLowerCase())) {
+          updateTripStatus('COMPLETED');
+        } else if (currentPhase === 'at_drop' || ['reached_drop', 'REACHED_DROP'].includes(String(backendStatus || ''))) {
+          updateTripStatus('REACHED_DROP');
+        } else if (
+          ['picked_up', 'PICKED_UP', 'delivering'].includes(String(backendStatus || '')) ||
+          currentPhase === 'en_route_to_delivery'
+        ) {
+          updateTripStatus('PICKED_UP');
+        } else if (currentPhase === 'at_pickup' || ['reached_pickup', 'REACHED_PICKUP', 'accepted'].includes(String(backendStatus || ''))) {
+          updateTripStatus(returnTrip && backendStatus === 'accepted' ? 'PICKING_UP' : 'REACHED_PICKUP');
+        } else if (['confirmed', 'preparing', 'ready_for_pickup', 'return_in_transit', 'return_pickup_assigned'].includes(String(backendStatus || ''))) {
+          updateTripStatus('PICKING_UP');
+        }
+        return;
+      }
+
+      if (!porterOrder?.id && !porterOrder?.orderId && !serverData) {
+        clearActiveOrder();
+      }
+    } catch (err) {
+      console.error('Order Sync Failed:', err);
+    }
+  }, [setActiveOrder, updateTripStatus, clearActiveOrder]);
 
   const [showSubModal, setShowSubModal] = useState(false);
   const [showLowBalanceModal, setShowLowBalanceModal] = useState(false);
@@ -595,82 +661,10 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
     setIsModalMinimized(false);
   }, [tripStatus, showVerification, incomingOrder]);
 
-  // 1. Initial Sync (Force sync with server to avoid 'stuck' persistent state)
+  // 1. Initial Sync (Porter + Food active trip restore)
   useEffect(() => {
-    const syncWithServer = async () => {
-      try {
-        const response = await deliveryAPI.getCurrentDelivery();
-        const rawData = response?.data?.data?.activeOrder || response?.data?.data;
-        const serverData = (rawData && (rawData._id || rawData.orderId)) ? rawData : null;
-        
-        if (serverData) {
-          // Robust location mapping (Same as acceptOrder logic)
-          const getLoc = (ref, keysLat, keysLng) => {
-            if (!ref) return null;
-            if (ref.location) {
-              if (Array.isArray(ref.location.coordinates) && ref.location.coordinates.length >= 2) {
-                return {
-                  lat: ref.location.coordinates[1],
-                  lng: ref.location.coordinates[0]
-                };
-              }
-              return {
-                lat: ref.location.latitude || ref.location.lat,
-                lng: ref.location.longitude || ref.location.lng
-              };
-            }
-            for (const k of keysLat) { if (ref[k] != null) return { lat: ref[k], lng: ref[keysLng[keysLat.indexOf(k)]] }; }
-            return null;
-          };
-
-          const resLoc = getLoc(serverData.restaurantId, ['latitude', 'lat'], ['longitude', 'lng']) || 
-                         getLoc(serverData, ['restaurant_lat', 'restaurantLat', 'latitude'], ['restaurant_lng', 'restaurantLng', 'longitude']);
-                         
-          const cusLoc = getLoc(serverData.deliveryAddress, ['latitude', 'lat'], ['longitude', 'lng']) || 
-                         getLoc(serverData, ['customer_lat', 'customerLat', 'latitude'], ['customer_lng', 'customerLng', 'longitude']);
-
-          const syncedOrder = enrichReturnDeliveryOrder({
-            ...serverData,
-            pickupPoints: normalizePickupPoints(serverData),
-            restaurantLocation: getPrimaryPickupLocation(serverData) || resLoc,
-            customerLocation: cusLoc,
-          });
-
-          setActiveOrder(syncedOrder);
-
-          const returnTrip = isReturnPickupTrip(syncedOrder);
-          const backendStatus =
-            syncedOrder.deliveryState?.status ||
-            syncedOrder.deliveryStatus ||
-            syncedOrder.orderState?.status ||
-            syncedOrder.orderStatus ||
-            syncedOrder.status;
-          const currentPhase = syncedOrder.deliveryState?.currentPhase;
-
-          if (['delivered', 'completed', 'DELIVERED', 'returned', 'refund_completed'].includes(String(backendStatus || '').toLowerCase())) {
-            updateTripStatus('COMPLETED');
-          } else if (currentPhase === 'at_drop' || ['reached_drop', 'REACHED_DROP'].includes(String(backendStatus || ''))) {
-            updateTripStatus('REACHED_DROP');
-          } else if (
-            ['picked_up', 'PICKED_UP', 'delivering'].includes(String(backendStatus || '')) ||
-            currentPhase === 'en_route_to_delivery'
-          ) {
-            updateTripStatus('PICKED_UP');
-          } else if (currentPhase === 'at_pickup' || ['reached_pickup', 'REACHED_PICKUP', 'accepted'].includes(String(backendStatus || ''))) {
-            updateTripStatus(returnTrip && backendStatus === 'accepted' ? 'PICKING_UP' : 'REACHED_PICKUP');
-          } else if (['confirmed', 'preparing', 'ready_for_pickup', 'return_in_transit', 'return_pickup_assigned'].includes(String(backendStatus || ''))) {
-            updateTripStatus('PICKING_UP');
-          }
-        } else {
-          clearActiveOrder();
-        }
-      } catch (err) { 
-        console.error('Order Sync Failed:', err); 
-        clearActiveOrder();
-      }
-    };
-    syncWithServer();
-  }, []); // Only on mount to stabilize state
+    void syncActiveTripFromServer();
+  }, [syncActiveTripFromServer]);
   
   // 1.5 Professional Unified ETA Calculation Hook
   useEffect(() => {
@@ -799,18 +793,7 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
 
   useEffect(() => {
     if (!newOrder) return;
-    setIncomingOrder(enrichReturnDeliveryOrder({
-      ...newOrder,
-      pickupPoints: normalizePickupPoints(newOrder),
-      customerLocation:
-        newOrder.customerLocation ||
-        normalizeLocationPoint(newOrder.deliveryAddress?.location) ||
-        normalizeLocationPoint(newOrder.deliveryAddress),
-      customerAddress: formatDeliveryAddressText(
-        newOrder.deliveryAddress,
-        newOrder.customerAddress || newOrder.customer_address || '',
-      ),
-    }));
+    setIncomingOrder(enrichIncomingDeliveryOrder(newOrder));
   }, [newOrder]);
 
   useEffect(() => {
@@ -828,6 +811,17 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
 
     const hydrateAvailableOrder = async () => {
       try {
+        const porterActive = await porterDriverApi.getActiveOrder().catch(() => null);
+        const porterOrder = porterActive?.order || porterActive;
+        if (!cancelled && (porterOrder?.id || porterOrder?.orderId)) {
+          const enriched = enrichPorterDeliveryOrder(porterOrder);
+          if (isPorterParcelTrip(enriched)) {
+            setActiveOrder(enriched);
+            updateTripStatus(mapPorterStatusToTripStatus(enriched.status));
+            return;
+          }
+        }
+
         const currentResponse = await deliveryAPI.getCurrentDelivery();
         const currentPayload =
           currentResponse?.data?.data?.activeOrder ||
@@ -835,11 +829,29 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
           null;
 
         if (!cancelled && currentPayload && (currentPayload._id || currentPayload.orderId)) {
-          setActiveOrder(enrichReturnDeliveryOrder({
-            ...currentPayload,
-            pickupPoints: normalizePickupPoints(currentPayload),
-            restaurantLocation: getPrimaryPickupLocation(currentPayload) || currentPayload.restaurantLocation,
-          }));
+          if (!isPorterParcelTrip(currentPayload)) {
+            setActiveOrder(enrichReturnDeliveryOrder({
+              ...currentPayload,
+              pickupPoints: normalizePickupPoints(currentPayload),
+              restaurantLocation: getPrimaryPickupLocation(currentPayload) || currentPayload.restaurantLocation,
+            }));
+          }
+          return;
+        }
+
+        const porterAvailable = await porterDriverApi.getAvailableOrders().catch(() => null);
+        const porterOffers = Array.isArray(porterAvailable?.orders)
+          ? porterAvailable.orders
+          : Array.isArray(porterAvailable)
+            ? porterAvailable
+            : [];
+        const nextPorterOffer = porterOffers.find((order) => isPorterParcelTrip(order));
+        if (!cancelled && nextPorterOffer) {
+          setIncomingOrder((prev) => {
+            const prevKey = prev?.orderId || prev?.id || prev?.orderMongoId || '';
+            const nextKey = nextPorterOffer?.orderId || nextPorterOffer?.id || nextPorterOffer?.orderMongoId || '';
+            return prevKey === nextKey && prev ? prev : enrichIncomingDeliveryOrder(nextPorterOffer);
+          });
           return;
         }
 
@@ -857,6 +869,7 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
               : [];
 
         const nextIncomingOrder = availableOrders.find((order) => {
+          if (isPorterParcelTrip(order)) return false;
           const dispatchStatus = String(order?.dispatch?.status || '').toLowerCase();
           const orderStatus = String(order?.orderStatus || order?.status || '').toLowerCase();
           if (isReturnPickupTrip(order)) {
@@ -902,17 +915,38 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
       cancelled = true;
       window.clearInterval(poller);
     };
-  }, [activeOrder, currentTab, isOnline, isSocketConnected, setActiveOrder]);
+  }, [activeOrder, currentTab, isOnline, isSocketConnected, setActiveOrder, updateTripStatus]);
 
   useEffect(() => {
-    if (orderStatusUpdate) {
-      if (orderStatusUpdate.status === 'cancelled') {
-        toast.error('Order cancelled');
+    if (!orderStatusUpdate) return;
+
+    if (isPorterParcelTrip(orderStatusUpdate)) {
+      const cancelled = orderStatusUpdate.cancelled
+        || String(orderStatusUpdate.status || '').toLowerCase().includes('cancelled');
+      if (cancelled) {
+        toast.error('Parcel order cancelled');
         resetTrip();
+      } else if (orderStatusUpdate.recoverySource || orderStatusUpdate.orderId || orderStatusUpdate.id) {
+        const enriched = enrichPorterDeliveryOrder(orderStatusUpdate);
+        setActiveOrder(enriched);
+        updateTripStatus(mapPorterStatusToTripStatus(enriched.status));
+      } else if (orderStatusUpdate.status) {
+        setActiveOrder((prev) => enrichPorterDeliveryOrder({
+          ...(prev || {}),
+          ...orderStatusUpdate,
+        }));
+        updateTripStatus(mapPorterStatusToTripStatus(orderStatusUpdate.status));
       }
       clearOrderStatusUpdate();
+      return;
     }
-  }, [orderStatusUpdate, resetTrip, clearOrderStatusUpdate]);
+
+    if (orderStatusUpdate.status === 'cancelled') {
+      toast.error('Order cancelled');
+      resetTrip();
+    }
+    clearOrderStatusUpdate();
+  }, [orderStatusUpdate, resetTrip, clearOrderStatusUpdate, setActiveOrder, updateTripStatus]);
 
 
   const handleCenterMap = () => {
@@ -1260,6 +1294,11 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
                     onReachedPickup={reachPickup} 
                     onPickedUp={(billImageUrl, extra) => pickUpOrder(billImageUrl, extra)} 
                     onMinimize={() => setIsModalMinimized(true)}
+                    onCancelTrip={isPorterParcelTrip(activeOrder) ? () => {
+                      const reason = window.prompt('Reason for cancelling this trip:');
+                      if (!reason || !reason.trim()) return;
+                      cancelPorterTrip(reason.trim()).catch(() => {});
+                    } : undefined}
                   />
                 )}
                 {(tripStatus === 'PICKED_UP' || tripStatus === 'REACHED_DROP') && (
@@ -1283,9 +1322,33 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
                             </div>
                             <div className="min-w-0 flex-1">
                                <h3 className="text-gray-950 text-xl md:text-2xl font-bold uppercase truncate">
-                                 {isReturnPickupTrip(activeOrder) ? getReturnPickupStopLabels().dropLabel : 'Handover Drop'}
+                                 {isPorterParcelTrip(activeOrder)
+                                   ? 'Parcel Drop'
+                                   : isReturnPickupTrip(activeOrder)
+                                     ? getReturnPickupStopLabels().dropLabel
+                                     : 'Handover Drop'}
                                </h3>
-                               {isReturnPickupTrip(activeOrder) && (
+                               {isPorterParcelTrip(activeOrder) && (
+                                 <>
+                                   <p className="text-sm font-bold text-gray-900 mt-1 truncate">
+                                     {activeOrder?.receiverName || 'Receiver'}
+                                   </p>
+                                   {activeOrder?.receiverPhone && (
+                                     <p className="text-xs font-semibold text-gray-600 truncate">
+                                       {activeOrder.receiverPhone}
+                                     </p>
+                                   )}
+                                   <p className="text-xs font-medium text-gray-500 mt-0.5 line-clamp-1">
+                                     {activeOrder?.dropAddress || activeOrder?.delivery?.address || 'Drop address'}
+                                   </p>
+                                   {activeOrder?.parcelWeight != null && (
+                                     <p className="text-xs font-semibold text-gray-600 mt-1">
+                                       {activeOrder.parcelWeight} kg parcel
+                                     </p>
+                                   )}
+                                 </>
+                               )}
+                               {isReturnPickupTrip(activeOrder) && !isPorterParcelTrip(activeOrder) && (
                                  <>
                                    <p className="text-sm font-bold text-gray-900 mt-1 truncate">
                                      {activeOrder?.dropPoint?.sourceName || activeOrder?.storeName || activeOrder?.sellerName || 'Seller'}
@@ -1309,14 +1372,18 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
                           <div className="flex gap-2 shrink-0 ml-3">
                             <button
                               onClick={() => {
-                                const phone = isReturnPickupTrip(activeOrder) 
+                                const phone = isPorterParcelTrip(activeOrder)
+                                  ? (activeOrder?.receiverPhone || activeOrder?.senderPhone)
+                                  : isReturnPickupTrip(activeOrder) 
                                   ? (activeOrder?.dropPoint?.phone || activeOrder?.storePhone || activeOrder?.sellerPhone)
                                   : (activeOrder?.userPhone || activeOrder?.user?.phone || activeOrder?.customerPhone || activeOrder?.customer_phone || activeOrder?.deliveryAddress?.phone);
                                 if (phone) window.location.href = `tel:${phone}`;
                                 else toast.error('Phone number not available');
                               }}
                               className={`w-10 h-10 rounded-full flex items-center justify-center border ${
-                                isReturnPickupTrip(activeOrder)
+                                isPorterParcelTrip(activeOrder)
+                                  ? 'bg-red-50 text-red-600 border-red-100'
+                                  : isReturnPickupTrip(activeOrder)
                                   ? 'bg-red-50 text-red-600 border-red-100'
                                   : 'bg-green-50 text-green-600 border-green-100'
                               }`}
@@ -1325,13 +1392,15 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
                             </button>
                             <button 
                               onClick={() => {
-                                const address = isReturnPickupTrip(activeOrder)
+                                const address = isPorterParcelTrip(activeOrder)
+                                  ? (activeOrder?.dropAddress || activeOrder?.delivery?.address)
+                                  : isReturnPickupTrip(activeOrder)
                                   ? (activeOrder?.dropPoint?.address || activeOrder?.storeAddress || activeOrder?.restaurantAddress)
                                   : (activeOrder?.customerAddress || activeOrder?.deliveryAddress?.formattedAddress || activeOrder?.deliveryAddress || '');
                                 window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`, '_blank');
                               }}
                               className={`w-10 h-10 rounded-full flex items-center justify-center text-white shadow-lg ${
-                                isReturnPickupTrip(activeOrder) ? 'bg-red-600' : 'bg-gray-900'
+                                isPorterParcelTrip(activeOrder) || isReturnPickupTrip(activeOrder) ? 'bg-red-600' : 'bg-gray-900'
                               }`}
                             >
                               <Navigation className="w-4 h-4" />
@@ -1359,13 +1428,24 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
                           onClick={() => setShowVerification(true)} 
                           className="w-full bg-green-500 hover:bg-green-600 text-white shadow-xl shadow-green-500/30 rounded-2xl py-5 font-bold text-sm tracking-[0.2em] transform transition-all active:scale-95 flex items-center justify-center gap-3"
                         >
-                          <CheckCircle2 className="w-6 h-6" /> VERIFY & COMPLETE
+                          <CheckCircle2 className="w-6 h-6" /> {isPorterParcelTrip(activeOrder) ? 'UPLOAD PHOTO & COMPLETE' : 'VERIFY & COMPLETE'}
                         </button>
                       </div>
                     )}
                   </div>
                 )}
                 {showVerification && tripStatus !== 'COMPLETED' && (
+                  isPorterParcelTrip(activeOrder) ? (
+                    <PorterDeliveryVerificationModal
+                      order={activeOrder}
+                      onComplete={async (deliveryPhotoUrl) => {
+                        const res = await completeDelivery(null, { deliveryPhotoUrl });
+                        setShowVerification(false);
+                        return res;
+                      }}
+                      onClose={() => setShowVerification(false)}
+                    />
+                  ) : (
                   <DeliveryVerificationModal 
                     order={activeOrder} 
                     onComplete={async (...args) => {
@@ -1375,6 +1455,7 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
                     }}
                     onClose={() => setShowVerification(false)}
                   />
+                  )
                 )}
                 {tripStatus === 'COMPLETED' && <OrderSummaryModal order={activeOrder} onDone={resetTrip} />}
               </div>

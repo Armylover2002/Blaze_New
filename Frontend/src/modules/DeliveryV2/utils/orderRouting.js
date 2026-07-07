@@ -68,7 +68,45 @@ export const normalizeLocationPoint = (value) => {
   return null;
 };
 
+export const isPorterParcelTrip = (order) => {
+  const moduleType = String(order?.module || order?.orderType || order?.serviceType || order?.type || "")
+    .trim()
+    .toLowerCase();
+  return (
+    moduleType === "parcel" ||
+    moduleType === "porter" ||
+    String(order?.documentType || "").trim() === "porter_order"
+  );
+};
+
+export const mapPorterStatusToTripStatus = (porterStatus) => {
+  const status = String(porterStatus || "").trim().toLowerCase();
+  if (["delivered", "completed"].includes(status)) return "COMPLETED";
+  if (status === "at_drop") return "REACHED_DROP";
+  if (["picked_up", "in_transit"].includes(status)) return "PICKED_UP";
+  if (status === "at_pickup") return "REACHED_PICKUP";
+  if (["partner_accepted", "en_route_pickup", "assigned", "searching_partner"].includes(status)) {
+    return "PICKING_UP";
+  }
+  return "PICKING_UP";
+};
+
 export const normalizePickupPoints = (order) => {
+  if (isPorterParcelTrip(order)) {
+    const pickupLoc = normalizeLocationPoint(
+      order?.pickup || order?.pickupLocation || order?.restaurantLocation,
+    );
+    return [{
+      id: "parcel:pickup",
+      pickupType: "parcel",
+      sourceId: String(order?.orderId || order?.id || order?.orderMongoId || ""),
+      sourceName: order?.senderName || order?.pickup?.title || "Sender",
+      address: order?.pickupAddress || order?.pickup?.address || "",
+      phone: String(order?.senderPhone || order?.pickup?.phone || "").trim(),
+      ...(pickupLoc ? { location: pickupLoc } : {}),
+    }];
+  }
+
   const isReturn = isReturnPickupTrip(order);
   const raw = Array.isArray(order?.pickupPoints) ? order.pickupPoints : [];
   const explicitOrderType = String(
@@ -215,10 +253,6 @@ export const isReturnPickupTrip = (order) =>
   String(order?.tripType || "").trim() === "return_pickup" ||
   String(order?.documentType || "").trim() === "seller_return";
 
-export const isPorterParcelTrip = (order) =>
-  String(order?.module || "").trim() === "parcel" ||
-  String(order?.documentType || "").trim() === "porter_order";
-
 export const enrichPorterDeliveryOrder = (order = {}) => {
   if (!isPorterParcelTrip(order)) return order;
   const pickupLoc = normalizeLocationPoint(order.pickup || order.pickupLocation || order.restaurantLocation);
@@ -235,7 +269,50 @@ export const enrichPorterDeliveryOrder = (order = {}) => {
     dropLocation: dropLoc,
     earnings: order.earnings ?? order.pricing?.driverEarning ?? 0,
     riderEarning: order.riderEarning ?? order.pricing?.driverEarning ?? order.earnings ?? 0,
+    senderName: order.senderName || order.pickup?.title || order.userName || "Sender",
+    senderPhone: order.senderPhone || order.pickup?.phone || order.userPhone || "",
+    receiverName: order.receiverName || order.parcel?.receiverName || "Receiver",
+    receiverPhone: order.receiverPhone || order.parcel?.receiverPhone || "",
+    pickupAddress: order.pickupAddress || order.pickup?.address || "",
+    dropAddress: order.dropAddress || order.delivery?.address || "",
+    vehicleName: order.vehicleName || order.vehicle?.name || "",
+    parcelWeight: order.parcel?.weightKg != null
+      ? Number(order.parcel.weightKg) * Math.max(1, Number(order.parcel?.quantity || 1))
+      : order.parcelWeight,
+    parcelName: order.parcel?.parcelName || order.parcelName || "",
+    instructions: order.parcel?.instructions || order.instructions || "",
+    deliveryState: order.deliveryState,
+    deliveryPhotoUrl: order.deliveryState?.deliveryPhotoUrl,
   };
+};
+
+export const enrichIncomingDeliveryOrder = (order = {}) => {
+  if (isPorterParcelTrip(order)) {
+    return enrichPorterDeliveryOrder({
+      ...order,
+      pickupPoints: normalizePickupPoints(order),
+      customerLocation:
+        order.customerLocation ||
+        normalizeLocationPoint(order.delivery || order.dropLocation),
+      customerAddress: formatDeliveryAddressText(
+        order.delivery,
+        order.dropAddress || order.delivery?.address || "",
+      ),
+    });
+  }
+
+  return enrichReturnDeliveryOrder({
+    ...order,
+    pickupPoints: normalizePickupPoints(order),
+    customerLocation:
+      order.customerLocation ||
+      normalizeLocationPoint(order.deliveryAddress?.location) ||
+      normalizeLocationPoint(order.deliveryAddress),
+    customerAddress: formatDeliveryAddressText(
+      order.deliveryAddress,
+      order.customerAddress || order.customer_address || "",
+    ),
+  });
 };
 
 export const getReturnPickupStopLabels = () => ({

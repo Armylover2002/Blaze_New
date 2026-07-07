@@ -535,32 +535,52 @@ export const ProfileDetailsV2 = () => {
         <section>
           <div className="flex items-center justify-between mb-3 px-1">
              <h3 className="text-xs font-black text-gray-950 uppercase tracking-widest flex items-center gap-2">
-                {(() => {
-                  const type = String(profile?.vehicle?.type || "").toLowerCase();
-                  if (type.includes("car")) return <Car className="w-4 h-4 text-gray-400" />;
-                  if (type.includes("bike") || type.includes("scooter") || type.includes("motorcycle")) return <Bike className="w-4 h-4 text-gray-400" />;
-                  if (type.includes("bicycle")) return <Bike className="w-4 h-4 text-gray-400" />;
-                  return <Truck className="w-4 h-4 text-gray-400" />;
-                })()} Vehicle Assets
+                <Truck className="w-4 h-4 text-gray-400" /> Vehicle Assets
              </h3>
           </div>
-          <InfoCard 
-            icon={(() => {
-              const type = String(profile?.vehicle?.type || "").toLowerCase();
-              if (type.includes("car")) return Car;
-              if (type.includes("bike") || type.includes("scooter") || type.includes("motorcycle")) return Bike;
-              if (type.includes("bicycle")) return Bike;
-              return Truck;
-            })()} 
-            label="Vehicle Details" 
-            value={[profile?.vehicle?.type, profile?.vehicle?.brand, vehicleNumber].filter(Boolean).map(v => String(v).toUpperCase()).join(" • ") || "N/A"} 
-            color="red"
-            badge={!vehicleNumber && <span className="text-[9px] bg-red-50 text-red-500 px-1.5 rounded uppercase font-bold">Missing</span>}
-            onEdit={() => { 
-                setVehicleInput({ number: vehicleNumber, brand: vehicleBrand, type: vehicleType }); 
-                setShowVehiclePopup(true); 
-            }}
-          />
+          <div className="space-y-3">
+             {profile?.driverVehicles && profile?.driverVehicles.length > 0 ? (
+               profile.driverVehicles.map((v, i) => (
+                 <InfoCard 
+                   key={v.id || i}
+                   icon={(() => {
+                     const type = String(v.vehicleCode || v.vehicleName || "").toLowerCase();
+                     if (type.includes("car")) return Car;
+                     if (type.includes("bike") || type.includes("scooter") || type.includes("motorcycle")) return Bike;
+                     if (type.includes("bicycle")) return Bike;
+                     return Truck;
+                   })()} 
+                   label={v.status === 'active' || v.isDefault ? "Active Vehicle" : "Vehicle Details"}
+                   value={[v.vehicleName, v.vehicleNumber].filter(Boolean).map(val => String(val).toUpperCase()).join(" • ") || "N/A"} 
+                   color="red"
+                   badge={
+                     <div className="flex gap-1">
+                       {(v.status === 'active' || v.isDefault) && <span className="text-[9px] bg-green-50 text-green-600 px-1.5 rounded uppercase font-bold border border-green-200">Active</span>}
+                       {v.status === 'pending' && <span className="text-[9px] bg-yellow-50 text-yellow-600 px-1.5 rounded uppercase font-bold border border-yellow-200">Pending</span>}
+                     </div>
+                   }
+                 />
+               ))
+             ) : (
+               <InfoCard 
+                 icon={(() => {
+                   const type = String(profile?.vehicle?.type || profile?.vehicleType || "").toLowerCase();
+                   if (type.includes("car")) return Car;
+                   if (type.includes("bike") || type.includes("scooter") || type.includes("motorcycle")) return Bike;
+                   if (type.includes("bicycle")) return Bike;
+                   return Truck;
+                 })()} 
+                 label="Vehicle Details" 
+                 value={[profile?.vehicle?.type || profile?.vehicleType, profile?.vehicle?.brand || profile?.vehicleName, vehicleNumber || profile?.vehicleNumber].filter(Boolean).map(v => String(v).toUpperCase()).join(" • ") || "N/A"} 
+                 color="red"
+                 badge={!(vehicleNumber || profile?.vehicleNumber) && <span className="text-[9px] bg-red-50 text-red-500 px-1.5 rounded uppercase font-bold border border-red-200">Missing</span>}
+                 onEdit={() => { 
+                     setVehicleInput({ number: vehicleNumber, brand: vehicleBrand, type: vehicleType }); 
+                     setShowVehiclePopup(true); 
+                 }}
+               />
+             )}
+          </div>
         </section>
 
         {/* ─── BANK & PAYMENTS SECTION (ENHANCED) ─── */}

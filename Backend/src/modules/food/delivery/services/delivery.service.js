@@ -14,6 +14,13 @@ import { ensureDailyPassEligibility, activateDailyPass } from '../../subscriptio
 import { verifyAndConsumeOnboardingPayment } from '../../../common/services/onboardingFee.service.js';
 import { OnboardingPaymentLog } from '../../../common/models/onboardingPaymentLog.model.js';
 import { enrichDriverVehiclesFromSignupPayload } from '../../../porter/orders/services/porter-driver-vehicle.service.js';
+import {
+    listPorterDriverTrips,
+    sumPorterDriverEarnings,
+    listPorterDriverPaymentTransactions,
+    shouldIncludePorter,
+    shouldIncludeFood,
+} from '../../../porter/orders/services/porter-driver-finance.service.js';
 import { notifyAdminsSafely } from '../../../../core/notifications/firebase.service.js';
 import {
     parseSignupVehiclesPayload,
@@ -829,9 +836,12 @@ export const getDeliveryPartnerEarnings = async (deliveryPartnerId, query = {}) 
         match['deliveryState.deliveredAt'] = { $gte: range.start, $lte: range.end };
     }
 
-    const [totalOrders, agg, returnPickupEarnings] = await Promise.all([
-        FoodOrder.countDocuments(match),
-        FoodOrder.aggregate([
+    const includeFood = shouldIncludeFood(query.module);
+    const includePorter = shouldIncludePorter(query.module);
+
+    const [totalOrders, agg, returnPickupEarnings, porterEarnings] = await Promise.all([
+        includeFood ? FoodOrder.countDocuments(match) : Promise.resolve(0),
+        includeFood ? FoodOrder.aggregate([
             { $match: match },
             {
                 $group: {
@@ -839,13 +849,19 @@ export const getDeliveryPartnerEarnings = async (deliveryPartnerId, query = {}) 
                     totalEarnings: { $sum: { $ifNull: ['$riderEarning', 0] } }
                 }
             }
-        ]),
-        sumReturnPickupEarnings(partnerId, range),
+        ]) : Promise.resolve([]),
+        includeFood ? sumReturnPickupEarnings(partnerId, range) : Promise.resolve({ totalEarnings: 0, totalTrips: 0 }),
+        includePorter ? sumPorterDriverEarnings(partnerId, range) : Promise.resolve({ totalEarnings: 0, totalTrips: 0 }),
     ]);
 
     const totalEarnings =
-        (Number(agg?.[0]?.totalEarnings) || 0) + (Number(returnPickupEarnings?.totalEarnings) || 0);
-    const combinedOrders = totalOrders + (Number(returnPickupEarnings?.totalTrips) || 0);
+        (Number(agg?.[0]?.totalEarnings) || 0) +
+        (Number(returnPickupEarnings?.totalEarnings) || 0) +
+        (Number(porterEarnings?.totalEarnings) || 0);
+    const combinedOrders =
+        totalOrders +
+        (Number(returnPickupEarnings?.totalTrips) || 0) +
+        (Number(porterEarnings?.totalTrips) || 0);
 
     // Frontend only strongly relies on totalEarnings + totalOrders.
     const summary = {
@@ -1048,11 +1064,16 @@ export const getDeliveryPartnerTripHistory = async (deliveryPartnerId, query = {
         match.createdAt = { $gte: start, $lte: end };
     }
 
-    const orders = await FoodOrder.find(match)
-        .populate({ path: 'restaurantId', select: 'restaurantName' })
-        .sort({ 'deliveryState.deliveredAt': -1, createdAt: -1 })
-        .limit(limit)
-        .lean();
+    const includeFood = shouldIncludeFood(query.module);
+    const includePorter = shouldIncludePorter(query.module);
+
+    const orders = includeFood
+        ? await FoodOrder.find(match)
+            .populate({ path: 'restaurantId', select: 'restaurantName' })
+            .sort({ 'deliveryState.deliveredAt': -1, createdAt: -1 })
+            .limit(limit)
+            .lean()
+        : [];
 
     const returnMatch = { 'dispatch.deliveryPartnerId': partnerId };
     if (sf === 'completed') {
@@ -1069,14 +1090,24 @@ export const getDeliveryPartnerTripHistory = async (deliveryPartnerId, query = {
         returnMatch.createdAt = { $gte: start, $lte: end };
     }
 
-    const returnPickups = await SellerReturn.find(returnMatch)
-        .sort({ 'deliveryState.completedAt': -1, createdAt: -1 })
-        .limit(limit)
-        .lean();
+    const returnPickups = includeFood
+        ? await SellerReturn.find(returnMatch)
+            .sort({ 'deliveryState.completedAt': -1, createdAt: -1 })
+            .limit(limit)
+            .lean()
+        : [];
+
+    const porterTrips = includePorter
+        ? await listPorterDriverTrips(partnerId, {
+            statusFilter: sf,
+            range: { start, end },
+            limit,
+        })
+        : [];
 
     const forwardTrips = (orders || []).map(toTripDto);
     const returnTrips = (returnPickups || []).map(toReturnPickupTripDto);
-    const mergedTrips = [...forwardTrips, ...returnTrips]
+    const mergedTrips = [...forwardTrips, ...returnTrips, ...porterTrips]
         .sort((a, b) => new Date(b.completedAt || b.deliveredAt || b.createdAt) - new Date(a.completedAt || a.deliveredAt || a.createdAt))
         .slice(0, limit);
 
@@ -1098,8 +1129,11 @@ export const getDeliveryPocketDetails = async (deliveryPartnerId, query = {}) =>
 
     const partnerId = new mongoose.Types.ObjectId(deliveryPartnerId);
 
-    const [orders, returnPickups, bonusTxList] = await Promise.all([
-        FoodOrder.find({
+    const includeFood = shouldIncludeFood(query.module);
+    const includePorter = shouldIncludePorter(query.module);
+
+    const [orders, returnPickups, bonusTxList, porterTrips, porterPaymentTx] = await Promise.all([
+        includeFood ? FoodOrder.find({
         'dispatch.deliveryPartnerId': partnerId,
         orderStatus: 'delivered',
         $or: [
@@ -1113,15 +1147,15 @@ export const getDeliveryPocketDetails = async (deliveryPartnerId, query = {}) =>
         .populate({ path: 'restaurantId', select: 'restaurantName' })
         .sort({ 'deliveryState.deliveredAt': -1, deliveredAt: -1, completedAt: -1, updatedAt: -1, createdAt: -1 })
         .limit(limit)
-        .lean(),
-        SellerReturn.find({
+        .lean() : Promise.resolve([]),
+        includeFood ? SellerReturn.find({
             'dispatch.deliveryPartnerId': partnerId,
             'dispatch.status': 'completed',
             'deliveryState.completedAt': { $gte: start, $lte: end },
         })
             .sort({ 'deliveryState.completedAt': -1, updatedAt: -1 })
             .limit(limit)
-            .lean(),
+            .lean() : Promise.resolve([]),
         DeliveryBonusTransaction.find({
         deliveryPartnerId: partnerId,
         createdAt: { $gte: start, $lte: end }
@@ -1129,9 +1163,11 @@ export const getDeliveryPocketDetails = async (deliveryPartnerId, query = {}) =>
         .sort({ createdAt: -1 })
         .limit(limit)
         .lean(),
+        includePorter ? listPorterDriverTrips(partnerId, { statusFilter: 'completed', range: { start, end }, limit }) : Promise.resolve([]),
+        includePorter ? listPorterDriverPaymentTransactions(partnerId, { range: { start, end }, limit }) : Promise.resolve([]),
     ]);
 
-    const trips = [...(orders || []).map(toTripDto), ...(returnPickups || []).map(toReturnPickupTripDto)]
+    const trips = [...(orders || []).map(toTripDto), ...(returnPickups || []).map(toReturnPickupTripDto), ...(porterTrips || [])]
         .sort((a, b) => new Date(b.completedAt || b.deliveredAt || b.createdAt) - new Date(a.completedAt || a.deliveredAt || a.createdAt))
         .slice(0, limit);
 
@@ -1162,6 +1198,7 @@ export const getDeliveryPocketDetails = async (deliveryPartnerId, query = {}) =>
             },
             description: `Return pickup earning - ${row.orderId || row._id}`,
         })),
+        ...(porterPaymentTx || []),
     ];
 
     const bonusTransactions = (bonusTxList || []).map((t) => ({

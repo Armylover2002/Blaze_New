@@ -42,7 +42,7 @@ const templates = {
         driver: null,
     },
     new_order: {
-        driver: { title: 'New Porter order', body: 'A new parcel delivery is available nearby.' },
+        driver: { title: 'New Parcel Delivery', body: 'Parcel pickup request nearby.' },
     },
     admin_failure: {
         admin: { title: 'Porter alert', body: 'A high-priority Porter operation needs attention.' },
@@ -50,14 +50,16 @@ const templates = {
 };
 
 function buildData(order, status) {
+    const orderId = String(order._id || order.id);
     return {
         type: PORTER_FCM_TYPE,
         module: 'porter',
         documentType: 'porter_order',
-        orderId: String(order._id || order.id),
+        orderId,
         orderNumber: order.orderNumber || '',
         status: status || order.status,
-        link: `/porter/track/${order._id || order.id}`,
+        link: `/food/delivery?porterOrderId=${orderId}`,
+        targetUrl: '/food/delivery',
     };
 }
 
@@ -90,6 +92,49 @@ export async function notifyPorterOrderStatusChange(order, { previousStatus } = 
 
     if (status === PORTER_ORDER_STATUS.FAILED) {
         await notifyPorterAdminAlert(order, `Order ${order.orderNumber} failed`, previousStatus);
+    }
+}
+
+export async function notifyPorterRefund(order, refund = {}) {
+    if (!order) return;
+    const status = String(refund?.status || '').toLowerCase();
+    if (status !== 'processed' && status !== 'pending') return;
+
+    const userId = order.userId?._id || order.userId;
+    if (!userId) return;
+
+    const amount = Number(refund?.amount) || 0;
+    const toWallet = String(refund?.method || '').toLowerCase() === 'wallet';
+    const title = status === 'pending' ? 'Refund initiated' : (toWallet ? 'Wallet credited' : 'Refund completed');
+    const body = status === 'pending'
+        ? `Your refund of ₹${amount} for order ${order.orderNumber} has been initiated.`
+        : toWallet
+            ? `₹${amount} has been credited to your Blaze wallet for order ${order.orderNumber}.`
+            : `₹${amount} has been refunded to your original payment method for order ${order.orderNumber}.`;
+
+    try {
+        await notifyOwnerSafely(
+            { ownerType: 'USER', ownerId: String(userId) },
+            { title, body, data: { ...buildData(order, order.status), refundStatus: status, refundAmount: String(amount) } },
+        );
+    } catch (err) {
+        logger.warn(`[PorterFCM] refund notify failed: ${err.message}`);
+    }
+}
+
+export async function notifyPorterDriverAssignmentRemoved(order, partnerId) {
+    if (!order || !partnerId) return;
+    try {
+        await notifyOwnerSafely(
+            { ownerType: 'DELIVERY_PARTNER', ownerId: String(partnerId), platform: 'mobile' },
+            {
+                title: 'Assignment removed',
+                body: `Order ${order.orderNumber} has been removed from your queue.`,
+                data: buildData(order, order.status),
+            },
+        );
+    } catch (err) {
+        logger.warn(`[PorterFCM] assignment removed notify failed: ${err.message}`);
     }
 }
 

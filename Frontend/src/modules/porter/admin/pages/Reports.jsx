@@ -37,11 +37,12 @@ const Reports = () => {
   const revenueData = data?.revenueTrend || [];
   const vehicleUtilization = data?.vehicleUtilization || [];
   const zonePerformance = data?.zonePerformance || [];
-  const topDrivers = (data?.topDrivers || []).map((d, i) => ({
-    name: `Driver ${i + 1}`,
-    orders: d.trips,
-    rating: "—",
-    earnings: d.earnings,
+  const topDrivers = (data?.topDrivers || []).map((d) => ({
+    name: d.name || "Unknown",
+    orders: d.completedOrders || d.trips || 0,
+    rating: d.rating || "—",
+    earnings: d.earnings || 0,
+    latestReviewText: d.latestReviewText || null
   }));
   const topVehicles = vehicleUtilization.map((v) => ({
     name: v.name,
@@ -65,13 +66,18 @@ const Reports = () => {
   const driverColumns = [
     { key: "name", header: "Driver", cell: (row) => <span className="font-medium">{row.name}</span> },
     { key: "orders", header: "Orders", cell: (row) => String(row.orders) },
-    { key: "rating", header: "Rating", cell: (row) => <span className="text-amber-600">★ {row.rating}</span> },
+    { key: "rating", header: "Rating", cell: (row) => (
+       <div>
+         <span className="text-amber-600">★ {row.rating}</span>
+         {row.latestReviewText && <p className="text-[10px] text-gray-500 mt-0.5 italic max-w-[150px] truncate" title={row.latestReviewText}>{row.latestReviewText}</p>}
+       </div>
+    ) },
     { key: "earnings", header: "Earnings", align: "right", cell: (row) => formatCurrency(row.earnings) },
   ];
   const vehicleColumns = [
     { key: "name", header: "Vehicle", cell: (row) => <span className="font-medium">{row.name}</span> },
     { key: "orders", header: "Orders", cell: (row) => String(row.orders) },
-    { key: "availability", header: "Availability", align: "right" },
+    { key: "revenue", header: "Revenue", align: "right", cell: (row) => formatCurrency(row.revenue) },
   ];
 
   const selectCls = "h-10 px-3 bg-white border border-gray-200 rounded-lg text-sm outline-none focus:border-red-500 focus:ring-4 focus:ring-red-500/10";
@@ -186,7 +192,7 @@ const Reports = () => {
       <SectionCard title="Zone Performance" subtitle="Orders and revenue by zone" flush>
         <div className="h-72 p-4">
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={zonePerformance.map((z) => ({ name: z.zoneId?.slice(-6) || "Zone", orders: z.orders }))} layout="vertical" margin={{ left: 30 }}>
+            <BarChart data={zonePerformance.map((z) => ({ name: z.zoneName || "Zone", orders: z.orders }))} layout="vertical" margin={{ left: 30 }}>
               <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke={BLAZE_CHART.grid} />
               <XAxis type="number" tick={{ fontSize: 11 }} />
               <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={100} />

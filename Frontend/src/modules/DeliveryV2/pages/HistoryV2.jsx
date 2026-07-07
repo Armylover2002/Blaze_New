@@ -264,14 +264,21 @@ export const HistoryV2 = () => {
 
                    const isReturnPickup = String(trip.tripType || '').trim() === 'return_pickup' ||
                      String(trip.documentType || '').trim() === 'seller_return';
+                   const isParcel = String(trip.tripType || '').trim() === 'parcel' ||
+                     String(trip.documentType || '').trim() === 'porter_order';
 
                    return (
                       <div key={trip.orderId || idx} className="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm active:scale-[0.99] transition-all">
                          <div className="flex justify-between items-start mb-2">
-                             <div>
-                                <h4 className="text-base font-bold text-gray-950">{trip.orderId || 'ORDER-ID'}</h4>
-                                <p className="text-sm font-medium text-gray-500 mt-0.5">{trip.restaurant || trip.restaurantName || trip.pickupPoints?.[0]?.name || trip.items?.[0]?.sourceName || 'Store'}</p>
-                                <p className="text-xs text-gray-400 font-medium mt-0.5 line-clamp-1">{extractItems(trip)}</p>
+                             <div className="flex items-start gap-2">
+                                {isParcel && (
+                                  <span className="mt-0.5 text-lg leading-none" aria-hidden>📦</span>
+                                )}
+                                <div>
+                                  <h4 className="text-base font-bold text-gray-950">{trip.orderId || 'ORDER-ID'}</h4>
+                                  <p className="text-sm font-medium text-gray-500 mt-0.5">{isParcel ? (trip.restaurantName || 'Parcel Delivery') : (trip.restaurant || trip.restaurantName || trip.pickupPoints?.[0]?.name || trip.items?.[0]?.sourceName || 'Store')}</p>
+                                  {!isParcel && <p className="text-xs text-gray-400 font-medium mt-0.5 line-clamp-1">{extractItems(trip)}</p>}
+                                </div>
                              </div>
                              <span className={`text-sm font-bold ${isCompleted ? 'text-[#10B981]' : isCancelled ? 'text-red-500' : 'text-red-500'}`}>
                                 {trip.status || 'Status'}
@@ -284,10 +291,32 @@ export const HistoryV2 = () => {
                                  Return Pickup
                                </span>
                              )}
+                             {isParcel && (
+                               <span className="text-[10px] font-bold px-3 py-1 rounded-full bg-indigo-50 text-indigo-700">
+                                 Parcel
+                               </span>
+                             )}
                              <span className={`text-[10px] font-bold px-3 py-1 rounded-full ${isCOD ? 'bg-red-50 text-red-600' : 'bg-green-50 text-[#10B981]'}`}>
                                 {isCOD ? 'COD' : 'Online'}
                              </span>
                          </div>
+
+                         {isParcel && (
+                           <div className="mb-4 space-y-1.5 rounded-xl bg-gray-50 p-3 border border-gray-100">
+                             <div className="flex items-start gap-2">
+                               <span className="mt-1 w-2 h-2 rounded-full bg-[#10B981] shrink-0" />
+                               <p className="text-xs font-medium text-gray-600 line-clamp-1">{trip.pickupAddress || 'Pickup'}</p>
+                             </div>
+                             <div className="flex items-start gap-2">
+                               <span className="mt-1 w-2 h-2 rounded-full bg-red-500 shrink-0" />
+                               <p className="text-xs font-medium text-gray-600 line-clamp-1">{trip.dropAddress || 'Drop'}</p>
+                             </div>
+                             <div className="flex items-center gap-4 pt-1">
+                               <span className="text-[10px] font-bold text-gray-500">{Number(trip.distanceKm || 0).toFixed(1)} km</span>
+                               {trip.vehicleName && <span className="text-[10px] font-bold text-gray-500">• {trip.vehicleName}</span>}
+                             </div>
+                           </div>
+                         )}
 
                          <div className="grid grid-cols-3 gap-4 pt-4 border-t border-gray-50">
                              <div>

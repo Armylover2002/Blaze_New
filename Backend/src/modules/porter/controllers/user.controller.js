@@ -11,3 +11,8 @@ export const getPorterUserById = asyncHandler(async (req, res) => {
     const user = await userService.getPorterUserById(req.params.id);
     return sendResponse(res, 200, 'User fetched successfully', { user });
 });
+
+export const updatePorterUser = asyncHandler(async (req, res) => {
+    const user = await userService.updatePorterUser(req.params.id, req.body);
+    return sendResponse(res, 200, 'User updated successfully', { user });
+});

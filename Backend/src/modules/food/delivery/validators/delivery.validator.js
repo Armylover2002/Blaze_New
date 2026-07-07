@@ -52,30 +52,18 @@ const deliveryRegisterSchema = z.object({
     const isElectricBike = data.vehicleType === 'electric_bike';
 
     // Driving license validation
-    if (!isBicycle && !isElectricBike && !hasVehicles) {
-        if (!data.drivingLicenseNumber || !data.drivingLicenseNumber.trim()) {
-            ctx.addIssue({
-                code: z.ZodIssueCode.custom,
-                message: 'Driving license number is required',
-                path: ['drivingLicenseNumber']
-            });
-        } else if (!drivingLicenseRegex.test(data.drivingLicenseNumber)) {
-            ctx.addIssue({
-                code: z.ZodIssueCode.custom,
-                message: 'Invalid driving license format',
-                path: ['drivingLicenseNumber']
-            });
-        }
-    } else {
-        if (data.drivingLicenseNumber && data.drivingLicenseNumber.trim()) {
-            if (!drivingLicenseRegex.test(data.drivingLicenseNumber)) {
-                ctx.addIssue({
-                    code: z.ZodIssueCode.custom,
-                    message: 'Invalid driving license format',
-                    path: ['drivingLicenseNumber']
-                });
-            }
-        }
+    if (!data.drivingLicenseNumber || !data.drivingLicenseNumber.trim()) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: 'Driving license number is required',
+            path: ['drivingLicenseNumber']
+        });
+    } else if (!drivingLicenseRegex.test(data.drivingLicenseNumber)) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: 'Invalid driving license format',
+            path: ['drivingLicenseNumber']
+        });
     }
 
     // Vehicle number validation

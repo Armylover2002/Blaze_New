@@ -6,6 +6,8 @@ import alertSound from '@food/assets/audio/alert.mp3';
 import originalSound from '@food/assets/audio/original.mp3';
 import { dispatchNotificationInboxRefresh } from '@food/hooks/useNotificationInbox';
 import { useDeliveryStore } from '@/modules/DeliveryV2/store/useDeliveryStore';
+import { isPorterParcelTrip, enrichPorterDeliveryOrder } from '@/modules/DeliveryV2/utils/orderRouting';
+import porterDriverApi from '@/modules/porter/driver/services/driverApi';
 
 const shouldLogDeliverySocket = () => {
   if (typeof window === 'undefined') return import.meta.env.DEV;
@@ -113,26 +115,42 @@ const supportsBrowserNotifications = () =>
 
 const buildDeliveryOrderNotification = (orderData = {}) => {
   const orderId = orderData.orderId || orderData.orderMongoId || orderData.id || 'New';
+
+  if (isPorterParcelTrip(orderData)) {
+    return {
+      title: 'New Parcel Delivery',
+      body: 'Parcel pickup request nearby',
+      tag: `porter-order-${orderId}`,
+      data: {
+        orderId,
+        module: 'parcel',
+        documentType: 'porter_order',
+        targetUrl: '/food/delivery',
+      },
+    };
+  }
+
   const itemCount = Array.isArray(orderData.items) ? orderData.items.length : 0;
   const total = Number(orderData.total || orderData.pricing?.total || orderData.orderTotal || 0);
 
   return {
     title: orderData.tripType === 'return_pickup' || orderData.documentType === 'seller_return'
       ? `Return pickup #${orderId}`
-      : `New order #${orderId}`,
+      : `New Food Order #${orderId}`,
     body: itemCount > 0
       ? `${itemCount} item${itemCount === 1 ? '' : 's'} - ₹${total.toFixed(2)}`
-      : 'A new order is available to accept',
+      : 'Restaurant pickup request nearby',
     tag: `delivery-order-${orderId}`,
     data: {
       orderId,
-      targetUrl: '/delivery',
+      module: 'food',
+      targetUrl: '/food/delivery',
     },
   };
 }
 
 const isActionableDeliveryOffer = (orderData = {}) => {
-  if (String(orderData?.documentType || '').trim() === 'porter_order') {
+  if (isPorterParcelTrip(orderData)) {
     const status = String(orderData?.status || '').trim().toLowerCase();
     const dispatchStatus = String(
       orderData?.dispatch?.status || orderData?.dispatchStatus || '',
@@ -438,6 +456,20 @@ export const useDeliveryNotifications = () => {
     if (!deliveryPartnerId) return;
 
     try {
+      const porterActiveResult = await porterDriverApi.getActiveOrder().catch(() => null);
+      const porterOrder = porterActiveResult?.order || porterActiveResult;
+      if (porterOrder?.id || porterOrder?.orderId) {
+        const enriched = enrichPorterDeliveryOrder(porterOrder);
+        debugLog('Recovered active Porter parcel trip after reconnect/focus:', enriched);
+        setOrderStatusUpdate({
+          ...enriched,
+          documentType: 'porter_order',
+          module: 'parcel',
+          recoverySource: 'porter_reconnect',
+        });
+        return;
+      }
+
       const [availableResult, currentTripResult] = await Promise.allSettled([
         deliveryAPI.getOrders({ limit: 20, page: 1 }),
         deliveryAPI.getCurrentDelivery(),
@@ -451,11 +483,30 @@ export const useDeliveryNotifications = () => {
           : null;
 
       if (currentTrip) {
-        debugLog('Recovered current delivery trip after reconnect/focus:', currentTrip);
-        setOrderStatusUpdate({
-          ...currentTrip,
-          recoverySource: 'delivery_reconnect',
-        });
+        if (isPorterParcelTrip(currentTrip)) {
+          debugLog('Ignoring Porter payload from Food current delivery API during recovery');
+        } else {
+          debugLog('Recovered current delivery trip after reconnect/focus:', currentTrip);
+          setOrderStatusUpdate({
+            ...currentTrip,
+            recoverySource: 'delivery_reconnect',
+          });
+          return;
+        }
+      }
+
+      const porterAvailableResult = await porterDriverApi.getAvailableOrders().catch(() => null);
+      const porterOffers = Array.isArray(porterAvailableResult?.orders)
+        ? porterAvailableResult.orders
+        : Array.isArray(porterAvailableResult)
+          ? porterAvailableResult
+          : [];
+      const recoverablePorterOrder = porterOffers.find((order) => isPorterParcelTrip(order));
+      if (recoverablePorterOrder && !activeOrderRef.current) {
+        const enriched = enrichPorterDeliveryOrder(recoverablePorterOrder);
+        debugLog('Recovered available Porter parcel order after reconnect/focus:', enriched);
+        setNewOrder(enriched);
+        handleIncomingOrderAlert(enriched);
         return;
       }
 
@@ -474,6 +525,7 @@ export const useDeliveryNotifications = () => {
             : [];
 
       const recoverableOrder = availableOrders.find((order) => {
+        if (isPorterParcelTrip(order)) return false;
         const dispatchStatus = order?.dispatch?.status;
         return (
           ['unassigned', 'assigned'].includes(dispatchStatus) &&
@@ -922,6 +974,10 @@ export const useDeliveryNotifications = () => {
     });
 
     socketRef.current.on('new_order', (orderData) => {
+      if (isPorterParcelTrip(orderData)) {
+        debugLog('Ignoring Porter payload on Food new_order channel', orderData);
+        return;
+      }
       if (!isActionableDeliveryOffer(orderData)) {
         debugLog('Ignoring non-actionable new_order event', orderData);
         return;
@@ -936,6 +992,10 @@ export const useDeliveryNotifications = () => {
 
     // Listen for priority-based order notifications (new_order_available)
     socketRef.current.on('new_order_available', (orderData) => {
+      if (isPorterParcelTrip(orderData)) {
+        debugLog('Ignoring Porter payload on Food new_order_available channel', orderData);
+        return;
+      }
       if (!isActionableDeliveryOffer(orderData)) {
         debugLog('Ignoring non-actionable new_order_available event', orderData);
         return;
@@ -958,8 +1018,13 @@ export const useDeliveryNotifications = () => {
       debugLog('Porter parcel order available', {
         orderId: orderData?.orderId || orderData?.orderMongoId || orderData?.id,
       });
-      setNewOrder({ ...orderData, module: 'parcel', documentType: 'porter_order' });
-      handleIncomingOrderAlert(orderData);
+      const enriched = enrichPorterDeliveryOrder({
+        ...orderData,
+        module: 'parcel',
+        documentType: 'porter_order',
+      });
+      setNewOrder(enriched);
+      handleIncomingOrderAlert(enriched);
     });
 
     socketRef.current.on('porter_play_notification_sound', (data) => {
@@ -974,11 +1039,22 @@ export const useDeliveryNotifications = () => {
     });
 
     socketRef.current.on('porter_order_status', (statusData) => {
-      setOrderStatusUpdate({ ...statusData, documentType: 'porter_order', module: 'parcel' });
+      setOrderStatusUpdate(enrichPorterDeliveryOrder({
+        ...statusData,
+        documentType: 'porter_order',
+        module: 'parcel',
+      }));
     });
 
     socketRef.current.on('porter_order_cancelled', (statusData) => {
-      setOrderStatusUpdate({ ...statusData, documentType: 'porter_order', module: 'parcel', cancelled: true });
+      setOrderStatusUpdate({
+        ...enrichPorterDeliveryOrder({
+          ...statusData,
+          documentType: 'porter_order',
+          module: 'parcel',
+        }),
+        cancelled: true,
+      });
     });
 
     socketRef.current.on('play_notification_sound', (data) => {
@@ -987,6 +1063,11 @@ export const useDeliveryNotifications = () => {
         orderMongoId: data?.orderMongoId || data?.order_mongo_id,
         ...data
       };
+
+      if (isPorterParcelTrip(normalizedData)) {
+        debugLog('Ignoring Porter payload on Food play_notification_sound channel', normalizedData);
+        return;
+      }
 
       const activeAlertKey = getOrderAlertKey(activeOrderRef.current || {});
       const incomingAlertKey = getOrderAlertKey(normalizedData);

@@ -124,9 +124,3 @@ export const MOCK_TOP_VEHICLES = [
   { name: "Piaggio Ape", image: TempoSvg, orders: 650, availability: "65%" }
 ];
 
-export const MOCK_NOTIFICATIONS = [
-  { id: 1, title: "Driver Assigned", message: "Ravi Kumar assigned to ORD-901", time: "10 mins ago", type: "success" },
-  { id: 2, title: "Order Delayed", message: "ORD-902 is delayed by 15 mins due to traffic", time: "30 mins ago", type: "warning" },
-  { id: 3, title: "Vehicle Offline", message: "MH01AB1234 went offline unexpectedly", time: "1 hour ago", type: "error" },
-  { id: 4, title: "Pricing Updated", message: "Surge pricing applied in Bandra zone", time: "2 hours ago", type: "info" },
-];

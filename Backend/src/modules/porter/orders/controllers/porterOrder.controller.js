@@ -3,6 +3,7 @@ import { asyncHandler } from '../../../../utils/asyncHandler.js';
 import * as porterOrderService from '../services/porter-order.service.js';
 import {
     createPorterOrderSchema,
+    validatePorterCouponSchema,
     cancelPorterOrderSchema,
     ratePorterOrderSchema,
     listPorterOrdersQuerySchema,
@@ -14,6 +15,12 @@ export const createPorterOrder = asyncHandler(async (req, res) => {
     const performer = extractPerformer(req.user);
     const order = await porterOrderService.createPorterOrder(req.user.userId, dto, performer);
     return sendResponse(res, 201, 'Porter order created successfully', { order });
+});
+
+export const validatePorterCoupon = asyncHandler(async (req, res) => {
+    const dto = validatePorterCouponSchema.parse(req.body);
+    const result = await porterOrderService.validatePorterCouponForUser(req.user.userId, dto);
+    return sendResponse(res, 200, 'Coupon applied successfully', result);
 });
 
 export const getActivePorterOrder = asyncHandler(async (req, res) => {

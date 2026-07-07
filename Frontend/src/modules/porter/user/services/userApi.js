@@ -1,5 +1,5 @@
 import axiosInstance from '@core/api/axios';
-import { getWithDedupe } from '@core/api/dedupe';
+import { getWithDedupe, invalidateCache } from '@core/api/dedupe';
 
 const unwrap = (response) => response?.data?.data ?? response?.data ?? response;
 
@@ -24,6 +24,13 @@ const porterUserApi = {
 
   createOrder: (payload, options = {}) => axiosInstance
     .post('/porter/orders', payload, { signal: options.signal })
+    .then((response) => {
+      invalidateCache('/porter/orders/active');
+      return unwrap(response);
+    }),
+
+  validateCoupon: (payload) => axiosInstance
+    .post('/porter/orders/validate-coupon', payload)
     .then(unwrap),
 
   getActiveOrder: (options = {}) => getWithDedupe('/porter/orders/active', {}, options).then(unwrap),
@@ -32,9 +39,9 @@ const porterUserApi = {
     .post('/porter/orders/verify-payment', payload)
     .then(unwrap),
 
-  getOrder: (id) => axiosInstance.get(`/porter/orders/${id}`).then(unwrap),
+  getOrder: (id, options = {}) => getWithDedupe(`/porter/orders/${id}`, {}, options).then(unwrap),
 
-  listOrders: (params = {}) => axiosInstance.get('/porter/orders', { params }).then(unwrap),
+  listOrders: (params = {}, options = {}) => getWithDedupe('/porter/orders', params, options).then(unwrap),
 
   cancelOrder: (id, reason) => axiosInstance
     .post(`/porter/orders/${id}/cancel`, { reason })

@@ -17,7 +17,6 @@ import {
   MOCK_CHART_VEHICLE_UTILIZATION,
   MOCK_RECENT_ORDERS,
   MOCK_RECENT_DRIVERS,
-  MOCK_NOTIFICATIONS,
   MOCK_TOP_VEHICLES
 } from "../utils/mockData";
 
@@ -25,23 +24,36 @@ const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042'];
 
 const Dashboard = () => {
   const [dashboard, setDashboard] = useState(null);
+  const [reports, setReports] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    porterAdminApi.getDashboard()
-      .then(setDashboard)
-      .catch(() => setDashboard(null))
+    Promise.all([
+      porterAdminApi.getDashboard(),
+      porterAdminApi.getReports({ range: 'weekly' })
+    ])
+      .then(([dashData, repData]) => {
+         setDashboard(dashData);
+         setReports(repData);
+      })
+      .catch(() => {
+         setDashboard(null);
+         setReports(null);
+      })
       .finally(() => setLoading(false));
   }, []);
 
-  const kpis = dashboard?.kpis || {};
+  const kpis = dashboard?.kpis || reports?.kpis || {};
   const recentOrders = dashboard?.recentOrders || [];
+  const revenueTrend = reports?.revenueTrend || [];
+  const vehicleUtilization = reports?.vehicleUtilization || [];
+  const topDrivers = reports?.topDrivers || [];
 
   const orderColumns = [
     { header: "Order ID", key: "id", className: "font-medium" },
     { header: "Customer", key: "customer" },
-    { header: "Pickup", key: "pickup" },
-    { header: "Drop", key: "drop" },
+    { header: "Pickup", key: "pickup", cell: (row) => <div className="max-w-[150px] truncate" title={row.pickup}>{row.pickup}</div> },
+    { header: "Drop", key: "drop", cell: (row) => <div className="max-w-[150px] truncate" title={row.drop}>{row.drop}</div> },
     { header: "Driver", key: "driver" },
     { header: "Vehicle", key: "vehicle" },
     { header: "Goods", key: "goodsType" },
@@ -55,20 +67,71 @@ const Dashboard = () => {
   const driverColumns = [
     { header: "Driver", key: "name", cell: (row) => (
         <div className="flex items-center gap-3">
-          <img src={row.image} alt={row.name} className="w-8 h-8 rounded-full bg-gray-100" />
+          {row.image ? (
+            <img src={row.image} alt={row.name} className="w-8 h-8 rounded-full bg-gray-100 object-cover" />
+          ) : (
+            <div className="w-8 h-8 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center font-bold text-xs uppercase">
+              {row.name ? row.name.substring(0, 2) : "UN"}
+            </div>
+          )}
           <div>
-            <p className="font-medium">{row.name}</p>
-            <p className="text-xs text-gray-500">{row.id}</p>
+            <p className="font-medium text-sm">{row.name}</p>
+            <p className="text-[10px] text-gray-500 font-mono bg-gray-50 px-1 py-0.5 rounded inline-block mt-0.5 border border-gray-100">
+              {(row.id || row.driverId || "").length > 10 ? `DRV-${(row.id || row.driverId).slice(-6).toUpperCase()}` : (row.id || row.driverId)}
+            </p>
           </div>
         </div>
       ) 
     },
     { header: "Phone", key: "phone" },
     { header: "Vehicle", key: "vehicle" },
-    { header: "Rating", key: "rating", cell: (row) => <span className="text-yellow-600 font-medium">★ {row.rating}</span> },
+    { header: "Rating", key: "rating", cell: (row) => (
+       <div>
+         <span className="text-yellow-600 font-medium">★ {row.rating}</span>
+         {row.latestReviewText && <p className="text-[10px] text-gray-500 mt-0.5 italic max-w-[150px] truncate" title={row.latestReviewText}>{row.latestReviewText}</p>}
+       </div>
+    ) },
     { header: "Orders", key: "completedOrders" },
     { header: "Status", key: "status", cell: (row) => <StatusBadge status={row.status === "active" ? "success" : "default"} /> },
   ];
+
+  const handleDownloadPDF = () => {
+    window.print();
+  };
+
+  const handleDownloadCSV = () => {
+    if (!recentOrders || recentOrders.length === 0) {
+      return;
+    }
+    const headers = ["Order ID", "Customer", "Pickup", "Drop", "Driver", "Vehicle", "Goods", "Distance", "Amount", "Payment", "Status", "Time"];
+    const csvRows = [headers.join(",")];
+    
+    recentOrders.forEach(o => {
+      const values = [
+        o.orderNumber || "",
+        `"${o.customer || ""}"`,
+        `"${o.pickup || ""}"`,
+        `"${o.drop || ""}"`,
+        `"${o.driver || ""}"`,
+        o.vehicle || "",
+        o.goodsType || "",
+        o.distance || "",
+        o.amount || 0,
+        o.payment || "",
+        o.status || "",
+        o.time ? new Date(o.time).toLocaleString() : ""
+      ];
+      csvRows.push(values.join(","));
+    });
+
+    const blob = new Blob([csvRows.join("\n")], { type: "text/csv" });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `porter_orders_${new Date().toISOString().split('T')[0]}.csv`;
+    a.click();
+    window.URL.revokeObjectURL(url);
+  };
 
   return (
     <div className="blaze-theme-scope space-y-6 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 pb-24">
@@ -82,11 +145,11 @@ const Dashboard = () => {
         ]}
         actions={
           <div className="flex gap-3">
-            <Button variant="outline" className="gap-2">
-              Export Data
+            <Button variant="outline" className="gap-2 border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700" onClick={handleDownloadPDF}>
+              Download PDF
             </Button>
-            <Button className="gap-2">
-              View Reports <ArrowRight size={16} />
+            <Button className="gap-2 bg-green-600 hover:bg-green-700 text-white border-transparent" onClick={handleDownloadCSV}>
+              Download CSV/Excel
             </Button>
           </div>
         }
@@ -107,23 +170,24 @@ const Dashboard = () => {
       </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
-          <SectionCard title="Recent Orders">
-                <AdminTable columns={orderColumns} data={recentOrders.map((o) => ({
-                  ...o,
-                  id: o.orderNumber,
-                  time: o.time ? new Date(o.time).toLocaleString() : "—",
-                  amount: `₹${o.amount ?? 0}`,
-                }))} />
+      <div className="mt-6">
+          <SectionCard title="Recent Orders" action={<Button variant="ghost" size="sm">View All</Button>}>
+                <div className="overflow-x-auto pb-4">
+                    <AdminTable columns={orderColumns} data={recentOrders.map((o) => ({
+                      ...o,
+                      id: o.orderNumber,
+                      time: o.time ? new Date(o.time).toLocaleString() : "—",
+                      amount: `₹${o.amount ?? 0}`,
+                    }))} />
+                </div>
           </SectionCard>
       </div>
 
-      {/* Legacy charts removed — use Reports page for detailed analytics */}
-      <div className="hidden grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6 mt-6">
           <SectionCard title="Daily Orders Trend">
             <div className="h-72 w-full">
                 <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={MOCK_CHART_DAILY_ORDERS} margin={{ top: 10, right: 10, bottom: 0, left: -20 }}>
+                    <LineChart data={revenueTrend} margin={{ top: 10, right: 10, bottom: 0, left: -20 }}>
                         <CartesianGrid strokeDasharray="3 3" vertical={false} />
                         <XAxis dataKey="name" tickLine={false} axisLine={false} tick={{ fontSize: 12 }} />
                         <YAxis tickLine={false} axisLine={false} tick={{ fontSize: 12 }} />
@@ -137,7 +201,7 @@ const Dashboard = () => {
           <SectionCard title="Revenue Trend (Last 7 Days)">
             <div className="h-72 w-full">
                 <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={MOCK_CHART_REVENUE} margin={{ top: 10, right: 10, bottom: 0, left: -10 }}>
+                    <BarChart data={revenueTrend} margin={{ top: 10, right: 10, bottom: 0, left: -10 }}>
                         <CartesianGrid strokeDasharray="3 3" vertical={false} />
                         <XAxis dataKey="name" tickLine={false} axisLine={false} tick={{ fontSize: 12 }} />
                         <YAxis tickLine={false} axisLine={false} tick={{ fontSize: 12 }} />
@@ -151,107 +215,48 @@ const Dashboard = () => {
           <SectionCard title="Vehicle Utilization">
             <div className="h-72 w-full">
                 <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={MOCK_CHART_VEHICLE_UTILIZATION} layout="vertical" margin={{ top: 10, right: 10, bottom: 0, left: 0 }}>
+                    <BarChart data={vehicleUtilization} layout="vertical" margin={{ top: 10, right: 10, bottom: 0, left: 0 }}>
                         <CartesianGrid strokeDasharray="3 3" horizontal={false} />
                         <XAxis type="number" tickLine={false} axisLine={false} tick={{ fontSize: 12 }} />
                         <YAxis type="category" dataKey="name" tickLine={false} axisLine={false} tick={{ fontSize: 12 }} width={80} />
                         <Tooltip />
-                        <Bar dataKey="active" stackId="a" fill="#3b82f6" name="Active %" />
-                        <Bar dataKey="idle" stackId="a" fill="#e5e7eb" name="Idle %" />
+                        <Bar dataKey="value" fill="#3b82f6" name="Orders" />
+                        <Bar dataKey="revenue" fill="#10b981" name="Revenue (₹)" />
                     </BarChart>
                 </ResponsiveContainer>
             </div>
           </SectionCard>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 mt-6">
         <div className="xl:col-span-2 space-y-6">
-          <SectionCard 
-            title="Recent Orders" 
-            action={<Button variant="ghost" size="sm">View All</Button>}
-          >
-            <div className="overflow-x-auto pb-4">
-                <AdminTable columns={orderColumns} data={MOCK_RECENT_ORDERS} />
-            </div>
-          </SectionCard>
-          
           <SectionCard 
             title="Active Drivers"
             action={<Button variant="ghost" size="sm">Manage Drivers</Button>}
           >
             <div className="overflow-x-auto pb-4">
-                <AdminTable columns={driverColumns} data={MOCK_RECENT_DRIVERS} />
+                <AdminTable columns={driverColumns} data={topDrivers} />
             </div>
           </SectionCard>
         </div>
 
         <div className="xl:col-span-1 space-y-6">
-            <SectionCard title="Quick Actions">
-                <div className="grid grid-cols-2 gap-3">
-                    <Button variant="outline" className="w-full justify-center h-auto py-3 flex-col gap-1">
-                        <Users size={20} className="text-blue-500" />
-                        <span className="text-xs font-medium">Assign Driver</span>
-                    </Button>
-                    <Button variant="outline" className="w-full justify-center h-auto py-3 flex-col gap-1">
-                        <Package size={20} className="text-purple-500" />
-                        <span className="text-xs font-medium">Create Order</span>
-                    </Button>
-                    <Button variant="outline" className="w-full justify-center h-auto py-3 flex-col gap-1">
-                        <Truck size={20} className="text-green-500" />
-                        <span className="text-xs font-medium">Add Vehicle</span>
-                    </Button>
-                    <Button variant="outline" className="w-full justify-center h-auto py-3 flex-col gap-1">
-                        <MapPin size={20} className="text-red-500" />
-                        <span className="text-xs font-medium">Track Shipment</span>
-                    </Button>
-                    <Button variant="outline" className="w-full justify-center h-auto py-3 flex-col gap-1">
-                        <DollarSign size={20} className="text-yellow-600" />
-                        <span className="text-xs font-medium">Pricing</span>
-                    </Button>
-                    <Button variant="outline" className="w-full justify-center h-auto py-3 flex-col gap-1">
-                        <Activity size={20} className="text-indigo-500" />
-                        <span className="text-xs font-medium">Reports</span>
-                    </Button>
-                </div>
-            </SectionCard>
-
-            <SectionCard title="Recent Notifications">
-                <div className="space-y-4">
-                    {MOCK_NOTIFICATIONS.map(notification => (
-                        <div key={notification.id} className="flex gap-3 items-start p-3 rounded-lg hover:bg-gray-50 transition-colors border border-transparent hover:border-gray-100">
-                            <div className={`mt-0.5 p-2 rounded-full ${
-                                notification.type === 'success' ? 'bg-green-100 text-green-600' :
-                                notification.type === 'warning' ? 'bg-orange-100 text-orange-600' :
-                                notification.type === 'error' ? 'bg-red-100 text-red-600' :
-                                'bg-blue-100 text-blue-600'
-                            }`}>
-                                <Bell size={14} />
-                            </div>
-                            <div>
-                                <h4 className="text-sm font-semibold text-gray-900">{notification.title}</h4>
-                                <p className="text-xs text-gray-600 mt-0.5 leading-relaxed">{notification.message}</p>
-                                <span className="text-[10px] font-medium text-gray-400 mt-1 block">{notification.time}</span>
-                            </div>
-                        </div>
-                    ))}
-                </div>
-                <Button variant="ghost" className="w-full mt-4 text-sm">View All Notifications</Button>
-            </SectionCard>
-
             <SectionCard title="Top Performing Vehicles">
                 <div className="space-y-4">
-                    {MOCK_TOP_VEHICLES.map((vehicle, index) => (
+                    {vehicleUtilization.map((vehicle, index) => (
                         <div key={index} className="flex items-center justify-between border-b border-gray-50 last:border-0 pb-3 last:pb-0">
                             <div className="flex items-center gap-3">
-                                <img src={vehicle.image} alt={vehicle.name} className="w-10 h-10 rounded-lg bg-gray-100 border border-gray-200" />
+                                <div className="w-10 h-10 flex items-center justify-center rounded-lg bg-gray-100 border border-gray-200">
+                                    <Truck size={20} className="text-gray-500" />
+                                </div>
                                 <div>
                                     <p className="font-medium text-sm">{vehicle.name}</p>
-                                    <p className="text-xs text-gray-500">{vehicle.orders} Orders</p>
+                                    <p className="text-xs text-gray-500">{vehicle.value} Orders</p>
                                 </div>
                             </div>
                             <div className="text-right">
-                                <span className="text-sm font-semibold text-green-600">{vehicle.availability}</span>
-                                <p className="text-[10px] text-gray-400">Available</p>
+                                <span className="text-sm font-semibold text-green-600">₹{vehicle.revenue}</span>
+                                <p className="text-[10px] text-gray-400">Revenue</p>
                             </div>
                         </div>
                     ))}
