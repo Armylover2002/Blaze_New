@@ -223,9 +223,8 @@ export default function AdminHome() {
 
   const activityFeed = dashboardData?.liveSignals || []
   const totalRevenueHelper = [
-    `Platform: ${formatCurrency(platformFeeTotal)}`,
-    `Delivery Net: ${formatCurrency(deliveryProfit)}`,
-    `GST: ${formatCurrency(gstTotal)}`,
+    `Platform fee: ${formatCurrency(platformFeeTotal)}`,
+    `Delivery net: ${formatCurrency(deliveryProfit)}`,
   ].join(" + ")
 
   const showInitialSkeleton = isLoading && !dashboardData

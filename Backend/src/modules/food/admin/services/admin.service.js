@@ -878,7 +878,7 @@ export async function getDashboardStats(query = {}) {
         platformFee: { total: Number(totals.platformFeeTotal || 0) },
         deliveryFee: { total: Number(totals.deliveryFeeTotal || 0) },
         gst: { total: Number(totals.gstTotal || 0) },
-        totalAdminEarnings: Number(totals.adminNetProfit || 0) + Number(totals.gstTotal || 0),
+        totalAdminEarnings: Number(totals.adminNetProfit || 0),
         deliveryProfit: Number(totals.adminNetProfit || 0) - Number(totals.platformFeeTotal || 0),
         restaurants: {
             total: Number(restaurantsTotal || 0),
