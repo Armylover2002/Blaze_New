@@ -205,7 +205,6 @@ export default function AdminHome() {
   const pendingOrders = dashboardData?.orderStats?.pending || 0
   const processingOrders = dashboardData?.orderStats?.processing || 0
   const completedOrders = dashboardData?.orderStats?.completed || 0
-  const activeOrdersTotal = processingOrders
 
   const pieData = useMemo(() => {
     return orderStats.map((item) => ({
@@ -308,9 +307,9 @@ export default function AdminHome() {
             canAccess={canAccessPath}
           />
           <StatCard
-            title="Orders processed"
-            value={activeOrdersTotal.toLocaleString("en-IN")}
-            helper="Orders currently being processed"
+            title="Processing orders"
+            value={processingOrders.toLocaleString("en-IN")}
+            helper="Orders currently in processing"
             icon={<Activity className="h-5 w-5" />}
             to="/admin/food/orders/processing"
             canAccess={canAccessPath}
