@@ -133,9 +133,9 @@ router.patch('/subscription-plans/:id', checkPermission('food::subscription_mana
 router.delete('/subscription-plans/:id', checkPermission('food::subscription_management::plans', 'delete'), subscriptionPlanController.deletePlanController);
 
 // ----- Subscription Business Analytics & History -----
-router.get('/subscription/overview', subscriptionPlanController.getSubscriptionOverviewController);
-router.get('/subscription/history', subscriptionPlanController.getSubscriptionHistoryController);
-router.get('/subscription/analytics', subscriptionPlanController.getSubscriptionAnalyticsController);
+router.get('/subscription/overview', checkPermission('food::subscription_management::plans', 'view'), subscriptionPlanController.getSubscriptionOverviewController);
+router.get('/subscription/history', checkPermission('food::subscription_management::plans', 'view'), subscriptionPlanController.getSubscriptionHistoryController);
+router.get('/subscription/analytics', checkPermission('food::subscription_management::plans', 'view'), subscriptionPlanController.getSubscriptionAnalyticsController);
 
 
 // ----- Delivery Cash Limit -----
