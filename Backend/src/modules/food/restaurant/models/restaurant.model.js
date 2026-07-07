@@ -42,6 +42,16 @@ const geoPointSchema = new mongoose.Schema(
   { _id: false },
 );
 
+const openingDayTimingSchema = new mongoose.Schema(
+  {
+    day: { type: String, trim: true },
+    isOpen: { type: Boolean, default: true },
+    openingTime: { type: String, trim: true },
+    closingTime: { type: String, trim: true },
+  },
+  { _id: false },
+);
+
 const restaurantSchema = new mongoose.Schema(
   {
     restaurantId: {
@@ -307,6 +317,27 @@ const restaurantSchema = new mongoose.Schema(
       previousZone: { type: String },
       updatedZone: { type: String },
       reVerificationReason: { type: String, trim: true }
+    },
+    /**
+     * Staged opening-days change awaiting admin re-approval.
+     * The live schedule (openDays + outlet timings collection) stays active until
+     * the admin approves. This keeps an already-approved restaurant online while a
+     * change to which days it is open is reviewed. `proposed*` holds the requested
+     * schedule; `previous*` snapshots the live schedule for admin before/after review.
+     */
+    pendingOpenDays: {
+      hasPendingUpdate: { type: Boolean, default: false, index: true },
+      proposedOpenDays: { type: [String], default: undefined },
+      proposedTimings: {
+        type: [openingDayTimingSchema],
+        default: undefined,
+      },
+      previousOpenDays: { type: [String], default: undefined },
+      previousTimings: {
+        type: [openingDayTimingSchema],
+        default: undefined,
+      },
+      requestedAt: { type: Date },
     },
     commissionPercentage: {
       type: Number,

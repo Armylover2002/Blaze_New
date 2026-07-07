@@ -62,6 +62,7 @@ export default function OutletTimings() {
   const isInternalUpdate = useRef(false)
   const [days, setDays] = useState(getDefaultDays)
   const [loading, setLoading] = useState(true)
+  const [pendingApproval, setPendingApproval] = useState(false)
   const saveTimerRef = useRef(null)
 
   // Load from backend on mount.
@@ -71,10 +72,12 @@ export default function OutletTimings() {
       try {
         setLoading(true)
         const res = await restaurantAPI.getOutletTimings()
-        const outletTimings = res?.data?.data?.outletTimings || res?.data?.outletTimings
+        const payload = res?.data?.data || res?.data
+        const outletTimings = payload?.outletTimings
         if (mounted && outletTimings && typeof outletTimings === "object") {
           setDays({ ...getDefaultDays(), ...outletTimings })
         }
+        if (mounted) setPendingApproval(Boolean(payload?.pendingApproval))
       } catch (error) {
         debugError("Error loading outlet timings from backend:", error)
       } finally {
@@ -94,7 +97,11 @@ export default function OutletTimings() {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
     saveTimerRef.current = setTimeout(async () => {
       try {
-        await restaurantAPI.saveOutletTimings(days)
+        const resp = await restaurantAPI.saveOutletTimings(days)
+        const payload = resp?.data?.data || resp?.data
+        // When a day is turned on/off on an approved restaurant, the change is staged
+        // for admin re-approval instead of going live immediately.
+        setPendingApproval(Boolean(payload?.pendingApproval))
         window.dispatchEvent(new Event("outletTimingsUpdated"))
         isInternalUpdate.current = false // Reset after successful save
       } catch (error) {
@@ -208,6 +215,20 @@ export default function OutletTimings() {
             </div>
             <div className="h-0.5 bg-blue-600"></div>
           </div>
+
+          {/* Pending re-approval notice */}
+          {pendingApproval && (
+            <div className="mb-6 flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
+              <Clock className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-semibold text-amber-900">Opening days pending approval</p>
+                <p className="text-xs text-amber-800 mt-0.5">
+                  Your updated opening days have been sent to the admin for review. Your
+                  currently approved schedule stays live for customers until the change is approved.
+                </p>
+              </div>
+            </div>
+          )}
 
           {/* Day-wise Accordion */}
           <div className="space-y-2">

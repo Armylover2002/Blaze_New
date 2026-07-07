@@ -199,9 +199,10 @@ export default function JoiningRequest() {
         normalizeRequestRecord(request),
       )
       if (activeTab === "pending") {
-        setPendingRequests(list.filter((r) => r.status === "pending"))
+        // Include approved restaurants that have a staged opening-days change awaiting review.
+        setPendingRequests(list.filter((r) => r.status === "pending" || r.hasPendingOpenDaysUpdate))
       } else {
-        setRejectedRequests(list.filter((r) => r.status === "rejected"))
+        setRejectedRequests(list.filter((r) => r.status === "rejected" && !r.hasPendingOpenDaysUpdate))
       }
     } catch (err) {
       debugError("Error fetching restaurant requests:", err)
@@ -641,13 +642,19 @@ export default function JoiningRequest() {
                         <span className="text-sm text-slate-700">{request.zone || "—"}</span>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`px-3 py-1 rounded-full text-xs font-medium ${
-                          request.status === "Pending" || request.status === "pending"
-                            ? (request?.reVerification?.isZoneUpdate || request?.reVerification?.reVerificationReason === 'FSSAI License Update' ? "bg-purple-100 text-purple-700" : "bg-blue-100 text-blue-700")
-                            : "bg-red-100 text-red-700"
-                        }`}>
-                          {request?.reVerification?.isZoneUpdate || request?.reVerification?.reVerificationReason === 'FSSAI License Update' ? "Re-verification" : request.status}
-                        </span>
+                        {request?.hasPendingOpenDaysUpdate ? (
+                          <span className="px-3 py-1 rounded-full text-xs font-medium bg-teal-100 text-teal-700">
+                            Opening Days
+                          </span>
+                        ) : (
+                          <span className={`px-3 py-1 rounded-full text-xs font-medium ${
+                            request.status === "Pending" || request.status === "pending"
+                              ? (request?.reVerification?.isZoneUpdate || request?.reVerification?.reVerificationReason === 'FSSAI License Update' ? "bg-purple-100 text-purple-700" : "bg-blue-100 text-blue-700")
+                              : "bg-red-100 text-red-700"
+                          }`}>
+                            {request?.reVerification?.isZoneUpdate || request?.reVerification?.reVerificationReason === 'FSSAI License Update' ? "Re-verification" : request.status}
+                          </span>
+                        )}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-center">
                         <div className="flex items-center justify-center gap-2">
@@ -934,9 +941,9 @@ export default function JoiningRequest() {
                           <span className="text-sm">{formatRestaurantId(r)}</span>
                         </div>
                         <span className={`px-3 py-1 rounded-full text-xs font-medium ${
-                          approvalStatus === "approved" ? "bg-green-100 text-green-700" : (approvalStatus === "rejected" || approvalStatus === "Rejected") ? "bg-red-100 text-red-700" : (r?.reVerification?.isZoneUpdate || r?.reVerification?.reVerificationReason === 'FSSAI License Update' ? "bg-purple-100 text-purple-700" : "bg-amber-100 text-amber-700")
+                          r?.pendingOpenDays?.hasPendingUpdate ? "bg-teal-100 text-teal-700" : approvalStatus === "approved" ? "bg-green-100 text-green-700" : (approvalStatus === "rejected" || approvalStatus === "Rejected") ? "bg-red-100 text-red-700" : (r?.reVerification?.isZoneUpdate || r?.reVerification?.reVerificationReason === 'FSSAI License Update' ? "bg-purple-100 text-purple-700" : "bg-amber-100 text-amber-700")
                         }`}>
-                          {approvalStatus === "approved" ? "Approved" : (approvalStatus === "rejected" || approvalStatus === "Rejected") ? "Rejected" : (r?.reVerification?.isZoneUpdate || r?.reVerification?.reVerificationReason === 'FSSAI License Update' ? "Re-verification" : "Pending Approval")}
+                          {r?.pendingOpenDays?.hasPendingUpdate ? "Opening Days Review" : approvalStatus === "approved" ? "Approved" : (approvalStatus === "rejected" || approvalStatus === "Rejected") ? "Rejected" : (r?.reVerification?.isZoneUpdate || r?.reVerification?.reVerificationReason === 'FSSAI License Update' ? "Re-verification" : "Pending Approval")}
                         </span>
                       </div>
                     </div>
@@ -1008,6 +1015,48 @@ export default function JoiningRequest() {
                           <div className="mt-2 pt-2 border-t border-amber-200">
                             <p className="text-xs font-bold text-amber-900">Reason for Re-verification:</p>
                             <p className="text-xs text-amber-800">FSSAI License Update</p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Opening Days Update Request (if applicable) */}
+                    {r?.pendingOpenDays?.hasPendingUpdate && (
+                      <div className="md:col-span-2">
+                        <div className="bg-teal-50 border border-teal-200 rounded-lg p-4 mb-2">
+                          <h4 className="text-sm font-bold text-teal-900 mb-1 flex items-center gap-2">
+                            <Clock className="w-4 h-4" />
+                            Opening Days Update Request
+                          </h4>
+                          <p className="text-xs text-teal-800">
+                            The restaurant requested a change to its opening days. The current
+                            schedule stays live for customers until you approve this change.
+                          </p>
+                          <div className="grid grid-cols-2 gap-4 mt-3 pt-3 border-t border-teal-200">
+                            <div>
+                              <p className="text-xs text-teal-700 font-bold uppercase tracking-wider mb-1">Requested Days</p>
+                              <div className="flex flex-wrap gap-1.5">
+                                {(r.pendingOpenDays.proposedOpenDays || []).length > 0 ? (
+                                  r.pendingOpenDays.proposedOpenDays.map((day, idx) => (
+                                    <span key={idx} className="px-2 py-1 bg-teal-100 text-teal-800 rounded text-xs font-medium capitalize">{day}</span>
+                                  ))
+                                ) : (
+                                  <span className="px-2 py-1 bg-red-100 text-red-700 rounded text-xs font-medium">Closed all week</span>
+                                )}
+                              </div>
+                            </div>
+                            <div>
+                              <p className="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Current Days</p>
+                              <div className="flex flex-wrap gap-1.5">
+                                {(r.pendingOpenDays.previousOpenDays || []).length > 0 ? (
+                                  r.pendingOpenDays.previousOpenDays.map((day, idx) => (
+                                    <span key={idx} className="px-2 py-1 bg-slate-100 text-slate-600 rounded text-xs font-medium capitalize line-through opacity-70">{day}</span>
+                                  ))
+                                ) : (
+                                  <span className="text-xs text-slate-500">—</span>
+                                )}
+                              </div>
+                            </div>
                           </div>
                         </div>
                       </div>

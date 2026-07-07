@@ -36,7 +36,8 @@ import {
     listCategoriesController,
     createCategoryController,
     updateCategoryController,
-    deleteCategoryController
+    deleteCategoryController,
+    getCategoryStatusController
 } from '../controllers/restaurantCategory.controller.js';
 import { getMenuController, updateMenuController, getPublicRestaurantMenuController, getPublicMenusBatchController } from '../controllers/restaurantMenu.controller.js';
 import { getPublicRestaurantAddonsController } from '../controllers/publicAddons.controller.js';
@@ -185,6 +186,7 @@ router.post(
 
 // Categories (restaurant dashboard). Read-only for item creation, CRUD for Menu Categories page.
 router.get('/categories', authMiddleware, requireRestaurant, listCategoriesController);
+router.get('/categories/:id/status', authMiddleware, requireRestaurant, getCategoryStatusController);
 router.post('/categories', authMiddleware, requireRestaurant, createCategoryController);
 router.patch('/categories/:id', authMiddleware, requireRestaurant, updateCategoryController);
 router.delete('/categories/:id', authMiddleware, requireRestaurant, deleteCategoryController);

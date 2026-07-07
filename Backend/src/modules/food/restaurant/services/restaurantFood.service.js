@@ -128,9 +128,11 @@ const resolveCategoryForRestaurant = async (context, body = {}) => {
         return { categoryObjectId: undefined, categoryName: '' };
     }
 
+    // Note: we intentionally do NOT filter by isActive here. An inactive category can
+    // still be resolved so we can surface a precise, professional error message instead
+    // of a generic "not found". The explicit isActive check happens after resolution.
     const baseFilter = {
-        ...getAccessibleCategoryFilter(context),
-        isActive: { $ne: false }
+        ...getAccessibleCategoryFilter(context)
     };
     if (context.pureVegRestaurant) {
         baseFilter.foodTypeScope = 'Veg';
@@ -167,6 +169,9 @@ const resolveCategoryForRestaurant = async (context, body = {}) => {
 
     await backfillLegacyCategoryWorkflow([category]);
 
+    if (category.isActive === false) {
+        throw new ValidationError('This category is currently inactive and is not available for use.');
+    }
     if (String(category.approvalStatus || '') !== 'approved') {
         throw new ValidationError('This category is awaiting admin approval');
     }
