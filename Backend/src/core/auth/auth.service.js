@@ -1053,6 +1053,7 @@ export const changeAdminPassword = async (
   userId,
   currentPassword,
   newPassword,
+  currentRefreshToken = null,
 ) => {
   if (!userId) {
     throw new AuthError("Invalid token payload");
@@ -1070,6 +1071,19 @@ export const changeAdminPassword = async (
   }
   admin.password = newPassword;
   await admin.save();
+
+  // Security: revoke existing sessions after a password change so any
+  // compromised/stale tokens can no longer be refreshed. Preserve the caller's
+  // current session (if provided) to avoid logging the acting admin out.
+  try {
+    const revokeFilter = { userId: admin._id };
+    if (currentRefreshToken) {
+      revokeFilter.token = { $ne: currentRefreshToken };
+    }
+    await FoodRefreshToken.deleteMany(revokeFilter);
+  } catch (e) {
+    logger?.warn?.({ err: e }, "Failed to revoke sessions after admin password change");
+  }
 
   try {
     const { notifyAdminsSafely } = await import("../../core/notifications/firebase.service.js");
@@ -1171,6 +1185,14 @@ export const resetAdminPasswordWithOtp = async (email, otp, newPassword) => {
   admin.password = newPassword;
   await admin.save();
   await record.deleteOne();
+
+  // Security: a forgot-password reset is unauthenticated, so revoke ALL
+  // existing sessions for this admin. The user re-authenticates via login.
+  try {
+    await FoodRefreshToken.deleteMany({ userId: admin._id });
+  } catch (e) {
+    logger?.warn?.({ err: e }, "Failed to revoke sessions after admin password reset");
+  }
 
   try {
     const { notifyAdminsSafely } = await import("../../core/notifications/firebase.service.js");

@@ -197,10 +197,10 @@ export const updateAdminProfileController = async (req, res, next) => {
 export const changeAdminPasswordController = async (req, res, next) => {
   try {
     const { userId } = req.user;
-    const { currentPassword, newPassword } = validateAdminChangePasswordDto(
+    const { currentPassword, newPassword, refreshToken } = validateAdminChangePasswordDto(
       req.body,
     );
-    await changeAdminPassword(userId, currentPassword, newPassword);
+    await changeAdminPassword(userId, currentPassword, newPassword, refreshToken);
     return sendResponse(res, 200, "Password changed successfully", {
       success: true,
     });
