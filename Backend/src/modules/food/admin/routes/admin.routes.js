@@ -61,7 +61,7 @@ router.patch('/restaurants/complaints/:id', checkPermission('food::restaurant_ma
 
 // ----- Restaurants -----
 router.get('/restaurants', adminController.getRestaurants);
-router.get('/dashboard-stats', adminController.getDashboardStats);
+router.get('/dashboard-stats', checkPermission('food::dashboard', 'view'), adminController.getDashboardStats);
 router.get('/reports/restaurants', adminController.getRestaurantReport);
 router.get('/reports/transactions', adminController.getTransactionReport);
 router.get('/reports/tax', adminController.getTaxReport);
