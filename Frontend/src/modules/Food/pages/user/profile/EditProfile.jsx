@@ -217,6 +217,11 @@ export default function EditProfile() {
     setHasChanges(currentData !== savedData)
   }, [formData, initialData])
 
+  const validateName = (value) => {
+    if (!value) return ""
+    return /^[a-zA-Z\s]+$/.test(value) ? "" : "invalid name"
+  }
+
   const validateEmail = (value) => {
     if (!value) return ""
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value) ? "" : "Please enter a valid email"
@@ -254,6 +259,8 @@ export default function EditProfile() {
       errorMessage = validateEmail(normalizedValue)
     } else if (field === "dateOfBirth") {
       errorMessage = validateDateOfBirth(normalizedValue)
+    } else if (field === "name") {
+      errorMessage = validateName(normalizedValue)
     }
 
     setFormData((prev) => ({
@@ -261,7 +268,7 @@ export default function EditProfile() {
       [field]: normalizedValue
     }))
 
-    if (field === "mobile" || field === "alternatePhone" || field === "email" || field === "dateOfBirth") {
+    if (field === "mobile" || field === "alternatePhone" || field === "email" || field === "dateOfBirth" || field === "name") {
       setFieldErrors((prev) => ({
         ...prev,
         [field]: errorMessage
@@ -518,6 +525,9 @@ export default function EditProfile() {
                   </button>
                 )}
               </div>
+              {fieldErrors.name && (
+                <p className="text-xs text-red-600 mt-1">{fieldErrors.name}</p>
+              )}
             </div>
 
             {/* Mobile Field */}

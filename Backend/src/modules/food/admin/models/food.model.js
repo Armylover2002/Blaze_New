@@ -5,7 +5,8 @@ const foodVariantSchema = new mongoose.Schema(
     {
         name: { type: String, required: true, trim: true },
         price: { type: Number, required: true, min: 0 },
-        otherPrice: { type: Number, min: 0, default: 0 }
+        otherPrice: { type: Number, min: 0, default: 0 },
+        unit: { type: String, trim: true, default: 'piece' }
     },
     { _id: true }
 );

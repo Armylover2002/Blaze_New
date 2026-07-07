@@ -404,6 +404,7 @@ export default function Home() {
                 navigate={navigate}
                 setShowAllCategoriesModal={setShowAllCategoriesModal}
                 backendOrigin={BACKEND_ORIGIN}
+                hasOffers={restaurants.loading ? true : (restaurants.visible || []).some(r => r.offer)}
               />
             </Suspense>
 
@@ -412,21 +413,23 @@ export default function Home() {
             </Suspense>
 
             <Suspense fallback={<HeroBannerSkeleton className="h-full w-full px-4 mt-3 md:hidden" />}>
-              <section className="content-auto px-4 py-4 sm:py-6 md:hidden lg:py-8">
-                <div className="overflow-hidden rounded-2xl h-48 sm:h-64 md:h-72 lg:h-[350px] shadow-lg border border-gray-100">
-                  <BannerSection
-                    showBannerSkeleton={banners.loading}
-                    heroBannerImages={banners.images}
-                    heroBannersData={banners.data}
-                    currentBannerIndex={currentBannerIndex}
-                    setCurrentBannerIndex={setCurrentBannerIndex}
-                    heroShellRef={heroShellRef}
-                    navigate={navigate}
-                    backendOrigin={BACKEND_ORIGIN}
-                    hideOverlay={true}
-                  />
-                </div>
-              </section>
+              {(banners.loading || (banners.images && banners.images.length > 0)) && (
+                <section className="content-auto px-4 py-4 sm:py-6 md:hidden lg:py-8">
+                  <div className="overflow-hidden rounded-2xl h-48 sm:h-64 md:h-72 lg:h-[350px] shadow-lg border border-gray-100">
+                    <BannerSection
+                      showBannerSkeleton={banners.loading}
+                      heroBannerImages={banners.images}
+                      heroBannersData={banners.data}
+                      currentBannerIndex={currentBannerIndex}
+                      setCurrentBannerIndex={setCurrentBannerIndex}
+                      heroShellRef={heroShellRef}
+                      navigate={navigate}
+                      backendOrigin={BACKEND_ORIGIN}
+                      hideOverlay={true}
+                    />
+                  </div>
+                </section>
+              )}
             </Suspense>
 
             <Suspense fallback={null}>

@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useRef, useMemo } from "react"
+import { useState, useEffect, useRef, useMemo } from "react"
 import { useParams, useNavigate, useSearchParams } from "react-router-dom"
 import { restaurantAPI, diningAPI, orderAPI } from "@food/api"
 import { API_BASE_URL } from "@food/api/config"
@@ -2041,12 +2041,6 @@ function RestaurantDetailsContent() {
         restaurant={restaurant}
         isRestaurantOffline={isRestaurantOffline}
         isOutOfService={isOutOfService}
-      />
-
-      <RestaurantDetailsOffers
-        offers={highlightOffers}
-        activeIndex={highlightIndex}
-        onOpenOffers={() => setShowOffersSheet(true)}
       />
 
       <RestaurantDetailsMenuToolbar
