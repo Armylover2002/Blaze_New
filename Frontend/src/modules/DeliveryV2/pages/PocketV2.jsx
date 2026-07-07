@@ -23,18 +23,27 @@ export const PocketV2 = () => {
   const getAvailableModules = useDeliveryStore(state => state.getAvailableModules);
   const availableModules = getAvailableModules();
   const [activeModuleFilter, setActiveModuleFilter] = useState('all');
-  const [loading, setLoading] = useState(true);
-  const [walletState, setWalletState] = useState({
-    totalBalance: 0,
-    cashInHand: 0,
-    availableCashLimit: 0,
-    totalCashLimit: 0,
-    weeklyEarnings: 0,
-    weeklyOrders: 0,
-    payoutAmount: 0,
-    payoutPeriod: 'Current Week',
-    totalBonus: 0,
-    bankDetailsFilled: false
+  const [walletState, setWalletState] = useState(() => {
+    try {
+      const cached = sessionStorage.getItem('deliveryWalletState');
+      if (cached) return JSON.parse(cached);
+    } catch(e) {}
+    return {
+      totalBalance: 0,
+      cashInHand: 0,
+      availableCashLimit: 0,
+      totalCashLimit: 0,
+      weeklyEarnings: 0,
+      weeklyOrders: 0,
+      payoutAmount: 0,
+      payoutPeriod: 'Current Week',
+      totalBonus: 0,
+      bankDetailsFilled: false
+    };
+  });
+
+  const [loading, setLoading] = useState(() => {
+    return !sessionStorage.getItem('deliveryWalletState');
   });
 
   const [activeOffer, setActiveOffer] = useState({
@@ -49,22 +58,20 @@ export const PocketV2 = () => {
   const [showDepositPopup, setShowDepositPopup] = useState(false);
 
   useEffect(() => {
-    const fetchData = async () => {
+    sessionStorage.setItem('deliveryWalletState', JSON.stringify(walletState));
+  }, [walletState]);
+
+  useEffect(() => {
+    const fetchInitialData = async () => {
       try {
-        setLoading(true);
-        const [profileRes, earningsRes, walletRes] = await Promise.all([
+        const [profileRes, walletRes, activeAddonsRes] = await Promise.all([
           deliveryAPI.getProfile(),
-          deliveryAPI.getEarnings({ 
-            period: 'week', 
-            ...(activeModuleFilter !== 'all' && { module: activeModuleFilter }) 
-          }),
-          deliveryAPI.getWallet()
+          deliveryAPI.getWallet(),
+          deliveryAPI.getActiveEarningAddons().catch(() => null)
         ]);
 
         const profile = profileRes?.data?.data?.profile || {};
-        const summary = earningsRes?.data?.data?.summary || {};
         const wallet = walletRes?.data?.data?.wallet || {};
-        const activeAddonsRes = await deliveryAPI.getActiveEarningAddons().catch(() => null);
         const activeOfferPayload =
           activeAddonsRes?.data?.data?.activeOffer ||
           activeAddonsRes?.data?.activeOffer ||
@@ -73,18 +80,17 @@ export const PocketV2 = () => {
         const bankDetails = profile?.documents?.bankDetails;
         const isFilled = !!(bankDetails?.accountNumber);
 
-        setWalletState({
+        setWalletState(prev => ({
+          ...prev,
           totalBalance: Number(wallet.pocketBalance) || 0,
           cashInHand: Number(wallet.cashInHand) || 0,
           availableCashLimit: Number(wallet.availableCashLimit) || 0,
           totalCashLimit: Number(wallet.totalCashLimit) || 0,
-          weeklyEarnings: Number(summary.totalEarnings) || 0,
-          weeklyOrders: Number(summary.totalOrders) || 0,
           payoutAmount: Number(wallet.lastPayout?.amount || wallet.totalWithdrawn || 0),
           payoutPeriod: wallet.lastPayout ? new Date(wallet.lastPayout.date).toLocaleDateString() : 'No recent payout',
           totalBonus: Number(wallet.totalBonus) || 0,
           bankDetailsFilled: isFilled
-        });
+        }));
 
         setActiveOffer({
            targetAmount: Number(activeOfferPayload?.targetAmount) || 0,
@@ -96,12 +102,32 @@ export const PocketV2 = () => {
         });
 
       } catch (err) {
-        toast.error('Failed to load wallet data');
+        // Silently fail if refreshing
       } finally {
         setLoading(false);
       }
     };
-    fetchData();
+    fetchInitialData();
+  }, []);
+
+  useEffect(() => {
+    const fetchEarnings = async () => {
+      try {
+        const earningsRes = await deliveryAPI.getEarnings({ 
+          period: 'week', 
+          ...(activeModuleFilter !== 'all' && { module: activeModuleFilter }) 
+        });
+        const summary = earningsRes?.data?.data?.summary || {};
+        setWalletState(prev => ({
+          ...prev,
+          weeklyEarnings: Number(summary.totalEarnings) || 0,
+          weeklyOrders: Number(summary.totalOrders) || 0,
+        }));
+      } catch (err) {
+        // Ignore background failure
+      }
+    };
+    fetchEarnings();
   }, [activeModuleFilter]);
 
   const handleDepositSuccess = useCallback(() => {

@@ -5,6 +5,7 @@ import { Suspense, lazy } from "react";
 import Loader from "@food/components/Loader";
 import UserLayout from "./user/UserLayout";
 import { PorterProvider } from "./user/context/BookingContext";
+import PorterBookingGuard from "./user/components/PorterBookingGuard";
 import Home from "./user/pages/Home";
 
 const SelectAddresses = lazy(() => import("./user/pages/SelectAddresses"));
@@ -61,7 +62,9 @@ function PorterInnerRoutes() {
 export default function PorterRoutes() {
   return (
     <PorterProvider>
-      <PorterInnerRoutes />
+      <PorterBookingGuard>
+        <PorterInnerRoutes />
+      </PorterBookingGuard>
     </PorterProvider>
   );
 }

@@ -21,6 +21,8 @@ export const PORTER_DISPATCH_STATUS = {
     UNASSIGNED: 'unassigned',
     ASSIGNED: 'assigned',
     ACCEPTED: 'accepted',
+    PICKED_UP: 'picked_up',
+    COMPLETED: 'completed',
     REJECTED: 'rejected',
     CANCELLED: 'cancelled',
 };
@@ -44,7 +46,11 @@ export const PORTER_PAYMENT_STATUS = {
 
 export const PORTER_PAYMENT_METHODS = ['wallet', 'cash', 'razorpay'];
 
+// A Porter trip is considered finished once it reaches DELIVERED (there is no
+// separate customer-facing COMPLETED transition). Both are terminal so a
+// finished order never blocks a new booking or lingers as the active shipment.
 export const PORTER_TERMINAL_STATUSES = new Set([
+    PORTER_ORDER_STATUS.DELIVERED,
     PORTER_ORDER_STATUS.COMPLETED,
     PORTER_ORDER_STATUS.CANCELLED_BY_USER,
     PORTER_ORDER_STATUS.CANCELLED_BY_ADMIN,
@@ -62,5 +68,4 @@ export const PORTER_ACTIVE_STATUSES = new Set([
     PORTER_ORDER_STATUS.PICKED_UP,
     PORTER_ORDER_STATUS.IN_TRANSIT,
     PORTER_ORDER_STATUS.AT_DROP,
-    PORTER_ORDER_STATUS.DELIVERED,
 ]);

@@ -116,6 +116,7 @@ export async function emitPorterOrderToPartner(order, partnerId, distanceKm) {
     io.to(rooms.delivery(partnerId)).emit(PORTER_SOCKET_EVENTS.ORDER_AVAILABLE, payload);
     io.to(rooms.delivery(partnerId)).emit(PORTER_SOCKET_EVENTS.PLAY_SOUND, {
         documentType: PORTER_DISPATCH_DOCUMENT_TYPE,
+        module: 'parcel',
         orderId: String(order._id),
     });
     void notifyPorterNewOrderToDriver(partnerId, order);
@@ -149,6 +150,7 @@ export async function emitPorterOrderStatus(order, userId, partnerId) {
         dispatch: order.dispatch,
         deliveryState: order.deliveryState,
         documentType: PORTER_DISPATCH_DOCUMENT_TYPE,
+        module: 'parcel',
     };
 
     if (userId) io.to(rooms.user(userId)).emit(PORTER_SOCKET_EVENTS.ORDER_STATUS, payload);

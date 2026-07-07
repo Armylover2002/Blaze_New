@@ -1,9 +1,12 @@
+import mongoose from 'mongoose';
 import { FoodUser } from '../../../core/users/user.model.js';
 import { NotFoundError } from '../../../core/auth/errors.js';
 import { parseListQuery, buildDateRangeFilter, toPorterPagination, escapeRegex } from '../utils/pagination.util.js';
 import { mapPorterUser } from '../utils/mappers.util.js';
 import { validateUpdatePorterUserDto, validateUserId } from '../validators/user.validator.js';
 import { validateListQuery } from '../validators/listQuery.validator.js';
+
+import { PorterOrder } from '../orders/models/porterOrder.model.js';
 
 const baseFilter = {
     role: 'USER',
@@ -57,7 +60,36 @@ export async function listPorterUsers(query = {}) {
         FoodUser.countDocuments(filter),
     ]);
 
-    const records = docs.map((doc) => mapPorterUser(doc));
+    const userIds = docs.map(d => d._id);
+    const stats = await PorterOrder.aggregate([
+        { $match: { userId: { $in: userIds }, isDeleted: false } },
+        {
+            $group: {
+                _id: "$userId",
+                totalOrders: { $sum: 1 },
+                completedOrders: {
+                    $sum: { $cond: [{ $in: ["$status", ["completed", "delivered"]] }, 1, 0] }
+                },
+                cancelledOrders: {
+                    $sum: { $cond: [{ $in: ["$status", ["cancelled_by_user", "cancelled_by_admin", "cancelled_by_driver", "failed"]] }, 1, 0] }
+                }
+            }
+        }
+    ]);
+
+    const statsMap = {};
+    stats.forEach(s => {
+        statsMap[s._id.toString()] = {
+            totalOrders: s.totalOrders,
+            completedOrders: s.completedOrders,
+            cancelledOrders: s.cancelledOrders,
+        };
+    });
+
+    const records = docs.map((doc) => {
+        const userStats = statsMap[doc._id.toString()] || {};
+        return mapPorterUser(doc, { ...userStats });
+    });
     return toPorterPagination({ docs: records, total, page: parsed.page, limit: parsed.limit });
 }
 
@@ -68,5 +100,53 @@ export async function getPorterUserById(id) {
         .lean();
 
     if (!doc) throw new NotFoundError('User not found');
-    return mapPorterUser(doc);
+
+    const stats = await PorterOrder.aggregate([
+        { $match: { userId: new mongoose.Types.ObjectId(userId), isDeleted: false } },
+        {
+            $group: {
+                _id: null,
+                totalOrders: { $sum: 1 },
+                completedOrders: {
+                    $sum: { $cond: [{ $in: ["$status", ["completed", "delivered"]] }, 1, 0] }
+                },
+                cancelledOrders: {
+                    $sum: { $cond: [{ $in: ["$status", ["cancelled_by_user", "cancelled_by_admin", "cancelled_by_driver", "failed"]] }, 1, 0] }
+                }
+            }
+        }
+    ]);
+
+    const recentOrderDocs = await PorterOrder.find({ userId, isDeleted: false })
+        .sort({ createdAt: -1 })
+        .limit(5)
+        .lean();
+
+    const recentOrders = recentOrderDocs.map(o => ({
+        id: o.orderNumber || String(o._id),
+        goodsType: o.parcel?.parcelName || o.vehicleName || 'Parcel',
+        amount: o.pricing?.total || 0,
+        status: o.status
+    }));
+
+    const userStats = stats.length > 0 ? {
+        totalOrders: stats[0].totalOrders,
+        completedOrders: stats[0].completedOrders,
+        cancelledOrders: stats[0].cancelledOrders,
+    } : {};
+
+    return mapPorterUser(doc, { ...userStats, recentOrders });
+}
+
+export async function updatePorterUser(id, body) {
+    const userId = validateUserId(id);
+    const doc = await FoodUser.findOne({ _id: userId, ...baseFilter });
+    if (!doc) throw new NotFoundError('User not found');
+
+    if (body.walletBalance !== undefined) {
+        doc.walletBalance = Number(body.walletBalance);
+    }
+    
+    await doc.save();
+    return getPorterUserById(id);
 }

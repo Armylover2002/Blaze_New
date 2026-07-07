@@ -8,11 +8,18 @@ import { useBooking } from "../context/BookingContext";
 import { getPorterRatePath, getPorterInvoicePath } from "../utils/routes";
 import { TRACKING_STAGES, resolveTrackingStage } from "../constants/booking";
 import { usePorterOrderTracking } from "../hooks/usePorterOrderTracking";
+import { mapActiveShipmentFromOrder } from "../utils/orderMapper";
 
 export default function ParcelTracking() {
   const navigate = useNavigate();
-  const { activeShipment, setActiveShipment } = useBooking();
+  const { activeShipment, setActiveShipment, refreshActiveOrder } = useBooking();
   const orderId = activeShipment?.id;
+
+  useEffect(() => {
+    if (!orderId) {
+      void refreshActiveOrder?.();
+    }
+  }, [orderId, refreshActiveOrder]);
 
   const { order, loading } = usePorterOrderTracking(orderId, {
     enabled: Boolean(orderId),
@@ -21,24 +28,14 @@ export default function ParcelTracking() {
 
   useEffect(() => {
     if (!order) return;
-    setActiveShipment((prev) => ({
-      ...(prev || {}),
-      id: order.id,
-      orderNumber: order.orderNumber,
-      trackingId: order.orderNumber,
-      status: order.status,
-      stage: resolveTrackingStage(order.status),
-      pickup: order.pickup,
-      delivery: order.delivery,
-      total: order.pricing?.total,
-    }));
+    const mapped = mapActiveShipmentFromOrder(order);
+    if (mapped) setActiveShipment((prev) => ({ ...(prev || {}), ...mapped }));
   }, [order, setActiveShipment]);
 
   const stage = resolveTrackingStage(order?.status || activeShipment?.status);
   const currentIdx = TRACKING_STAGES.findIndex((s) => s.id === stage);
 
   const pickupOtp = order?.deliveryState?.pickupOtp;
-  const dropOtp = order?.deliveryState?.dropOtp;
 
   const mapOrder = useMemo(() => order || activeShipment, [order, activeShipment]);
 
@@ -67,14 +64,12 @@ export default function ParcelTracking() {
             />
           )}
 
-          {(pickupOtp || dropOtp) && (
+          {pickupOtp && ["at_pickup", "partner_accepted", "en_route_pickup", "assigned"].includes(order?.status) && (
             <div className="mb-4 rounded-2xl border border-[#FF0000]/20 bg-[#FFF1F1] p-4">
-              {pickupOtp && ["at_pickup", "partner_accepted", "en_route_pickup", "assigned"].includes(order?.status) && (
-                <p className="text-[13px] font-bold text-gray-900">Pickup OTP: <span className="text-[#FF0000]">{pickupOtp}</span></p>
-              )}
-              {dropOtp && ["at_drop", "in_transit", "picked_up"].includes(order?.status) && (
-                <p className="text-[13px] font-bold text-gray-900 mt-1">Delivery OTP: <span className="text-[#FF0000]">{dropOtp}</span></p>
-              )}
+              <p className="text-[13px] font-bold text-gray-900">
+                Pickup OTP: <span className="text-[#FF0000]">{pickupOtp}</span>
+              </p>
+              <p className="mt-1 text-[11px] text-gray-600">Share this OTP with the driver at pickup only</p>
             </div>
           )}
 

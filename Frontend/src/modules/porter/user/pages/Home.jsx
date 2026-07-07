@@ -14,7 +14,9 @@ import {
   getPorterShipmentDetailsPath,
   getPorterPromoPath
 } from "../utils/routes";
-import { SHIPMENT_HISTORY } from "../utils/mock/shipments";
+
+
+import porterUserApi from '../services/userApi';
 
 const FEATURED_VEHICLE_LIMIT = 4;
 
@@ -89,8 +91,20 @@ export default function Home({ embedded = false }) {
   const { pickup } = useBooking();
   const [selectedCoupon, setSelectedCoupon] = useState(null);
   const { vehicles, banners, coupons, isLoading } = usePorterHomeData();
+  const [recentShipment, setRecentShipment] = useState(null);
+  const [loadingShipment, setLoadingShipment] = useState(true);
 
-  const recentShipments = SHIPMENT_HISTORY.slice(0, 3);
+  React.useEffect(() => {
+    porterUserApi.listOrders({ limit: 1 })
+      .then(res => {
+        if (res && res.records && res.records.length > 0) {
+          setRecentShipment(res.records[0]);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoadingShipment(false));
+  }, []);
+
   const featuredVehicles = useMemo(
     () => vehicles.slice(0, FEATURED_VEHICLE_LIMIT),
     [vehicles],
@@ -181,11 +195,7 @@ export default function Home({ embedded = false }) {
                 <p className="truncate text-[12px] text-gray-500">{pickup.address}</p>
               </div>
             )}
-            <div className="border-t border-gray-100 p-3">
-              <PrimaryButton onClick={() => navigate(getPorterAddressPath())}>
-                {pickup?.address ? "Set delivery location" : "Set pickup & delivery"}
-              </PrimaryButton>
-            </div>
+
           </div>
         </div>
 
@@ -224,43 +234,45 @@ export default function Home({ embedded = false }) {
           </section>
         )}
 
-        <section className="px-4">
-          <div className="mb-2 flex items-center justify-between">
-            <SectionLabel className="mb-0">Recent shipments</SectionLabel>
-            <button type="button" onClick={() => navigate("/porter/shipments")} className="text-[12px] font-bold text-[#FF0000]">
-              View all
-            </button>
-          </div>
-          <div className="space-y-2">
-            {recentShipments.map((s) => (
-              <button
-                key={s.id}
-                type="button"
-                onClick={() => navigate(getPorterShipmentDetailsPath(s.id))}
-                className="flex w-full items-center gap-3 rounded-2xl border border-gray-100 bg-white p-3 text-left shadow-sm transition hover:border-gray-200"
-              >
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gray-50">
-                  <Package className="h-5 w-5 text-[#FF0000]" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-[13px] font-bold text-gray-900">{s.delivery.title} · {s.trackingId}</p>
-                  <p className="truncate text-[11px] text-gray-500">{s.vehicle} · {s.weightKg} kg</p>
-                </div>
-                <div className="text-right">
-                  <p className="text-[13px] font-bold text-gray-900">{inr(s.total)}</p>
-                  <p className={`text-[10px] font-bold capitalize ${s.status === "delivered" ? "text-[#2e7d32]" : s.status === "cancelled" ? "text-gray-400" : "text-amber-600"}`}>
-                    {s.status.replace("_", " ")}
-                  </p>
-                </div>
+        {recentShipment && (
+          <section className="px-4 mt-5">
+            <div className="mb-2 flex items-center justify-between">
+              <SectionLabel className="mb-0">Recent Shipment</SectionLabel>
+              <button type="button" onClick={() => navigate('/porter/shipments')} className="text-[12px] font-bold text-[#FF0000]">
+                View history
               </button>
-            ))}
-          </div>
-        </section>
+            </div>
+            <div
+              onClick={() => navigate(getPorterShipmentDetailsPath(recentShipment.id))}
+              className="flex flex-col rounded-2xl border border-gray-100 bg-white p-4 text-left shadow-sm transition hover:border-[#FF0000]/30 hover:shadow-md cursor-pointer"
+            >
+              <div className="flex items-center justify-between gap-2 mb-3 border-b border-gray-50 pb-3">
+                <p className="text-[13px] font-bold text-gray-900">#{recentShipment.orderNumber}</p>
+                <span className={`text-[11px] font-bold uppercase ${["delivered", "completed"].includes(recentShipment.status) ? "text-green-600" : "text-[#FF0000]"}`}>
+                  {String(recentShipment.status || "").replace(/_/g, " ")}
+                </span>
+              </div>
+              <div className="relative pl-5 mb-2">
+                 <div className="absolute left-1.5 top-1.5 bottom-1.5 w-[1px] bg-gray-200"></div>
+                 <div className="relative mb-3">
+                    <div className="absolute -left-[18.5px] top-1.5 h-2 w-2 rounded-full border-2 border-green-600 bg-white"></div>
+                    <p className="text-[12px] text-gray-700 font-medium line-clamp-1">{recentShipment.pickup?.address || "Pickup address"}</p>
+                 </div>
+                 <div className="relative">
+                    <div className="absolute -left-[18.5px] top-1.5 h-2 w-2 rounded-full border-2 border-[#FF0000] bg-white"></div>
+                    <p className="text-[12px] text-gray-700 font-medium line-clamp-1">{recentShipment.delivery?.address || "Delivery address"}</p>
+                 </div>
+              </div>
+              <div className="flex items-center justify-between mt-1 pt-2 border-t border-gray-50">
+                <p className="text-[14px] font-bold text-gray-900">{inr(recentShipment.pricing?.total ?? 0)}</p>
+                <span className="text-[11px] font-medium text-gray-500">
+                  {new Date(recentShipment.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
+                </span>
+              </div>
+            </div>
+          </section>
+        )}
 
-        <div className="mx-4 flex items-center gap-2 rounded-2xl bg-white p-3 text-[11px] text-gray-500 shadow-sm">
-          <Clock className="h-4 w-4 shrink-0 text-[#FF0000]" />
-          Same-day pickup available across Noida · Live parcel tracking included
-        </div>
       </main>
 
       <BottomSheet

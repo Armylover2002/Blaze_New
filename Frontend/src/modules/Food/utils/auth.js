@@ -216,6 +216,7 @@ export function clearModuleAuth(module) {
     sessionStorage.removeItem("sellerReonboard");
   }
   if (module === "delivery") {
+    localStorage.removeItem("auth_delivery");
     sessionStorage.removeItem("deliveryIsRejected");
   }
   // Also clear any sessionStorage data
@@ -348,6 +349,9 @@ export function setAuthData(module, token, user, refreshToken = null) {
       localStorage.setItem("auth_customer", token);
       localStorage.setItem("accessToken", token);
       localStorage.setItem("token", token);
+    }
+    if (module === "delivery") {
+      localStorage.setItem("auth_delivery", token);
     }
     if (refreshToken && typeof refreshToken === "string") {
       localStorage.setItem(refreshTokenKey, refreshToken);

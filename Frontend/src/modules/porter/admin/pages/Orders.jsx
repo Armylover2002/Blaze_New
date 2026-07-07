@@ -18,15 +18,30 @@ import porterAdminApi from "../services/adminApi";
 const mapApiOrder = (o) => ({
   id: String(o._id || o.id),
   orderNumber: o.orderNumber,
-  customer: o.userId?.name || "Customer",
+  customer: o.userId?.name || o.customer?.name || "Customer",
+  customerPhone: o.userId?.phone || o.customer?.phone || "—",
   pickup: o.pickup?.address || "",
   drop: o.delivery?.address || "",
+  senderName: o.parcel?.senderName || o.userId?.name || o.customer?.name || "Sender",
+  receiverName: o.parcel?.receiverName || "Receiver",
+  receiverPhone: o.parcel?.receiverPhone || "—",
   driverId: o.dispatch?.deliveryPartnerId?._id || o.dispatch?.deliveryPartnerId,
   driverName: o.dispatch?.deliveryPartnerId?.name || "—",
   vehicle: o.vehicleName || "—",
   goodsType: o.parcel?.parcelName || "Parcel",
-  amount: o.pricing?.total ?? 0,
+  weightKg: o.parcel?.weightKg ?? null,
+  distanceKm: o.route?.distanceKm ?? o.pricing?.distance ?? o.distance ?? 0,
+  distanceText: o.route?.distanceText || "",
+  amount: o.pricing?.total ?? o.totalAmount ?? 0,
+  commission: o.pricing?.commission ?? 0,
+  driverEarning: o.pricing?.driverEarning ?? 0,
+  paymentMethod: o.payment?.method || "—",
+  collectedAt: o.payment?.collectedAt || null,
+  paidAt: o.payment?.paidAt || null,
+  pickupPhotoUrl: o.deliveryState?.pickupPhotoUrl || "",
+  deliveryPhotoUrl: o.deliveryState?.deliveryPhotoUrl || "",
   deliveryStatus: o.status,
+  dispatchStatus: o.dispatch?.status,
   paymentStatus: o.payment?.status,
   createdAt: o.createdAt,
   timeline: o.statusHistory || [],
@@ -40,9 +55,18 @@ const STATUS_LABELS = {
   in_transit: "In Transit",
   near_destination: "Near Destination",
   delivered: "Delivered",
+  completed: "Completed",
   cancelled: "Cancelled",
   failed: "Failed",
   refunded: "Refunded",
+  scheduled: "Scheduled",
+  searching_partner: "Searching Partner",
+  partner_accepted: "Partner Accepted",
+  at_pickup: "At Pickup",
+  at_drop: "At Drop",
+  cancelled_by_user: "Cancelled by User",
+  cancelled_by_admin: "Cancelled by Admin",
+  cancelled_by_driver: "Cancelled by Driver",
 };
 
 const STATUS_TONES = {
@@ -53,6 +77,7 @@ const STATUS_TONES = {
   in_transit: "primary",
   near_destination: "primary",
   delivered: "success",
+  completed: "success",
   cancelled: "danger",
   failed: "danger",
   refunded: "danger",
@@ -100,6 +125,10 @@ const Orders = () => {
   const [assignDriverId, setAssignDriverId] = useState("");
   const [assignableDrivers, setAssignableDrivers] = useState([]);
   const [actionLoading, setActionLoading] = useState(false);
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [cancelOrderId, setCancelOrderId] = useState(null);
+  const [cancelReason, setCancelReason] = useState("");
+  const [cancelNote, setCancelNote] = useState("");
   const socketRef = useRef(null);
 
   const loadOrders = useCallback(async () => {
@@ -227,12 +256,20 @@ const Orders = () => {
     }
   };
 
-  const handleCancel = async (orderId) => {
-    const reason = window.prompt("Cancellation reason:");
-    if (!reason?.trim()) return;
+  const openCancel = (orderId) => {
+    setCancelOrderId(orderId);
+    setCancelReason("");
+    setCancelNote("");
+    setCancelOpen(true);
+  };
+
+  const handleCancel = async () => {
+    const reason = cancelReason.trim();
+    if (!reason || !cancelOrderId) return;
     setActionLoading(true);
     try {
-      await porterAdminApi.cancelOrder(orderId, reason.trim());
+      await porterAdminApi.cancelOrder(cancelOrderId, reason, cancelNote.trim());
+      setCancelOpen(false);
       setDetailOpen(false);
       await loadOrders();
     } catch (err) {
@@ -249,10 +286,10 @@ const Orders = () => {
   };
 
   const columns = [
-    { key: "id", header: "Order ID", cell: (row) => <span className="font-semibold">{row.id}</span> },
+    { key: "id", header: "Order ID", cell: (row) => <span className="font-semibold" title={row.id}>{row.orderNumber || '...' + row.id.slice(-6)}</span> },
     { key: "customer", header: "Customer" },
-    { key: "pickup", header: "Pickup", cell: (row) => <span className="text-sm">{row.pickup}</span> },
-    { key: "drop", header: "Drop", cell: (row) => <span className="text-sm">{row.drop}</span> },
+    { key: "pickup", header: "Pickup", cell: (row) => <div className="text-sm line-clamp-2 max-w-[150px] overflow-hidden text-ellipsis" title={row.pickup}>{row.pickup}</div> },
+    { key: "drop", header: "Drop", cell: (row) => <div className="text-sm line-clamp-2 max-w-[150px] overflow-hidden text-ellipsis" title={row.drop}>{row.drop}</div> },
     { key: "driverName", header: "Driver" },
     { key: "vehicle", header: "Vehicle" },
     { key: "goodsType", header: "Goods" },
@@ -270,7 +307,7 @@ const Orders = () => {
             <Button variant="ghost" size="sm" onClick={() => openAssign(row)}><UserPlus size={14} /></Button>
           )}
           {!["delivered", "completed", "cancelled_by_user", "cancelled_by_admin", "cancelled_by_driver", "failed"].includes(row.deliveryStatus) && (
-            <Button variant="ghost" size="sm" className="text-red-500" onClick={() => handleCancel(row.id)}><XCircle size={14} /></Button>
+            <Button variant="ghost" size="sm" className="text-red-500" onClick={() => openCancel(row.id)}><XCircle size={14} /></Button>
           )}
         </div>
       ),
@@ -353,11 +390,13 @@ const Orders = () => {
 
       {/* Order Details Drawer */}
       <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
-        <DialogContent className="blaze-theme-scope sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
-          <DialogHeader><DialogTitle>Order {selected?.id}</DialogTitle></DialogHeader>
+        <DialogContent className="blaze-theme-scope sm:max-w-[600px] p-0 overflow-hidden flex flex-col max-h-[90vh]">
+          <div className="px-6 py-4 border-b shrink-0 bg-white z-10">
+            <DialogHeader><DialogTitle>Order {selected?.orderNumber || selected?.id}</DialogTitle></DialogHeader>
+          </div>
           {selected && (
             <>
-              <div className="px-6 py-4 overflow-y-auto">
+              <div className="px-6 py-4 overflow-y-auto flex-1">
                 <FormLayout>
                   <div className="flex flex-wrap gap-2 mb-4">
                     <StatusBadge tone={STATUS_TONES[selected.deliveryStatus]} label={STATUS_LABELS[selected.deliveryStatus]} />
@@ -375,8 +414,19 @@ const Orders = () => {
                       <FormField label="Vehicle"><div className="text-sm font-medium">{selected.vehicle}</div></FormField>
                     </FormRow>
                     <FormRow>
-                      <FormField label="Distance"><div className="text-sm font-medium">{selected.distanceKm} km</div></FormField>
+                      <FormField label="Distance"><div className="text-sm font-medium">{Number(selected.distanceKm || 0).toFixed(1)} km</div></FormField>
                       <FormField label="Amount"><div className="text-sm font-medium text-emerald-600">{formatCurrency(selected.amount)}</div></FormField>
+                    </FormRow>
+                  </FormSection>
+
+                  <FormSection title="Parcel Details">
+                    <FormRow>
+                      <FormField label="Parcel"><div className="text-sm font-medium">{selected.goodsType}</div></FormField>
+                      <FormField label="Weight"><div className="text-sm font-medium">{selected.weightKg != null ? `${selected.weightKg} kg` : "—"}</div></FormField>
+                    </FormRow>
+                    <FormRow>
+                      <FormField label="Sender"><div className="text-sm font-medium">{selected.senderName}</div></FormField>
+                      <FormField label="Receiver"><div className="text-sm font-medium">{selected.receiverName}{selected.receiverPhone && selected.receiverPhone !== "—" ? ` · ${selected.receiverPhone}` : ""}</div></FormField>
                     </FormRow>
                   </FormSection>
 
@@ -384,14 +434,107 @@ const Orders = () => {
                     <div className="space-y-3">
                       <div className="flex items-start gap-3 text-sm p-3 border rounded-lg bg-gray-50/50">
                         <MapPin size={16} className="mt-0.5 text-green-600 shrink-0" />
-                        <div><p className="font-semibold text-gray-900">Pickup</p><p className="text-muted-foreground">{selected.pickupAddress}</p></div>
+                        <div><p className="font-semibold text-gray-900">Pickup</p><p className="text-muted-foreground">{selected.pickup}</p></div>
                       </div>
                       <div className="flex items-start gap-3 text-sm p-3 border rounded-lg bg-gray-50/50">
                         <MapPin size={16} className="mt-0.5 text-red-600 shrink-0" />
-                        <div><p className="font-semibold text-gray-900">Drop</p><p className="text-muted-foreground">{selected.dropAddress}</p></div>
+                        <div><p className="font-semibold text-gray-900">Drop</p><p className="text-muted-foreground">{selected.drop}</p></div>
                       </div>
                     </div>
                   </FormSection>
+
+                  <FormSection title="Payment & Earnings">
+                    <FormRow>
+                      <FormField label="Payment Method"><div className="text-sm font-medium capitalize">{selected.paymentMethod}</div></FormField>
+                      <FormField label="Payment Status"><div className="text-sm font-medium capitalize">{selected.paymentStatus}</div></FormField>
+                    </FormRow>
+                    <FormRow>
+                      <FormField label="Commission"><div className="text-sm font-medium">{formatCurrency(selected.commission)}</div></FormField>
+                      <FormField label="Driver Earning"><div className="text-sm font-medium text-emerald-600">{formatCurrency(selected.driverEarning)}</div></FormField>
+                    </FormRow>
+                    {(selected.collectedAt || selected.paidAt) && (
+                      <FormRow>
+                        <FormField label="Collected/Paid At"><div className="text-sm font-medium">{formatDateTime(selected.collectedAt || selected.paidAt)}</div></FormField>
+                        <FormField label="Dispatch"><div className="text-sm font-medium capitalize">{selected.dispatchStatus || "—"}</div></FormField>
+                      </FormRow>
+                    )}
+                  </FormSection>
+
+                  {(selected.pickupPhotoUrl || selected.deliveryPhotoUrl) && (
+                    <FormSection title="Parcel Photos">
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-gray-500">Pickup Photo</p>
+                          {selected.pickupPhotoUrl ? (
+                            <a href={selected.pickupPhotoUrl} target="_blank" rel="noreferrer" download className="group relative block">
+                              <img
+                                src={selected.pickupPhotoUrl}
+                                alt="Pickup proof"
+                                className="w-full rounded-lg border border-gray-200 object-cover transition-transform group-hover:scale-[1.01]"
+                                onError={(e) => { e.currentTarget.style.display = "none"; }}
+                              />
+                              <span className="absolute bottom-2 right-2 rounded-md bg-black/60 px-2 py-1 text-[10px] font-semibold text-white opacity-0 transition-opacity group-hover:opacity-100">
+                                Open / Download
+                              </span>
+                            </a>
+                          ) : (
+                            <div className="flex h-28 items-center justify-center rounded-lg border border-dashed border-gray-200 bg-gray-50 text-xs text-muted-foreground">No pickup photo</div>
+                          )}
+                        </div>
+                        <div>
+                          <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-gray-500">Delivery Photo</p>
+                          {selected.deliveryPhotoUrl ? (
+                            <a href={selected.deliveryPhotoUrl} target="_blank" rel="noreferrer" download className="group relative block">
+                              <img
+                                src={selected.deliveryPhotoUrl}
+                                alt="Delivery proof"
+                                className="w-full rounded-lg border border-gray-200 object-cover transition-transform group-hover:scale-[1.01]"
+                                onError={(e) => { e.currentTarget.style.display = "none"; }}
+                              />
+                              <span className="absolute bottom-2 right-2 rounded-md bg-black/60 px-2 py-1 text-[10px] font-semibold text-white opacity-0 transition-opacity group-hover:opacity-100">
+                                Open / Download
+                              </span>
+                            </a>
+                          ) : (
+                            <div className="flex h-28 items-center justify-center rounded-lg border border-dashed border-gray-200 bg-gray-50 text-xs text-muted-foreground">No delivery photo</div>
+                          )}
+                        </div>
+                      </div>
+                    </FormSection>
+                  )}
+
+                  {(selected.rating?.score) && (
+                    <FormSection title="Rating & Feedback">
+                      <FormRow>
+                        <FormField label="Score"><div className="text-sm font-medium">{selected.rating.score} / 5 ⭐</div></FormField>
+                        {selected.rating.tags?.length > 0 && <FormField label="Tags"><div className="text-sm font-medium">{selected.rating.tags.join(", ")}</div></FormField>}
+                      </FormRow>
+                      {selected.rating.comment && (
+                        <FormRow>
+                          <FormField label="Comment"><div className="text-sm font-medium italic">"{selected.rating.comment}"</div></FormField>
+                        </FormRow>
+                      )}
+                    </FormSection>
+                  )}
+
+                  {selected.cancellation && (
+                    <FormSection title="Cancellation Details">
+                      <FormRow>
+                        <FormField label="Cancelled By"><div className="text-sm font-medium capitalize">{selected.cancellation.cancelledBy}</div></FormField>
+                        <FormField label="Cancelled At"><div className="text-sm font-medium">{formatDateTime(selected.cancellation.cancelledAt)}</div></FormField>
+                      </FormRow>
+                      <FormRow>
+                        <FormField label="Reason"><div className="text-sm font-medium text-red-600">{selected.cancellation.reason}</div></FormField>
+                        {selected.cancellation.note && <FormField label="Note"><div className="text-sm font-medium text-gray-600">{selected.cancellation.note}</div></FormField>}
+                      </FormRow>
+                      {(selected.cancellation.refundStatus) && (
+                        <FormRow>
+                          <FormField label="Refund Status"><div className="text-sm font-medium capitalize">{selected.cancellation.refundStatus}</div></FormField>
+                          <FormField label="Refund Amount"><div className="text-sm font-medium text-emerald-600">{formatCurrency(selected.cancellation.refundAmount)}</div></FormField>
+                        </FormRow>
+                      )}
+                    </FormSection>
+                  )}
 
                   <FormSection title="Tracking Timeline">
                     <div className="space-y-4 pl-2">
@@ -415,13 +558,13 @@ const Orders = () => {
                   </FormSection>
                 </FormLayout>
               </div>
-              <div className="px-6 py-4 border-t flex flex-wrap gap-2 justify-end bg-gray-50/50">
+              <div className="px-6 py-4 border-t flex flex-wrap gap-2 justify-end bg-gray-50/50 shrink-0 z-10">
                 <Button variant="outline" size="sm" className="gap-1" onClick={() => window.print()}><FileText size={14} /> Invoice</Button>
                 {["searching_partner", "scheduled", "assigned"].includes(selected.deliveryStatus) && (
                   <Button size="sm" className="gap-1" onClick={() => openAssign(selected)}><UserPlus size={14} /> Assign Driver</Button>
                 )}
                 {!["delivered", "completed", "cancelled_by_user", "cancelled_by_admin", "cancelled_by_driver", "failed"].includes(selected.deliveryStatus) && (
-                  <Button size="sm" variant="outline" className="text-red-600" disabled={actionLoading} onClick={() => handleCancel(selected.id)}>Cancel Order</Button>
+                  <Button size="sm" variant="outline" className="text-red-600" disabled={actionLoading} onClick={() => openCancel(selected.id)}>Cancel Order</Button>
                 )}
               </div>
             </>
@@ -442,6 +585,56 @@ const Orders = () => {
           <div className="flex justify-end gap-2 mt-4">
             <Button variant="outline" onClick={() => setAssignOpen(false)}>Cancel</Button>
             <Button onClick={handleAssign} disabled={!assignDriverId || actionLoading}>Assign</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Cancel Order Dialog */}
+      <Dialog open={cancelOpen} onOpenChange={setCancelOpen}>
+        <DialogContent className="blaze-theme-scope sm:max-w-[460px]">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-bold">Cancel Order</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <label className="text-sm font-semibold text-gray-700">
+                Cancellation reason <span className="text-red-500">*</span>
+              </label>
+              <select
+                className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:border-red-500 focus:outline-none focus:ring-1 focus:ring-red-500 transition-colors"
+                value={cancelReason}
+                onChange={(e) => setCancelReason(e.target.value)}
+              >
+                <option value="" disabled>Select a reason...</option>
+                <option value="Customer requested cancellation">Customer requested cancellation</option>
+                <option value="No driver available">No driver available</option>
+                <option value="Incorrect pickup/drop details">Incorrect pickup/drop details</option>
+                <option value="Suspected fraud">Suspected fraud</option>
+                <option value="Operational issue">Operational issue</option>
+                <option value="Other">Other</option>
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-semibold text-gray-700">Note (optional)</label>
+              <textarea
+                className="w-full min-h-[80px] resize-none rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:border-red-500 focus:outline-none focus:ring-1 focus:ring-red-500 transition-colors"
+                value={cancelNote}
+                maxLength={1000}
+                placeholder="Add an internal note explaining the cancellation..."
+                onChange={(e) => setCancelNote(e.target.value)}
+              />
+            </div>
+            <div className="rounded-lg bg-orange-50 p-3 border border-orange-100">
+              <p className="text-[13px] text-orange-800 leading-tight">
+                <strong>Note:</strong> If the order was paid, the eligible amount will be refunded automatically to the customer's original payment method or wallet.
+              </p>
+            </div>
+          </div>
+          <div className="flex justify-end gap-3 pt-2">
+            <Button variant="outline" onClick={() => setCancelOpen(false)}>Close</Button>
+            <Button variant="destructive" className="bg-red-600 hover:bg-red-700 text-white" onClick={handleCancel} disabled={!cancelReason || actionLoading}>
+              Confirm Cancellation
+            </Button>
           </div>
         </DialogContent>
       </Dialog>

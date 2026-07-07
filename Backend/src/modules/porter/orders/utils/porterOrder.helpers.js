@@ -2,6 +2,28 @@ import crypto from 'crypto';
 import { PorterOrderLog } from '../models/porterOrderLog.model.js';
 import { PORTER_TERMINAL_STATUSES } from '../constants/porterOrderStatus.constants.js';
 
+export const PORTER_DRIVER_POPULATE_SELECT = 'name phone rating totalRatings vehicleNumber vehicleName profilePhoto';
+
+const mapDriverFromDispatch = (deliveryPartnerId) => {
+    if (!deliveryPartnerId || typeof deliveryPartnerId !== 'object' || !deliveryPartnerId.name) {
+        return undefined;
+    }
+
+    const rating = Number(deliveryPartnerId.rating);
+    const totalRatings = Number(deliveryPartnerId.totalRatings);
+
+    return {
+        id: String(deliveryPartnerId._id || deliveryPartnerId),
+        name: deliveryPartnerId.name,
+        phone: deliveryPartnerId.phone || '',
+        rating: Number.isFinite(rating) && rating > 0 ? rating : undefined,
+        totalRatings: Number.isFinite(totalRatings) && totalRatings > 0 ? totalRatings : undefined,
+        vehicleNumber: deliveryPartnerId.vehicleNumber || undefined,
+        vehicleName: deliveryPartnerId.vehicleName || undefined,
+        profilePhoto: deliveryPartnerId.profilePhoto || undefined,
+    };
+};
+
 export const generateOrderNumber = () => {
     const date = new Date();
     const ymd = date.toISOString().slice(0, 10).replace(/-/g, '');
@@ -61,7 +83,6 @@ export const mapPorterOrderForUser = (doc) => {
     if (!doc) return null;
     const o = typeof doc.toObject === 'function' ? doc.toObject() : doc;
     const pickupOtpStatuses = new Set(['at_pickup', 'partner_accepted', 'en_route_pickup', 'assigned']);
-    const dropOtpStatuses = new Set(['at_drop', 'in_transit', 'picked_up']);
 
     return {
         id: String(o._id),
@@ -80,16 +101,14 @@ export const mapPorterOrderForUser = (doc) => {
             deliveryPartnerId: o.dispatch.deliveryPartnerId?._id
                 ? String(o.dispatch.deliveryPartnerId._id)
                 : (o.dispatch.deliveryPartnerId ? String(o.dispatch.deliveryPartnerId) : null),
-            driver: o.dispatch.deliveryPartnerId?.name ? {
-                id: String(o.dispatch.deliveryPartnerId._id || o.dispatch.deliveryPartnerId),
-                name: o.dispatch.deliveryPartnerId.name,
-                phone: o.dispatch.deliveryPartnerId.phone,
-            } : undefined,
+            driver: mapDriverFromDispatch(o.dispatch.deliveryPartnerId),
         } : undefined,
         deliveryState: {
             currentPhase: o.deliveryState?.currentPhase,
             pickupOtp: pickupOtpStatuses.has(o.status) ? o.deliveryState?.pickupOtp : undefined,
-            dropOtp: dropOtpStatuses.has(o.status) ? o.deliveryState?.dropOtp : undefined,
+            pickupOtpVerifiedAt: o.deliveryState?.pickupOtpVerifiedAt,
+            pickupPhotoUrl: o.deliveryState?.pickupPhotoUrl,
+            deliveryPhotoUrl: o.deliveryState?.deliveryPhotoUrl,
             pickedUpAt: o.deliveryState?.pickedUpAt,
             deliveredAt: o.deliveryState?.deliveredAt,
         },
@@ -111,13 +130,16 @@ export const mapPorterOrderForDriver = (doc) => {
         orderId: base.id,
         orderMongoId: base.id,
         earnings: o.pricing?.driverEarning ?? 0,
-        pickupOtp: o.deliveryState?.pickupOtp,
-        dropOtp: o.deliveryState?.dropOtp,
         pickupAddress: o.pickup?.address,
         dropAddress: o.delivery?.address,
         senderName: o.userId?.name || 'Sender',
         senderPhone: o.userId?.phone,
         receiverName: o.parcel?.receiverName || 'Receiver',
         receiverPhone: o.parcel?.receiverPhone,
+        deliveryState: {
+            currentPhase: o.deliveryState?.currentPhase,
+            pickedUpAt: o.deliveryState?.pickedUpAt,
+            deliveredAt: o.deliveryState?.deliveredAt,
+        },
     };
 };

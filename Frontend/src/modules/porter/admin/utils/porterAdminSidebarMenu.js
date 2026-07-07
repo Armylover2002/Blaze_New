@@ -93,13 +93,7 @@ export const porterAdminSidebarMenu = [
         path: "/admin/porter/reports",
         permissionKey: "reports",
       },
-      {
-        type: "link",
-        label: "Notifications",
-        icon: "Bell",
-        path: "/admin/porter/notifications",
-        permissionKey: "notifications",
-      },
+
     ],
   },
 

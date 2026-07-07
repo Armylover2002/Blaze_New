@@ -23,9 +23,9 @@ export const adminReassignPorterDriver = asyncHandler(async (req, res) => {
 });
 
 export const adminCancelPorterOrder = asyncHandler(async (req, res) => {
-    const { reason } = adminCancelOrderSchema.parse(req.body);
+    const { reason, note } = adminCancelOrderSchema.parse(req.body);
     const performer = extractPerformer(req.user);
-    const order = await adminOrderService.adminCancelPorterOrder(req.params.id, reason, performer);
+    const order = await adminOrderService.adminCancelPorterOrder(req.params.id, reason, performer, note || null);
     return sendResponse(res, 200, 'Order cancelled', { order });
 });
 

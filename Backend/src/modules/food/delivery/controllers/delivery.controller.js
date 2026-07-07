@@ -32,6 +32,15 @@ export const validateDocumentsController = async (req, res, next) => {
 export const registerDeliveryPartnerController = async (req, res, next) => {
     try {
         const validated = validateDeliveryRegisterDto(req.body);
+        
+        const requiredFiles = ['profilePhoto', 'aadharPhoto', 'panPhoto', 'drivingLicensePhoto'];
+        const missingFiles = requiredFiles.filter(field => !req.files || !req.files[field] || req.files[field].length === 0);
+        if (missingFiles.length > 0) {
+            return res.status(400).json({
+                success: false,
+                message: `Missing required document photos: ${missingFiles.join(', ')}`
+            });
+        }
         const partner = await registerDeliveryPartner(validated, req.files);
         return sendResponse(
             res,

@@ -35,10 +35,29 @@ export const cancelPorterOrderSchema = z.object({
 export const ratePorterOrderSchema = z.object({
     score: z.number().min(1).max(5),
     comment: z.string().max(1000).optional(),
+    tags: z.array(z.string()).optional(),
 });
 
 export const porterOtpSchema = z.object({
     otp: z.string().min(4).max(6),
+});
+
+export const porterCompleteDeliverySchema = z.object({
+    deliveryPhotoUrl: z.string().min(1, 'Delivery photo is required'),
+});
+
+const couponLocationSchema = z.object({
+    lat: z.number(),
+    lng: z.number(),
+    address: z.string().optional(),
+});
+
+export const validatePorterCouponSchema = z.object({
+    couponCode: z.string().min(1, 'Coupon code is required'),
+    pickup: couponLocationSchema,
+    delivery: couponLocationSchema,
+    vehicleId: z.string().min(1, 'Vehicle is required'),
+    parcel: parcelSchema,
 });
 
 export const listPorterOrdersQuerySchema = z.object({
@@ -54,6 +73,7 @@ export const adminAssignDriverSchema = z.object({
 
 export const adminCancelOrderSchema = z.object({
     reason: z.string().min(1).max(500),
+    note: z.string().max(1000).optional().nullable(),
 });
 
 export const adminForceCloseSchema = z.object({

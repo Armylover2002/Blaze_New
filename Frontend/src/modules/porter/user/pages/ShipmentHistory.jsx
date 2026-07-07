@@ -78,13 +78,22 @@ export default function ShipmentHistory() {
               onClick={() => navigate(getPorterShipmentDetailsPath(s.id))}
               className="w-full rounded-2xl border border-gray-100 bg-white p-4 text-left shadow-sm"
             >
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-[13px] font-bold text-gray-900">{s.orderNumber}</p>
-                <span className="text-[11px] font-bold uppercase text-[#FF0000]">{s.status}</span>
+              <div className="flex items-center justify-between gap-2 mb-3 border-b border-gray-50 pb-3">
+                <p className="text-[13px] font-bold text-gray-900">#{s.orderNumber}</p>
+                <span className={`text-[11px] font-bold uppercase ${["delivered", "completed"].includes(s.status) ? "text-green-600" : "text-[#FF0000]"}`}>{String(s.status || "").replace(/_/g, " ")}</span>
               </div>
-              <p className="mt-1 text-[12px] text-gray-500 line-clamp-1">{s.pickup?.address}</p>
-              <p className="text-[12px] text-gray-500 line-clamp-1">→ {s.delivery?.address}</p>
-              <p className="mt-2 text-[13px] font-bold text-gray-900">{inr(s.pricing?.total ?? 0)}</p>
+              <div className="relative pl-5 mb-3">
+                 <div className="absolute left-1.5 top-1.5 bottom-1.5 w-[1px] bg-gray-200"></div>
+                 <div className="relative mb-3">
+                    <div className="absolute -left-[18.5px] top-1.5 h-2 w-2 rounded-full border-2 border-green-600 bg-white"></div>
+                    <p className="text-[12px] text-gray-700 font-medium line-clamp-1">{s.pickup?.address || "Pickup address"}</p>
+                 </div>
+                 <div className="relative">
+                    <div className="absolute -left-[18.5px] top-1.5 h-2 w-2 rounded-full border-2 border-[#FF0000] bg-white"></div>
+                    <p className="text-[12px] text-gray-700 font-medium line-clamp-1">{s.delivery?.address || "Delivery address"}</p>
+                 </div>
+              </div>
+              <p className="text-[14px] font-bold text-gray-900">{inr(s.pricing?.total ?? 0)}</p>
             </button>
           ))}
         </div>

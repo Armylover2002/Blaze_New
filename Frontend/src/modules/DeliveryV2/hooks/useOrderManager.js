@@ -1,7 +1,7 @@
 import { useDeliveryStore } from '@/modules/DeliveryV2/store/useDeliveryStore';
 import { deliveryAPI } from '@food/api';
 import { toast } from 'sonner';
-import { getPrimaryPickupLocation, normalizeLocationPoint, normalizePickupPoints, isReturnPickupTrip, isPorterParcelTrip, getDeliveryDocumentId, getReturnDropLocation, enrichReturnDeliveryOrder, enrichPorterDeliveryOrder } from '@/modules/DeliveryV2/utils/orderRouting';
+import { getPrimaryPickupLocation, normalizeLocationPoint, normalizePickupPoints, isReturnPickupTrip, isPorterParcelTrip, getDeliveryDocumentId, getReturnDropLocation, enrichReturnDeliveryOrder, enrichPorterDeliveryOrder, mapPorterStatusToTripStatus } from '@/modules/DeliveryV2/utils/orderRouting';
 import porterDriverApi from '@/modules/porter/driver/services/driverApi';
 
 /**
@@ -25,7 +25,7 @@ export const useOrderManager = () => {
         const result = await porterDriverApi.acceptOrder(orderId);
         const fullOrder = enrichPorterDeliveryOrder(result?.order || order);
         setActiveOrder(fullOrder);
-        updateTripStatus('PICKING_UP');
+        updateTripStatus(mapPorterStatusToTripStatus(fullOrder.status));
       } catch (error) {
         toast.error(error?.response?.data?.message || 'Order already taken or unavailable');
         throw error;
@@ -158,8 +158,17 @@ export const useOrderManager = () => {
     try {
       if (isPorterParcelTrip(activeOrder)) {
         const otp = extra?.otp || extra?.customerOtp || extra?.pickupOtp;
-        if (otp) await porterDriverApi.verifyPickupOtp(orderId, otp);
-        const result = await porterDriverApi.confirmPickedUp(orderId);
+        if (!otp || String(otp).length < 4) {
+          toast.error('Enter pickup OTP from sender');
+          throw new Error('Pickup OTP required');
+        }
+        const pickupPhotoUrl = extra?.pickupPhotoUrl || billImageUrl || extra?.pickupImages?.[0] || null;
+        if (!pickupPhotoUrl) {
+          toast.error('Upload parcel pickup photo');
+          throw new Error('Pickup photo required');
+        }
+        await porterDriverApi.verifyPickupOtp(orderId, otp);
+        const result = await porterDriverApi.confirmPickedUp(orderId, { pickupPhotoUrl });
         const updatedOrder = enrichPorterDeliveryOrder(result?.order || activeOrder);
         setActiveOrder(updatedOrder);
         updateTripStatus('PICKED_UP');
@@ -194,7 +203,8 @@ export const useOrderManager = () => {
         throw new Error('Confirm order ID failed');
       }
     } catch (error) {
-      toast.error('Error confirming pickup');
+      const message = error?.response?.data?.message || error?.message;
+      toast.error(message || (isPorterParcelTrip(activeOrder) ? 'Invalid pickup OTP' : 'Error confirming pickup'));
       throw error;
     }
   };
@@ -235,7 +245,12 @@ export const useOrderManager = () => {
 
     try {
       if (isPorterParcelTrip(activeOrder)) {
-        const result = await porterDriverApi.completeDelivery(orderId, otp);
+        const deliveryPhotoUrl = options?.deliveryPhotoUrl;
+        if (!deliveryPhotoUrl) {
+          toast.error('Delivery photo is required');
+          throw new Error('Delivery photo required');
+        }
+        const result = await porterDriverApi.completeDelivery(orderId, { deliveryPhotoUrl });
         const finalOrder = enrichPorterDeliveryOrder(result?.order || activeOrder);
         setActiveOrder(finalOrder);
         updateTripStatus('COMPLETED');
@@ -299,6 +314,27 @@ export const useOrderManager = () => {
     clearActiveOrder();
   };
 
+  // Porter-only: a driver may cancel an accepted parcel trip BEFORE pickup.
+  // The backend releases the driver and redispatches the order to others.
+  const cancelPorterTrip = async (reason) => {
+    if (!isPorterParcelTrip(activeOrder)) return;
+    const trimmed = String(reason || '').trim();
+    if (!trimmed) {
+      toast.error('Please provide a cancellation reason');
+      throw new Error('Reason required');
+    }
+    const orderId = getDeliveryDocumentId(activeOrder);
+    try {
+      await porterDriverApi.cancelOrder(orderId, trimmed);
+      toast.success('Trip cancelled');
+      clearActiveOrder();
+    } catch (error) {
+      const message = error?.response?.data?.message || error?.message;
+      toast.error(message || 'Failed to cancel trip');
+      throw error;
+    }
+  };
+
   return {
     acceptOrder,
     reachPickup,
@@ -306,5 +342,6 @@ export const useOrderManager = () => {
     reachDrop,
     completeDelivery,
     resetTrip,
+    cancelPorterTrip,
   };
 };

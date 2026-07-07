@@ -38,8 +38,11 @@ const Transactions = () => {
           amount: t.amount,
           commission: t.commission,
           tax: t.tax,
+          netPayout: t.netPayout,
           driverPayout: t.driverPayout,
           paymentMethod: t.paymentMethod,
+          customer: t.customer,
+          driverName: t.driverName,
           status: t.status,
           createdAt: t.date,
         })));
@@ -64,8 +67,8 @@ const Transactions = () => {
   );
 
   const exportCsv = () => {
-    const headers = ["Transaction ID", "Order ID", "Driver", "Customer", "Amount", "Commission", "Tax", "Net Payout", "Method", "Gateway", "Status", "Created"];
-    const rows = filtered.map((t) => [t.id, t.orderId, t.driverName, t.customer, t.amount, t.commission, t.tax, t.netPayout, t.paymentMethod, t.gateway, t.status, formatDateTime(t.createdAt)]);
+    const headers = ["Transaction ID", "Order ID", "Driver", "Customer", "Amount", "Commission", "Tax", "Net Payout", "Method", "Status", "Created"];
+    const rows = filtered.map((t) => [t.id, t.orderId, t.driverName, t.customer, t.amount, t.commission, t.tax, t.netPayout, t.paymentMethod, t.status, formatDateTime(t.createdAt)]);
     const csv = [headers, ...rows].map((r) => r.map((c) => `"${c}"`).join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
@@ -79,15 +82,13 @@ const Transactions = () => {
   const openDetail = (row) => { setSelected(row); setDetailOpen(true); };
 
   const columns = [
-    { key: "id", header: "Transaction ID", cell: (row) => <span className="font-semibold">{row.id}</span> },
     { key: "orderId", header: "Order ID" },
-    { key: "driverName", header: "Driver" },
-    { key: "customer", header: "Customer" },
+    { key: "driverName", header: "Driver", cell: (row) => <span>{row.driverName || "—"}</span> },
+    { key: "customer", header: "Customer", cell: (row) => <span>{row.customer || "Customer"}</span> },
     { key: "amount", header: "Amount", cell: (row) => <span className="font-medium">{formatCurrency(row.amount)}</span> },
     { key: "commission", header: "Commission", cell: (row) => formatCurrency(row.commission) },
     { key: "tax", header: "Tax", cell: (row) => formatCurrency(row.tax) },
     { key: "paymentMethod", header: "Method" },
-    { key: "gateway", header: "Gateway", cell: (row) => <span className="text-sm text-muted-foreground">{row.gateway}</span> },
     { key: "status", header: "Status", cell: (row) => <StatusBadge status={row.status} /> },
     { key: "createdAt", header: "Created", cell: (row) => <span className="text-xs text-muted-foreground">{formatDateTime(row.createdAt)}</span> },
     {
@@ -149,7 +150,7 @@ const Transactions = () => {
       {/* Detail Dialog */}
       <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
         <DialogContent className="blaze-theme-scope sm:max-w-[500px] p-0">
-          <DialogHeader className="px-6 py-4 border-b"><DialogTitle>Transaction {selected?.id}</DialogTitle></DialogHeader>
+          <DialogHeader className="px-6 py-4 border-b"><DialogTitle>Transaction Details</DialogTitle></DialogHeader>
           <div className="px-6 py-4 max-h-[85vh] overflow-y-auto">
             {selected && (
               <FormLayout>
@@ -161,13 +162,12 @@ const Transactions = () => {
                 <FormSection title="Transaction Details">
                   <FormRow>
                     <FormField label="Order ID"><div className="text-sm font-medium">{selected.orderId}</div></FormField>
-                    <FormField label="Customer"><div className="text-sm font-medium">{selected.customer}</div></FormField>
+                    <FormField label="Customer"><div className="text-sm font-medium">{selected.customer || "Customer"}</div></FormField>
                   </FormRow>
                   <FormRow>
-                    <FormField label="Driver"><div className="text-sm font-medium">{selected.driverName}</div></FormField>
-                    <FormField label="Gateway"><div className="text-sm font-medium">{selected.gateway}</div></FormField>
+                    <FormField label="Driver"><div className="text-sm font-medium">{selected.driverName || "—"}</div></FormField>
+                    <FormField label="Payment Method"><div className="text-sm font-medium">{selected.paymentMethod}</div></FormField>
                   </FormRow>
-                  <FormField label="Payment Method"><div className="text-sm font-medium">{selected.paymentMethod}</div></FormField>
                 </FormSection>
                 
                 <FormSection title="Financial Breakdown">

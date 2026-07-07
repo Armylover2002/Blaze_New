@@ -14,7 +14,7 @@ const Users = React.lazy(() => import("../pages/Users"));
 const Wallet = React.lazy(() => import("../pages/Wallet"));
 const Transactions = React.lazy(() => import("../pages/Transactions"));
 const Reports = React.lazy(() => import("../pages/Reports"));
-const Notifications = React.lazy(() => import("../pages/Notifications"));
+
 
 const BannerManagement = React.lazy(() => import("../pages/BannerManagement"));
 
@@ -35,7 +35,7 @@ function PorterAdminRoutesInner() {
       <Route path="/wallet" element={<Wallet />} />
       <Route path="/transactions" element={<Transactions />} />
       <Route path="/reports" element={<Reports />} />
-      <Route path="/notifications" element={<Notifications />} />
+
 
       <Route path="/banners" element={<BannerManagement />} />
 

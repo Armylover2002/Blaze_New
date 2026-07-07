@@ -19,9 +19,10 @@ export default function DeliveryInvoice() {
         pickup: activeShipment.pickup,
         delivery: activeShipment.delivery,
         partner: activeShipment.partner,
-        fare: total,
-        discount: 0,
-        total: total + 12,
+        fare: activeShipment.pricing ? activeShipment.pricing.baseFare : total,
+        serviceTax: activeShipment.pricing?.serviceTax || 0,
+        discount: activeShipment.pricing?.discount || 0,
+        total: activeShipment.pricing?.total || total,
         paymentMethod: paymentMethodId,
         createdAt: activeShipment.createdAt || new Date().toISOString(),
         deliveredAt: new Date().toISOString(),
@@ -73,7 +74,9 @@ export default function DeliveryInvoice() {
       <SectionLabel>Payment summary</SectionLabel>
       <div className="mb-4 rounded-2xl border border-gray-100 bg-white p-4">
         <FareRow label="Delivery fare" value={inr(shipment.fare)} />
-        <FareRow label="Platform fee" value={inr(12)} />
+        {(shipment.serviceTax || 0) > 0 && (
+          <FareRow label="Service Tax / GST" value={inr(shipment.serviceTax)} />
+        )}
         {(shipment.discount || 0) > 0 && <FareRow label="Discount" value={`−${inr(shipment.discount)}`} accent />}
         <div className="my-2 border-t border-gray-100" />
         <FareRow label="Total paid" value={inr(shipment.total)} strong />

@@ -381,10 +381,7 @@ export default function SignupStep2() {
     }
   } catch (e) { }
 
-  const isDlOptional = !(signupDetails.vehicles || []).some(v => {
-    const master = porterVehicles.find(p => p.id === v.vehicleId);
-    return (master?.requiredDocuments || []).length > 0;
-  });
+
 
   const fileInputRefs = useRef({
     profilePhoto: null,
@@ -583,7 +580,7 @@ export default function SignupStep2() {
     if (!hasDocumentValue(documents.profilePhoto, uploadedDocs.profilePhoto)) return false;
     if (!hasDocumentValue(documents.aadharPhoto, uploadedDocs.aadharPhoto)) return false;
     if (!hasDocumentValue(documents.panPhoto, uploadedDocs.panPhoto)) return false;
-    if (!isDlOptional && !hasDocumentValue(documents.drivingLicensePhoto, uploadedDocs.drivingLicensePhoto)) return false;
+    if (!hasDocumentValue(documents.drivingLicensePhoto, uploadedDocs.drivingLicensePhoto)) return false;
 
     let hasAllVehicleDocs = true;
     (signupDetails.vehicles || []).forEach(v => {
@@ -851,9 +848,7 @@ export default function SignupStep2() {
           <DocumentUpload docType="profilePhoto" label="Profile Photo" required={true} />
           <DocumentUpload docType="aadharPhoto" label="Aadhar Card Photo" required={true} />
           <DocumentUpload docType="panPhoto" label="PAN Card Photo" required={true} />
-          {!isDlOptional && (
-            <DocumentUpload docType="drivingLicensePhoto" label="Driving License Photo" required={true} />
-          )}
+          <DocumentUpload docType="drivingLicensePhoto" label="Driving License Photo" required={true} />
 
           {signupDetails.vehicles && signupDetails.vehicles.length > 0 && (
              <div className="pt-6 mt-6 border-t border-gray-200">

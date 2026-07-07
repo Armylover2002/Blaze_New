@@ -20,7 +20,7 @@ import {
     emitPorterOrderCancelled,
     partnerSupportsParcel,
 } from './porter-order-dispatch.service.js';
-import { refundPorterOrderWallet } from './porter-order-payment.service.js';
+import { applyPorterRefund } from './porter-order-payment.service.js';
 import { settlePorterOrderEarningsAtomic } from './porter-wallet-atomic.service.js';
 import { notifyPorterOrderStatusChange } from './porter-notification.service.js';
 import { activateScheduledPorterOrder } from './porter-scheduled-dispatch.service.js';
@@ -161,7 +161,7 @@ export async function adminReassignPorterDriver(orderId, driverId, performer = n
     return order;
 }
 
-export async function adminCancelPorterOrder(orderId, reason, performer = null) {
+export async function adminCancelPorterOrder(orderId, reason, performer = null, note = null) {
     const order = await loadOrder(orderId);
     if (isTerminalPorterStatus(order.status)) {
         throw new ValidationError('Order is already closed');
@@ -191,7 +191,7 @@ export async function adminCancelPorterOrder(orderId, reason, performer = null) 
             $set: {
                 status: PORTER_ORDER_STATUS.CANCELLED_BY_ADMIN,
                 'dispatch.status': PORTER_DISPATCH_STATUS.CANCELLED,
-                cancellation: { reason, cancelledBy: 'admin', cancelledAt: new Date() },
+                cancellation: { reason, cancelledBy: 'admin', cancelledAt: new Date(), note: note || undefined },
             },
         },
         { new: true },
@@ -199,24 +199,18 @@ export async function adminCancelPorterOrder(orderId, reason, performer = null) 
 
     if (!cancelled) throw new ValidationError('Order cannot be cancelled');
 
-    appendStatusHistory(cancelled, cancelled.status, performer, reason);
+    appendStatusHistory(cancelled, cancelled.status, performer, note ? `${reason} — ${note}` : reason);
     await cancelled.save();
 
-    if (cancelled.payment.status === PORTER_PAYMENT_STATUS.PAID && cancelled.pricing?.total > 0) {
-        await refundPorterOrderWallet({
-            userId: cancelled.userId,
-            orderId: cancelled._id,
-            orderNumber: cancelled.orderNumber,
-            amount: cancelled.pricing.total,
-            reason,
-        });
-        cancelled.payment.status = PORTER_PAYMENT_STATUS.REFUNDED;
-        await cancelled.save();
-    }
+    const refundResult = await applyPorterRefund(cancelled, reason);
 
     await emitPorterOrderCancelled(cancelled, cancelled.userId, previousDriver);
     await emitPorterOrderStatus(cancelled, cancelled.userId, previousDriver);
     await notifyPorterOrderStatusChange(cancelled);
+    if (refundResult?.status === 'processed') {
+        const { notifyPorterRefund } = await import('./porter-notification.service.js');
+        void notifyPorterRefund(cancelled, refundResult);
+    }
     await logPorterOrderAction({
         orderId: cancelled._id,
         orderNumber: cancelled.orderNumber,

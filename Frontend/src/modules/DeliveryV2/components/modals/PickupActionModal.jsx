@@ -9,8 +9,8 @@ import { ActionSlider } from '@/modules/DeliveryV2/components/ui/ActionSlider';
 import { uploadAPI } from '@food/api';
 import { toast } from 'sonner';
 import { openCamera } from "@food/utils/imageUploadUtils";
-import { isMixedOrder, isReturnPickupTrip, normalizePickupPoints, getReturnPickupStopLabels } from '@/modules/DeliveryV2/utils/orderRouting';
-import { RenderPickupVerification } from './renderers/PickupActionRenderers';
+import { isMixedOrder, isReturnPickupTrip, isPorterParcelTrip, normalizePickupPoints, getReturnPickupStopLabels } from '@/modules/DeliveryV2/utils/orderRouting';
+import { RenderPickupVerification, ParcelTripDetailsPanel } from './renderers/PickupActionRenderers';
 
 /**
  * PickupActionModal - Unified White/Green Theme with Slider Actions.
@@ -24,7 +24,8 @@ export const PickupActionModal = ({
   eta,
   onReachedPickup, 
   onPickedUp,
-  onMinimize
+  onMinimize,
+  onCancelTrip
 }) => {
   const [showItems, setShowItems] = useState(false);
   const [isUploadingBill, setIsUploadingBill] = useState(false);
@@ -38,6 +39,7 @@ export const PickupActionModal = ({
   if (!order) return null;
 
   const isReturnPickup = isReturnPickupTrip(order);
+  const isParcelOrder = isPorterParcelTrip(order);
   const returnLabels = getReturnPickupStopLabels();
 
   const handleBillImageSelect = async (file) => {
@@ -79,7 +81,7 @@ export const PickupActionModal = ({
   }
 
   const isAtPickup = status === 'REACHED_PICKUP';
-  const isQuickOrder = String(order?.orderType || order?.serviceType || order?.type || '').trim().toLowerCase() === 'quick';
+  const isQuickOrder = !isParcelOrder && String(order?.orderType || order?.serviceType || order?.type || '').trim().toLowerCase() === 'quick';
   const restaurantName = isReturnPickup
     ? order?.customerName || order?.userName || 'Customer'
     : isQuickOrder
@@ -97,32 +99,62 @@ export const PickupActionModal = ({
   const restaurantLogo = isQuickOrder
     ? order?.storeImage || order?.seller?.logo || order?.seller?.image || order?.seller?.profileImage || 'https://cdn-icons-png.flaticon.com/512/3170/3170733.png'
     : order?.restaurantImage || order?.restaurant?.logo || order?.restaurant?.profileImage || 'https://cdn-icons-png.flaticon.com/512/3170/3170733.png';
-  const pickupPoints = normalizePickupPoints(order);
-  const mixedOrder = isMixedOrder(order);
-  const pickupStops = pickupPoints.length
+  const pickupPoints = isParcelOrder ? normalizePickupPoints(order) : normalizePickupPoints(order);
+  const mixedOrder = !isParcelOrder && isMixedOrder(order);
+  const pickupStops = isParcelOrder
     ? pickupPoints
-    : [
-        {
-          id: 'food:primary',
-          pickupType: isQuickOrder ? 'quick' : 'food',
-          sourceName: restaurantName,
-          address: restaurantAddress,
-          phone: restaurantPhone,
-        },
-      ];
+    : (pickupPoints.length
+      ? pickupPoints
+      : [
+          {
+            id: 'food:primary',
+            pickupType: isQuickOrder ? 'quick' : 'food',
+            sourceName: restaurantName,
+            address: restaurantAddress,
+            phone: restaurantPhone,
+          },
+        ]);
   const primaryStop = pickupStops[0] || null;
   const primaryPickupType = primaryStop?.pickupType === 'quick' ? 'quick' : 'food';
   const primaryName = primaryStop?.sourceName || restaurantName;
   const primaryAddress = primaryStop?.address || restaurantAddress;
   const primaryPhone = primaryStop?.phone || restaurantPhone;
   const primaryDestinationLabel = isReturnPickup ? 'Customer' : primaryPickupType === 'quick' ? 'Store' : 'Restaurant';
-  const isParcelOrder = String(order?.module || order?.orderType || order?.serviceType || order?.type || '').toLowerCase() === 'parcel';
+
+  const parcelSenderName = order?.senderName || order?.pickup?.title || 'Sender';
+  const parcelPickupAddress = order?.pickupAddress || order?.pickup?.address || primaryAddress;
+  const parcelSenderPhone = order?.senderPhone || order?.pickup?.phone || primaryPhone;
+  const parcelWeight = order?.parcelWeight ?? (
+    order?.parcel?.weightKg != null
+      ? Number(order.parcel.weightKg) * Math.max(1, Number(order.parcel?.quantity || 1))
+      : null
+  );
+
+  const displayName = isParcelOrder ? parcelSenderName : primaryName;
+  const displayAddress = isParcelOrder ? parcelPickupAddress : primaryAddress;
+  const displayPhone = isParcelOrder ? parcelSenderPhone : primaryPhone;
+  const displayLogo = isParcelOrder
+    ? 'https://cdn-icons-png.flaticon.com/512/3170/3170733.png'
+    : restaurantLogo;
+  const pickupPointLabel = isParcelOrder
+    ? 'Parcel Pickup'
+    : isReturnPickup
+      ? returnLabels.pickupLabel
+      : primaryPickupType === 'quick'
+        ? 'Store Pickup'
+        : 'Restaurant Pickup';
 
   const canConfirmPickup = isReturnPickup
     ? billImageUploaded && customerOtp.length >= 4
     : isParcelOrder
-      ? billImageUploaded
+      ? customerOtp.length >= 4 && billImageUploaded
       : billImageUploaded;
+
+  const parcelPickupLockedLabel = customerOtp.length < 4 && !billImageUploaded
+    ? 'Enter OTP & upload parcel photo'
+    : customerOtp.length < 4
+      ? 'Enter pickup OTP to unlock'
+      : 'Upload parcel photo to unlock';
 
   const returnPickupLockedLabel = !billImageUploaded && customerOtp.length < 4
     ? 'Upload photo & enter OTP'
@@ -131,7 +163,7 @@ export const PickupActionModal = ({
       : 'Enter customer OTP';
 
   const compactReturnReached = isReturnPickup && isAtPickup;
-  const showPickupStops = !compactReturnReached;
+  const showPickupStops = !compactReturnReached && !isParcelOrder;
 
   return (
     <div className="absolute inset-x-0 bottom-0 z-[110] p-0 flex items-end justify-center max-h-full">
@@ -158,19 +190,24 @@ export const PickupActionModal = ({
           </button>
         </div>
 
-        {/* Restaurant Header */}
+        {/* Pickup Header */}
         <div className={`flex items-start justify-between border-b border-gray-100 ${
           compactReturnReached ? 'mb-4 pb-3' : 'mb-5 pb-5'
         }`}>
           <div className="flex gap-4 min-w-0 flex-1">
             {!compactReturnReached && (
               <div className="w-16 h-16 bg-white rounded-2xl flex items-center justify-center shadow-[0_4px_12px_rgba(0,0,0,0.05)] overflow-hidden border border-gray-100 shrink-0">
-                <img src={restaurantLogo} alt="Logo" className="w-full h-full object-cover" />
+                <img src={displayLogo} alt="Pickup" className="w-full h-full object-cover" />
               </div>
             )}
             <div className="min-w-0 flex-1 pt-0.5">
               <div className="flex flex-wrap gap-2 items-center mb-1">
-                <h3 className={`text-gray-950 font-extrabold truncate ${compactReturnReached ? 'text-lg' : 'text-xl'}`}>{primaryName}</h3>
+                <h3 className={`text-gray-950 font-extrabold truncate ${compactReturnReached ? 'text-lg' : 'text-xl'}`}>{displayName}</h3>
+                {isParcelOrder && (
+                  <div className="inline-flex items-center rounded-lg border border-red-200 bg-red-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest text-red-700">
+                    Parcel Pickup
+                  </div>
+                )}
                 {isReturnPickup && (
                   <div className="inline-flex items-center rounded-lg border border-red-200 bg-red-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest text-red-700">
                     Return Pickup
@@ -199,6 +236,9 @@ export const PickupActionModal = ({
                     </span>
                   </div>
                 )}
+                {isParcelOrder && parcelWeight != null && (
+                  <p className="text-[12px] font-semibold text-gray-600 mt-1">{parcelWeight} kg parcel</p>
+                )}
               </div>
             </div>
           </div>
@@ -206,7 +246,7 @@ export const PickupActionModal = ({
           <div className="flex gap-2 shrink-0">
             <button
               onClick={() => {
-                if (primaryPhone) window.location.href = `tel:${primaryPhone}`;
+                if (displayPhone) window.location.href = `tel:${displayPhone}`;
                 else toast.error('Phone number not available');
               }}
               className={`w-10 h-10 rounded-full flex items-center justify-center border ${
@@ -218,7 +258,7 @@ export const PickupActionModal = ({
               <Phone className="w-4 h-4" />
             </button>
             <button 
-              onClick={() => window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(primaryAddress)}`, '_blank')}
+              onClick={() => window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(displayAddress)}`, '_blank')}
               className={`w-10 h-10 rounded-full flex items-center justify-center text-white shadow-lg ${
                 isReturnPickup ? 'bg-red-600' : 'bg-gray-900'
               }`}
@@ -234,15 +274,15 @@ export const PickupActionModal = ({
           </div>
         </div>
 
+        {isParcelOrder && (
+          <ParcelTripDetailsPanel order={order} />
+        )}
+
         {showPickupStops && (
         <div className="mb-4 space-y-2">
           {pickupStops.map((pickup, index) => {
             const isQuickStore = pickup.pickupType === 'quick';
-            const label = isReturnPickup
-              ? returnLabels.pickupLabel
-              : isQuickStore
-                ? 'Store Pickup'
-                : 'Restaurant Pickup';
+            const label = pickupPointLabel;
             const accentClasses = isReturnPickup
               ? 'text-red-700 bg-red-50 border-red-200'
               : isQuickStore
@@ -306,25 +346,39 @@ export const PickupActionModal = ({
 
               <div>
                 <p className={`text-center text-[9px] font-bold uppercase tracking-widest mb-2 ${canConfirmPickup ? 'text-green-600' : isReturnPickup ? 'text-red-500' : 'text-gray-400'}`}>
-                  {isReturnPickup
+                  {isParcelOrder
+                    ? (canConfirmPickup ? 'Swipe to confirm parcel pickup' : parcelPickupLockedLabel)
+                    : isReturnPickup
                     ? (canConfirmPickup ? 'Swipe to confirm pickup' : 'Complete photo + OTP to unlock')
                     : (billImageUploaded ? "Check the restaurant logo - Swipe to pick up" : "Capture bill to unlock swipe")}
                 </p>
                 <ActionSlider 
                   key="action-pickup"
-                  label={isReturnPickup ? "Slide to Confirm Pickup" : "Slide to Pick Up"}
-                  lockedLabel={isReturnPickup ? returnPickupLockedLabel : 'Upload bill to unlock'}
+                  label={isParcelOrder ? "Slide to Pick Up Parcel" : isReturnPickup ? "Slide to Confirm Pickup" : "Slide to Pick Up"}
+                  lockedLabel={isParcelOrder ? parcelPickupLockedLabel : isReturnPickup ? returnPickupLockedLabel : 'Upload bill to unlock'}
                   successLabel="Picked Up!"
                   disabled={!canConfirmPickup}
                   onConfirm={() => onPickedUp(billImageUrl, {
                     otp: customerOtp,
                     customerOtp,
+                    pickupPhotoUrl: billImageUrl,
                     pickupImages: billImageUrl ? [billImageUrl] : [],
                   })}
                   color="bg-[#FF0000]"
                 />
               </div>
             </div>
+          )}
+
+          {/* Porter-only: driver can cancel an accepted parcel trip before pickup */}
+          {isParcelOrder && typeof onCancelTrip === 'function' && (
+            <button
+              type="button"
+              onClick={onCancelTrip}
+              className="w-full text-center text-[11px] font-bold uppercase tracking-widest text-red-600 py-2 rounded-xl border border-red-100 bg-red-50/60 active:scale-[0.98] transition-transform"
+            >
+              Cancel this trip
+            </button>
           )}
 
           {/* Delivery Instructions (User Note) */}
@@ -339,7 +393,7 @@ export const PickupActionModal = ({
               )}
               <div className="min-w-0">
                 <p className="text-[9px] font-bold text-red-600 uppercase tracking-widest mb-1">
-                  {isReturnPickup ? 'Return Reason' : 'User Instructions'}
+                  {isParcelOrder ? 'Parcel Instructions' : isReturnPickup ? 'Return Reason' : 'User Instructions'}
                 </p>
                 <p className={`font-bold text-gray-800 leading-snug ${compactReturnReached ? 'text-xs' : 'text-sm'}`}>"{order.note}"</p>
               </div>
@@ -355,7 +409,7 @@ export const PickupActionModal = ({
           >
             <div className="flex items-center gap-2 text-gray-900 font-bold text-[10px] uppercase tracking-widest">
               <Package className="w-4 h-4 text-gray-400" />
-              <span>Order Details ({items.length || 0})</span>
+              <span>{isParcelOrder ? 'Parcel Details' : `Order Details (${items.length || 0})`}</span>
             </div>
             {showItems ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
           </button>

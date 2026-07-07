@@ -227,8 +227,8 @@ export const porterAdminApi = {
     const response = await axiosInstance.post(`/porter/admin/orders/${orderId}/reassign`, { driverId });
     return unwrap(response).order;
   },
-  cancelOrder: async (orderId, reason) => {
-    const response = await axiosInstance.post(`/porter/admin/orders/${orderId}/cancel`, { reason });
+  cancelOrder: async (orderId, reason, note) => {
+    const response = await axiosInstance.post(`/porter/admin/orders/${orderId}/cancel`, { reason, note: note || undefined });
     return unwrap(response).order;
   },
   forceCloseOrder: async (orderId, payload) => {
@@ -245,6 +245,10 @@ export const porterAdminApi = {
   },
   getTransactions: async (params = {}) => {
     const response = await axiosInstance.get('/porter/admin/transactions', { params });
+    return unwrap(response);
+  },
+  getWallets: async (params = {}) => {
+    const response = await axiosInstance.get('/porter/admin/wallets', { params });
     return unwrap(response);
   },
 };

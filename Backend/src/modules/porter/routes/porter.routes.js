@@ -59,10 +59,12 @@ import {
 import {
     listPorterUsers,
     getPorterUserById,
+    updatePorterUser,
 } from '../controllers/user.controller.js';
 
 import {
     createPorterOrder,
+    validatePorterCoupon,
     getActivePorterOrder,
     getPorterOrder,
     listPorterOrders,
@@ -78,11 +80,14 @@ import {
     getActivePorterDriverOrder,
     acceptPorterOrder,
     rejectPorterOrder,
+    cancelPorterDriverOrder,
     confirmPorterReachedPickup,
     verifyPorterPickupOtp,
     confirmPorterPickedUp,
     confirmPorterReachedDrop,
     completePorterDelivery,
+    createPorterCollectQr,
+    getPorterPaymentStatus,
     listPorterTripHistory,
     getDriverVehicles,
     setActiveDriverVehicle,
@@ -92,6 +97,7 @@ import {
     getPorterDashboard,
     getPorterReports,
     getPorterTransactions,
+    getPorterWallets,
 } from '../orders/controllers/porterAdminAnalytics.controller.js';
 
 import {
@@ -127,6 +133,7 @@ router.post('/maps/quote-preview', getQuotePreview);
 
 // Customer orders
 router.post('/orders', ...userAuth, createPorterOrder);
+router.post('/orders/validate-coupon', ...userAuth, validatePorterCoupon);
 router.get('/orders/active', ...userAuth, getActivePorterOrder);
 router.get('/orders', ...userAuth, listPorterOrders);
 router.post('/orders/verify-payment', ...userAuth, verifyPayment);
@@ -142,10 +149,13 @@ router.get('/driver/orders/active', ...driverAuth, getActivePorterDriverOrder);
 router.get('/driver/trips', ...driverAuth, listPorterTripHistory);
 router.post('/driver/orders/:id/accept', ...driverAuth, acceptPorterOrder);
 router.post('/driver/orders/:id/reject', ...driverAuth, rejectPorterOrder);
+router.post('/driver/orders/:id/cancel', ...driverAuth, cancelPorterDriverOrder);
 router.post('/driver/orders/:id/reached-pickup', ...driverAuth, confirmPorterReachedPickup);
 router.post('/driver/orders/:id/verify-pickup-otp', ...driverAuth, verifyPorterPickupOtp);
 router.post('/driver/orders/:id/picked-up', ...driverAuth, confirmPorterPickedUp);
 router.post('/driver/orders/:id/reached-drop', ...driverAuth, confirmPorterReachedDrop);
+router.post('/driver/orders/:id/collect-qr', ...driverAuth, createPorterCollectQr);
+router.get('/driver/orders/:id/payment-status', ...driverAuth, getPorterPaymentStatus);
 router.post('/driver/orders/:id/complete', ...driverAuth, completePorterDelivery);
 
 // Zones
@@ -199,6 +209,7 @@ router.delete('/admin/banners/:id', ...adminOrEmployee, checkPermission('porter:
 // Users (FoodUser listing)
 router.get('/admin/users', ...adminOrEmployee, checkPermission('porter::users', 'view'), listPorterUsers);
 router.get('/admin/users/:id', ...adminOrEmployee, checkPermission('porter::users', 'view'), getPorterUserById);
+router.put('/admin/users/:id', ...adminOrEmployee, checkPermission('porter::users', 'edit'), updatePorterUser);
 
 // Admin orders
 router.get('/admin/orders', ...adminOrEmployee, checkPermission('porter::orders', 'view'), listPorterOrdersAdmin);
@@ -214,5 +225,6 @@ router.post('/admin/orders/:id/force-close', authMiddleware, requireRoles('ADMIN
 router.get('/admin/dashboard', ...adminOrEmployee, checkPermission('porter::orders', 'view'), getPorterDashboard);
 router.get('/admin/reports', ...adminOrEmployee, checkPermission('porter::orders', 'view'), getPorterReports);
 router.get('/admin/transactions', ...adminOrEmployee, checkPermission('porter::orders', 'view'), getPorterTransactions);
+router.get('/admin/wallets', ...adminOrEmployee, checkPermission('porter::orders', 'view'), getPorterWallets);
 
 export default router;

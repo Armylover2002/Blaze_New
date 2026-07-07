@@ -37,15 +37,8 @@ export function isParcelVehicleEligible(vehicle, parcelWeight, pricing) {
     if (!pricing) {
         return { eligible: false, reason: 'Pricing not configured for this vehicle.' };
     }
-    // Weight filtering disabled as per requirements - show all vehicles
-    // const maxWeight = Number(vehicle.maxWeight || 0);
-    // const minWeight = Number(vehicle.minWeight || 0);
-    // if (maxWeight > 0 && parcelWeight > maxWeight) {
-    //     return { eligible: false, reason: WEIGHT_INELIGIBLE_REASON };
-    // }
-    // if (minWeight > 0 && parcelWeight < minWeight) {
-    //     return { eligible: false, reason: WEIGHT_INELIGIBLE_REASON };
-    // }
+
+    // Weight limits removed as per user request: user can select any vehicle regardless of weight.
     return { eligible: true, reason: null };
 }
 
