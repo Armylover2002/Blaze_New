@@ -20,6 +20,16 @@ import { sendAdminResetOtpEmail } from "../../utils/email.js";
 import mongoose from "mongoose";
 import { AdminRole } from "../admin/role.model.js";
 import { creditReferralReward } from "../../modules/food/user/services/userWallet.service.js";
+import {
+  assertAdminForgotOtpRequestAllowed,
+  assertAdminForgotOtpVerificationAllowed,
+  assertAdminLoginAllowed,
+  clearAdminForgotOtpVerificationLockout,
+  clearAdminLoginLockout,
+  getAdminAccountLockoutKey,
+  lockAdminForgotOtpVerification,
+  recordAdminLoginFailure,
+} from "./auth.lockout.js";
 
 const ROLES = {
   USER: "USER",
@@ -394,24 +404,33 @@ export const adminLogin = async (email, password, roleId) => {
     throw new AuthError("User not found");
   }
 
+  const lockoutKey = getAdminAccountLockoutKey(admin);
+  await assertAdminLoginAllowed(lockoutKey);
+
   const isMatch = await admin.comparePassword(password);
   if (!isMatch) {
+    await recordAdminLoginFailure(lockoutKey);
     throw new AuthError("Incorrect password");
   }
 
   if (roleId) {
     if (roleId === 'ADMIN' && admin.role !== 'ADMIN') {
+      await recordAdminLoginFailure(lockoutKey);
       throw new AuthError("Please select the correct role for this account.");
     }
     if (roleId !== 'ADMIN') {
       if (admin.role !== 'EMPLOYEE') {
+        await recordAdminLoginFailure(lockoutKey);
         throw new AuthError("Please select the correct role for this account.");
       }
       if (admin.adminRoleId && String(admin.adminRoleId._id) !== roleId) {
+        await recordAdminLoginFailure(lockoutKey);
         throw new AuthError("Please select the correct role for this account.");
       }
     }
   }
+
+  await clearAdminLoginLockout(lockoutKey);
 
   const payload = { userId: admin._id.toString(), role: admin.role };
 
@@ -1117,6 +1136,8 @@ export const requestAdminForgotPasswordOtp = async (email) => {
     throw new AuthError("This email is not registered as an admin account.");
   }
 
+  await assertAdminForgotOtpRequestAllowed(normalizedEmail);
+
   const otp = config.useDefaultOtp
     ? "123456"
     : String(crypto.randomInt(100000, 999999));
@@ -1159,6 +1180,8 @@ export const resetAdminPasswordWithOtp = async (email, otp, newPassword) => {
     throw new ValidationError("New password must be at least 6 characters");
   }
 
+  await assertAdminForgotOtpVerificationAllowed(normalizedEmail);
+
   const record = await AdminResetOtp.findOne({ email: normalizedEmail });
   if (!record) {
     throw new AuthError("OTP not found or expired. Please request a new code.");
@@ -1168,11 +1191,15 @@ export const resetAdminPasswordWithOtp = async (email, otp, newPassword) => {
     throw new AuthError("OTP has expired. Please request a new code.");
   }
   if (record.attempts >= (config.otpMaxAttempts || 5)) {
+    await lockAdminForgotOtpVerification(normalizedEmail);
     throw new AuthError("Too many attempts. Please request a new code.");
   }
   record.attempts += 1;
   if (record.otp !== otpStr) {
     await record.save();
+    if (record.attempts >= (config.otpMaxAttempts || 5)) {
+      await lockAdminForgotOtpVerification(normalizedEmail);
+    }
     throw new AuthError("Invalid OTP.");
   }
 
@@ -1185,6 +1212,7 @@ export const resetAdminPasswordWithOtp = async (email, otp, newPassword) => {
   admin.password = newPassword;
   await admin.save();
   await record.deleteOne();
+  await clearAdminForgotOtpVerificationLockout(normalizedEmail);
 
   // Security: a forgot-password reset is unauthenticated, so revoke ALL
   // existing sessions for this admin. The user re-authenticates via login.
