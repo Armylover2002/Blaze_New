@@ -81,7 +81,7 @@ router.patch('/restaurants/:id/approve', checkPermission('food::restaurant_manag
 router.patch('/restaurants/:id/reject', checkPermission('food::restaurant_management::restaurants::joining_request', 'edit'), adminController.rejectRestaurant);
 
 // ----- Categories -----
-router.get('/categories', adminController.getCategories);
+router.get('/categories', checkPermission('food::food_management::categories::list', 'view'), adminController.getCategories);
 router.post('/categories', checkPermission('food::food_management::categories::list', 'create'), adminController.createCategory);
 router.patch('/categories/:id', checkPermission('food::food_management::categories::list', 'edit'), adminController.updateCategory);
 router.delete('/categories/:id', checkPermission('food::food_management::categories::list', 'delete'), adminController.deleteCategory);
