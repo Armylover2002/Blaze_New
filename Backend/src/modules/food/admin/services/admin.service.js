@@ -965,13 +965,14 @@ export async function getTransactionReport(query = {}) {
 
     const transactions = transactionRows.map((tx) => {
         const order = tx.orderId || {};
-        const pricing = order.pricing || {};
+        const pricing = { ...(tx.pricing || {}), ...(order.pricing || {}) };
         const subtotal = Number(pricing.subtotal || 0) || 0;
         const packagingFee = Number(pricing.packagingFee || 0) || 0;
         const deliveryFee = Number(pricing.deliveryFee || 0) || 0;
         const tax = Number(pricing.tax || 0) || 0;
         const discount = Number(pricing.discount || 0) || 0;
         const total = Number(pricing.total || 0) || 0;
+        const { totalDiscount, couponDiscount, itemDiscount, referralDiscount } = resolveTransactionDiscounts(pricing);
 
         // "Platform fee" should come from pricing.platformFee when available.
         // For older orders where pricing.platformFee isn't stored, derive it from the pricing equation:
@@ -990,10 +991,10 @@ export async function getTransactionReport(query = {}) {
             restaurant: tx.restaurantId?.restaurantName || 'N/A',
             customerName: tx.userId?.name || 'Guest',
             totalItemAmount: subtotal,
-            itemDiscount: pricing.discount || 0,
-            couponDiscount: 0, // Placeholder if you add coupon logic
-            referralDiscount: 0, // Placeholder
-            discountedAmount: Math.max(0, (pricing.subtotal || 0) - (pricing.discount || 0)),
+            itemDiscount,
+            couponDiscount,
+            referralDiscount,
+            discountedAmount: Math.max(0, subtotal - totalDiscount),
             vatTax: tx.amounts?.taxAmount || pricing.tax || 0,
             deliveryCharge: pricing.deliveryFee || 0,
             platformFee,
@@ -1032,6 +1033,23 @@ export async function getTransactionReport(query = {}) {
 
     return { transactions, summary };
 }
+
+const resolveTransactionDiscounts = (pricing = {}) => {
+    const totalDiscount = Math.max(0, Number(pricing.discount || 0) || 0);
+    const couponFromApplied = Math.max(0, Number(pricing.appliedCoupon?.discount || 0) || 0);
+    const referralDiscount = Math.max(0, Number(pricing.referralDiscount || 0) || 0);
+    const hasCouponCode = Boolean(pricing.couponCode || pricing.appliedCoupon?.code);
+
+    let couponDiscount = 0;
+    if (couponFromApplied > 0) {
+        couponDiscount = Math.min(totalDiscount, couponFromApplied);
+    } else if (hasCouponCode && totalDiscount > 0) {
+        couponDiscount = Math.max(0, totalDiscount - referralDiscount);
+    }
+
+    const itemDiscount = Math.max(0, totalDiscount - couponDiscount - referralDiscount);
+    return { totalDiscount, couponDiscount, itemDiscount, referralDiscount };
+};
 
 export async function getRestaurantReport(query = {}) {
     const parseTimeRange = (timeLabel) => {
