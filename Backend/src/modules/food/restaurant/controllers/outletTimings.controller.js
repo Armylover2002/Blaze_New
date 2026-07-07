@@ -13,7 +13,7 @@ export const getOutletTimingsByRestaurantIdController = async (req, res, next) =
 export const getCurrentRestaurantOutletTimingsController = async (req, res, next) => {
     try {
         const restaurantId = req.user?.userId;
-        const data = await getOutletTimingsForRestaurant(restaurantId);
+        const data = await getOutletTimingsForRestaurant(restaurantId, { includePending: true });
         return sendResponse(res, 200, 'Outlet timings fetched successfully', data);
     } catch (error) {
         next(error);
