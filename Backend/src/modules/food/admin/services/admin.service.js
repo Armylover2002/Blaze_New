@@ -76,6 +76,10 @@ const toFiniteNumber = (value) => {
     return Number.isFinite(num) ? num : null;
 };
 
+// Escapes user input before embedding it in a MongoDB $regex to prevent regex
+// injection / ReDoS-style slowdowns from special characters like ( ) * + ? etc.
+const escapeRegex = (value) => String(value ?? '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 const normalizeRestaurantTime = (value) => {
     const raw = String(value || '').trim();
     if (!raw) return '';
@@ -2560,7 +2564,7 @@ export async function getCategories(query) {
 
     const filter = {};
     if (query.search && String(query.search).trim()) {
-        const term = String(query.search).trim();
+        const term = escapeRegex(String(query.search).trim().slice(0, 80));
         filter.$or = [{ name: { $regex: term, $options: 'i' } }];
     }
     // Optional zone filter for admin list.
