@@ -26,6 +26,11 @@ import ReusableImageLibraryModal from "@food/components/ReusableImageLibraryModa
 import Cropper from "react-easy-crop"
 import { isFlutterBridgeAvailable } from "@food/utils/imageUploadUtils"
 import { getFoodVariants } from "@food/utils/foodVariants"
+import {
+  FOOD_VARIANT_UNITS,
+  DEFAULT_FOOD_VARIANT_UNIT,
+  normalizeFoodVariantUnit,
+} from "@food/constants/foodVariantUnits"
 const debugLog = (...args) => { }
 const debugWarn = (...args) => { }
 const debugError = (...args) => { }
@@ -46,6 +51,7 @@ const createVariantDraft = (variant = {}) => ({
   localId: String(variant?.id || variant?._id || `variant-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`),
   persistedId: String(variant?.id || variant?._id || ""),
   name: String(variant?.name || ""),
+  unit: normalizeFoodVariantUnit(variant?.unit),
   price: variant?.price != null ? String(variant.price) : "",
   otherPrice: variant?.otherPrice != null ? String(variant.otherPrice) : "",
 })
@@ -831,6 +837,7 @@ export default function ItemDetailsPage() {
         .map((variant) => ({
           persistedId: String(variant.persistedId || "").trim(),
           name: String(variant.name || "").trim(),
+          unit: normalizeFoodVariantUnit(variant.unit),
           price: Number(variant.price),
           otherPrice: Number(variant.otherPrice) || 0,
         }))
@@ -859,6 +866,7 @@ export default function ItemDetailsPage() {
       const variantPayload = normalizedVariants.map((variant) => ({
         ...(variant.persistedId ? { _id: variant.persistedId } : {}),
         name: variant.name,
+        unit: variant.unit,
         price: variant.price,
         otherPrice: Number(variant.otherPrice) || 0,
       }))
@@ -981,7 +989,7 @@ export default function ItemDetailsPage() {
   }
 
   return (
-    <div className="h-screen bg-white flex flex-col overflow-hidden">
+    <div className="h-screen bg-white flex flex-col overflow-hidden lg:bg-slate-50">
       <style>{`
         [data-slot="switch"][data-state="checked"] {
           background-color: #16a34a !important;
@@ -998,23 +1006,33 @@ export default function ItemDetailsPage() {
         }
       `}</style>
       {/* Header */}
-      <div className="sticky top-0 z-40 bg-white border-b border-gray-200 flex-shrink-0">
-        <div className="px-4 py-3 flex items-center gap-3">
+      <div className="sticky top-0 z-40 bg-white border-b border-gray-200 flex-shrink-0 lg:border-slate-200">
+        <div className="px-4 py-3 flex items-center gap-3 lg:max-w-6xl lg:mx-auto lg:px-6 lg:py-4">
           <button
             onClick={goBack}
             className="p-1 rounded-full hover:bg-gray-100"
           >
             <ArrowLeft className="w-5 h-5 text-gray-700" />
           </button>
-          <h1 className="text-xl font-bold text-gray-900">Item details</h1>
+          <div>
+            <h1 className="text-xl font-bold text-gray-900 lg:text-2xl">
+              {isNewItem ? "Add menu item" : "Edit menu item"}
+            </h1>
+            <p className="hidden lg:block text-sm text-slate-500 mt-0.5">
+              Fill in item details, pricing, and availability
+            </p>
+          </div>
         </div>
       </div>
 
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto" style={{ paddingBottom: `${96 + keyboardInset}px` }}>
+      <div className="flex-1 overflow-y-auto lg:py-6" style={{ paddingBottom: `${96 + keyboardInset}px` }}>
+        <div className="lg:max-w-6xl lg:mx-auto lg:px-6">
+          <div className="lg:grid lg:grid-cols-[minmax(300px,380px)_minmax(0,1fr)] lg:gap-8 lg:items-start">
+            <div className="lg:sticky lg:top-24">
         {!isNewItem && currentApprovalStatus === "rejected" && currentRejectionReason ? (
-          <div className="px-4 pt-4">
+          <div className="px-4 pt-4 lg:px-0">
             <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3">
               <p className="text-sm font-semibold text-red-700">Approval rejected</p>
               <p className="mt-1 text-sm leading-5 text-red-600">Reason: {currentRejectionReason}</p>
@@ -1026,9 +1044,9 @@ export default function ItemDetailsPage() {
         ) : null}
 
         {/* Image Carousel */}
-        <div className="relative bg-white">
+        <div className="relative bg-white lg:rounded-2xl lg:border lg:border-slate-200 lg:shadow-sm lg:overflow-hidden">
           {images.length > 0 ? (
-            <div className="relative w-full h-80 overflow-hidden bg-gray-100">
+            <div className="relative w-full h-80 lg:h-72 overflow-hidden bg-gray-100">
               {/* Image container with swipe support */}
               <div
                 ref={carouselRef}
@@ -1113,7 +1131,7 @@ export default function ItemDetailsPage() {
               )}
             </div>
           ) : (
-            <div className="relative w-full h-80 bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center">
+            <div className="relative w-full h-80 lg:h-72 bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center">
               <div className="text-center">
                 <div className="w-20 h-20 bg-white/80 rounded-full flex items-center justify-center mx-auto mb-3 shadow-lg">
                   <Camera className="w-10 h-10 text-gray-400" />
@@ -1125,7 +1143,7 @@ export default function ItemDetailsPage() {
           )}
 
           {/* Add image button - redesigned */}
-          <div className="px-4 py-4 bg-white border-t border-gray-100">
+          <div className="px-4 py-4 bg-white border-t border-gray-100 lg:px-5 lg:py-5">
             <input
               ref={fileInputRef}
               type="file"
@@ -1157,7 +1175,7 @@ export default function ItemDetailsPage() {
 
         {/* Suggested Images Section */}
         {(loadingSuggestions || (suggestedImages && suggestedImages.length > 0)) && (
-          <div className="px-4 py-3 bg-white border-t border-b border-gray-100 flex flex-col gap-2">
+          <div className="px-4 py-3 bg-white border-t border-b border-gray-100 flex flex-col gap-2 lg:mt-4 lg:rounded-2xl lg:border lg:border-slate-200 lg:shadow-sm lg:px-5">
             <div className="flex items-center justify-between">
               <span className="text-xs font-semibold text-gray-700 uppercase tracking-wider">
                 Suggested Images
@@ -1188,9 +1206,11 @@ export default function ItemDetailsPage() {
             )}
           </div>
         )}
+            </div>
 
         {/* Form Fields */}
-        <div className="p-4 space-y-3">
+        <div className="p-4 space-y-3 lg:p-0 lg:space-y-5">
+          <div className="lg:bg-white lg:rounded-2xl lg:border lg:border-slate-200 lg:shadow-sm lg:p-6 lg:space-y-5">
           {/* Category Selector */}
           <div>
             <label className="block text-sm font-medium text-gray-900 mb-2">
@@ -1369,8 +1389,8 @@ export default function ItemDetailsPage() {
                 {variants.length > 0 ? (
                   <div className="space-y-3">
                     {variants.map((variant, index) => (
-                      <div key={variant.localId} className="grid grid-cols-[1fr_auto] gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3">
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      <div key={variant.localId} className="grid grid-cols-[1fr_auto] gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3 lg:bg-white">
+                        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
                           <div>
                             <label className="block text-xs text-gray-600 mb-1">Variant name</label>
                             <input
@@ -1380,6 +1400,20 @@ export default function ItemDetailsPage() {
                               placeholder={index === 0 ? "Full" : "Half"}
                               className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                             />
+                          </div>
+                          <div>
+                            <label className="block text-xs text-gray-600 mb-1">Unit</label>
+                            <select
+                              value={variant.unit || DEFAULT_FOOD_VARIANT_UNIT}
+                              onChange={(e) => handleVariantChange(variant.localId, "unit", e.target.value)}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            >
+                              {FOOD_VARIANT_UNITS.map((unit) => (
+                                <option key={unit.value} value={unit.value}>
+                                  {unit.label}
+                                </option>
+                              ))}
+                            </select>
                           </div>
                           <div>
                             <label className="block text-xs text-gray-600 mb-1">Variant price</label>
@@ -1494,6 +1528,9 @@ export default function ItemDetailsPage() {
 
 
         </div>
+          </div>
+        </div>
+      </div>
       </div>
 
       {/* Category Selection Popup */}
@@ -1659,10 +1696,10 @@ export default function ItemDetailsPage() {
 
       {/* Bottom Sticky Buttons */}
       <div
-        className="fixed left-0 right-0 bg-white border-t border-gray-200 z-40"
+        className="fixed left-0 right-0 bg-white border-t border-gray-200 z-40 lg:border-slate-200 lg:bg-white/95 lg:backdrop-blur"
         style={{ bottom: `${keyboardInset}px` }}
       >
-        <div className={`flex gap-3 px-4 py-4 ${isNewItem ? 'justify-end' : ''}`}>
+        <div className={`flex gap-3 px-4 py-4 lg:max-w-6xl lg:mx-auto lg:px-6 ${isNewItem ? "justify-end" : ""}`}>
           {!isNewItem && (
             <button
               onClick={handleDelete}
@@ -1674,7 +1711,7 @@ export default function ItemDetailsPage() {
           <button
             onClick={handleSave}
             disabled={uploadingImages}
-            className={`${isNewItem ? 'w-full' : 'flex-1'} py-3 px-4 rounded-lg text-sm font-semibold transition-colors flex items-center justify-center gap-2 ${!uploadingImages
+            className={`${isNewItem ? "w-full lg:w-auto lg:min-w-[220px]" : "flex-1 lg:flex-none lg:min-w-[220px]"} py-3 px-4 rounded-lg text-sm font-semibold transition-colors flex items-center justify-center gap-2 ${!uploadingImages
               ? "bg-[#FF0000] text-white hover:bg-[#E64D02]"
               : "bg-gray-300 text-gray-500 cursor-not-allowed"
               }`}

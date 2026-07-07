@@ -36,10 +36,13 @@ export const normalizeFoodVariantsInput = (value = [], options = {}) => {
                 throw new ValidationError(`${priceLabel} must be greater than 0`);
             }
 
+            const unit = toTrimmedString(entry?.unit).toLowerCase() || 'piece';
+
             const variant = {
                 name,
                 price,
-                otherPrice: Number(entry?.otherPrice) || 0
+                otherPrice: Number(entry?.otherPrice) || 0,
+                unit
             };
 
             const variantId = entry?._id || entry?.id;
@@ -71,7 +74,8 @@ export const serializeFoodVariants = (value = []) =>
                 _id: variantId ? String(variantId) : '',
                 name,
                 price,
-                otherPrice: Number(entry?.otherPrice) || 0
+                otherPrice: Number(entry?.otherPrice) || 0,
+                unit: toTrimmedString(entry?.unit).toLowerCase() || 'piece'
             };
         })
         .filter(Boolean);
