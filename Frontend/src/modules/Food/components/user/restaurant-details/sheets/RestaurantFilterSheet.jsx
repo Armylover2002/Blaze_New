@@ -109,7 +109,7 @@ export default function RestaurantFilterSheet({ open, onClose, filters, setFilte
                           }`}
                       >
                         <RotateCcw className="h-4 w-4" />
-                        <span className="font-medium">Highly reordered</span>
+                        <span className="font-medium">Highly recommended</span>
                       </button>
                     </div>
 

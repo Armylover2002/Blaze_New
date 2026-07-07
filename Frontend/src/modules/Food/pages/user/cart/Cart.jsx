@@ -2099,6 +2099,26 @@ export default function Cart() {
     )
   }
 
+  let calculatedDeliveryTime = restaurantData?.estimatedDeliveryTime || "15-20 mins";
+  let maxUpperBound = 0;
+  let maxTimeString = "";
+  
+  cart.forEach((item) => {
+    const timeStr = String(item.preparationTime || "0");
+    const matches = timeStr.match(/\d+/g);
+    if (matches) {
+      const upper = Math.max(...matches.map(Number));
+      if (upper > maxUpperBound) {
+        maxUpperBound = upper;
+        maxTimeString = timeStr;
+      }
+    }
+  });
+
+  if (maxTimeString && maxUpperBound > 0) {
+    calculatedDeliveryTime = maxTimeString.includes("min") ? maxTimeString : `${maxTimeString} mins`;
+  }
+
   return (
     <div className="relative min-h-screen overflow-x-hidden bg-slate-50 dark:bg-[#0a0a0a]">
       {/* Header - Sticky at top */}
@@ -2117,7 +2137,7 @@ export default function Cart() {
               <div className="min-w-0">
                 <p className="text-xs md:text-sm text-gray-500 dark:text-gray-400">{restaurantName}</p>
                 <p className="text-sm md:text-base font-medium text-gray-800 dark:text-white truncate">
-                  {restaurantData?.estimatedDeliveryTime || "10-15 mins"} to <span className="font-semibold">Location</span>
+                  {calculatedDeliveryTime} to <span className="font-semibold">Location</span>
                   <span className="text-gray-400 dark:text-gray-500 ml-1 text-xs md:text-sm">{defaultAddress ? (formatFullAddress(defaultAddress) || defaultAddress?.formattedAddress || defaultAddress?.address || defaultAddress?.city || "Select address") : "Select address"}</span>
                 </p>
               </div>
@@ -2248,7 +2268,9 @@ export default function Cart() {
                       </div>
 
                       <p className="mt-3 text-lg font-bold tracking-tight text-gray-900 dark:text-white md:text-xl">
-                        Delivery in <span className="text-[#FF0000]">{restaurantData?.estimatedDeliveryTime || "15-20 mins"}</span>
+                        Delivery in <span className="text-[#FF0000]">
+                          {calculatedDeliveryTime}
+                        </span>
                       </p>
                       <p className="mt-1 max-w-xl text-sm leading-6 text-gray-600 dark:text-gray-300">
                         We prioritize your order, match the nearest available rider, and keep the handoff moving smoothly.

@@ -1439,14 +1439,14 @@ export default function Under250() {
                   {selectedItem.description || `${selectedItem.name} from ${selectedItem.restaurant || 'Under 250'}`}
                 </p>
 
-                {/* Highly Reordered Progress Bar */}
+                {/* Highly Recommended Progress Bar */}
                 {selectedItem.customisable && (
                   <div className="flex items-center gap-2 mb-4">
                     <div className="flex-1 h-0.5 bg-gray-200 rounded-full overflow-hidden">
                       <div className="h-full bg-[#FF0000] rounded-full" style={{ width: '50%' }} />
                     </div>
                     <span className="text-xs text-gray-600 dark:text-gray-400 font-medium whitespace-nowrap">
-                      highly reordered
+                      highly recommended
                     </span>
                   </div>
                 )}
