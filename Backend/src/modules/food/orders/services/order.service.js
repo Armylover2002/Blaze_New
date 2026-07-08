@@ -2196,68 +2196,84 @@ export async function createOrder(userId, dto) {
           ? "single"
           : "split";
 
-  // Ensure pricing is present and consistent.
-  const computedSubtotal = items.reduce((sum, item) => {
-    const price = Number(item?.price);
-    const qty = Number(item?.quantity);
-    if (!Number.isFinite(price) || !Number.isFinite(qty)) return sum;
-    return sum + Math.max(0, price) * Math.max(0, qty);
-  }, 0);
-  const commissionPercentage = primaryRestaurant ? Number(primaryRestaurant.commissionPercentage || 0) : 0;
-  const restaurantCommission = Math.round(computedSubtotal * (commissionPercentage / 100) * 100) / 100;
+  // Server-authoritative pricing from active fee settings (never trust client fee amounts).
+  const couponCodeFromClient = dto.pricing?.couponCode
+    ? String(dto.pricing.couponCode).trim().toUpperCase()
+    : "";
+  const { pricing: serverPricing } = await calculateOrder(userId, {
+    orderType,
+    items: dto.items,
+    address: dto.address,
+    restaurantId: dto.restaurantId || primaryRestaurantId || undefined,
+    zoneId: dto.zoneId,
+    couponCode: couponCodeFromClient,
+    deliveryFleet: requestedDeliveryFleet,
+  });
 
+  let resolvedDeliveryFee = Math.max(0, Number(serverPricing.deliveryFee || 0));
+  let resolvedTotal = Math.max(0, Number(serverPricing.total || 0));
+  if (
+    orderType === "mixed" &&
+    requestedDeliveryFleet === "express" &&
+    Array.isArray(serverPricing.deliveryOptions)
+  ) {
+    const expressOption = serverPricing.deliveryOptions.find(
+      (option) => option?.code === "express",
+    );
+    if (expressOption) {
+      resolvedDeliveryFee = Math.max(0, Number(expressOption.deliveryFee || 0));
+      resolvedTotal = Math.max(0, Number(expressOption.total || 0));
+    }
+  }
+
+  const commissionPercentage = primaryRestaurant
+    ? Number(primaryRestaurant.commissionPercentage || 0)
+    : 0;
+  const commissionBase = Math.max(0, Number(serverPricing.subtotal || 0));
+  const restaurantCommission =
+    Math.round(commissionBase * (commissionPercentage / 100) * 100) / 100;
+
+  const useExpressMixedFees =
+    orderType === "mixed" && requestedDeliveryFleet === "express";
   const normalizedPricing = {
-    subtotal: Number(dto.pricing?.subtotal ?? computedSubtotal),
-    tax: Number(dto.pricing?.tax ?? 0),
-    packagingFee: Number(dto.pricing?.packagingFee ?? 0),
-    deliveryFee: Number(dto.pricing?.deliveryFee ?? 0),
-    totalDeliveryFee: Number(
-      dto.pricing?.totalDeliveryFee ?? dto.pricing?.deliveryFee ?? 0,
+    subtotal: Math.max(0, Number(serverPricing.subtotal || 0)),
+    tax: Math.max(0, Number(serverPricing.tax || 0)),
+    packagingFee: Math.max(0, Number(serverPricing.packagingFee || 0)),
+    deliveryFee: resolvedDeliveryFee,
+    totalDeliveryFee: useExpressMixedFees
+      ? resolvedDeliveryFee
+      : Math.max(
+          0,
+          Number(serverPricing.totalDeliveryFee ?? resolvedDeliveryFee),
+        ),
+    userDeliveryFee: useExpressMixedFees
+      ? resolvedDeliveryFee
+      : Math.max(
+          0,
+          Number(serverPricing.userDeliveryFee ?? resolvedDeliveryFee),
+        ),
+    restaurantDeliveryFee: Math.max(
+      0,
+      Number(serverPricing.restaurantDeliveryFee || 0),
     ),
-    userDeliveryFee: Number(
-      dto.pricing?.userDeliveryFee ?? dto.pricing?.deliveryFee ?? 0,
-    ),
-    restaurantDeliveryFee: Number(dto.pricing?.restaurantDeliveryFee ?? 0),
-    sponsoredDelivery: Boolean(dto.pricing?.sponsoredDelivery),
-    sponsoredKm: Number(dto.pricing?.sponsoredKm ?? 0),
+    sponsoredDelivery: Boolean(serverPricing.sponsoredDelivery),
+    sponsoredKm: Math.max(0, Number(serverPricing.sponsoredKm || 0)),
     deliveryDistanceKm:
-      dto.pricing?.deliveryDistanceKm == null
+      serverPricing.deliveryDistanceKm == null
         ? null
-        : Number(dto.pricing.deliveryDistanceKm),
+        : Number(serverPricing.deliveryDistanceKm),
     deliverySponsorType: String(
-      dto.pricing?.deliverySponsorType ||
-        (Number(dto.pricing?.restaurantDeliveryFee || 0) > 0 ? "RESTAURANT_FULL" : "USER_FULL"),
+      serverPricing.deliverySponsorType || "USER_FULL",
     ),
-    platformFee: Number(dto.pricing?.platformFee ?? 0),
-    discount: Number(dto.pricing?.discount ?? 0),
-    restaurantCommissionPercentage: Number(dto.pricing?.restaurantCommissionPercentage ?? commissionPercentage),
-    restaurantCommission: Number(dto.pricing?.restaurantCommission ?? restaurantCommission),
-    total: Number(dto.pricing?.total ?? 0),
-    currency: String(dto.pricing?.currency || "INR"),
+    platformFee: Math.max(0, Number(serverPricing.platformFee || 0)),
+    discount: Math.max(0, Number(serverPricing.discount || 0)),
+    restaurantCommissionPercentage: commissionPercentage,
+    restaurantCommission,
+    total: resolvedTotal,
+    currency: String(serverPricing.currency || "INR"),
+    couponCode: serverPricing.couponCode || couponCodeFromClient || null,
+    appliedCoupon: serverPricing.appliedCoupon || undefined,
   };
-  normalizedPricing.totalDeliveryFee = Math.max(0, normalizedPricing.totalDeliveryFee);
-  normalizedPricing.userDeliveryFee = Math.max(
-    0,
-    Number.isFinite(normalizedPricing.userDeliveryFee)
-      ? normalizedPricing.userDeliveryFee
-      : normalizedPricing.deliveryFee,
-  );
-  normalizedPricing.restaurantDeliveryFee = Math.max(
-    0,
-    Number.isFinite(normalizedPricing.restaurantDeliveryFee)
-      ? normalizedPricing.restaurantDeliveryFee
-      : 0,
-  );
-  normalizedPricing.sponsoredKm = Math.max(
-    0,
-    Number.isFinite(normalizedPricing.sponsoredKm) ? normalizedPricing.sponsoredKm : 0,
-  );
-  normalizedPricing.deliveryFee = Math.max(
-    0,
-    Number.isFinite(normalizedPricing.deliveryFee)
-      ? normalizedPricing.deliveryFee
-      : normalizedPricing.userDeliveryFee,
-  );
   if (normalizedPricing.totalDeliveryFee < normalizedPricing.deliveryFee) {
     normalizedPricing.totalDeliveryFee = normalizedPricing.deliveryFee;
   }
@@ -2271,32 +2287,19 @@ export async function createOrder(userId, dto) {
     );
   }
   normalizedPricing.sponsoredDelivery =
-    Boolean(dto.pricing?.sponsoredDelivery) ||
+    Boolean(normalizedPricing.sponsoredDelivery) ||
     normalizedPricing.restaurantDeliveryFee > 0;
-  const computedTotal = Math.max(
+  const recomputedTotal = Math.max(
     0,
-    (Number.isFinite(normalizedPricing.subtotal)
-      ? normalizedPricing.subtotal
-      : 0) +
-      (Number.isFinite(normalizedPricing.tax) ? normalizedPricing.tax : 0) +
-      (Number.isFinite(normalizedPricing.packagingFee)
-        ? normalizedPricing.packagingFee
-        : 0) +
-      (Number.isFinite(normalizedPricing.deliveryFee)
-        ? normalizedPricing.deliveryFee
-        : 0) +
-      (Number.isFinite(normalizedPricing.platformFee)
-        ? normalizedPricing.platformFee
-        : 0) -
-      (Number.isFinite(normalizedPricing.discount)
-        ? normalizedPricing.discount
-        : 0),
+    normalizedPricing.subtotal +
+      normalizedPricing.tax +
+      normalizedPricing.packagingFee +
+      normalizedPricing.deliveryFee +
+      normalizedPricing.platformFee -
+      normalizedPricing.discount,
   );
-  if (
-    !Number.isFinite(normalizedPricing.total) ||
-    normalizedPricing.total <= 0
-  ) {
-    normalizedPricing.total = computedTotal;
+  if (!Number.isFinite(normalizedPricing.total) || normalizedPricing.total <= 0) {
+    normalizedPricing.total = recomputedTotal;
   }
 
   const payment = {
@@ -2548,8 +2551,8 @@ export async function createOrder(userId, dto) {
   } catch {
     // Don't block order placement on socket failures.
   }
-  const couponCode = dto.pricing?.couponCode
-    ? String(dto.pricing.couponCode).trim().toUpperCase()
+  const couponCode = normalizedPricing.couponCode
+    ? String(normalizedPricing.couponCode).trim().toUpperCase()
     : "";
   if ((orderType === "food" || orderType === "mixed") && couponCode) {
     const offer = await FoodOffer.findOne({ couponCode }).lean();
