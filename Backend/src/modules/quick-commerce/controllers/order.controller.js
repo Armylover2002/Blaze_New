@@ -726,25 +726,62 @@ export const placeOrder = async (req, res) => {
 
 export const verifyPayment = async (req, res) => {
   try {
-    const { orderId } = req.params;
-    const { razorpay_payment_id, razorpay_order_id, razorpay_signature } = req.body;
+    const accessQuery = buildOrderAccessQuery(req);
+    if (!accessQuery) {
+      return res.status(400).json({ success: false, message: 'sessionId or userId is required' });
+    }
 
-    const order = await QuickOrder.findOne({ orderId });
+    const rawOrderId = String(req.params.orderId || '').trim();
+    if (!rawOrderId) {
+      return res.status(400).json({ success: false, message: 'orderId is required' });
+    }
+
+    const razorpayPaymentId = String(
+      req.body?.razorpay_payment_id || req.body?.razorpayPaymentId || '',
+    ).trim();
+    const razorpayOrderId = String(
+      req.body?.razorpay_order_id || req.body?.razorpayOrderId || '',
+    ).trim();
+    const razorpaySignature = String(
+      req.body?.razorpay_signature || req.body?.razorpaySignature || '',
+    ).trim();
+
+    if (!razorpayPaymentId || !razorpayOrderId || !razorpaySignature) {
+      return res.status(400).json({ success: false, message: 'Invalid payment verification payload' });
+    }
+
+    const orderIdentityQuery = [{ orderId: rawOrderId }];
+    if (mongoose.isValidObjectId(rawOrderId)) {
+      orderIdentityQuery.unshift({ _id: rawOrderId });
+    }
+
+    const order = await QuickOrder.findOne({
+      orderType: 'quick',
+      $and: [
+        accessQuery,
+        { $or: orderIdentityQuery },
+      ],
+    });
     if (!order) return res.status(404).json({ success: false, message: 'Order not found' });
 
     if (order.payment?.status === 'paid') {
       return res.json({ success: true, message: 'Payment already verified' });
     }
 
-    const isValid = verifyPaymentSignature(razorpay_order_id, razorpay_payment_id, razorpay_signature);
+    const expectedRazorpayOrderId = String(order.payment?.razorpay?.orderId || '').trim();
+    if (!expectedRazorpayOrderId || razorpayOrderId !== expectedRazorpayOrderId) {
+      return res.status(400).json({ success: false, message: 'Payment order mismatch' });
+    }
+
+    const isValid = verifyPaymentSignature(razorpayOrderId, razorpayPaymentId, razorpaySignature);
     if (!isValid) {
       return res.status(400).json({ success: false, message: 'Invalid payment signature' });
     }
 
     order.payment.status = 'paid';
     if (order.payment.razorpay) {
-      order.payment.razorpay.paymentId = razorpay_payment_id;
-      order.payment.razorpay.signature = razorpay_signature;
+      order.payment.razorpay.paymentId = razorpayPaymentId;
+      order.payment.razorpay.signature = razorpaySignature;
     }
 
     await order.save();
@@ -756,8 +793,8 @@ export const verifyPayment = async (req, res) => {
       }
       await foodTransactionService.updateTransactionStatus(order._id, 'captured', {
         status: 'captured',
-        razorpayPaymentId: razorpay_payment_id,
-        razorpaySignature: razorpay_signature,
+        razorpayPaymentId: razorpayPaymentId,
+        razorpaySignature: razorpaySignature,
         note: 'Quick commerce payment verified',
         recordedByRole: 'USER',
         recordedById: order.userId,
