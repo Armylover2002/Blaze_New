@@ -59,6 +59,12 @@ import {
     serializeFoodVariants
 } from './foodVariant.service.js';
 import { notifyCategoryStatusChange } from './categoryStatusNotification.service.js';
+import { getCache, setCache } from '../../../../utils/cacheManager.js';
+import {
+    buildDashboardStatsCacheKey,
+    DASHBOARD_STATS_CACHE_TTL_MS,
+    invalidateDashboardStatsCache
+} from '../utils/dashboardStatsCache.js';
 
 const parseBooleanLike = (value, fieldName) => {
     if (typeof value === 'boolean') return value;
@@ -159,6 +165,54 @@ const detectZoneFromPartner = (partner, zones) => {
         if (match) detectedZone = match.zoneName || match.name;
     }
     return detectedZone;
+};
+
+const partnerMatchesZone = (partner, zone) => {
+    if (!partner || !zone) return false;
+    const detected = detectZoneFromPartner(partner, [zone]);
+    if (!detected) return false;
+    const detectedKey = String(detected).trim().toLowerCase();
+    return [zone.zoneName, zone.name, zone.serviceLocation]
+        .filter(Boolean)
+        .some((label) => String(label).trim().toLowerCase() === detectedKey);
+};
+
+async function getZoneDeliveryPartnerStats(zoneId, zoneDoc) {
+    if (!zoneId || !zoneDoc) return { approved: 0, pending: 0 };
+
+    const zoneObjectId = new mongoose.Types.ObjectId(zoneId);
+    const orderPartnerIds = await FoodOrder.distinct('dispatch.deliveryPartnerId', {
+        zoneId: zoneObjectId,
+        orderType: 'food',
+        'dispatch.deliveryPartnerId': { $ne: null },
+    });
+
+    const [approvedFromOrders, partners] = await Promise.all([
+        orderPartnerIds.length
+            ? FoodDeliveryPartner.countDocuments({ _id: { $in: orderPartnerIds }, status: 'approved' })
+            : Promise.resolve(0),
+        FoodDeliveryPartner.find({ status: { $in: ['approved', 'pending'] } })
+            .select('status lastLat lastLng city state address')
+            .lean(),
+    ]);
+
+    const orderPartnerIdSet = new Set(orderPartnerIds.map((id) => String(id)));
+    let approvedByLocation = 0;
+    let pending = 0;
+
+    for (const partner of partners) {
+        if (!partnerMatchesZone(partner, zoneDoc)) continue;
+        if (partner.status === 'pending') {
+            pending += 1;
+        } else if (partner.status === 'approved' && !orderPartnerIdSet.has(String(partner._id))) {
+            approvedByLocation += 1;
+        }
+    }
+
+    return {
+        approved: Number(approvedFromOrders) + approvedByLocation,
+        pending,
+    };
 };
 
 const timeToMinutes = (value) => {
@@ -366,6 +420,9 @@ export async function getRestaurants(query) {
 const CANCELLED_ORDER_STATUSES = ['cancelled_by_user', 'cancelled_by_restaurant', 'cancelled_by_admin'];
 const PENDING_ORDER_STATUSES = ['placed', 'created'];
 const PROCESSING_ORDER_STATUSES = ['confirmed', 'preparing', 'ready_for_pickup', 'picked_up'];
+// Fallback commission rate applied to a delivered order's subtotal when the order
+// has no stored restaurantCommission (e.g. legacy orders created before commission tracking).
+const DEFAULT_RESTAURANT_COMMISSION_RATE = 0.15;
 
 const getDateRangeByPeriod = (periodRaw) => {
     const period = String(periodRaw || 'overall').trim().toLowerCase();
@@ -408,7 +465,91 @@ const getDateRangeByPeriod = (periodRaw) => {
 const formatMonthShort = (year, monthIndex) =>
     new Date(year, monthIndex, 1).toLocaleString('en-IN', { month: 'short' });
 
+// Builds a period-aware trend configuration for the dashboard chart so the
+// trajectory series matches the selected filter:
+//   today  -> hourly buckets
+//   week   -> daily buckets (the selected week)
+//   month  -> daily buckets (the selected month)
+//   year   -> monthly buckets (current year)
+//   overall-> rolling last 12 months
+// The bucket `label` is always returned in the response `month` field to keep
+// the existing frontend chart contract unchanged.
+const getDashboardTrendConfig = (periodRaw, periodRange, now = new Date()) => {
+    const period = String(periodRaw || 'overall').trim().toLowerCase();
+
+    if (period === 'today' && periodRange) {
+        const buckets = [];
+        for (let h = 0; h < 24; h += 1) {
+            buckets.push({ key: `${h}`, label: `${String(h).padStart(2, '0')}:00` });
+        }
+        return {
+            groupId: { hour: { $hour: '$createdAt' } },
+            keyOf: (id) => `${id?.hour}`,
+            buckets,
+            extraMatch: null,
+        };
+    }
+
+    if ((period === 'week' || period === 'month') && periodRange) {
+        const buckets = [];
+        const cursor = new Date(periodRange.start);
+        const end = new Date(periodRange.end);
+        while (cursor <= end) {
+            buckets.push({
+                key: `${cursor.getFullYear()}-${cursor.getMonth() + 1}-${cursor.getDate()}`,
+                label: cursor.toLocaleString('en-IN', { day: '2-digit', month: 'short' }),
+            });
+            cursor.setDate(cursor.getDate() + 1);
+        }
+        return {
+            groupId: {
+                year: { $year: '$createdAt' },
+                month: { $month: '$createdAt' },
+                day: { $dayOfMonth: '$createdAt' },
+            },
+            keyOf: (id) => `${id?.year}-${id?.month}-${id?.day}`,
+            buckets,
+            extraMatch: null,
+        };
+    }
+
+    if (period === 'year' && periodRange) {
+        const buckets = [];
+        for (let m = 0; m < 12; m += 1) {
+            buckets.push({ key: `${now.getFullYear()}-${m + 1}`, label: formatMonthShort(now.getFullYear(), m) });
+        }
+        return {
+            groupId: { year: { $year: '$createdAt' }, month: { $month: '$createdAt' } },
+            keyOf: (id) => `${id?.year}-${id?.month}`,
+            buckets,
+            extraMatch: null,
+        };
+    }
+
+    // overall (default) -> rolling last 12 months
+    const buckets = [];
+    for (let i = 11; i >= 0; i -= 1) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        buckets.push({ key: `${d.getFullYear()}-${d.getMonth() + 1}`, label: formatMonthShort(d.getFullYear(), d.getMonth()) });
+    }
+    return {
+        groupId: { year: { $year: '$createdAt' }, month: { $month: '$createdAt' } },
+        keyOf: (id) => `${id?.year}-${id?.month}`,
+        buckets,
+        extraMatch: {
+            createdAt: {
+                $gte: new Date(now.getFullYear(), now.getMonth() - 11, 1),
+                $lte: new Date(),
+            },
+        },
+    };
+};
+
 export async function getDashboardStats(query = {}) {
+    const cacheKey = buildDashboardStatsCacheKey(query);
+    const cached = getCache(cacheKey);
+    if (cached) return cached;
+
     const periodRange = getDateRangeByPeriod(query.period);
     const zoneId = query.zoneId && mongoose.Types.ObjectId.isValid(query.zoneId)
         ? new mongoose.Types.ObjectId(query.zoneId)
@@ -436,9 +577,17 @@ export async function getDashboardStats(query = {}) {
     const zoneRestaurantIds = zoneId
         ? await FoodRestaurant.find({ zoneId }).distinct('_id')
         : null;
+    const zoneDoc = zoneId
+        ? await FoodZone.findById(zoneId).select('zoneName name serviceLocation coordinates').lean()
+        : null;
     const zoneScopedRestaurantMatch = zoneId
         ? { restaurantId: { $in: zoneRestaurantIds || [] } }
         : {};
+
+    const trendConfig = getDashboardTrendConfig(query.period, periodRange);
+    const zoneDeliveryStatsPromise = zoneId && zoneDoc
+        ? getZoneDeliveryPartnerStats(zoneId, zoneDoc)
+        : null;
 
     const [
         orderTotalsAgg,
@@ -466,7 +615,21 @@ export async function getDashboardStats(query = {}) {
                     delivered: { $sum: { $cond: [{ $eq: ['$orderStatus', 'delivered'] }, 1, 0] } },
                     cancelled: {
                         $sum: {
-                            $cond: [{ $in: ['$orderStatus', CANCELLED_ORDER_STATUSES] }, 1, 0]
+                            $cond: [
+                                {
+                                    $and: [
+                                        { $in: ['$orderStatus', CANCELLED_ORDER_STATUSES] },
+                                        { $ne: ['$payment.status', 'refunded'] }
+                                    ]
+                                },
+                                1,
+                                0
+                            ]
+                        }
+                    },
+                    refunded: {
+                        $sum: {
+                            $cond: [{ $eq: ['$payment.status', 'refunded'] }, 1, 0]
                         }
                     },
                     pendingOnly: {
@@ -486,7 +649,17 @@ export async function getDashboardStats(query = {}) {
                     },
                     commissionTotal: { 
                         $sum: { 
-                            $cond: [{ $eq: ['$orderStatus', 'delivered'] }, { $ifNull: ['$pricing.restaurantCommission', 0] }, 0] 
+                            $cond: [
+                                { $eq: ['$orderStatus', 'delivered'] },
+                                {
+                                    $cond: [
+                                        { $gt: [{ $ifNull: ['$pricing.restaurantCommission', 0] }, 0] },
+                                        '$pricing.restaurantCommission',
+                                        { $multiply: [{ $ifNull: ['$pricing.subtotal', 0] }, DEFAULT_RESTAURANT_COMMISSION_RATE] }
+                                    ]
+                                },
+                                0
+                            ]
                         } 
                     },
                     platformFeeTotal: { 
@@ -524,18 +697,12 @@ export async function getDashboardStats(query = {}) {
             {
                 $match: {
                     ...orderMatch,
-                    createdAt: {
-                        $gte: new Date(new Date().getFullYear(), new Date().getMonth() - 11, 1),
-                        $lte: new Date()
-                    }
+                    ...(trendConfig.extraMatch || {})
                 }
             },
             {
                 $group: {
-                    _id: {
-                        year: { $year: '$createdAt' },
-                        month: { $month: '$createdAt' }
-                    },
+                    _id: trendConfig.groupId,
                     orders: { $sum: 1 },
                     revenue: { 
                         $sum: { 
@@ -546,26 +713,42 @@ export async function getDashboardStats(query = {}) {
                         $sum: {
                             $cond: [
                                 { $eq: ['$orderStatus', 'delivered'] },
-                                { $ifNull: ['$platformProfit', { $ifNull: ['$pricing.platformFee', 0] }] },
+                                {
+                                    $cond: [
+                                        { $gt: [{ $ifNull: ['$pricing.restaurantCommission', 0] }, 0] },
+                                        '$pricing.restaurantCommission',
+                                        { $multiply: [{ $ifNull: ['$pricing.subtotal', 0] }, DEFAULT_RESTAURANT_COMMISSION_RATE] }
+                                    ]
+                                },
                                 0
                             ]
                         }
                     }
                 }
-            },
-            { $sort: { '_id.year': 1, '_id.month': 1 } }
+            }
         ]),
         FoodRestaurant.countDocuments({ ...restaurantMatch, status: 'approved' }),
         FoodRestaurant.countDocuments({ ...restaurantMatch, status: 'pending' }),
-        FoodDeliveryPartner.countDocuments({ status: 'approved' }),
-        FoodDeliveryPartner.countDocuments({ status: 'pending' }),
+        zoneDeliveryStatsPromise
+            ? zoneDeliveryStatsPromise.then((stats) => stats.approved)
+            : FoodDeliveryPartner.countDocuments({ status: 'approved' }),
+        zoneDeliveryStatsPromise
+            ? zoneDeliveryStatsPromise.then((stats) => stats.pending)
+            : FoodDeliveryPartner.countDocuments({ status: 'pending' }),
         FoodItem.countDocuments({ approvalStatus: 'approved', ...zoneScopedRestaurantMatch }),
         FoodAddon.countDocuments({ approvalStatus: 'approved', isDeleted: { $ne: true }, ...zoneScopedRestaurantMatch }),
         zoneId
             ? FoodOrder.distinct('userId', { ...orderMatch, userId: { $ne: null } }).then((ids) => ids.length)
             : FoodUser.countDocuments({}),
         FoodRestaurant.find({ ...restaurantMatch, status: 'pending' }).sort({ createdAt: -1 }).limit(5).select('restaurantName createdAt').lean(),
-        FoodDeliveryPartner.find({ status: 'pending' }).sort({ createdAt: -1 }).limit(5).select('name createdAt').lean(),
+        zoneId && zoneDoc
+            ? FoodDeliveryPartner.find({ status: 'pending' })
+                .sort({ createdAt: -1 })
+                .limit(25)
+                .select('name createdAt lastLat lastLng city state address')
+                .lean()
+                .then((list) => list.filter((partner) => partnerMatchesZone(partner, zoneDoc)).slice(0, 5))
+            : FoodDeliveryPartner.find({ status: 'pending' }).sort({ createdAt: -1 }).limit(5).select('name createdAt').lean(),
         FoodOrder.find({ 
             ...orderMatch,
             orderStatus: { $in: [...PENDING_ORDER_STATUSES, ...PROCESSING_ORDER_STATUSES] },
@@ -675,45 +858,37 @@ export async function getDashboardStats(query = {}) {
 
     const totals = orderTotalsAgg?.[0] || {};
 
-    const now = new Date();
     const monthlyMap = new Map(
-        (monthlyAgg || []).map((row) => {
-            const key = `${row._id?.year}-${row._id?.month}`;
-            return [key, row];
-        })
+        (monthlyAgg || []).map((row) => [trendConfig.keyOf(row._id), row])
     );
 
-    const monthlyData = [];
-    for (let i = 11; i >= 0; i -= 1) {
-        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-        const year = d.getFullYear();
-        const month = d.getMonth() + 1;
-        const key = `${year}-${month}`;
-        const row = monthlyMap.get(key);
-        monthlyData.push({
-            month: formatMonthShort(year, month - 1),
+    const monthlyData = trendConfig.buckets.map((bucket) => {
+        const row = monthlyMap.get(bucket.key);
+        return {
+            month: bucket.label,
             orders: Number(row?.orders || 0),
             revenue: Number(row?.revenue || 0),
             commission: Number(row?.commission || 0)
-        });
-    }
+        };
+    });
 
-    return {
+    const result = {
         orders: {
             total: Number(totals.totalOrders || 0),
             byStatus: {
                 delivered: Number(totals.delivered || 0),
                 cancelled: Number(totals.cancelled || 0),
+                refunded: Number(totals.refunded || 0),
                 pending: Number(totals.pendingOnly || 0),
                 processing: Number(totals.processing || 0)
             }
         },
         revenue: { total: Number(totals.revenueTotal || 0) },
-        commission: { total: 0 },
+        commission: { total: Number(totals.commissionTotal || 0) },
         platformFee: { total: Number(totals.platformFeeTotal || 0) },
         deliveryFee: { total: Number(totals.deliveryFeeTotal || 0) },
         gst: { total: Number(totals.gstTotal || 0) },
-        totalAdminEarnings: Number(totals.adminNetProfit || 0) + Number(totals.gstTotal || 0),
+        totalAdminEarnings: Number(totals.adminNetProfit || 0),
         deliveryProfit: Number(totals.adminNetProfit || 0) - Number(totals.platformFeeTotal || 0),
         restaurants: {
             total: Number(restaurantsTotal || 0),
@@ -734,6 +909,9 @@ export async function getDashboardStats(query = {}) {
         monthlyData,
         liveSignals: finalLiveSignals
     };
+
+    setCache(cacheKey, result, DASHBOARD_STATS_CACHE_TTL_MS);
+    return result;
 }
 
 function formatTimeAgo(date) {
@@ -753,8 +931,136 @@ function formatTimeAgo(date) {
 }
 
 
+const mapTransactionReportRow = (tx) => {
+    const order = tx.orderId || {};
+    const pricing = { ...(tx.pricing || {}), ...(order.pricing || {}) };
+    const subtotal = Number(pricing.subtotal || 0) || 0;
+    const packagingFee = Number(pricing.packagingFee || 0) || 0;
+    const deliveryFee = Number(pricing.deliveryFee || 0) || 0;
+    const tax = Number(pricing.tax || 0) || 0;
+    const discount = Number(pricing.discount || 0) || 0;
+    const total = Number(pricing.total || 0) || 0;
+    const { totalDiscount, couponDiscount, itemDiscount, referralDiscount } = resolveTransactionDiscounts(pricing);
+
+    const platformFeeDerived = Math.max(
+        0,
+        total - subtotal - packagingFee - deliveryFee - tax + discount
+    );
+    const platformFee =
+        pricing.platformFee !== undefined && pricing.platformFee !== null
+            ? Number(pricing.platformFee || 0) || 0
+            : platformFeeDerived;
+
+    return {
+        id: tx._id,
+        orderId: tx.orderReadableId || order.orderId || 'N/A',
+        restaurant: tx.restaurantId?.restaurantName || 'N/A',
+        customerName: tx.userId?.name || 'Guest',
+        totalItemAmount: subtotal,
+        itemDiscount,
+        couponDiscount,
+        referralDiscount,
+        discountedAmount: Math.max(0, subtotal - totalDiscount),
+        vatTax: tx.amounts?.taxAmount || pricing.tax || 0,
+        deliveryCharge: pricing.deliveryFee || 0,
+        platformFee,
+        orderAmount: tx.amounts?.totalCustomerPaid || pricing.total || 0,
+        status: tx.status
+    };
+};
+
+const buildTransactionReportSummaryPipeline = () => ([
+    {
+        $lookup: {
+            from: 'food_orders',
+            localField: 'orderId',
+            foreignField: '_id',
+            as: 'order'
+        }
+    },
+    { $unwind: { path: '$order', preserveNullAndEmptyArrays: true } },
+    {
+        $group: {
+            _id: null,
+            completedTransaction: {
+                $sum: {
+                    $cond: [
+                        {
+                            $or: [
+                                { $in: ['$status', ['captured', 'settled']] },
+                                { $eq: ['$order.orderStatus', 'delivered'] }
+                            ]
+                        },
+                        { $ifNull: ['$amounts.totalCustomerPaid', 0] },
+                        0
+                    ]
+                }
+            },
+            refundedTransaction: {
+                $sum: {
+                    $cond: [
+                        {
+                            $or: [
+                                { $eq: ['$status', 'refunded'] },
+                                { $eq: ['$order.orderStatus', 'cancelled_by_admin'] }
+                            ]
+                        },
+                        { $ifNull: ['$amounts.totalCustomerPaid', 0] },
+                        0
+                    ]
+                }
+            },
+            adminEarning: {
+                $sum: {
+                    $cond: [
+                        {
+                            $or: [
+                                { $in: ['$status', ['captured', 'settled']] },
+                                { $eq: ['$order.orderStatus', 'delivered'] }
+                            ]
+                        },
+                        { $ifNull: ['$amounts.platformNetProfit', 0] },
+                        0
+                    ]
+                }
+            },
+            restaurantEarning: {
+                $sum: {
+                    $cond: [
+                        {
+                            $or: [
+                                { $in: ['$status', ['captured', 'settled']] },
+                                { $eq: ['$order.orderStatus', 'delivered'] }
+                            ]
+                        },
+                        { $ifNull: ['$amounts.restaurantShare', 0] },
+                        0
+                    ]
+                }
+            },
+            deliverymanEarning: {
+                $sum: {
+                    $cond: [
+                        {
+                            $or: [
+                                { $in: ['$status', ['captured', 'settled']] },
+                                { $eq: ['$order.orderStatus', 'delivered'] }
+                            ]
+                        },
+                        { $ifNull: ['$amounts.riderShare', 0] },
+                        0
+                    ]
+                }
+            }
+        }
+    }
+]);
+
 export async function getTransactionReport(query = {}) {
     const { fromDate, toDate, zone, restaurant, search } = query;
+    const limit = Math.min(Math.max(parseInt(query.limit, 10) || 50, 1), 500);
+    const page = Math.max(parseInt(query.page, 10) || 1, 1);
+    const skip = (page - 1) * limit;
     const match = { orderType: 'food' };
 
     if (fromDate && toDate) {
@@ -773,100 +1079,74 @@ export async function getTransactionReport(query = {}) {
         ];
     }
 
-    let restaurantIds = null;
     if (zone || restaurant) {
         const restFilter = {};
-        if (zone) restFilter.zoneId = zone; // Assuming zone is an ID or we need to lookup
+        if (zone) restFilter.zoneId = zone;
         if (restaurant && restaurant !== 'All restaurants') {
             const restDoc = await mongoose.model('FoodRestaurant').findOne({ restaurantName: restaurant }).lean();
             if (restDoc) restFilter._id = restDoc._id;
         }
-        
+
         if (Object.keys(restFilter).length > 0) {
             const restaurantsList = await mongoose.model('FoodRestaurant').find(restFilter).select('_id').lean();
-            restaurantIds = restaurantsList.map(r => r._id);
+            const restaurantIds = restaurantsList.map(r => r._id);
             match.restaurantId = { $in: restaurantIds };
         }
     }
 
-    // Include only resolved transactions for reports (or all to match orders)
-    // We will query the FoodTransaction table directly as it is the ledger
-    const transactionRows = await FoodTransaction.find(match)
-        .populate('orderId')
-        .populate('userId', 'name')
-        .populate('restaurantId', 'restaurantName')
-        .sort({ createdAt: -1 })
-        .lean();
+    const [total, transactionRows, summaryRows] = await Promise.all([
+        FoodTransaction.countDocuments(match),
+        FoodTransaction.find(match)
+            .populate('orderId')
+            .populate('userId', 'name')
+            .populate('restaurantId', 'restaurantName')
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(limit)
+            .lean(),
+        FoodTransaction.aggregate([
+            { $match: match },
+            ...buildTransactionReportSummaryPipeline()
+        ])
+    ]);
 
-    const transactions = transactionRows.map((tx) => {
-        const order = tx.orderId || {};
-        const pricing = order.pricing || {};
-        const subtotal = Number(pricing.subtotal || 0) || 0;
-        const packagingFee = Number(pricing.packagingFee || 0) || 0;
-        const deliveryFee = Number(pricing.deliveryFee || 0) || 0;
-        const tax = Number(pricing.tax || 0) || 0;
-        const discount = Number(pricing.discount || 0) || 0;
-        const total = Number(pricing.total || 0) || 0;
-
-        // "Platform fee" should come from pricing.platformFee when available.
-        // For older orders where pricing.platformFee isn't stored, derive it from the pricing equation:
-        // total = subtotal + packagingFee + deliveryFee + platformFee + tax - discount
-        const platformFeeDerived = Math.max(
-            0,
-            total - subtotal - packagingFee - deliveryFee - tax + discount
-        );
-        const platformFee =
-            pricing.platformFee !== undefined && pricing.platformFee !== null
-                ? Number(pricing.platformFee || 0) || 0
-                : platformFeeDerived;
-        return {
-            id: tx._id,
-            orderId: tx.orderReadableId || order.orderId || 'N/A',
-            restaurant: tx.restaurantId?.restaurantName || 'N/A',
-            customerName: tx.userId?.name || 'Guest',
-            totalItemAmount: subtotal,
-            itemDiscount: pricing.discount || 0,
-            couponDiscount: 0, // Placeholder if you add coupon logic
-            referralDiscount: 0, // Placeholder
-            discountedAmount: Math.max(0, (pricing.subtotal || 0) - (pricing.discount || 0)),
-            vatTax: tx.amounts?.taxAmount || pricing.tax || 0,
-            deliveryCharge: pricing.deliveryFee || 0,
-            platformFee,
-            orderAmount: tx.amounts?.totalCustomerPaid || pricing.total || 0,
-            status: tx.status
-        };
-    });
-
-    let completedTransaction = 0;
-    let refundedTransaction = 0;
-    let adminEarning = 0;
-    let restaurantEarning = 0;
-    let deliverymanEarning = 0;
-
-    for (const tx of transactionRows) {
-        // Calculate Summary
-        if (tx.status === 'captured' || tx.status === 'settled' || (tx.orderId && tx.orderId.orderStatus === 'delivered')) {
-            completedTransaction += tx.amounts?.totalCustomerPaid || 0;
-            adminEarning += tx.amounts?.platformNetProfit || 0;
-            restaurantEarning += tx.amounts?.restaurantShare || 0;
-            deliverymanEarning += tx.amounts?.riderShare || 0;
-        }
-        if (tx.status === 'refunded' || (tx.orderId && tx.orderId.orderStatus === 'cancelled_by_admin')) {
-            // Count number of refunded transactions according to old logic or sum them
-            refundedTransaction += tx.amounts?.totalCustomerPaid || 0;
-        }
-    }
-
+    const summaryDoc = summaryRows?.[0] || {};
     const summary = {
-        completedTransaction,
-        refundedTransaction, // Returning amount instead of count for consistency, frontend might expect count though
-        adminEarning,
-        restaurantEarning,
-        deliverymanEarning,
+        completedTransaction: Number(summaryDoc.completedTransaction || 0),
+        refundedTransaction: Number(summaryDoc.refundedTransaction || 0),
+        adminEarning: Number(summaryDoc.adminEarning || 0),
+        restaurantEarning: Number(summaryDoc.restaurantEarning || 0),
+        deliverymanEarning: Number(summaryDoc.deliverymanEarning || 0),
     };
 
-    return { transactions, summary };
+    return {
+        transactions: transactionRows.map(mapTransactionReportRow),
+        summary,
+        pagination: {
+            total,
+            page,
+            limit,
+            totalPages: Math.ceil(total / limit) || 1
+        }
+    };
 }
+
+const resolveTransactionDiscounts = (pricing = {}) => {
+    const totalDiscount = Math.max(0, Number(pricing.discount || 0) || 0);
+    const couponFromApplied = Math.max(0, Number(pricing.appliedCoupon?.discount || 0) || 0);
+    const referralDiscount = Math.max(0, Number(pricing.referralDiscount || 0) || 0);
+    const hasCouponCode = Boolean(pricing.couponCode || pricing.appliedCoupon?.code);
+
+    let couponDiscount = 0;
+    if (couponFromApplied > 0) {
+        couponDiscount = Math.min(totalDiscount, couponFromApplied);
+    } else if (hasCouponCode && totalDiscount > 0) {
+        couponDiscount = Math.max(0, totalDiscount - referralDiscount);
+    }
+
+    const itemDiscount = Math.max(0, totalDiscount - couponDiscount - referralDiscount);
+    return { totalDiscount, couponDiscount, itemDiscount, referralDiscount };
+};
 
 export async function getRestaurantReport(query = {}) {
     const parseTimeRange = (timeLabel) => {
@@ -1857,32 +2137,36 @@ export async function getReferralSettings() {
     return { referralSettings: doc || null };
 }
 
+const normalizeReferralSection = (incoming, fallback = {}) => {
+    const pick = (key) => {
+        if (incoming && Object.prototype.hasOwnProperty.call(incoming, key) && incoming[key] !== undefined) {
+            return Math.max(0, Number(incoming[key]) || 0);
+        }
+        return Math.max(0, Number(fallback[key]) || 0);
+    };
+    return {
+        referrerReward: pick('referrerReward'),
+        refereeReward: pick('refereeReward'),
+        limit: pick('limit')
+    };
+};
+
 export async function upsertReferralSettings(body = {}) {
     const existing = await FoodReferralSettings.findOne({ isActive: true }).sort({ createdAt: -1 });
-    
+    const existingObj = existing?.toObject?.() || existing || {};
+
+    // Merge only provided sections/fields so a partial PUT cannot zero other roles.
     const formattedData = {
-        user: {
-            referrerReward: Math.max(0, Number(body.user?.referrerReward) || 0),
-            refereeReward: Math.max(0, Number(body.user?.refereeReward) || 0),
-            limit: Math.max(0, Number(body.user?.limit) || 0)
-        },
-        delivery: {
-            referrerReward: Math.max(0, Number(body.delivery?.referrerReward) || 0),
-            refereeReward: Math.max(0, Number(body.delivery?.refereeReward) || 0),
-            limit: Math.max(0, Number(body.delivery?.limit) || 0)
-        },
-        restaurant: {
-            referrerReward: Math.max(0, Number(body.restaurant?.referrerReward) || 0),
-            refereeReward: Math.max(0, Number(body.restaurant?.refereeReward) || 0),
-            limit: Math.max(0, Number(body.restaurant?.limit) || 0)
-        },
-        isActive: body.isActive !== false
+        user: normalizeReferralSection(body.user, existingObj.user),
+        delivery: normalizeReferralSection(body.delivery, existingObj.delivery),
+        restaurant: normalizeReferralSection(body.restaurant, existingObj.restaurant),
+        isActive: body.isActive !== undefined ? Boolean(body.isActive) : (existingObj.isActive !== false)
     };
 
     if (existing) {
         const updated = await FoodReferralSettings.findByIdAndUpdate(
-            existing._id, 
-            { $set: formattedData }, 
+            existing._id,
+            { $set: formattedData },
             { new: true }
         ).lean();
         return updated;
@@ -2182,112 +2466,269 @@ export async function getRestaurantAnalytics(restaurantId) {
     if (!restaurantId || !mongoose.Types.ObjectId.isValid(restaurantId)) return null;
     const rId = new mongoose.Types.ObjectId(restaurantId);
 
-    const [restaurant, orders, txRows] = await Promise.all([
+    const now = new Date();
+    const currentMonth = now.getMonth();
+    const currentYear = now.getFullYear();
+    const monthStart = new Date(currentYear, currentMonth, 1);
+    const nextMonthStart = new Date(currentYear, currentMonth + 1, 1);
+    const yearStart = new Date(currentYear, 0, 1);
+    const nextYearStart = new Date(currentYear + 1, 0, 1);
+
+    const [restaurant, orderStats, txStats] = await Promise.all([
         FoodRestaurant.findById(rId).lean(),
-        FoodOrder.find({ restaurantId: rId, orderType: 'food' }).lean(),
-        FoodTransaction.find({ restaurantId: rId })
-            .populate('orderId', 'orderStatus createdAt pricing')
-            .sort({ createdAt: -1 })
-            .lean(),
+        FoodOrder.aggregate([
+            { $match: { restaurantId: rId, orderType: 'food' } },
+            {
+                $facet: {
+                    counts: [
+                        {
+                            $group: {
+                                _id: null,
+                                totalOrders: { $sum: 1 },
+                                completedOrders: {
+                                    $sum: { $cond: [{ $eq: ['$orderStatus', 'delivered'] }, 1, 0] }
+                                },
+                                cancelledOrders: {
+                                    $sum: {
+                                        $cond: [
+                                            {
+                                                $in: [
+                                                    '$orderStatus',
+                                                    ['cancelled_by_user', 'cancelled_by_restaurant', 'cancelled_by_admin']
+                                                ]
+                                            },
+                                            1,
+                                            0
+                                        ]
+                                    }
+                                },
+                                monthlyOrders: {
+                                    $sum: {
+                                        $cond: [
+                                            {
+                                                $and: [
+                                                    { $gte: ['$createdAt', monthStart] },
+                                                    { $lt: ['$createdAt', nextMonthStart] }
+                                                ]
+                                            },
+                                            1,
+                                            0
+                                        ]
+                                    }
+                                },
+                                yearlyOrders: {
+                                    $sum: {
+                                        $cond: [
+                                            {
+                                                $and: [
+                                                    { $gte: ['$createdAt', yearStart] },
+                                                    { $lt: ['$createdAt', nextYearStart] }
+                                                ]
+                                            },
+                                            1,
+                                            0
+                                        ]
+                                    }
+                                }
+                            }
+                        }
+                    ],
+                    customers: [
+                        { $group: { _id: '$userId', orderCount: { $sum: 1 } } },
+                        {
+                            $group: {
+                                _id: null,
+                                totalCustomers: { $sum: 1 },
+                                repeatCustomers: {
+                                    $sum: { $cond: [{ $gt: ['$orderCount', 1] }, 1, 0] }
+                                }
+                            }
+                        }
+                    ]
+                }
+            }
+        ]),
+        FoodTransaction.aggregate([
+            { $match: { restaurantId: rId } },
+            {
+                $lookup: {
+                    from: 'food_orders',
+                    localField: 'orderId',
+                    foreignField: '_id',
+                    as: 'order'
+                }
+            },
+            { $unwind: { path: '$order', preserveNullAndEmptyArrays: true } },
+            {
+                $addFields: {
+                    effectiveDate: { $ifNull: ['$createdAt', '$order.createdAt'] },
+                    isCompleted: {
+                        $cond: [
+                            { $ne: [{ $ifNull: ['$order.orderStatus', null] }, null] },
+                            { $eq: ['$order.orderStatus', 'delivered'] },
+                            { $in: ['$status', ['captured', 'authorized', 'settled']] }
+                        ]
+                    }
+                }
+            },
+            { $match: { isCompleted: true } },
+            {
+                $facet: {
+                    lifetime: [
+                        {
+                            $group: {
+                                _id: null,
+                                completedTxCount: { $sum: 1 },
+                                totalRevenue: {
+                                    $sum: {
+                                        $ifNull: [
+                                            '$amounts.totalCustomerPaid',
+                                            { $ifNull: ['$pricing.total', { $ifNull: ['$order.pricing.total', 0] }] }
+                                        ]
+                                    }
+                                },
+                                restaurantEarning: { $sum: { $ifNull: ['$amounts.restaurantShare', 0] } },
+                                subtotal: {
+                                    $sum: {
+                                        $ifNull: ['$pricing.subtotal', { $ifNull: ['$order.pricing.subtotal', 0] }]
+                                    }
+                                },
+                                tax: {
+                                    $sum: {
+                                        $ifNull: [
+                                            '$pricing.tax',
+                                            { $ifNull: ['$amounts.taxAmount', { $ifNull: ['$order.pricing.tax', 0] }] }
+                                        ]
+                                    }
+                                },
+                                packagingFee: {
+                                    $sum: {
+                                        $ifNull: ['$pricing.packagingFee', { $ifNull: ['$order.pricing.packagingFee', 0] }]
+                                    }
+                                },
+                                deliveryFee: {
+                                    $sum: {
+                                        $ifNull: ['$pricing.deliveryFee', { $ifNull: ['$order.pricing.deliveryFee', 0] }]
+                                    }
+                                },
+                                platformFee: {
+                                    $sum: {
+                                        $ifNull: ['$pricing.platformFee', { $ifNull: ['$order.pricing.platformFee', 0] }]
+                                    }
+                                },
+                                discount: {
+                                    $sum: {
+                                        $ifNull: ['$pricing.discount', { $ifNull: ['$order.pricing.discount', 0] }]
+                                    }
+                                },
+                                riderShare: { $sum: { $ifNull: ['$amounts.riderShare', 0] } },
+                                platformNetProfit: { $sum: { $ifNull: ['$amounts.platformNetProfit', 0] } }
+                            }
+                        }
+                    ],
+                    monthly: [
+                        {
+                            $match: {
+                                effectiveDate: { $gte: monthStart, $lt: nextMonthStart }
+                            }
+                        },
+                        {
+                            $group: {
+                                _id: null,
+                                monthlyProfit: { $sum: { $ifNull: ['$amounts.restaurantShare', 0] } }
+                            }
+                        }
+                    ],
+                    yearly: [
+                        {
+                            $match: {
+                                effectiveDate: { $gte: yearStart, $lt: nextYearStart }
+                            }
+                        },
+                        {
+                            $group: {
+                                _id: null,
+                                yearlyProfit: { $sum: { $ifNull: ['$amounts.restaurantShare', 0] } }
+                            }
+                        }
+                    ]
+                }
+            }
+        ])
     ]);
 
     if (!restaurant) return null;
 
-    const now = new Date();
-    const currentMonth = now.getMonth();
-    const currentYear = now.getFullYear();
+    const orderFacet = orderStats?.[0] || {};
+    const orderCounts = orderFacet.counts?.[0] || {};
+    const customerStats = orderFacet.customers?.[0] || {};
 
-    const completedOrders = orders.filter(o => o.orderStatus === 'delivered');
-    const cancelledOrders = orders.filter(o => ['cancelled_by_user', 'cancelled_by_restaurant', 'cancelled_by_admin'].includes(o.orderStatus));
+    const txFacet = txStats?.[0] || {};
+    const lifetimeTx = txFacet.lifetime?.[0] || {};
+    const monthlyTx = txFacet.monthly?.[0] || {};
+    const yearlyTx = txFacet.yearly?.[0] || {};
 
-    // Money metrics should come from the ledger (FoodTransaction), not FoodOrder.
-    const completedTx = (txRows || []).filter((tx) => {
-        const orderStatus = tx?.orderId?.orderStatus;
-        if (orderStatus) return orderStatus === 'delivered';
-        return tx?.status === 'captured' || tx?.status === 'authorized' || tx?.status === 'settled';
-    });
+    const totalOrdersCount = Number(orderCounts.totalOrders || 0);
+    const completedOrders = Number(orderCounts.completedOrders || 0);
+    const cancelledOrders = Number(orderCounts.cancelledOrders || 0);
+    const monthlyOrders = Number(orderCounts.monthlyOrders || 0);
+    const yearlyOrders = Number(orderCounts.yearlyOrders || 0);
+    const totalCustomers = Number(customerStats.totalCustomers || 0);
+    const repeatCustomers = Number(customerStats.repeatCustomers || 0);
 
-    const sum = (arr, pick) => (arr || []).reduce((s, it) => s + (Number(pick(it)) || 0), 0);
-
-    // 1) Total order value (gross customer paid)
-    const totalRevenue = sum(completedTx, (tx) => tx?.amounts?.totalCustomerPaid ?? tx?.pricing?.total ?? tx?.orderId?.pricing?.total);
-
-    // 2) Restaurant share (payout to restaurant)
-    const restaurantEarning = sum(completedTx, (tx) => tx?.amounts?.restaurantShare);
-
-    // 3) Restaurant profit (in this system, equals restaurant share)
+    const completedTxCount = Number(lifetimeTx.completedTxCount || 0);
+    const totalRevenue = Number(lifetimeTx.totalRevenue || 0);
+    const restaurantEarning = Number(lifetimeTx.restaurantEarning || 0);
     const restaurantProfit = restaurantEarning;
+    const monthlyProfit = Number(monthlyTx.monthlyProfit || 0);
+    const yearlyProfit = Number(yearlyTx.yearlyProfit || 0);
 
-    const monthlyOrdersList = orders.filter(o => {
-        const d = new Date(o.createdAt);
-        return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
-    });
-    const monthlyCompletedTx = completedTx.filter((tx) => {
-        const d = new Date(tx?.createdAt || tx?.orderId?.createdAt || 0);
-        return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
-    });
-    const monthlyProfit = sum(monthlyCompletedTx, (tx) => tx?.amounts?.restaurantShare);
-
-    const yearlyOrdersList = orders.filter(o => {
-        const d = new Date(o.createdAt);
-        return d.getFullYear() === currentYear;
-    });
-    const yearlyCompletedTx = completedTx.filter((tx) => {
-        const d = new Date(tx?.createdAt || tx?.orderId?.createdAt || 0);
-        return d.getFullYear() === currentYear;
-    });
-    const yearlyProfit = sum(yearlyCompletedTx, (tx) => tx?.amounts?.restaurantShare);
-
-    const totalOrdersCount = orders.length;
-    const avgOrderValue = completedTx.length > 0 ? totalRevenue / completedTx.length : 0;
-
-    const uniqueCustomers = new Set(orders.map(o => String(o.userId))).size;
-    const customerOrderCounts = orders.reduce((acc, o) => {
-        const uid = String(o.userId);
-        acc[uid] = (acc[uid] || 0) + 1;
-        return acc;
-    }, {});
-    const repeatCustomers = Object.values(customerOrderCounts).filter(count => count > 1).length;
+    const joinDate = new Date(restaurant.createdAt || now);
+    const monthsSinceJoin = Math.max(
+        1,
+        (currentYear - joinDate.getFullYear()) * 12 + (currentMonth - joinDate.getMonth()) + 1
+    );
+    const yearsSinceJoin = Math.max(1, currentYear - joinDate.getFullYear() + 1);
+    const averageMonthlyProfit = restaurantProfit / monthsSinceJoin;
+    const averageYearlyProfit = restaurantProfit / yearsSinceJoin;
+    const avgOrderValue = completedTxCount > 0 ? totalRevenue / completedTxCount : 0;
 
     const analytics = {
         totalOrders: totalOrdersCount,
-        cancelledOrders: cancelledOrders.length,
-        completedOrders: completedOrders.length,
+        cancelledOrders,
+        completedOrders,
         averageRating: Number(restaurant.rating || 0),
         totalRatings: Number(restaurant.totalRatings || 0),
         monthlyProfit,
         yearlyProfit,
         averageOrderValue: avgOrderValue,
         totalRevenue,
-        restaurantEarning, // restaurant share
+        restaurantEarning,
         restaurantProfit,
-        monthlyOrders: monthlyOrdersList.length,
-        yearlyOrders: yearlyOrdersList.length,
-        averageMonthlyProfit: monthlyProfit, // Placeholder: can be improved if historical data exists
-        averageYearlyProfit: yearlyProfit,   // Placeholder: can be improved if historical data exists
+        monthlyOrders,
+        yearlyOrders,
+        averageMonthlyProfit,
+        averageYearlyProfit,
         status: restaurant.status === 'approved' ? 'active' : 'inactive',
         joinDate: restaurant.createdAt,
-        totalCustomers: uniqueCustomers,
+        totalCustomers,
         repeatCustomers,
-        cancellationRate: totalOrdersCount > 0 ? (cancelledOrders.length / totalOrdersCount) * 100 : 0,
-        completionRate: totalOrdersCount > 0 ? (completedOrders.length / totalOrdersCount) * 100 : 0
+        cancellationRate: totalOrdersCount > 0 ? (cancelledOrders / totalOrdersCount) * 100 : 0,
+        completionRate: totalOrdersCount > 0 ? (completedOrders / totalOrdersCount) * 100 : 0
     };
 
     const paymentSummary = {
-        // Pricing (what customer paid components)
-        subtotal: sum(completedTx, (tx) => tx?.pricing?.subtotal ?? tx?.orderId?.pricing?.subtotal),
-        tax: sum(completedTx, (tx) => tx?.pricing?.tax ?? tx?.amounts?.taxAmount ?? tx?.orderId?.pricing?.tax),
-        packagingFee: sum(completedTx, (tx) => tx?.pricing?.packagingFee ?? tx?.orderId?.pricing?.packagingFee),
-        deliveryFee: sum(completedTx, (tx) => tx?.pricing?.deliveryFee ?? tx?.orderId?.pricing?.deliveryFee),
-        platformFee: sum(completedTx, (tx) => tx?.pricing?.platformFee ?? tx?.orderId?.pricing?.platformFee),
-        discount: sum(completedTx, (tx) => tx?.pricing?.discount ?? tx?.orderId?.pricing?.discount),
+        subtotal: Number(lifetimeTx.subtotal || 0),
+        tax: Number(lifetimeTx.tax || 0),
+        packagingFee: Number(lifetimeTx.packagingFee || 0),
+        deliveryFee: Number(lifetimeTx.deliveryFee || 0),
+        platformFee: Number(lifetimeTx.platformFee || 0),
+        discount: Number(lifetimeTx.discount || 0),
         total: totalRevenue,
         currency: 'INR',
-
-        // Split (who got what)
         restaurantShare: restaurantEarning,
-        riderShare: sum(completedTx, (tx) => tx?.amounts?.riderShare),
-        platformNetProfit: sum(completedTx, (tx) => tx?.amounts?.platformNetProfit),
+        riderShare: Number(lifetimeTx.riderShare || 0),
+        platformNetProfit: Number(lifetimeTx.platformNetProfit || 0),
     };
 
     return { restaurant, analytics, paymentSummary };
@@ -2454,7 +2895,7 @@ export async function updateRestaurantStatus(id, body = {}) {
     const isActive = parseBooleanLike(raw, 'status');
     const status = isActive ? 'approved' : 'rejected';
 
-    return FoodRestaurant.findByIdAndUpdate(
+    const updated = await FoodRestaurant.findByIdAndUpdate(
         id,
         {
             $set: {
@@ -2466,6 +2907,8 @@ export async function updateRestaurantStatus(id, body = {}) {
         },
         { new: true, runValidators: false }
     ).lean();
+    if (updated) invalidateDashboardStatsCache();
+    return updated;
 }
 
 export async function toggleRestaurantListing(id, isListed) {
@@ -2648,11 +3091,15 @@ export async function getCategories(query) {
 export async function createCategory(body) {
     const name = typeof body.name === 'string' ? body.name.trim() : '';
     if (!name) throw new ValidationError('Category name is required');
+    const foodTypeScope = normalizeCategoryFoodTypeScope(body.foodTypeScope, '');
+    if (!foodTypeScope) {
+        throw new ValidationError('Category diet type must be Veg or Non-Veg');
+    }
     const doc = new FoodCategory({
         name,
         image: typeof body.image === 'string' ? body.image.trim() : '',
         type: typeof body.type === 'string' ? body.type.trim() : '',
-        foodTypeScope: normalizeCategoryFoodTypeScope(body.foodTypeScope, 'Both'),
+        foodTypeScope,
         zoneId:
             body.zoneId && String(body.zoneId).trim()
                 ? (() => {
@@ -2745,10 +3192,14 @@ export async function updateCategory(id, body) {
     const previousIsActive = doc.isActive !== false;
 
     const nextFoodTypeScope = body.foodTypeScope !== undefined
-        ? normalizeCategoryFoodTypeScope(body.foodTypeScope, doc.foodTypeScope || 'Both')
-        : normalizeCategoryFoodTypeScope(doc.foodTypeScope, 'Both');
+        ? normalizeCategoryFoodTypeScope(body.foodTypeScope, doc.foodTypeScope || 'Veg')
+        : normalizeCategoryFoodTypeScope(doc.foodTypeScope, 'Veg');
 
-    if (body.foodTypeScope !== undefined && nextFoodTypeScope !== 'Both') {
+    if (body.foodTypeScope !== undefined && !nextFoodTypeScope) {
+        throw new ValidationError('Category diet type must be Veg or Non-Veg');
+    }
+
+    if (body.foodTypeScope !== undefined) {
         const incompatibleFoods = await FoodItem.countDocuments({
             categoryId: doc._id,
             foodType: nextFoodTypeScope === 'Veg' ? 'Non-Veg' : 'Veg'
@@ -3439,6 +3890,7 @@ export async function approveRestaurant(id, performer = null) {
         } catch (e) {
             console.error('Failed to send opening-days approval notification:', e);
         }
+        invalidateDashboardStatsCache();
         return updated;
     }
 
@@ -3485,8 +3937,6 @@ export async function approveRestaurant(id, performer = null) {
                         },
                         { upsert: true }
                     );
-                    // Increment referrer count
-                    await FoodRestaurant.updateOne({ _id: referralLog.referrerId }, { $inc: { referralCount: 1 } });
                 }
 
                 // Credit Referee (Approved Restaurant)
@@ -3504,8 +3954,18 @@ export async function approveRestaurant(id, performer = null) {
                     );
                 }
 
-                // Update log to credited
-                await FoodReferralLog.updateOne({ _id: referralLog._id }, { $set: { status: 'credited' } });
+                // Count against limit for any successful credit (referrer and/or referee reward).
+                const marked = await FoodReferralLog.findOneAndUpdate(
+                    { _id: referralLog._id, status: 'pending' },
+                    { $set: { status: 'credited' } },
+                    { new: true }
+                );
+                if (marked) {
+                    await FoodRestaurant.updateOne(
+                        { _id: referralLog.referrerId },
+                        { $inc: { referralCount: 1 } }
+                    );
+                }
             }
         } catch (e) {
             console.error('Referral crediting failed on approval:', e);
@@ -3530,6 +3990,7 @@ export async function approveRestaurant(id, performer = null) {
             console.error('Failed to send restaurant approval notification:', e);
         }
     }
+    if (updated) invalidateDashboardStatsCache();
     return updated;
 }
 
@@ -3562,6 +4023,7 @@ export async function rejectRestaurant(id, reason, performer = null) {
         } catch (e) {
             console.error('Failed to send opening-days rejection notification:', e);
         }
+        invalidateDashboardStatsCache();
         return updated;
     }
 
@@ -3599,6 +4061,7 @@ export async function rejectRestaurant(id, reason, performer = null) {
             console.error('Failed to send restaurant rejection notification:', e);
         }
     }
+    if (updated) invalidateDashboardStatsCache();
     return updated;
 }
 
@@ -4716,44 +5179,31 @@ export async function approveDeliveryPartner(id, performer = null) {
         console.error('Failed to send delivery partner approval notification:', e);
     }
 
-    // Referral crediting: on approval, credit the referrer and referee partners' pocket balances via DeliveryBonusTransaction.
+    // Referral crediting: pending log first, wallet/bonus credit, then mark credited (retryable on later approval runs).
     try {
         const referrerId = partner.referredBy ? String(partner.referredBy) : '';
         if (referrerId && mongoose.Types.ObjectId.isValid(referrerId)) {
-            const already = await FoodReferralLog.findOne({ refereeId: partner._id, role: 'DELIVERY_PARTNER' }).lean();
-            if (!already) {
+            let log = await FoodReferralLog.findOne({ refereeId: partner._id, role: 'DELIVERY_PARTNER' });
+
+            if (!log) {
                 const settingsDoc = await FoodReferralSettings.findOne({ isActive: true }).sort({ createdAt: -1 }).lean();
-                
+
                 const referrerReward = Math.max(0, Number(settingsDoc?.delivery?.referrerReward) || 0);
                 const refereeReward = Math.max(0, Number(settingsDoc?.delivery?.refereeReward) || 0);
                 const limit = Math.max(0, Number(settingsDoc?.delivery?.limit) || 0);
-                
-                const referrer = await FoodDeliveryPartner.findById(referrerId).select('_id referralCount status').lean();
+
+                const referrer = await FoodDeliveryPartner.findById(referrerId).select('_id referralCount status name').lean();
 
                 if (referrer && referrer.status === 'approved' && (referrerReward > 0 || refereeReward > 0) && limit > 0 && Number(referrer.referralCount || 0) < limit) {
-                    const log = await FoodReferralLog.create({
+                    log = await FoodReferralLog.create({
                         referrerId: referrer._id,
                         refereeId: partner._id,
                         role: 'DELIVERY_PARTNER',
                         rewardAmount: referrerReward,
                         referrerRewardAmount: referrerReward,
                         refereeRewardAmount: refereeReward,
-                        status: 'credited'
+                        status: 'pending'
                     });
-
-                    await Promise.all([
-                        FoodDeliveryPartner.updateOne({ _id: referrer._id }, { $inc: { referralCount: 1 } }),
-                        // Credit Referrer
-                        referrerReward > 0 ? addDeliveryPartnerBonus(
-                            { deliveryPartnerId: String(referrer._id), amount: referrerReward, reference: `Referral bonus for referring ${partner.name || 'new partner'}` },
-                            null
-                        ) : Promise.resolve(),
-                        // Credit Referee (The approved partner)
-                        refereeReward > 0 ? addDeliveryPartnerBonus(
-                            { deliveryPartnerId: String(partner._id), amount: refereeReward, reference: `Sign-up referral bonus via ${referrer.name || 'existing partner'}` },
-                            null
-                        ) : Promise.resolve()
-                    ]);
                 } else {
                     await FoodReferralLog.create({
                         referrerId: new mongoose.Types.ObjectId(referrerId),
@@ -4765,12 +5215,62 @@ export async function approveDeliveryPartner(id, performer = null) {
                     });
                 }
             }
+
+            if (log?.status === 'pending') {
+                const referrerReward = Math.max(0, Number(log.referrerRewardAmount) || 0);
+                const refereeReward = Math.max(0, Number(log.refereeRewardAmount) || 0);
+                const referrerBonusRef = `referral_log:${String(log._id)}:referrer`;
+                const refereeBonusRef = `referral_log:${String(log._id)}:referee`;
+
+                const [existingReferrerBonus, existingRefereeBonus] = await Promise.all([
+                    referrerReward > 0
+                        ? DeliveryBonusTransaction.findOne({ reference: referrerBonusRef }).select('_id').lean()
+                        : Promise.resolve(null),
+                    refereeReward > 0
+                        ? DeliveryBonusTransaction.findOne({ reference: refereeBonusRef }).select('_id').lean()
+                        : Promise.resolve(null)
+                ]);
+
+                await Promise.all([
+                    referrerReward > 0 && !existingReferrerBonus
+                        ? addDeliveryPartnerBonus(
+                            {
+                                deliveryPartnerId: String(log.referrerId),
+                                amount: referrerReward,
+                                reference: referrerBonusRef
+                            },
+                            null
+                        )
+                        : Promise.resolve(),
+                    refereeReward > 0 && !existingRefereeBonus
+                        ? addDeliveryPartnerBonus(
+                            {
+                                deliveryPartnerId: String(partner._id),
+                                amount: refereeReward,
+                                reference: refereeBonusRef
+                            },
+                            null
+                        )
+                        : Promise.resolve()
+                ]);
+
+                // Atomic pending → credited so retries cannot double-increment referralCount.
+                const marked = await FoodReferralLog.findOneAndUpdate(
+                    { _id: log._id, status: 'pending' },
+                    { $set: { status: 'credited' } },
+                    { new: true }
+                );
+                if (marked) {
+                    await FoodDeliveryPartner.updateOne({ _id: log.referrerId }, { $inc: { referralCount: 1 } });
+                }
+            }
         }
     } catch (e) {
-        // Never fail approval due to referral errors.
+        // Never fail approval due to referral errors. Pending logs stay retryable.
         // eslint-disable-next-line no-console
         console.warn('Referral crediting failed (delivery approval):', e?.message || e);
     }
+    invalidateDashboardStatsCache();
     return partner.toObject();
 }
 
@@ -4811,6 +5311,7 @@ export async function rejectDeliveryPartner(id, reason, performer = null) {
             console.error('Failed to send delivery partner rejection notification:', e);
         }
     }
+    if (updated) invalidateDashboardStatsCache();
     return updated;
 }
 
@@ -4880,10 +5381,15 @@ export async function createZone(body) {
     const coordinates = Array.isArray(body.coordinates) ? body.coordinates : [];
     if (coordinates.length < 3) return { error: 'At least 3 coordinates (polygon points) are required' };
 
-    const normalized = coordinates.map((c) => ({
-        latitude: Number(c.latitude) || 0,
-        longitude: Number(c.longitude) || 0
-    }));
+    const normalized = [];
+    for (const c of coordinates) {
+        const latitude = Number(c?.latitude);
+        const longitude = Number(c?.longitude);
+        if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+            return { error: 'Each coordinate must have valid finite latitude and longitude values' };
+        }
+        normalized.push({ latitude, longitude });
+    }
 
     const country = (body.country && body.country.trim()) || 'India';
     const overlapResult = await assertNoZoneOverlap(FoodZone, normalized, { extraFilter: { country } });
@@ -4913,10 +5419,15 @@ export async function updateZone(id, body) {
     if (body.unit !== undefined) zone.unit = body.unit === 'miles' ? 'miles' : 'kilometer';
     if (body.isActive !== undefined) zone.isActive = body.isActive !== false;
     if (Array.isArray(body.coordinates) && body.coordinates.length >= 3) {
-        const normalizedCoords = body.coordinates.map((c) => ({
-            latitude: Number(c.latitude) || 0,
-            longitude: Number(c.longitude) || 0
-        }));
+        const normalizedCoords = [];
+        for (const c of body.coordinates) {
+            const latitude = Number(c?.latitude);
+            const longitude = Number(c?.longitude);
+            if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+                return { error: 'Each coordinate must have valid finite latitude and longitude values' };
+            }
+            normalizedCoords.push({ latitude, longitude });
+        }
         const overlapResult = await assertNoZoneOverlap(FoodZone, normalizedCoords, {
             excludeId: id,
             extraFilter: { country: zone.country },

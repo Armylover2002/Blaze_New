@@ -29,7 +29,7 @@ const defaultFormData = {
   status: true,
   type: "",
   zoneId: "global",
-  foodTypeScope: "Both",
+  foodTypeScope: "Veg",
 }
 
 const approvalBadgeClass = (status) => {
@@ -264,7 +264,7 @@ export default function Category() {
       status: category?.status !== false,
       type: category?.type || "",
       zoneId: zoneIdValue || "global",
-      foodTypeScope: category?.foodTypeScope || "Both",
+      foodTypeScope: category?.foodTypeScope || "Veg",
     })
     setSelectedImageFile(null)
     setImagePreview(category?.image || null)
@@ -398,7 +398,7 @@ export default function Category() {
       const tableData = filteredCategories.map((category, index) => [
         index + 1,
         category?.name || "N/A",
-        category?.foodTypeScope || "Both",
+        category?.foodTypeScope || "Veg",
         category?.isGlobal ? "Global" : "Private",
         zoneLabel(category?.zoneId),
         category?.approvalStatus || "pending",
@@ -624,7 +624,7 @@ export default function Category() {
                       </td>
                       <td className="px-4 py-5 text-center">
                         <span className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] font-semibold ${scopeBadgeClass(category?.foodTypeScope)}`}>
-                          {category?.foodTypeScope || "Both"}
+                          {category?.foodTypeScope || "Veg"}
                         </span>
                       </td>
                       <td className="px-4 py-5 text-center">
@@ -775,7 +775,6 @@ export default function Category() {
                           >
                             <option value="Veg">Veg</option>
                             <option value="Non-Veg">Non-Veg</option>
-                            <option value="Both">Both</option>
                           </select>
                         </div>
 

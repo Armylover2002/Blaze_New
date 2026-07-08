@@ -4,12 +4,15 @@ import { FoodUser } from '../../../../core/users/user.model.js';
 import { FoodRestaurant } from '../../restaurant/models/restaurant.model.js';
 import { FoodDeliveryPartner } from '../../delivery/models/deliveryPartner.model.js';
 import { Seller } from '../../../quick-commerce/seller/models/seller.model.js';
+import { SellerNotification } from '../../../quick-commerce/seller/models/sellerNotification.model.js';
 import { BroadcastNotification } from '../../../../core/notifications/models/notificationBroadcast.model.js';
 import { FoodNotification } from '../../../../core/notifications/models/notification.model.js';
 import { createInboxNotifications } from '../../../../core/notifications/notification.service.js';
-import { notifyOwnersSafely } from '../../../../core/notifications/firebase.service.js';
+import { notifyOwnersWithReport } from '../../../../core/notifications/firebase.service.js';
+import { filterTargetsByChannel } from './notificationChannel.service.js';
 import { FoodAdmin } from '../../../../core/admin/admin.model.js';
 import { getIO, rooms } from '../../../../config/socket.js';
+import { logger } from '../../../../utils/logger.js';
 
 const TARGET_TYPE_MAP = {
     ALL: 'ALL',
@@ -22,9 +25,12 @@ const TARGET_TYPE_MAP = {
 };
 
 const OWNER_LABEL_MAP = {
+    ALL: 'All (Food)',
+    ALL_QC: 'All (Quick Commerce)',
     USER: 'Users',
     RESTAURANT: 'Restaurants',
     SELLER: 'Sellers',
+    DELIVERY: 'Delivery Partners',
     DELIVERY_PARTNER: 'Delivery Partners'
 };
 
@@ -194,6 +200,43 @@ const buildNotificationPayload = ({ title, message, link, broadcastId, target })
     }
 });
 
+const upsertSellerInboxNotifications = async ({ targets = [], broadcast, title, message, link }) => {
+    const sellerTargets = (Array.isArray(targets) ? targets : []).filter((target) => target?.ownerType === 'SELLER');
+    if (!sellerTargets.length) return;
+
+    const broadcastId = String(broadcast?._id || '');
+    if (!broadcastId) return;
+
+    const operations = sellerTargets
+        .map((target) => String(target?.ownerId || '').trim())
+        .filter((sellerId) => mongoose.Types.ObjectId.isValid(sellerId))
+        .map((sellerId) => ({
+            updateOne: {
+                filter: {
+                    sellerId: new mongoose.Types.ObjectId(sellerId),
+                    key: `broadcast:${broadcastId}`
+                },
+                update: {
+                    $set: {
+                        type: 'system',
+                        title,
+                        message,
+                        metadata: {
+                            source: 'admin_broadcast',
+                            broadcastId,
+                            link: String(link || '').trim()
+                        }
+                    },
+                    $setOnInsert: { isRead: false }
+                },
+                upsert: true
+            }
+        }));
+
+    if (!operations.length) return;
+    await SellerNotification.bulkWrite(operations, { ordered: false });
+};
+
 const emitRealtimeNotifications = (targets = [], broadcast) => {
     const io = getIO();
     if (!io) return;
@@ -218,7 +261,7 @@ const emitRealtimeNotifications = (targets = [], broadcast) => {
             io.to(rooms.restaurant(ownerId)).emit('admin_notification', payload);
         }
         if (target.ownerType === 'SELLER') {
-            io.to(`seller_${ownerId}`).emit('admin_notification', payload); // Using generic seller room format if rooms.seller isn't available
+            io.to(rooms.seller(ownerId)).emit('admin_notification', payload);
         }
         if (target.ownerType === 'DELIVERY_PARTNER') {
             io.to(rooms.delivery(ownerId)).emit('admin_notification', payload);
@@ -269,39 +312,97 @@ export const createBroadcastNotification = async ({ body = {}, adminId } = {}) =
         targetCount: resolvedTargets.length
     });
 
-    await createInboxNotifications({
-        notifications: resolvedTargets.map((target) =>
-            buildNotificationPayload({
-                title,
-                message,
-                link,
-                broadcastId: broadcast._id,
-                target
-            })
-        )
+    // Respect Notification Channels setup (Push / In-App). Mail/SMS for broadcasts
+    // are persisted as preferences but not dispatched here until providers are wired.
+    const [inAppTargets, pushTargets] = await Promise.all([
+        filterTargetsByChannel({
+            targets: resolvedTargets,
+            topicKey: 'admin_broadcast',
+            channel: 'inApp'
+        }),
+        filterTargetsByChannel({
+            targets: resolvedTargets,
+            topicKey: 'admin_broadcast',
+            channel: 'push'
+        })
+    ]);
+
+    // FoodNotification inbox only supports USER / RESTAURANT / DELIVERY_PARTNER.
+    // Seller targets are persisted on the broadcast record and delivered via push/realtime;
+    // SellerNotification inbox wiring is handled separately.
+    const foodInboxTargets = inAppTargets.filter((target) => target.ownerType !== 'SELLER');
+    if (foodInboxTargets.length > 0) {
+        await createInboxNotifications({
+            notifications: foodInboxTargets.map((target) =>
+                buildNotificationPayload({
+                    title,
+                    message,
+                    link,
+                    broadcastId: broadcast._id,
+                    target
+                })
+            )
+        });
+    }
+    await upsertSellerInboxNotifications({
+        targets: inAppTargets,
+        broadcast,
+        title,
+        message,
+        link
     });
 
-    await notifyOwnersSafely(
-        resolvedTargets.map((target) => ({
-            ownerType: target.ownerType,
-            ownerId: target.ownerId
-        })),
-        {
-            title,
-            body: message,
-            data: {
-                type: 'admin_broadcast',
-                broadcastId: String(broadcast._id),
-                link
+    let pushDeliveryReport = {
+        summary: {
+            attemptedRecipients: 0,
+            recipientsWithSuccess: 0,
+            recipientsWithoutTokens: 0,
+            recipientsWithFailures: 0,
+            totalTokenAttempts: 0,
+            totalTokenSuccess: 0,
+            totalTokenFailures: 0
+        },
+        recipients: []
+    };
+    if (pushTargets.length > 0) {
+        pushDeliveryReport = await notifyOwnersWithReport(
+            pushTargets.map((target) => ({
+                ownerType: target.ownerType,
+                ownerId: target.ownerId
+            })),
+            {
+                title,
+                body: message,
+                data: {
+                    type: 'admin_broadcast',
+                    broadcastId: String(broadcast._id),
+                    link
+                }
             }
-        }
-    );
+        );
 
-    emitRealtimeNotifications(resolvedTargets, broadcast);
+        if (
+            pushDeliveryReport.summary.attemptedRecipients > 0 &&
+            pushDeliveryReport.summary.recipientsWithSuccess === 0
+        ) {
+            logger.error(
+                `Broadcast ${String(broadcast._id)} push delivery failed for all recipients (attempted=${pushDeliveryReport.summary.attemptedRecipients}, noTokens=${pushDeliveryReport.summary.recipientsWithoutTokens}, tokenFailures=${pushDeliveryReport.summary.totalTokenFailures})`
+            );
+        }
+    }
+
+    emitRealtimeNotifications(inAppTargets, broadcast);
 
     return {
         broadcast,
-        targetPreview: resolvedTargets.slice(0, 10)
+        targetPreview: resolvedTargets.slice(0, 10),
+        deliveryReport: {
+            inAppRecipients: inAppTargets.length,
+            push: pushDeliveryReport,
+            hasPushDeliveryFailure:
+                pushDeliveryReport.summary.attemptedRecipients > 0 &&
+                pushDeliveryReport.summary.recipientsWithSuccess === 0
+        }
     };
 };
 
@@ -343,10 +444,13 @@ export const deleteBroadcastNotification = async (broadcastId) => {
         throw new NotFoundError('Broadcast notification not found');
     }
 
-    const result = await FoodNotification.deleteMany({ broadcastId: normalizedId });
+    const [foodDeleteResult, sellerDeleteResult] = await Promise.all([
+        FoodNotification.deleteMany({ broadcastId: normalizedId }),
+        SellerNotification.deleteMany({ key: `broadcast:${String(normalizedId)}` })
+    ]);
 
     return {
         broadcast,
-        deletedInboxCount: Number(result?.deletedCount || 0)
+        deletedInboxCount: Number(foodDeleteResult?.deletedCount || 0) + Number(sellerDeleteResult?.deletedCount || 0)
     };
 };

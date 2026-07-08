@@ -1,18 +1,47 @@
-import { useState, useMemo } from "react"
-import { Search, Download, ChevronDown, Filter, UtensilsCrossed, Eye, ArrowUpDown, Info, Settings, FileText, FileSpreadsheet, Code } from "lucide-react"
-import { emptyDisbursementReportRestaurants, emptyDisbursementStats } from "@food/utils/adminFallbackData"
+import { useState, useMemo, useEffect } from "react"
+import { Search, Download, ChevronDown, Filter, UtensilsCrossed, Eye, ArrowUpDown, Info, Settings, FileText, FileSpreadsheet, Code, Loader2 } from "lucide-react"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@food/components/ui/dropdown-menu"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@food/components/ui/dialog"
 import { exportReportsToCSV, exportReportsToExcel, exportReportsToPDF, exportReportsToJSON } from "@food/components/admin/reports/reportsExportUtils"
+import { adminAPI } from "@food/api"
+import { toast } from "sonner"
 
 // Import icons from Transaction-report-icons
 import pendingIcon from "@food/assets/Transaction-report-icons/trx1.png"
 import completedIcon from "@food/assets/Transaction-report-icons/trx3.png"
 import canceledIcon from "@food/assets/Transaction-report-icons/trx5.png"
 
+// Withdrawal status (pending/approved/rejected) mapped to disbursement display labels.
+const STATUS_DISPLAY = { pending: "Pending", approved: "Completed", rejected: "Canceled" }
+
+const isInTimeRange = (rawDate, time) => {
+  if (time === "All Time") return true
+  if (!rawDate) return false
+  const d = new Date(rawDate)
+  if (Number.isNaN(d.getTime())) return false
+  const now = new Date()
+  switch (time) {
+    case "Today":
+      return d.toDateString() === now.toDateString()
+    case "This Week": {
+      const start = new Date(now)
+      start.setDate(now.getDate() - now.getDay())
+      start.setHours(0, 0, 0, 0)
+      return d >= start
+    }
+    case "This Month":
+      return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()
+    case "This Year":
+      return d.getFullYear() === now.getFullYear()
+    default:
+      return true
+  }
+}
+
 export default function DisbursementReportRestaurants() {
   const [searchQuery, setSearchQuery] = useState("")
-  const [disbursements, setDisbursements] = useState(emptyDisbursementReportRestaurants)
+  const [disbursements, setDisbursements] = useState([])
+  const [loading, setLoading] = useState(true)
   const [filters, setFilters] = useState({
     zone: "All Zones",
     restaurant: "All restaurants",
@@ -22,6 +51,58 @@ export default function DisbursementReportRestaurants() {
   })
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
+
+  useEffect(() => {
+    let active = true
+    const fetchDisbursements = async () => {
+      try {
+        setLoading(true)
+        const response = await adminAPI.getWithdrawals({ limit: 500 })
+        if (!active) return
+        if (response?.data?.success && response.data.data) {
+          const raw = response.data.data.requests || []
+          const mapped = raw.map((w, index) => ({
+            sl: index + 1,
+            id: String(w.transactionId || w.restaurantIdString || w._id || ""),
+            restaurantName: w.restaurantName || "N/A",
+            createdAt: w.createdAt ? new Date(w.createdAt).toLocaleString("en-IN") : "",
+            createdAtRaw: w.createdAt || null,
+            disburseAmount: `\u20B9${Number(w.amount || 0).toLocaleString("en-IN")}`,
+            paymentMethod: w.paymentMethod || "N/A",
+            status: STATUS_DISPLAY[String(w.status || "").toLowerCase()] || w.status || "",
+          }))
+          setDisbursements(mapped)
+        } else {
+          setDisbursements([])
+          if (response?.data?.message) toast.error(response.data.message)
+        }
+      } catch (error) {
+        if (!active) return
+        toast.error("Failed to fetch disbursement report")
+        setDisbursements([])
+      } finally {
+        if (active) setLoading(false)
+      }
+    }
+    fetchDisbursements()
+    return () => { active = false }
+  }, [])
+
+  const stats = useMemo(() => {
+    const s = { pending: 0, completed: 0, canceled: 0 }
+    disbursements.forEach((d) => {
+      const st = String(d.status).toLowerCase()
+      if (st === "pending") s.pending += 1
+      else if (st === "completed") s.completed += 1
+      else if (st === "canceled") s.canceled += 1
+    })
+    return s
+  }, [disbursements])
+
+  const restaurantOptions = useMemo(() => {
+    const names = new Set(disbursements.map((d) => d.restaurantName).filter((n) => n && n !== "N/A"))
+    return Array.from(names)
+  }, [disbursements])
 
   const filteredDisbursements = useMemo(() => {
     let result = [...disbursements]
@@ -48,6 +129,10 @@ export default function DisbursementReportRestaurants() {
 
     if (filters.status !== "All status") {
       result = result.filter(d => d.status.toLowerCase() === filters.status.toLowerCase())
+    }
+
+    if (filters.time !== "All Time") {
+      result = result.filter(d => isInTimeRange(d.createdAtRaw, filters.time))
     }
 
     return result
@@ -119,7 +204,7 @@ export default function DisbursementReportRestaurants() {
               <div className="w-16 h-16 rounded-full bg-green-500 flex items-center justify-center mb-4 relative">
                 <img src={pendingIcon} alt="Pending" className="w-10 h-10" />
               </div>
-              <p className="text-2xl font-bold text-green-600 mb-1">{emptyDisbursementStats.pending}</p>
+              <p className="text-2xl font-bold text-green-600 mb-1">{stats.pending}</p>
               <p className="text-sm text-slate-600">Pending Disbursements</p>
             </div>
           </div>
@@ -135,7 +220,7 @@ export default function DisbursementReportRestaurants() {
               <div className="w-16 h-16 rounded-full bg-red-500 flex items-center justify-center mb-4">
                 <img src={completedIcon} alt="Completed" className="w-10 h-10" />
               </div>
-              <p className="text-2xl font-bold text-slate-900 mb-1">{emptyDisbursementStats.completed}</p>
+              <p className="text-2xl font-bold text-slate-900 mb-1">{stats.completed}</p>
               <p className="text-sm text-slate-600">Completed Disbursements</p>
             </div>
           </div>
@@ -151,7 +236,7 @@ export default function DisbursementReportRestaurants() {
               <div className="w-16 h-16 rounded-full bg-red-500 flex items-center justify-center mb-4 relative">
                 <img src={canceledIcon} alt="Canceled" className="w-10 h-10" />
               </div>
-              <p className="text-2xl font-bold text-red-600 mb-1">{emptyDisbursementStats.canceled}</p>
+              <p className="text-2xl font-bold text-red-600 mb-1">{stats.canceled}</p>
               <p className="text-sm text-slate-600">Canceled Transactions</p>
             </div>
           </div>
@@ -190,8 +275,9 @@ export default function DisbursementReportRestaurants() {
                 >
                   <option value="All restaurants">All restaurants</option>
                   <option value="Caf� Monarch">Caf� Monarch</option>
-                  <option value="Hungry Puppets">Hungry Puppets</option>
-                  <option value="Redcliff Cafe">Redcliff Cafe</option>
+                  {restaurantOptions.map((name) => (
+                    <option key={name} value={name}>{name}</option>
+                  ))}
                 </select>
                 <ChevronDown className="absolute right-2 bottom-2.5 w-4 h-4 text-slate-500 pointer-events-none" />
               </div>
@@ -381,7 +467,16 @@ export default function DisbursementReportRestaurants() {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-slate-100">
-                {filteredDisbursements.length === 0 ? (
+                {loading ? (
+                  <tr>
+                    <td colSpan={8} className="px-6 py-20 text-center">
+                      <div className="flex flex-col items-center justify-center">
+                        <Loader2 className="w-10 h-10 text-blue-500 animate-spin mb-3" />
+                        <p className="text-sm text-slate-500">Loading disbursements...</p>
+                      </div>
+                    </td>
+                  </tr>
+                ) : filteredDisbursements.length === 0 ? (
                   <tr>
                     <td colSpan={8} className="px-6 py-20 text-center">
                       <div className="flex flex-col items-center justify-center">

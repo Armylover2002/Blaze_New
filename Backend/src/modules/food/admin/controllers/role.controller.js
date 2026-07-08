@@ -1,4 +1,5 @@
 import { AdminRole } from '../../../../core/admin/role.model.js';
+import { FoodAdmin } from '../../../../core/admin/admin.model.js';
 import { sendResponse, sendError } from '../../../../utils/response.js';
 import { invalidateRoleCache } from '../../../../core/auth/auth.middleware.js';
 
@@ -111,6 +112,39 @@ export const toggleRoleStatus = async (req, res) => {
         invalidateRoleCache(req.params.id);
 
         return sendResponse(res, 200, `Role ${role.status === 'active' ? 'activated' : 'deactivated'} successfully`, role);
+    } catch (error) {
+        return sendError(res, 500, error.message);
+    }
+};
+
+/**
+ * Delete a role (blocked for default roles and roles still assigned to employees)
+ */
+export const deleteRole = async (req, res) => {
+    try {
+        const roleId = req.params.id;
+        const role = await AdminRole.findById(roleId);
+        if (!role) return sendError(res, 404, 'Role not found');
+
+        if (role.isDefault) {
+            return sendError(res, 400, 'Cannot delete system default role');
+        }
+
+        const assignedCount = await FoodAdmin.countDocuments({
+            role: 'EMPLOYEE',
+            adminRoleId: roleId,
+        });
+        if (assignedCount > 0) {
+            return sendError(
+                res,
+                400,
+                `Cannot delete role assigned to ${assignedCount} employee${assignedCount === 1 ? '' : 's'}. Reassign them first.`
+            );
+        }
+
+        await role.deleteOne();
+        invalidateRoleCache(roleId);
+        return sendResponse(res, 200, 'Role deleted successfully', role);
     } catch (error) {
         return sendError(res, 500, error.message);
     }

@@ -8,6 +8,11 @@ import { ValidationError, NotFoundError } from '../../../../core/auth/errors.js'
 import dayjs from 'dayjs';
 import { logger } from '../../../../utils/logger.js';
 import { getCache, setCache } from '../../../../utils/cacheManager.js';
+import {
+    invalidateSubscriptionStatsCache,
+    SUBSCRIPTION_ANALYTICS_CACHE_KEY,
+    SUBSCRIPTION_OVERVIEW_CACHE_KEY
+} from '../utils/subscriptionStatsCache.js';
 
 /**
  * Maps our internal duration units to Razorpay periods.
@@ -51,6 +56,7 @@ export async function createPlan(data) {
         razorpayPlanId
     });
 
+    invalidateSubscriptionStatsCache();
     return plan;
 }
 
@@ -87,6 +93,7 @@ export async function updatePlan(id, updates) {
                 updatedAt: undefined
             });
 
+            invalidateSubscriptionStatsCache();
             return newPlan;
         } catch (err) {
             throw new Error(`Failed to version plan on Razorpay: ${err.message}`);
@@ -96,6 +103,7 @@ export async function updatePlan(id, updates) {
     // 📂 CASE 2: METADATA OR ONE-TIME UPDATE (Safe Mutation)
     Object.assign(oldPlan, updates);
     await oldPlan.save();
+    invalidateSubscriptionStatsCache();
     return oldPlan;
 }
 
@@ -118,6 +126,7 @@ export async function deletePlan(id) {
         { new: true }
     );
     if (!plan) throw new NotFoundError('Plan not found');
+    invalidateSubscriptionStatsCache();
     return plan;
 }
 
@@ -197,6 +206,15 @@ export async function processSubscriptionExpiry() {
         logger.info(`Subscription Lifecycle: Marked ${toExpired.modifiedCount} as EXPIRED`);
     }
 
+    const changed =
+        pendingCleanup.modifiedCount > 0 ||
+        cancelledToExpired.modifiedCount > 0 ||
+        toGrace.modifiedCount > 0 ||
+        toExpired.modifiedCount > 0;
+    if (changed) {
+        invalidateSubscriptionStatsCache();
+    }
+
     return { 
         toGrace: toGrace.modifiedCount, 
         toExpired: toExpired.modifiedCount + cancelledToExpired.modifiedCount 
@@ -204,7 +222,7 @@ export async function processSubscriptionExpiry() {
 }
 
 export async function getSubscriptionOverview() {
-    const cacheKey = 'subscription_overview_stats';
+    const cacheKey = SUBSCRIPTION_OVERVIEW_CACHE_KEY;
     const cached = getCache(cacheKey);
     if (cached) return cached;
 
@@ -607,7 +625,7 @@ export async function getSubscriptionHistory(query, res) {
 }
 
 export async function getSubscriptionAnalytics() {
-    const cacheKey = 'subscription_analytics_charts';
+    const cacheKey = SUBSCRIPTION_ANALYTICS_CACHE_KEY;
     const cached = getCache(cacheKey);
     if (cached) return cached;
 

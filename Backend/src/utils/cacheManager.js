@@ -37,3 +37,15 @@ export function setCache(key, value, ttlMs = 30000) {
 export function deleteCache(key) {
     cache.delete(key);
 }
+
+/**
+ * Clear all cache entries whose keys start with the given prefix.
+ * @param {string} prefix
+ */
+export function deleteCacheByPrefix(prefix) {
+    for (const key of cache.keys()) {
+        if (key.startsWith(prefix)) {
+            cache.delete(key);
+        }
+    }
+}

@@ -376,7 +376,14 @@ export const sendNotificationToOwner = async ({ ownerType, ownerId, payload, pla
 
     const tokens = await listOwnerTokens({ ownerType, ownerId, platform });
     if (!tokens.length) {
-        return { successCount: 0, failureCount: 0, results: [] };
+        return {
+            successCount: 0,
+            failureCount: 0,
+            results: [],
+            tokenCount: 0,
+            skipped: true,
+            reason: 'NO_TOKENS'
+        };
     }
     try {
         console.log(`[FCM] Sending to ${ownerType}:${ownerId}. Title: "${enrichedPayload.title || 'Data Only'}"`);
@@ -402,10 +409,20 @@ export const sendNotificationToOwner = async ({ ownerType, ownerId, payload, pla
         logger.info(
             `FCM push sent to ${ownerType}:${ownerId} (${platform || 'all'}). Success=${response.successCount}, Failure=${response.failureCount}`
         );
-        return response;
+        return {
+            ...response,
+            tokenCount: tokens.length,
+            skipped: false
+        };
     } catch (error) {
         logger.warn(`FCM push failed for ${ownerType}:${ownerId}: ${error.message}`);
-        return { successCount: 0, failureCount: tokens.length, error: error.message };
+        return {
+            successCount: 0,
+            failureCount: tokens.length,
+            tokenCount: tokens.length,
+            skipped: false,
+            error: error.message
+        };
     }
 };
 
@@ -428,6 +445,47 @@ export const sendNotificationToOwners = async (targets = [], payload = {}) => {
         );
     }
     return results;
+};
+
+export const notifyOwnersWithReport = async (targets = [], payload = {}) => {
+    const uniqueTargets = Array.isArray(targets)
+        ? [...new Map(targets.filter((t) => t?.ownerType && t?.ownerId).map((t) => [`${t.ownerType}:${t.ownerId}`, t])).values()]
+        : [];
+
+    const perRecipient = [];
+    for (const target of uniqueTargets) {
+        const result = await sendNotificationToOwner({
+            ownerType: target.ownerType,
+            ownerId: target.ownerId,
+            platform: target.platform,
+            payload
+        });
+        perRecipient.push({
+            ownerType: target.ownerType,
+            ownerId: String(target.ownerId),
+            tokenCount: Number(result?.tokenCount || 0),
+            successCount: Number(result?.successCount || 0),
+            failureCount: Number(result?.failureCount || 0),
+            skipped: Boolean(result?.skipped),
+            reason: result?.reason || null,
+            error: result?.error || null
+        });
+    }
+
+    const summary = {
+        attemptedRecipients: uniqueTargets.length,
+        recipientsWithSuccess: perRecipient.filter((row) => row.successCount > 0).length,
+        recipientsWithoutTokens: perRecipient.filter((row) => row.skipped && row.reason === 'NO_TOKENS').length,
+        recipientsWithFailures: perRecipient.filter((row) => row.failureCount > 0).length,
+        totalTokenAttempts: perRecipient.reduce((sum, row) => sum + row.tokenCount, 0),
+        totalTokenSuccess: perRecipient.reduce((sum, row) => sum + row.successCount, 0),
+        totalTokenFailures: perRecipient.reduce((sum, row) => sum + row.failureCount, 0)
+    };
+
+    return {
+        summary,
+        recipients: perRecipient
+    };
 };
 
 export const notifyAdminsSafely = async (payload = {}) => {

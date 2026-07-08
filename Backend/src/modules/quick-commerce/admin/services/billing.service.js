@@ -308,8 +308,16 @@ export async function calculateQuickPricing({ subtotal = 0, discount = 0, produc
   // handlingFee is tracked internally for seller/category analytics but NOT charged to customer
   const handlingFee = await calculateHandlingFeeFromProducts(products);
 
-  // Delivery fee from commission rules (= rider earning)
-  const deliveryFee = await getRiderEarning(distanceKm);
+  // Match checkout UI: free-delivery threshold, else rider commission, else flat deliveryFee.
+  const freeThreshold = Number(feeSettings.freeDeliveryThreshold || 0);
+  let deliveryFee = 0;
+  if (!(Number.isFinite(freeThreshold) && freeThreshold > 0 && safeSubtotal >= freeThreshold)) {
+    const riderBasedFee = await getRiderEarning(distanceKm);
+    deliveryFee =
+      Number.isFinite(riderBasedFee) && riderBasedFee > 0
+        ? riderBasedFee
+        : Number(feeSettings.deliveryFee || 0);
+  }
 
   const gstRate = Number(feeSettings.gstRate || 0);
   const gst =

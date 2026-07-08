@@ -31,6 +31,24 @@ export const creditReferralReward = async (userId, amountInr, metadata = {}) => 
         return { wallet: await getUserWallet(userId) };
     }
     const wallet = await ensureWallet(userId);
+    const referralLogId = metadata?.referralLogId ? String(metadata.referralLogId) : '';
+    const rewardType = metadata?.type ? String(metadata.type) : '';
+
+    // Idempotent retry: skip if this referral log side was already credited.
+    if (referralLogId && Array.isArray(wallet.transactions)) {
+        const alreadyCredited = wallet.transactions.some((tx) => {
+            const meta = tx?.metadata || {};
+            return (
+                String(meta.source || '') === 'referral_reward' &&
+                String(meta.referralLogId || '') === referralLogId &&
+                (!rewardType || String(meta.type || '') === rewardType)
+            );
+        });
+        if (alreadyCredited) {
+            return { wallet: await getUserWallet(userId) };
+        }
+    }
+
     wallet.transactions.unshift({
         type: 'addition',
         amount,

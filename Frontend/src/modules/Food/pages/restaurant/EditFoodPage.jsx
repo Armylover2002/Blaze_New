@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 import { motion, AnimatePresence } from "framer-motion"
 import Lenis from "lenis"
@@ -25,6 +25,11 @@ import { ImageSourcePicker } from "@food/components/ImageSourcePicker"
 import { isFlutterBridgeAvailable } from "@food/utils/imageUploadUtils"
 import { toast } from "sonner"
 import { compressImage } from "@/shared/utils/imageCompression"
+import {
+  canSelectNonVegFoodType,
+  categoryAcceptsFoodType,
+  filterCategoriesForRestaurant,
+} from "@food/utils/categoryDietScope"
 
 const defaultFormData = {
   name: "",
@@ -48,11 +53,11 @@ const defaultFormData = {
 }
 
 const fallbackCategoryOptions = [
-  { id: "fallback-varieties", name: "Varieties", foodTypeScope: "Both" },
-  { id: "fallback-appetizers", name: "Appetizers", foodTypeScope: "Both" },
-  { id: "fallback-main-course", name: "Main Course", foodTypeScope: "Both" },
-  { id: "fallback-desserts", name: "Desserts", foodTypeScope: "Both" },
-  { id: "fallback-beverages", name: "Beverages", foodTypeScope: "Both" },
+  { id: "fallback-varieties", name: "Varieties", foodTypeScope: "Veg" },
+  { id: "fallback-appetizers", name: "Appetizers", foodTypeScope: "Veg" },
+  { id: "fallback-main-course", name: "Main Course", foodTypeScope: "Veg" },
+  { id: "fallback-desserts", name: "Desserts", foodTypeScope: "Veg" },
+  { id: "fallback-beverages", name: "Beverages", foodTypeScope: "Veg" },
 ]
 
 const INACTIVE_CATEGORY_WARNING = "This category is currently inactive and is not available for use."
@@ -155,7 +160,7 @@ export default function EditFoodPage() {
           .map((category) => ({
             id: category?._id || category?.id,
             name: String(category?.name || "").trim(),
-            foodTypeScope: category?.foodTypeScope || "Both",
+            foodTypeScope: category?.foodTypeScope || "Veg",
             isGlobal: Boolean(category?.isGlobal),
           }))
           .filter((category) => category.id && category.name)
@@ -361,12 +366,13 @@ export default function EditFoodPage() {
   const categoryOptions = (() => {
     const currentCategory = String(formData.category || "").trim()
     const source = availableCategories.length > 0 ? availableCategories : fallbackCategoryOptions
-    if (!currentCategory) return source
+    const filteredSource = filterCategoriesForRestaurant(source, { pureVegRestaurant: isPureVegRestaurant })
+    if (!currentCategory) return filteredSource
 
-    const alreadyPresent = source.some(
+    const alreadyPresent = filteredSource.some(
       (category) => String(category?.id || "").trim() === currentCategory,
     )
-    if (alreadyPresent) return source
+    if (alreadyPresent) return filteredSource
 
     const matchedSection = Array.isArray(menuSections)
       ? menuSections.find((section) => String(section?.categoryId || section?.id || "") === currentCategory)
@@ -376,11 +382,29 @@ export default function EditFoodPage() {
       {
         id: currentCategory,
         name: matchedSection?.name || currentCategory,
-        foodTypeScope: "Both",
+        foodTypeScope: "Veg",
       },
-      ...source,
+      ...filteredSource,
     ]
   })()
+
+  const selectedCategoryOption = useMemo(
+    () => categoryOptions.find(
+      (category) => String(category?.id || "").trim() === String(formData.category || "").trim(),
+    ),
+    [categoryOptions, formData.category],
+  )
+
+  const showNonVegFoodType = canSelectNonVegFoodType({
+    pureVegRestaurant: isPureVegRestaurant,
+    categoryFoodTypeScope: selectedCategoryOption?.foodTypeScope,
+  })
+
+  useEffect(() => {
+    if (!showNonVegFoodType && formData.foodType !== "Veg") {
+      setFormData((prev) => ({ ...prev, foodType: "Veg" }))
+    }
+  }, [showNonVegFoodType, formData.foodType])
 
   const handleImageUpload = async (field, file) => {
     if (file) {
@@ -479,11 +503,7 @@ export default function EditFoodPage() {
       return
     }
 
-    if (
-      matchedCategory?.foodTypeScope &&
-      matchedCategory.foodTypeScope !== "Both" &&
-      matchedCategory.foodTypeScope !== foodDataToSave.foodType
-    ) {
+    if (!categoryAcceptsFoodType(matchedCategory?.foodTypeScope, foodDataToSave.foodType)) {
       toast.error(`This ${matchedCategory.foodTypeScope} category cannot accept ${foodDataToSave.foodType} food`)
       return
     }
@@ -633,7 +653,22 @@ export default function EditFoodPage() {
                   </label>
                   <select
                     value={formData.category}
-                    onChange={(e) => handleInputChange("category", e.target.value)}
+                    onChange={(e) => {
+                      const nextCategoryId = e.target.value
+                      const nextCategory = categoryOptions.find(
+                        (category) => String(category?.id || "").trim() === String(nextCategoryId || "").trim(),
+                      )
+                      setFormData((prev) => ({
+                        ...prev,
+                        category: nextCategoryId,
+                        foodType: canSelectNonVegFoodType({
+                          pureVegRestaurant: isPureVegRestaurant,
+                          categoryFoodTypeScope: nextCategory?.foodTypeScope,
+                        })
+                          ? prev.foodType
+                          : "Veg",
+                      }))
+                    }}
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#ff8100] focus:border-transparent outline-none"
                   >
                     {categoryOptions.map((category) => (
@@ -666,7 +701,7 @@ export default function EditFoodPage() {
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#ff8100] focus:border-transparent outline-none"
                   >
                     <option value="Veg">Veg</option>
-                    {!isPureVegRestaurant && <option value="Non-Veg">Non-Veg</option>}
+                    {showNonVegFoodType && <option value="Non-Veg">Non-Veg</option>}
                   </select>
                 </div>
               </div>

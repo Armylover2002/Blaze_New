@@ -2196,68 +2196,84 @@ export async function createOrder(userId, dto) {
           ? "single"
           : "split";
 
-  // Ensure pricing is present and consistent.
-  const computedSubtotal = items.reduce((sum, item) => {
-    const price = Number(item?.price);
-    const qty = Number(item?.quantity);
-    if (!Number.isFinite(price) || !Number.isFinite(qty)) return sum;
-    return sum + Math.max(0, price) * Math.max(0, qty);
-  }, 0);
-  const commissionPercentage = primaryRestaurant ? Number(primaryRestaurant.commissionPercentage || 0) : 0;
-  const restaurantCommission = Math.round(computedSubtotal * (commissionPercentage / 100) * 100) / 100;
+  // Server-authoritative pricing from active fee settings (never trust client fee amounts).
+  const couponCodeFromClient = dto.pricing?.couponCode
+    ? String(dto.pricing.couponCode).trim().toUpperCase()
+    : "";
+  const { pricing: serverPricing } = await calculateOrder(userId, {
+    orderType,
+    items: dto.items,
+    address: dto.address,
+    restaurantId: dto.restaurantId || primaryRestaurantId || undefined,
+    zoneId: dto.zoneId,
+    couponCode: couponCodeFromClient,
+    deliveryFleet: requestedDeliveryFleet,
+  });
 
+  let resolvedDeliveryFee = Math.max(0, Number(serverPricing.deliveryFee || 0));
+  let resolvedTotal = Math.max(0, Number(serverPricing.total || 0));
+  if (
+    orderType === "mixed" &&
+    requestedDeliveryFleet === "express" &&
+    Array.isArray(serverPricing.deliveryOptions)
+  ) {
+    const expressOption = serverPricing.deliveryOptions.find(
+      (option) => option?.code === "express",
+    );
+    if (expressOption) {
+      resolvedDeliveryFee = Math.max(0, Number(expressOption.deliveryFee || 0));
+      resolvedTotal = Math.max(0, Number(expressOption.total || 0));
+    }
+  }
+
+  const commissionPercentage = primaryRestaurant
+    ? Number(primaryRestaurant.commissionPercentage || 0)
+    : 0;
+  const commissionBase = Math.max(0, Number(serverPricing.subtotal || 0));
+  const restaurantCommission =
+    Math.round(commissionBase * (commissionPercentage / 100) * 100) / 100;
+
+  const useExpressMixedFees =
+    orderType === "mixed" && requestedDeliveryFleet === "express";
   const normalizedPricing = {
-    subtotal: Number(dto.pricing?.subtotal ?? computedSubtotal),
-    tax: Number(dto.pricing?.tax ?? 0),
-    packagingFee: Number(dto.pricing?.packagingFee ?? 0),
-    deliveryFee: Number(dto.pricing?.deliveryFee ?? 0),
-    totalDeliveryFee: Number(
-      dto.pricing?.totalDeliveryFee ?? dto.pricing?.deliveryFee ?? 0,
+    subtotal: Math.max(0, Number(serverPricing.subtotal || 0)),
+    tax: Math.max(0, Number(serverPricing.tax || 0)),
+    packagingFee: Math.max(0, Number(serverPricing.packagingFee || 0)),
+    deliveryFee: resolvedDeliveryFee,
+    totalDeliveryFee: useExpressMixedFees
+      ? resolvedDeliveryFee
+      : Math.max(
+          0,
+          Number(serverPricing.totalDeliveryFee ?? resolvedDeliveryFee),
+        ),
+    userDeliveryFee: useExpressMixedFees
+      ? resolvedDeliveryFee
+      : Math.max(
+          0,
+          Number(serverPricing.userDeliveryFee ?? resolvedDeliveryFee),
+        ),
+    restaurantDeliveryFee: Math.max(
+      0,
+      Number(serverPricing.restaurantDeliveryFee || 0),
     ),
-    userDeliveryFee: Number(
-      dto.pricing?.userDeliveryFee ?? dto.pricing?.deliveryFee ?? 0,
-    ),
-    restaurantDeliveryFee: Number(dto.pricing?.restaurantDeliveryFee ?? 0),
-    sponsoredDelivery: Boolean(dto.pricing?.sponsoredDelivery),
-    sponsoredKm: Number(dto.pricing?.sponsoredKm ?? 0),
+    sponsoredDelivery: Boolean(serverPricing.sponsoredDelivery),
+    sponsoredKm: Math.max(0, Number(serverPricing.sponsoredKm || 0)),
     deliveryDistanceKm:
-      dto.pricing?.deliveryDistanceKm == null
+      serverPricing.deliveryDistanceKm == null
         ? null
-        : Number(dto.pricing.deliveryDistanceKm),
+        : Number(serverPricing.deliveryDistanceKm),
     deliverySponsorType: String(
-      dto.pricing?.deliverySponsorType ||
-        (Number(dto.pricing?.restaurantDeliveryFee || 0) > 0 ? "RESTAURANT_FULL" : "USER_FULL"),
+      serverPricing.deliverySponsorType || "USER_FULL",
     ),
-    platformFee: Number(dto.pricing?.platformFee ?? 0),
-    discount: Number(dto.pricing?.discount ?? 0),
-    restaurantCommissionPercentage: Number(dto.pricing?.restaurantCommissionPercentage ?? commissionPercentage),
-    restaurantCommission: Number(dto.pricing?.restaurantCommission ?? restaurantCommission),
-    total: Number(dto.pricing?.total ?? 0),
-    currency: String(dto.pricing?.currency || "INR"),
+    platformFee: Math.max(0, Number(serverPricing.platformFee || 0)),
+    discount: Math.max(0, Number(serverPricing.discount || 0)),
+    restaurantCommissionPercentage: commissionPercentage,
+    restaurantCommission,
+    total: resolvedTotal,
+    currency: String(serverPricing.currency || "INR"),
+    couponCode: serverPricing.couponCode || couponCodeFromClient || null,
+    appliedCoupon: serverPricing.appliedCoupon || undefined,
   };
-  normalizedPricing.totalDeliveryFee = Math.max(0, normalizedPricing.totalDeliveryFee);
-  normalizedPricing.userDeliveryFee = Math.max(
-    0,
-    Number.isFinite(normalizedPricing.userDeliveryFee)
-      ? normalizedPricing.userDeliveryFee
-      : normalizedPricing.deliveryFee,
-  );
-  normalizedPricing.restaurantDeliveryFee = Math.max(
-    0,
-    Number.isFinite(normalizedPricing.restaurantDeliveryFee)
-      ? normalizedPricing.restaurantDeliveryFee
-      : 0,
-  );
-  normalizedPricing.sponsoredKm = Math.max(
-    0,
-    Number.isFinite(normalizedPricing.sponsoredKm) ? normalizedPricing.sponsoredKm : 0,
-  );
-  normalizedPricing.deliveryFee = Math.max(
-    0,
-    Number.isFinite(normalizedPricing.deliveryFee)
-      ? normalizedPricing.deliveryFee
-      : normalizedPricing.userDeliveryFee,
-  );
   if (normalizedPricing.totalDeliveryFee < normalizedPricing.deliveryFee) {
     normalizedPricing.totalDeliveryFee = normalizedPricing.deliveryFee;
   }
@@ -2271,32 +2287,19 @@ export async function createOrder(userId, dto) {
     );
   }
   normalizedPricing.sponsoredDelivery =
-    Boolean(dto.pricing?.sponsoredDelivery) ||
+    Boolean(normalizedPricing.sponsoredDelivery) ||
     normalizedPricing.restaurantDeliveryFee > 0;
-  const computedTotal = Math.max(
+  const recomputedTotal = Math.max(
     0,
-    (Number.isFinite(normalizedPricing.subtotal)
-      ? normalizedPricing.subtotal
-      : 0) +
-      (Number.isFinite(normalizedPricing.tax) ? normalizedPricing.tax : 0) +
-      (Number.isFinite(normalizedPricing.packagingFee)
-        ? normalizedPricing.packagingFee
-        : 0) +
-      (Number.isFinite(normalizedPricing.deliveryFee)
-        ? normalizedPricing.deliveryFee
-        : 0) +
-      (Number.isFinite(normalizedPricing.platformFee)
-        ? normalizedPricing.platformFee
-        : 0) -
-      (Number.isFinite(normalizedPricing.discount)
-        ? normalizedPricing.discount
-        : 0),
+    normalizedPricing.subtotal +
+      normalizedPricing.tax +
+      normalizedPricing.packagingFee +
+      normalizedPricing.deliveryFee +
+      normalizedPricing.platformFee -
+      normalizedPricing.discount,
   );
-  if (
-    !Number.isFinite(normalizedPricing.total) ||
-    normalizedPricing.total <= 0
-  ) {
-    normalizedPricing.total = computedTotal;
+  if (!Number.isFinite(normalizedPricing.total) || normalizedPricing.total <= 0) {
+    normalizedPricing.total = recomputedTotal;
   }
 
   const payment = {
@@ -2548,8 +2551,8 @@ export async function createOrder(userId, dto) {
   } catch {
     // Don't block order placement on socket failures.
   }
-  const couponCode = dto.pricing?.couponCode
-    ? String(dto.pricing.couponCode).trim().toUpperCase()
+  const couponCode = normalizedPricing.couponCode
+    ? String(normalizedPricing.couponCode).trim().toUpperCase()
     : "";
   if ((orderType === "food" || orderType === "mixed") && couponCode) {
     const offer = await FoodOffer.findOne({ couponCode }).lean();
@@ -4529,8 +4532,22 @@ export async function getPaymentStatus(orderId, deliveryPartnerId) {
 }
 
 // ----- Admin -----
-export async function listOrdersAdmin(query) {
-  const { page, limit, skip } = buildPaginationOptions(query);
+const EMPTY_ORDER_REPORT_STATUS_SUMMARY = {
+  total: 0,
+  Scheduled: 0,
+  Pending: 0,
+  Accepted: 0,
+  Processing: 0,
+  "Food On The Way": 0,
+  Delivered: 0,
+  Canceled: 0,
+  "Payment Failed": 0,
+  Refunded: 0,
+};
+
+const isTruthyQueryFlag = (value) => value === true || value === "true" || value === "1";
+
+async function buildListOrdersAdminFilter(query = {}) {
   const filter = {
     orderType: { $in: ["food", "mixed"] },
     $or: [
@@ -4539,7 +4556,6 @@ export async function listOrdersAdmin(query) {
     ],
   };
 
-  // Extract raw query params
   const rawStatus = typeof query.status === "string" ? query.status.trim().toLowerCase() : "";
   const cancelledBy = typeof query.cancelledBy === "string" ? query.cancelledBy.trim().toLowerCase() : "";
   const restaurantIdRaw = typeof query.restaurantId === "string" ? query.restaurantId.trim() : "";
@@ -4599,7 +4615,6 @@ export async function listOrdersAdmin(query) {
     }
   }
 
-  // ID based filters
   if (restaurantIdRaw && mongoose.Types.ObjectId.isValid(restaurantIdRaw)) {
     filter.restaurantId = new mongoose.Types.ObjectId(restaurantIdRaw);
   }
@@ -4610,7 +4625,6 @@ export async function listOrdersAdmin(query) {
     filter.userId = new mongoose.Types.ObjectId(userIdRaw);
   }
 
-  // Date filters
   if (startDateRaw || endDateRaw) {
     const createdAt = {};
     const start = startDateRaw ? new Date(startDateRaw) : null;
@@ -4619,7 +4633,6 @@ export async function listOrdersAdmin(query) {
       createdAt.$gte = start;
     }
     if (end && !Number.isNaN(end.getTime())) {
-      // Set to end of day
       end.setHours(23, 59, 59, 999);
       createdAt.$lte = end;
     }
@@ -4628,41 +4641,77 @@ export async function listOrdersAdmin(query) {
     }
   }
 
-  // Search logic
   if (search) {
-    // Search by Order ID (exact or partial regex)
-    const searchConditions = [
-      { orderId: { $regex: search, $options: "i" } }
-    ];
-
-    // If search looks like a name, we need to find matching users and restaurants first
+    const searchConditions = [{ orderId: { $regex: search, $options: "i" } }];
     const [matchingUsers, matchingRestaurants] = await Promise.all([
-      FoodUser.find({ name: { $regex: search, $options: "i" } }).select('_id').lean(),
-      FoodRestaurant.find({ restaurantName: { $regex: search, $options: "i" } }).select('_id').lean()
+      FoodUser.find({ name: { $regex: search, $options: "i" } }).select("_id").lean(),
+      FoodRestaurant.find({ restaurantName: { $regex: search, $options: "i" } }).select("_id").lean(),
     ]);
 
     if (matchingUsers.length > 0) {
-      searchConditions.push({ userId: { $in: matchingUsers.map(u => u._id) } });
+      searchConditions.push({ userId: { $in: matchingUsers.map((u) => u._id) } });
     }
     if (matchingRestaurants.length > 0) {
-      searchConditions.push({ restaurantId: { $in: matchingRestaurants.map(r => r._id) } });
+      searchConditions.push({ restaurantId: { $in: matchingRestaurants.map((r) => r._id) } });
     }
 
-    // Combine base filter with search conditions
-    // We use $and to ensure both the visibility/status filters AND the search conditions are met
     const originalFilter = { ...filter };
-    delete filter.$or; // We'll reconstruct it
-
-    filter.$and = [
-      { $or: originalFilter.$or }, // Visibility filters
-      { $or: searchConditions }   // Search conditions
-    ];
-    
-    // Copy other specific filters into $and if needed, but since they are already in `filter` object, 
-    // we should be careful. Actually, it's better to just keep them as they are and let Mongo handle it.
+    delete filter.$or;
+    filter.$and = [{ $or: originalFilter.$or }, { $or: searchConditions }];
   }
 
-  const [docs, total] = await Promise.all([
+  return filter;
+}
+
+async function aggregateListOrdersAdminStatusSummary(filter) {
+  const rows = await FoodOrder.aggregate([
+    { $match: filter },
+    {
+      $addFields: {
+        displayStatus: {
+          $switch: {
+            branches: [
+              { case: { $in: ["$orderStatus", [null, "", "created", "confirmed"]] }, then: "Pending" },
+              { case: { $in: ["$orderStatus", ["preparing", "ready_for_pickup"]] }, then: "Processing" },
+              { case: { $eq: ["$orderStatus", "picked_up"] }, then: "Food On The Way" },
+              { case: { $eq: ["$orderStatus", "delivered"] }, then: "Delivered" },
+              { case: { $eq: ["$orderStatus", "cancelled_by_restaurant"] }, then: "Canceled" },
+              {
+                case: { $in: ["$orderStatus", ["cancelled_by_user", "cancelled_by_admin"]] },
+                then: "Canceled",
+              },
+            ],
+            default: { $ifNull: ["$orderStatus", "Pending"] },
+          },
+        },
+      },
+    },
+    { $group: { _id: "$displayStatus", count: { $sum: 1 } } },
+  ]);
+
+  const summary = { ...EMPTY_ORDER_REPORT_STATUS_SUMMARY };
+  let total = 0;
+  for (const row of rows) {
+    const count = Number(row.count || 0);
+    total += count;
+    if (Object.prototype.hasOwnProperty.call(summary, row._id)) {
+      summary[row._id] += count;
+    }
+  }
+  summary.total = total;
+  return summary;
+}
+
+export async function listOrdersAdmin(query) {
+  const includeStatusSummary = isTruthyQueryFlag(query?.includeStatusSummary);
+  const maxLimit = includeStatusSummary ? 500 : 100;
+  const page = Math.max(parseInt(query.page, 10) || 1, 1);
+  const limit = Math.min(Math.max(parseInt(query.limit, 10) || 20, 1), maxLimit);
+  const skip = (page - 1) * limit;
+
+  const filter = await buildListOrdersAdminFilter(query);
+
+  const [docs, total, statusSummary] = await Promise.all([
     FoodOrder.find(filter)
       .populate("userId", "name phone email")
       .populate("restaurantId", "restaurantName area city ownerPhone")
@@ -4672,10 +4721,15 @@ export async function listOrdersAdmin(query) {
       .limit(limit)
       .lean(),
     FoodOrder.countDocuments(filter),
+    includeStatusSummary ? aggregateListOrdersAdminStatusSummary(filter) : Promise.resolve(null),
   ]);
 
   const paginated = buildPaginatedResult({ docs, total, page, limit });
-  return { ...paginated, orders: paginated.data };
+  return {
+    ...paginated,
+    orders: paginated.data,
+    ...(statusSummary ? { statusSummary } : {}),
+  };
 }
 
 export async function assignDeliveryPartnerAdmin(

@@ -6,7 +6,7 @@ const referralLogSchema = new mongoose.Schema(
         refereeId: { type: mongoose.Schema.Types.ObjectId, required: true, index: true },
         role: {
             type: String,
-            enum: ['USER', 'DELIVERY_PARTNER'],
+            enum: ['USER', 'DELIVERY_PARTNER', 'RESTAURANT'],
             required: true,
             index: true
         },

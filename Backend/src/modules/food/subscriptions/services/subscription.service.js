@@ -5,6 +5,7 @@ import { ValidationError, NotFoundError } from '../../../../core/auth/errors.js'
 import mongoose from 'mongoose';
 import dayjs from 'dayjs';
 import crypto from 'crypto';
+import { invalidateSubscriptionStatsCache } from '../../admin/utils/subscriptionStatsCache.js';
 
 export async function initiatePurchase(userId, userType, { planId }) {
     const plan = await SubscriptionPlan.findOne({ _id: planId, isDeleted: false, isActive: true });
@@ -281,6 +282,7 @@ export async function verifyPurchase(userId, userType, data) {
                 );
             }
         }
+        invalidateSubscriptionStatsCache();
     }
 
     return { verified: true };

@@ -1,19 +1,85 @@
-import { useState, useMemo } from "react"
-import { Search, Download, ChevronDown, Filter, Calendar, ClipboardList, IndianRupee, FileText, AlertCircle, Settings, FileSpreadsheet, Code } from "lucide-react"
-import { emptyRestaurantVATReports, emptyRestaurantVATStats } from "@food/utils/adminFallbackData"
+import { useState, useMemo, useEffect } from "react"
+import { Search, Download, ChevronDown, Filter, Calendar, ClipboardList, IndianRupee, FileText, AlertCircle, Settings, FileSpreadsheet, Code, Loader2 } from "lucide-react"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@food/components/ui/dropdown-menu"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@food/components/ui/dialog"
 import { exportReportsToCSV, exportReportsToExcel, exportReportsToPDF, exportReportsToJSON } from "@food/components/admin/reports/reportsExportUtils"
+import { adminAPI } from "@food/api"
+import { toast } from "sonner"
+
+const EMPTY_VAT_STATS = { totalOrders: 0, totalOrderAmount: "\u20B90.00", totalTaxAmount: "\u20B90.00" }
+
+const parseDateRange = (value) => {
+  if (!value || typeof value !== "string") return { fromDate: undefined, toDate: undefined }
+  const parts = value.split("-").map((p) => p.trim())
+  if (parts.length !== 2) return { fromDate: undefined, toDate: undefined }
+  const from = new Date(parts[0])
+  const to = new Date(parts[1])
+  if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) {
+    return { fromDate: undefined, toDate: undefined }
+  }
+  to.setHours(23, 59, 59, 999)
+  return { fromDate: from.toISOString(), toDate: to.toISOString() }
+}
 
 export default function RestaurantVATReport() {
   const [searchQuery, setSearchQuery] = useState("")
-  const [reports, setReports] = useState(emptyRestaurantVATReports)
+  const [reports, setReports] = useState([])
+  const [stats, setStats] = useState(EMPTY_VAT_STATS)
+  const [loading, setLoading] = useState(true)
   const [filters, setFilters] = useState({
     dateRange: "",
     restaurant: "All Restaurants",
   })
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
+
+  useEffect(() => {
+    let active = true
+    const fetchVATReport = async () => {
+      try {
+        setLoading(true)
+        const { fromDate, toDate } = parseDateRange(filters.dateRange)
+        const response = await adminAPI.getTaxReport({ fromDate, toDate, limit: 1000 })
+        if (!active) return
+        if (response?.data?.success && response.data.data) {
+          const rawReports = response.data.data.reports || []
+          const mapped = rawReports.map((r, index) => ({
+            sl: index + 1,
+            id: r.id,
+            restaurantName: r.incomeSource,
+            totalOrder: r.orderCount,
+            totalOrderAmount: r.totalIncome,
+            taxAmount: r.totalTax,
+          }))
+          setReports(mapped)
+          const totalOrders = rawReports.reduce((sum, r) => sum + Number(r.orderCount || 0), 0)
+          setStats({
+            totalOrders,
+            totalOrderAmount: response.data.data.stats?.totalIncome || EMPTY_VAT_STATS.totalOrderAmount,
+            totalTaxAmount: response.data.data.stats?.totalTax || EMPTY_VAT_STATS.totalTaxAmount,
+          })
+        } else {
+          setReports([])
+          setStats(EMPTY_VAT_STATS)
+          if (response?.data?.message) toast.error(response.data.message)
+        }
+      } catch (error) {
+        if (!active) return
+        toast.error("Failed to fetch VAT report")
+        setReports([])
+        setStats(EMPTY_VAT_STATS)
+      } finally {
+        if (active) setLoading(false)
+      }
+    }
+    fetchVATReport()
+    return () => { active = false }
+  }, [filters.dateRange])
+
+  const restaurantOptions = useMemo(() => {
+    const names = new Set(reports.map((r) => r.restaurantName).filter(Boolean))
+    return Array.from(names)
+  }, [reports])
 
   const filteredReports = useMemo(() => {
     let result = [...reports]
@@ -106,10 +172,9 @@ export default function RestaurantVATReport() {
                 >
                   <option value="All Restaurants">All Restaurants</option>
                   <option value="Caf� Monarch">Caf� Monarch</option>
-                  <option value="Hungry Puppets">Hungry Puppets</option>
-                  <option value="Cheesy Restaurant">Cheesy Restaurant</option>
-                  <option value="Cheese Burger">Cheese Burger</option>
-                  <option value="Frying Nemo">Frying Nemo</option>
+                  {restaurantOptions.map((name) => (
+                    <option key={name} value={name}>{name}</option>
+                  ))}
                 </select>
                 <ChevronDown className="absolute right-2 bottom-2.5 w-4 h-4 text-slate-500 pointer-events-none" />
               </div>
@@ -147,8 +212,8 @@ export default function RestaurantVATReport() {
               <div className="flex-1">
                 <p className="text-sm font-bold text-slate-900 mb-1">Total Orders</p>
                 <p className="text-xs text-slate-600 mb-2">Total Orders</p>
-                <p className="text-3xl font-bold text-blue-600">{emptyRestaurantVATStats.totalOrders}</p>
-                <p className="text-lg font-semibold text-blue-600 mt-1">{emptyRestaurantVATStats.totalOrders}</p>
+                <p className="text-3xl font-bold text-blue-600">{stats.totalOrders}</p>
+                <p className="text-lg font-semibold text-blue-600 mt-1">{stats.totalOrders}</p>
               </div>
               <div className="w-12 h-12 rounded-lg bg-blue-100 flex items-center justify-center flex-shrink-0">
                 <ClipboardList className="w-7 h-7 text-blue-600" />
@@ -162,8 +227,8 @@ export default function RestaurantVATReport() {
               <div className="flex-1">
                 <p className="text-sm font-bold text-slate-900 mb-1">Total Order Amount</p>
                 <p className="text-xs text-slate-600 mb-2">Total Order Amount</p>
-                <p className="text-3xl font-bold text-green-600">{emptyRestaurantVATStats.totalOrderAmount}</p>
-                <p className="text-lg font-semibold text-green-600 mt-1">{emptyRestaurantVATStats.totalOrderAmount}</p>
+                <p className="text-3xl font-bold text-green-600">{stats.totalOrderAmount}</p>
+                <p className="text-lg font-semibold text-green-600 mt-1">{stats.totalOrderAmount}</p>
               </div>
               <div className="w-12 h-12 rounded-lg bg-yellow-100 flex items-center justify-center flex-shrink-0">
                 <IndianRupee className="w-7 h-7 text-yellow-600" />
@@ -177,8 +242,8 @@ export default function RestaurantVATReport() {
               <div className="flex-1">
                 <p className="text-sm font-bold text-slate-900 mb-1">Total Tax Amount</p>
                 <p className="text-xs text-slate-600 mb-2">Total Tax Amount</p>
-                <p className="text-3xl font-bold text-red-600">{emptyRestaurantVATStats.totalTaxAmount}</p>
-                <p className="text-lg font-semibold text-red-600 mt-1">{emptyRestaurantVATStats.totalTaxAmount}</p>
+                <p className="text-3xl font-bold text-red-600">{stats.totalTaxAmount}</p>
+                <p className="text-lg font-semibold text-red-600 mt-1">{stats.totalTaxAmount}</p>
               </div>
               <div className="w-12 h-12 rounded-lg bg-purple-100 flex items-center justify-center flex-shrink-0">
                 <FileText className="w-7 h-7 text-purple-600" />
@@ -243,7 +308,14 @@ export default function RestaurantVATReport() {
           </div>
 
           {/* Table or Empty State */}
-          {filteredReports.length === 0 ? (
+          {loading ? (
+            <div className="py-20 text-center">
+              <div className="flex flex-col items-center justify-center">
+                <Loader2 className="w-10 h-10 text-blue-500 animate-spin mb-3" />
+                <p className="text-sm text-slate-500">Loading VAT report...</p>
+              </div>
+            </div>
+          ) : filteredReports.length === 0 ? (
             <div className="py-20 text-center">
               <div className="flex flex-col items-center justify-center">
                 <div className="w-20 h-20 rounded-lg bg-slate-200 flex items-center justify-center mb-4">

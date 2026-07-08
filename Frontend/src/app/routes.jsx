@@ -26,7 +26,6 @@ const SellerApp = lazy(() => import('../modules/seller/routes'))
 const FoodUserLayout = lazy(() => import('../modules/Food/components/user/UserLayout'))
 const FoodHomePage = lazy(() => import('../modules/Food/pages/user/Home'))
 const GlobalCartPage = lazy(() => import('../modules/Food/pages/user/cart/Cart'))
-const GlobalCheckoutPage = lazy(() => import('../modules/Food/pages/user/cart/Checkout'))
 const GlobalSelectAddressPage = lazy(() => import('../modules/Food/pages/user/cart/SelectAddress'))
 const GlobalAddressSelectorPage = lazy(() => import('../modules/Food/pages/user/cart/AddressSelectorPage'))
 const SharedProfilePage = lazy(() => import('../modules/Food/pages/user/profile/Profile'))
@@ -198,7 +197,7 @@ const AppRoutes = () => {
             }
           >
             <Route path="/cart" element={<GlobalCartPage />} />
-            <Route path="/cart/checkout" element={<ProtectedRoute requiredRole="user" loginPath="/user/auth/login"><GlobalCheckoutPage /></ProtectedRoute>} />
+            <Route path="/cart/checkout" element={<Navigate to="/cart" replace />} />
             <Route path="/cart/select-address" element={<ProtectedRoute requiredRole="user" loginPath="/user/auth/login"><GlobalSelectAddressPage /></ProtectedRoute>} />
             <Route path="/cart/address-selector" element={<ProtectedRoute requiredRole="user" loginPath="/user/auth/login"><GlobalAddressSelectorPage /></ProtectedRoute>} />
             <Route path="/profile" element={<FoodProtectedRoute requiredRole="user" loginPath="/user/auth/login"><SharedProfilePage /></FoodProtectedRoute>} />

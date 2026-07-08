@@ -162,9 +162,9 @@ export default function UpdateBankDetails() {
     try {
       setSaving(true)
       await restaurantAPI.updateProfile(payload)
-      await loadProfile()
       setErrors({})
-      alert("Bank details updated successfully")
+      toast.success("Bank details updated successfully")
+      goBack()
     } catch (error) {
       alert(error?.response?.data?.message || "Failed to update bank details")
     } finally {
@@ -183,7 +183,7 @@ export default function UpdateBankDetails() {
     <div className="min-h-full bg-white lg:bg-slate-50 flex flex-col">
       <div className="sticky top-0 z-40 border-b border-gray-200 bg-white/95 backdrop-blur">
         <div className="px-4 pt-4 pb-3 flex items-center gap-3 lg:max-w-2xl lg:mx-auto lg:px-8 lg:py-5 lg:w-full">
-          <button onClick={goBack} className="p-2 rounded-full hover:bg-gray-100 lg:hidden" aria-label="Back">
+          <button onClick={goBack} className="p-2 rounded-full hover:bg-gray-100" aria-label="Back">
             <ArrowLeft className="w-5 h-5 text-gray-900" />
           </button>
           <div>

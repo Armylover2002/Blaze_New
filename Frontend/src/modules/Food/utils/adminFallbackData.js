@@ -8,7 +8,6 @@ export const emptyConversations = [];
 export const emptyDeliveryManPayments = [];
 export const emptyExpenseReports = [];
 export const emptyFoodCampaigns = [];
-export const emptyFoodReports = [];
 export const emptyIncentiveRequests = [];
 export const emptyIncentivesHistory = [];
 export const emptyLoyaltyPointTransactions = [];
@@ -43,11 +42,6 @@ export const emptyRestaurantVATStats = {
 export const emptyTaxStats = {
   totalIncome: 0,
   totalTax: 0,
-};
-
-export const emptyYearlySalesData = {
-  averageYearlySales: 0,
-  chartData: [],
 };
 
 export const emptyDisbursementReportRestaurants = [];

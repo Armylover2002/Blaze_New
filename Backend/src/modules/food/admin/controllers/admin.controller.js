@@ -1301,6 +1301,12 @@ export async function updateZone(req, res, next) {
                 message: 'Zone not found'
             });
         }
+        if (result.error) {
+            return res.status(400).json({
+                success: false,
+                message: result.error
+            });
+        }
         res.status(200).json({
             success: true,
             message: 'Zone updated successfully',

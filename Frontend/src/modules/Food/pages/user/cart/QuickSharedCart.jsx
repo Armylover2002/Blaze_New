@@ -137,33 +137,53 @@ export default function QuickSharedCart({ initialAddress = null, addressMode = "
       return;
     }
 
-    const subtotalValue = quickCart.reduce(
-      (sum, item) => sum + Number(item.price || 0) * Number(item.quantity || 1),
-      0,
-    );
-    const deliveryFeeValue = 25;
-    const platformFeeValue = 0;
-    const taxValue = 0;
-    const totalValue = subtotalValue + deliveryFeeValue + platformFeeValue + taxValue;
+    let cancelled = false;
+    const loadPricing = async () => {
+      try {
+        setIsPricingLoading(true);
+        const deliveryAddress = selectedAddress
+          ? buildOrderAddress(selectedAddress, userProfile)
+          : undefined;
+        const response = await orderAPI.calculateOrder({
+          orderType: "quick",
+          items: mapCartItemsToPayload(quickCart),
+          ...(deliveryAddress ? { address: deliveryAddress } : {}),
+        });
+        if (!cancelled) {
+          setPricing(response?.data?.data?.pricing || null);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.error("Quick order pricing failed", error);
+          toast.error(
+            error?.response?.data?.message ||
+              error?.response?.data?.error?.message ||
+              "Couldn't load pricing",
+          );
+          setPricing(null);
+        }
+      } finally {
+        if (!cancelled) setIsPricingLoading(false);
+      }
+    };
 
-    setPricing({
-      subtotal: subtotalValue,
-      deliveryFee: deliveryFeeValue,
-      platformFee: platformFeeValue,
-      tax: taxValue,
-      discount: 0,
-      packagingFee: 0,
-      total: totalValue,
-      currency: "INR",
-    });
-    setIsPricingLoading(false);
-  }, [quickCart]);
+    loadPricing();
+    return () => {
+      cancelled = true;
+    };
+  }, [quickCart, selectedAddress, userProfile]);
 
-  const subtotal = pricing?.subtotal || quickCart.reduce((sum, item) => sum + Number(item.price || 0) * Number(item.quantity || 1), 0);
-  const deliveryFee = pricing?.deliveryFee || 0;
-  const platformFee = pricing?.platformFee || 0;
-  const tax = pricing?.tax || 0;
-  const total = pricing?.total || subtotal + deliveryFee + platformFee + tax;
+  const subtotal =
+    pricing?.subtotal ??
+    quickCart.reduce((sum, item) => sum + Number(item.price || 0) * Number(item.quantity || 1), 0);
+  const deliveryFee = pricing?.deliveryFee ?? (isPricingLoading ? 0 : null);
+  const platformFee = pricing?.platformFee ?? (isPricingLoading ? 0 : null);
+  const tax = pricing?.tax ?? (isPricingLoading ? 0 : null);
+  const total =
+    pricing?.total ??
+    (deliveryFee == null || platformFee == null || tax == null
+      ? subtotal
+      : Math.max(0, subtotal + deliveryFee + platformFee + tax));
 
   const handlePlaceOrder = async () => {
     // Check authentication first
@@ -195,21 +215,40 @@ export default function QuickSharedCart({ initialAddress = null, addressMode = "
     try {
       setIsPlacingOrder(true);
       const deliveryAddress = buildOrderAddress(selectedAddress, userProfile);
+      const items = mapCartItemsToPayload(quickCart);
+      let resolvedPricing = pricing;
+      try {
+        const pricingResponse = await orderAPI.calculateOrder({
+          orderType: "quick",
+          items,
+          address: deliveryAddress,
+        });
+        resolvedPricing = pricingResponse?.data?.data?.pricing || pricing;
+        if (resolvedPricing) setPricing(resolvedPricing);
+      } catch (pricingError) {
+        console.error("Quick order pricing refresh failed", pricingError);
+      }
+
+      if (!resolvedPricing) {
+        toast.error("Couldn't calculate order total. Please try again.");
+        return;
+      }
+
       const orderPayload = {
         orderType: "quick",
-        items: mapCartItemsToPayload(quickCart),
+        items,
         address: deliveryAddress,
         customerName: userProfile?.name || "Customer",
         customerPhone: deliveryAddress.phone,
         pricing: {
-          subtotal,
-          deliveryFee,
-          platformFee,
-          tax,
-          discount: pricing?.discount || 0,
-          packagingFee: pricing?.packagingFee || 0,
-          total,
-          currency: pricing?.currency || "INR",
+          subtotal: Number(resolvedPricing.subtotal || 0),
+          deliveryFee: Number(resolvedPricing.deliveryFee || 0),
+          platformFee: Number(resolvedPricing.platformFee || 0),
+          tax: Number(resolvedPricing.tax || 0),
+          discount: Number(resolvedPricing.discount || 0),
+          packagingFee: Number(resolvedPricing.packagingFee || 0),
+          total: Number(resolvedPricing.total || 0),
+          currency: resolvedPricing.currency || "INR",
         },
         paymentMethod: selectedPaymentMethod,
       };
@@ -468,20 +507,30 @@ export default function QuickSharedCart({ initialAddress = null, addressMode = "
                 </div>
                 <div className="flex justify-between">
                   <span>Delivery fee</span>
-                  <span>{RUPEE_SYMBOL}{deliveryFee.toFixed(0)}</span>
+                  <span>
+                    {deliveryFee == null ? "--" : `${RUPEE_SYMBOL}${Number(deliveryFee).toFixed(0)}`}
+                  </span>
                 </div>
                 <div className="flex justify-between">
                   <span>Platform fee</span>
-                  <span>{RUPEE_SYMBOL}{platformFee.toFixed(0)}</span>
+                  <span>
+                    {platformFee == null ? "--" : `${RUPEE_SYMBOL}${Number(platformFee).toFixed(0)}`}
+                  </span>
                 </div>
                 <div className="flex justify-between">
                   <span>Taxes</span>
-                  <span>{RUPEE_SYMBOL}{tax.toFixed(0)}</span>
+                  <span>
+                    {tax == null ? "--" : `${RUPEE_SYMBOL}${Number(tax).toFixed(0)}`}
+                  </span>
                 </div>
                 <div className="border-t border-white/10 pt-3 text-base font-bold text-white">
                   <div className="flex justify-between">
                     <span>Total</span>
-                    <span>{RUPEE_SYMBOL}{total.toFixed(0)}</span>
+                    <span>
+                      {isPricingLoading || pricing == null
+                        ? "--"
+                        : `${RUPEE_SYMBOL}${Number(total).toFixed(0)}`}
+                    </span>
                   </div>
                 </div>
               </div>

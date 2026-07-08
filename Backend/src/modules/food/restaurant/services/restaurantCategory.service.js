@@ -104,7 +104,7 @@ export async function listRestaurantCategories(restaurantId, query = {}) {
     applyZoneVisibilityFilter(filter.$and, zoneIdRaw);
 
     if (compact && context.pureVegRestaurant) {
-        filter.$and.push({ foodTypeScope: 'Veg' });
+        filter.$and.push({ foodTypeScope: { $ne: 'Non-Veg' } });
     }
 
     const queryBuilder = FoodCategory.find(filter)
@@ -233,7 +233,7 @@ export async function getRestaurantCategoryStatus(restaurantId, id) {
         name: category.name || '',
         isActive: category.isActive !== false,
         approvalStatus: category.approvalStatus || 'approved',
-        foodTypeScope: normalizeCategoryFoodTypeScope(category.foodTypeScope, 'Both'),
+        foodTypeScope: normalizeCategoryFoodTypeScope(category.foodTypeScope, 'Veg'),
         ownedByRestaurant:
             String(category.restaurantId || '') === String(context.restaurantId) ||
             String(category.createdByRestaurantId || '') === String(context.restaurantId)
@@ -254,6 +254,9 @@ export async function createRestaurantCategory(restaurantId, body = {}) {
     const foodTypeScope = normalizeCategoryFoodTypeScope(foodTypeScopeRaw, '');
     if (!foodTypeScope) {
         throw new ValidationError('Invalid category diet type');
+    }
+    if (!['Veg', 'Non-Veg'].includes(foodTypeScope)) {
+        throw new ValidationError('Category diet type must be Veg or Non-Veg');
     }
     if (context.pureVegRestaurant && foodTypeScope !== 'Veg') {
         throw new ValidationError('Pure veg restaurants can only create veg categories');
@@ -291,9 +294,12 @@ export async function updateRestaurantCategory(restaurantId, id, body = {}) {
 
     const nextFoodTypeScope = body.foodTypeScope !== undefined
         ? normalizeCategoryFoodTypeScope(body.foodTypeScope, '')
-        : normalizeCategoryFoodTypeScope(doc.foodTypeScope, 'Both');
+        : normalizeCategoryFoodTypeScope(doc.foodTypeScope, 'Veg');
     if (body.foodTypeScope !== undefined && !nextFoodTypeScope) {
         throw new ValidationError('Invalid category diet type');
+    }
+    if (body.foodTypeScope !== undefined && !['Veg', 'Non-Veg'].includes(nextFoodTypeScope)) {
+        throw new ValidationError('Category diet type must be Veg or Non-Veg');
     }
     if (context.pureVegRestaurant && nextFoodTypeScope !== 'Veg') {
         throw new ValidationError('Pure veg restaurants can only keep veg categories');
@@ -335,12 +341,10 @@ export async function updateRestaurantCategory(restaurantId, id, body = {}) {
         }
     }
     if (body.foodTypeScope !== undefined) {
-        const incompatibleFoods = nextFoodTypeScope === 'Both'
-            ? 0
-            : await FoodItem.countDocuments({
-                categoryId: doc._id,
-                foodType: nextFoodTypeScope === 'Veg' ? 'Non-Veg' : 'Veg'
-            });
+        const incompatibleFoods = await FoodItem.countDocuments({
+            categoryId: doc._id,
+            foodType: nextFoodTypeScope === 'Veg' ? 'Non-Veg' : 'Veg'
+        });
         if (incompatibleFoods > 0) {
             throw new ValidationError(`This category already has ${incompatibleFoods} food item(s) outside the selected diet type`);
         }

@@ -106,6 +106,32 @@ export default function RoleList() {
     }
   };
 
+  const handleDeleteRole = async (role) => {
+    if (!canDeleteRole) {
+      toast.error("You do not have permission to delete roles");
+      return;
+    }
+    if (role?.isDefault) {
+      toast.error("Cannot delete system default role");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Delete role "${role.roleName}"? This cannot be undone.`
+    );
+    if (!confirmed) return;
+
+    try {
+      const response = await axiosInstance.delete(`/food/admin/roles/${role._id}`);
+      if (response.data.success) {
+        toast.success(response.data.message || "Role deleted successfully");
+        fetchRoles();
+      }
+    } catch (error) {
+      toast.error(error.response?.data?.message || "Failed to delete role");
+    }
+  };
+
   const filteredRoles = (roles || []).filter(role => 
     role.roleName.toLowerCase().includes(searchQuery.toLowerCase()) ||
     role.description?.toLowerCase().includes(searchQuery.toLowerCase())
@@ -316,9 +342,9 @@ export default function RoleList() {
                                 <DropdownMenuSeparator className="bg-neutral-100" />
                                 <DropdownMenuItem 
                                   className="rounded-xl h-11 font-bold text-sm text-red-600 focus:bg-red-50 focus:text-red-600 cursor-pointer px-3" 
-                                  onClick={() => toast.error("Revocation requires SuperAdmin approval")}
+                                  onClick={() => handleDeleteRole(role)}
                                 >
-                                  <Trash2 className="w-4 h-4 mr-3 opacity-60" /> Revoke Role
+                                  <Trash2 className="w-4 h-4 mr-3 opacity-60" /> Delete Role
                                 </DropdownMenuItem>
                               </>
                             )}

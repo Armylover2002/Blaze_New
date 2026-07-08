@@ -32,6 +32,7 @@ import {
 } from "recharts"
 import { Activity, ShoppingBag, CreditCard, Truck, Receipt, IndianRupee, Store, UserCheck, Package, UserCircle, Clock, CheckCircle, Plus, XCircle } from "lucide-react"
 import { adminAPI } from "@food/api"
+import { toast } from "sonner"
 import { useAuth } from "@core/context/AuthContext"
 import { getCurrentUser } from "@food/utils/auth"
 import { canAccessAdminPath, extractAdminPermissions, extractAdminRoleId, fetchAdminRolePermissions } from "@food/utils/adminPermissions"
@@ -55,6 +56,7 @@ export default function AdminHome() {
   const [selectedPeriod, setSelectedPeriod] = useState("overall")
   const [isLoading, setIsLoading] = useState(true)
   const [dashboardData, setDashboardData] = useState(null)
+  const [hasError, setHasError] = useState(false)
   const [zones, setZones] = useState([])
   const [resolvedPermissions, setResolvedPermissions] = useState({})
 
@@ -117,41 +119,45 @@ export default function AdminHome() {
   }, [])
 
   // Fetch dashboard stats from backend when filters change
-  useEffect(() => {
-    const fetchDashboardStats = async () => {
-      try {
-        setIsLoading(true)
-        const params = {
-          period: selectedPeriod,
-          ...(selectedZone !== "all" ? { zoneId: selectedZone } : {}),
-        }
-        const response = await adminAPI.getDashboardStats(params)
-        if (response.data?.success && response.data?.data) {
-          setDashboardData(response.data.data)
-          debugLog("Dashboard stats fetched:", response.data.data)
-        } else {
-          setDashboardData(null)
-          debugError("Invalid dashboard response format:", response.data)
-        }
-      } catch (error) {
-        setDashboardData(null)
-        debugError("Error fetching dashboard stats:", error)
-      } finally {
-        setIsLoading(false)
+  const fetchDashboardStats = useCallback(async () => {
+    try {
+      setIsLoading(true)
+      const params = {
+        period: selectedPeriod,
+        ...(selectedZone !== "all" ? { zoneId: selectedZone } : {}),
       }
+      const response = await adminAPI.getDashboardStats(params)
+      if (response.data?.success && response.data?.data) {
+        setDashboardData(response.data.data)
+        setHasError(false)
+        debugLog("Dashboard stats fetched:", response.data.data)
+      } else {
+        setHasError(true)
+        debugError("Invalid dashboard response format:", response.data)
+        toast.error(response?.data?.message || "Failed to load dashboard metrics")
+      }
+    } catch (err) {
+      setHasError(true)
+      debugError("Error fetching dashboard stats:", err)
+      toast.error("Failed to load dashboard metrics")
+    } finally {
+      setIsLoading(false)
     }
-
-    fetchDashboardStats()
   }, [selectedZone, selectedPeriod])
+
+  useEffect(() => {
+    fetchDashboardStats()
+  }, [fetchDashboardStats])
 
   // Get order stats from real data
   const orderStats = useMemo(() => {
     if (!dashboardData?.orders?.byStatus) {
       return [
         { label: "Delivered", value: 0, color: BLAZE_CHART.success },
+        { label: "Processing", value: 0, color: BLAZE_CHART.info },
         { label: "Cancelled", value: 0, color: BLAZE_CHART.danger },
-        { label: "Refunded", value: 0, color: BLAZE_CHART.warning },
-        { label: "Pending", value: 0, color: BLAZE_CHART.info },
+        { label: "Pending", value: 0, color: BLAZE_CHART.warning },
+        { label: "Refunded", value: 0, color: BLAZE_CHART.violet },
       ]
     }
 
@@ -161,6 +167,7 @@ export default function AdminHome() {
       { label: "Processing", value: byStatus.processing || 0, color: BLAZE_CHART.info },
       { label: "Cancelled", value: byStatus.cancelled || 0, color: BLAZE_CHART.danger },
       { label: "Pending", value: byStatus.pending || 0, color: BLAZE_CHART.warning },
+      { label: "Refunded", value: byStatus.refunded || 0, color: BLAZE_CHART.violet },
     ]
   }, [dashboardData]);
 
@@ -200,7 +207,6 @@ export default function AdminHome() {
   const pendingOrders = dashboardData?.orderStats?.pending || 0
   const processingOrders = dashboardData?.orderStats?.processing || 0
   const completedOrders = dashboardData?.orderStats?.completed || 0
-  const activeOrdersTotal = processingOrders
 
   const pieData = useMemo(() => {
     return orderStats.map((item) => ({
@@ -217,9 +223,8 @@ export default function AdminHome() {
 
   const activityFeed = dashboardData?.liveSignals || []
   const totalRevenueHelper = [
-    `Platform: ${formatCurrency(platformFeeTotal)}`,
-    `Delivery Net: ${formatCurrency(deliveryProfit)}`,
-    `GST: ${formatCurrency(gstTotal)}`,
+    `Platform fee: ${formatCurrency(platformFeeTotal)}`,
+    `Delivery net: ${formatCurrency(deliveryProfit)}`,
   ].join(" + ")
 
   const showInitialSkeleton = isLoading && !dashboardData
@@ -229,6 +234,7 @@ export default function AdminHome() {
     Processing: "/admin/food/orders/processing",
     Cancelled: "/admin/food/orders/canceled",
     Pending: "/admin/food/orders/pending",
+    Refunded: "/admin/food/orders/refunded",
   }
 
   return (
@@ -276,6 +282,19 @@ export default function AdminHome() {
         }
       />
 
+      {hasError && (
+        <div className="mb-4 flex flex-col gap-3 rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive sm:flex-row sm:items-center sm:justify-between">
+          <span>Couldn't refresh dashboard metrics. Showing the last available values.</span>
+          <button
+            type="button"
+            onClick={fetchDashboardStats}
+            className="self-start rounded-lg border border-destructive/40 px-3 py-1.5 text-xs font-medium transition hover:bg-destructive/20 sm:self-auto"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
       {/* KPI grid */}
       {showInitialSkeleton ? (
         <KpiGridSkeleton count={8} />
@@ -290,9 +309,9 @@ export default function AdminHome() {
             canAccess={canAccessPath}
           />
           <StatCard
-            title="Orders processed"
-            value={activeOrdersTotal.toLocaleString("en-IN")}
-            helper="Orders currently being processed"
+            title="Processing orders"
+            value={processingOrders.toLocaleString("en-IN")}
+            helper="Orders currently in processing"
             icon={<Activity className="h-5 w-5" />}
             to="/admin/food/orders/processing"
             canAccess={canAccessPath}
@@ -409,7 +428,7 @@ export default function AdminHome() {
         <SectionCard
           className="lg:col-span-2"
           title="Revenue trajectory"
-          subtitle="Commission and gross revenue with monthly order volume"
+          subtitle="Commission and gross revenue with order volume"
         >
           <div className="h-80 w-full min-w-0">
             <ResponsiveContainer width="100%" height="100%" minWidth={0}>

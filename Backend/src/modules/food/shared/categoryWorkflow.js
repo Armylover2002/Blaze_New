@@ -2,7 +2,7 @@ import mongoose from 'mongoose';
 import { FoodItem } from '../admin/models/food.model.js';
 
 export const CATEGORY_APPROVAL_STATUSES = ['pending', 'approved', 'rejected'];
-export const CATEGORY_FOOD_TYPE_SCOPES = ['Veg', 'Non-Veg', 'Both'];
+export const CATEGORY_FOOD_TYPE_SCOPES = ['Veg', 'Non-Veg'];
 export const GLOBAL_CATEGORY_FILTER = [{ restaurantId: { $exists: false } }, { restaurantId: null }];
 
 export const toObjectId = (value) => new mongoose.Types.ObjectId(String(value));
@@ -12,8 +12,11 @@ export const normalizeCategoryApprovalStatus = (value, fallback = 'pending') => 
     return CATEGORY_APPROVAL_STATUSES.includes(normalized) ? normalized : fallback;
 };
 
-export const normalizeCategoryFoodTypeScope = (value, fallback = 'Both') => {
+export const normalizeCategoryFoodTypeScope = (value, fallback = 'Veg') => {
     const normalized = String(value || '').trim();
+    if (normalized === 'Both') {
+        return CATEGORY_FOOD_TYPE_SCOPES.includes(fallback) ? fallback : 'Veg';
+    }
     return CATEGORY_FOOD_TYPE_SCOPES.includes(normalized) ? normalized : fallback;
 };
 
@@ -24,9 +27,11 @@ export const normalizeFoodTypeForCategory = (value) => {
 };
 
 export const categoryAllowsFoodType = (scope, foodType) => {
-    const normalizedScope = normalizeCategoryFoodTypeScope(scope, 'Both');
+    const rawScope = String(scope || '').trim();
     const normalizedFoodType = normalizeFoodTypeForCategory(foodType);
-    if (normalizedScope === 'Both') return true;
+    if (rawScope === 'Both') return true;
+    const normalizedScope = normalizeCategoryFoodTypeScope(scope, '');
+    if (!normalizedScope) return false;
     return normalizedScope === normalizedFoodType;
 };
 
@@ -134,10 +139,12 @@ export const backfillLegacyCategoryWorkflow = async (categories = [], options = 
             }
         }
 
-        if (!CATEGORY_FOOD_TYPE_SCOPES.includes(currentFoodTypeScope)) {
-            let foodTypeScope = 'Both';
+        if (!CATEGORY_FOOD_TYPE_SCOPES.includes(currentFoodTypeScope) || currentFoodTypeScope === 'Both') {
+            let foodTypeScope = 'Veg';
             if (Number(stats?.totalFoods || 0) > 0) {
-                foodTypeScope = Number(stats?.vegFoods || 0) === Number(stats?.totalFoods || 0) ? 'Veg' : 'Non-Veg';
+                const vegFoods = Number(stats?.vegFoods || 0);
+                const totalFoods = Number(stats?.totalFoods || 0);
+                foodTypeScope = vegFoods === totalFoods ? 'Veg' : 'Non-Veg';
             }
             next.foodTypeScope = foodTypeScope;
         }
@@ -187,7 +194,7 @@ export const serializeCategoryForResponse = (category = {}, options = {}) => {
         isActive: category.isActive !== false,
         isApproved: approvalStatus === 'approved',
         approvalStatus,
-        foodTypeScope: normalizeCategoryFoodTypeScope(category.foodTypeScope, 'Both'),
+        foodTypeScope: normalizeCategoryFoodTypeScope(category.foodTypeScope, 'Veg'),
         rejectionReason: category.rejectionReason || '',
         restaurantId,
         createdByRestaurantId,

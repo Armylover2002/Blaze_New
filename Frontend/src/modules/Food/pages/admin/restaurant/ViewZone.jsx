@@ -18,6 +18,7 @@ export default function ViewZone() {
   
   const [googleMapsApiKey, setGoogleMapsApiKey] = useState("")
   const [mapLoading, setMapLoading] = useState(true)
+  const [mapError, setMapError] = useState("")
   const [zone, setZone] = useState(null)
   const [loading, setLoading] = useState(true)
 
@@ -62,8 +63,9 @@ const coordinatesLength = useMemo(() => zone?.coordinates?.length || 0, [zone?.c
   const loadGoogleMaps = async () => {
     try {
       debugLog("Loading Google Maps...")
+      setMapError("")
       const apiKey = await getGoogleMapsApiKey()
-      setGoogleMapsApiKey(apiKey || "loaded")
+      setGoogleMapsApiKey(apiKey || "")
       
       // Wait for Google Maps to be loaded from main.jsx if it's loading
       let retries = 0
@@ -99,10 +101,12 @@ const coordinatesLength = useMemo(() => zone?.coordinates?.length || 0, [zone?.c
         }, 100)
       } else {
         debugLog("No API key found")
+        setMapError("Google Maps API key not found")
         setMapLoading(false)
       }
     } catch (error) {
       debugError("Error loading Google Maps:", error)
+      setMapError("Unable to load Google Maps SDK. Please verify API key and network.")
       setMapLoading(false)
     }
   }
@@ -434,6 +438,15 @@ const coordinatesLength = useMemo(() => zone?.coordinates?.length || 0, [zone?.c
                     <div className="text-center p-6">
                       <MapPin className="w-12 h-12 text-slate-400 mx-auto mb-4" />
                       <p className="text-sm text-slate-600">Google Maps API key not found</p>
+                    </div>
+                  </div>
+                )}
+
+                {mapError && !mapLoading && googleMapsApiKey && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-slate-100 rounded-lg" style={{ zIndex: 10 }}>
+                    <div className="text-center p-6">
+                      <MapPin className="w-12 h-12 text-slate-400 mx-auto mb-4" />
+                      <p className="text-sm text-slate-600">{mapError}</p>
                     </div>
                   </div>
                 )}
