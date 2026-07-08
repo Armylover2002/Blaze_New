@@ -2137,32 +2137,36 @@ export async function getReferralSettings() {
     return { referralSettings: doc || null };
 }
 
+const normalizeReferralSection = (incoming, fallback = {}) => {
+    const pick = (key) => {
+        if (incoming && Object.prototype.hasOwnProperty.call(incoming, key) && incoming[key] !== undefined) {
+            return Math.max(0, Number(incoming[key]) || 0);
+        }
+        return Math.max(0, Number(fallback[key]) || 0);
+    };
+    return {
+        referrerReward: pick('referrerReward'),
+        refereeReward: pick('refereeReward'),
+        limit: pick('limit')
+    };
+};
+
 export async function upsertReferralSettings(body = {}) {
     const existing = await FoodReferralSettings.findOne({ isActive: true }).sort({ createdAt: -1 });
-    
+    const existingObj = existing?.toObject?.() || existing || {};
+
+    // Merge only provided sections/fields so a partial PUT cannot zero other roles.
     const formattedData = {
-        user: {
-            referrerReward: Math.max(0, Number(body.user?.referrerReward) || 0),
-            refereeReward: Math.max(0, Number(body.user?.refereeReward) || 0),
-            limit: Math.max(0, Number(body.user?.limit) || 0)
-        },
-        delivery: {
-            referrerReward: Math.max(0, Number(body.delivery?.referrerReward) || 0),
-            refereeReward: Math.max(0, Number(body.delivery?.refereeReward) || 0),
-            limit: Math.max(0, Number(body.delivery?.limit) || 0)
-        },
-        restaurant: {
-            referrerReward: Math.max(0, Number(body.restaurant?.referrerReward) || 0),
-            refereeReward: Math.max(0, Number(body.restaurant?.refereeReward) || 0),
-            limit: Math.max(0, Number(body.restaurant?.limit) || 0)
-        },
-        isActive: body.isActive !== false
+        user: normalizeReferralSection(body.user, existingObj.user),
+        delivery: normalizeReferralSection(body.delivery, existingObj.delivery),
+        restaurant: normalizeReferralSection(body.restaurant, existingObj.restaurant),
+        isActive: body.isActive !== undefined ? Boolean(body.isActive) : (existingObj.isActive !== false)
     };
 
     if (existing) {
         const updated = await FoodReferralSettings.findByIdAndUpdate(
-            existing._id, 
-            { $set: formattedData }, 
+            existing._id,
+            { $set: formattedData },
             { new: true }
         ).lean();
         return updated;
