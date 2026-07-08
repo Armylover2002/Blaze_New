@@ -4529,8 +4529,22 @@ export async function getPaymentStatus(orderId, deliveryPartnerId) {
 }
 
 // ----- Admin -----
-export async function listOrdersAdmin(query) {
-  const { page, limit, skip } = buildPaginationOptions(query);
+const EMPTY_ORDER_REPORT_STATUS_SUMMARY = {
+  total: 0,
+  Scheduled: 0,
+  Pending: 0,
+  Accepted: 0,
+  Processing: 0,
+  "Food On The Way": 0,
+  Delivered: 0,
+  Canceled: 0,
+  "Payment Failed": 0,
+  Refunded: 0,
+};
+
+const isTruthyQueryFlag = (value) => value === true || value === "true" || value === "1";
+
+async function buildListOrdersAdminFilter(query = {}) {
   const filter = {
     orderType: { $in: ["food", "mixed"] },
     $or: [
@@ -4539,7 +4553,6 @@ export async function listOrdersAdmin(query) {
     ],
   };
 
-  // Extract raw query params
   const rawStatus = typeof query.status === "string" ? query.status.trim().toLowerCase() : "";
   const cancelledBy = typeof query.cancelledBy === "string" ? query.cancelledBy.trim().toLowerCase() : "";
   const restaurantIdRaw = typeof query.restaurantId === "string" ? query.restaurantId.trim() : "";
@@ -4599,7 +4612,6 @@ export async function listOrdersAdmin(query) {
     }
   }
 
-  // ID based filters
   if (restaurantIdRaw && mongoose.Types.ObjectId.isValid(restaurantIdRaw)) {
     filter.restaurantId = new mongoose.Types.ObjectId(restaurantIdRaw);
   }
@@ -4610,7 +4622,6 @@ export async function listOrdersAdmin(query) {
     filter.userId = new mongoose.Types.ObjectId(userIdRaw);
   }
 
-  // Date filters
   if (startDateRaw || endDateRaw) {
     const createdAt = {};
     const start = startDateRaw ? new Date(startDateRaw) : null;
@@ -4619,7 +4630,6 @@ export async function listOrdersAdmin(query) {
       createdAt.$gte = start;
     }
     if (end && !Number.isNaN(end.getTime())) {
-      // Set to end of day
       end.setHours(23, 59, 59, 999);
       createdAt.$lte = end;
     }
@@ -4628,41 +4638,77 @@ export async function listOrdersAdmin(query) {
     }
   }
 
-  // Search logic
   if (search) {
-    // Search by Order ID (exact or partial regex)
-    const searchConditions = [
-      { orderId: { $regex: search, $options: "i" } }
-    ];
-
-    // If search looks like a name, we need to find matching users and restaurants first
+    const searchConditions = [{ orderId: { $regex: search, $options: "i" } }];
     const [matchingUsers, matchingRestaurants] = await Promise.all([
-      FoodUser.find({ name: { $regex: search, $options: "i" } }).select('_id').lean(),
-      FoodRestaurant.find({ restaurantName: { $regex: search, $options: "i" } }).select('_id').lean()
+      FoodUser.find({ name: { $regex: search, $options: "i" } }).select("_id").lean(),
+      FoodRestaurant.find({ restaurantName: { $regex: search, $options: "i" } }).select("_id").lean(),
     ]);
 
     if (matchingUsers.length > 0) {
-      searchConditions.push({ userId: { $in: matchingUsers.map(u => u._id) } });
+      searchConditions.push({ userId: { $in: matchingUsers.map((u) => u._id) } });
     }
     if (matchingRestaurants.length > 0) {
-      searchConditions.push({ restaurantId: { $in: matchingRestaurants.map(r => r._id) } });
+      searchConditions.push({ restaurantId: { $in: matchingRestaurants.map((r) => r._id) } });
     }
 
-    // Combine base filter with search conditions
-    // We use $and to ensure both the visibility/status filters AND the search conditions are met
     const originalFilter = { ...filter };
-    delete filter.$or; // We'll reconstruct it
-
-    filter.$and = [
-      { $or: originalFilter.$or }, // Visibility filters
-      { $or: searchConditions }   // Search conditions
-    ];
-    
-    // Copy other specific filters into $and if needed, but since they are already in `filter` object, 
-    // we should be careful. Actually, it's better to just keep them as they are and let Mongo handle it.
+    delete filter.$or;
+    filter.$and = [{ $or: originalFilter.$or }, { $or: searchConditions }];
   }
 
-  const [docs, total] = await Promise.all([
+  return filter;
+}
+
+async function aggregateListOrdersAdminStatusSummary(filter) {
+  const rows = await FoodOrder.aggregate([
+    { $match: filter },
+    {
+      $addFields: {
+        displayStatus: {
+          $switch: {
+            branches: [
+              { case: { $in: ["$orderStatus", [null, "", "created", "confirmed"]] }, then: "Pending" },
+              { case: { $in: ["$orderStatus", ["preparing", "ready_for_pickup"]] }, then: "Processing" },
+              { case: { $eq: ["$orderStatus", "picked_up"] }, then: "Food On The Way" },
+              { case: { $eq: ["$orderStatus", "delivered"] }, then: "Delivered" },
+              { case: { $eq: ["$orderStatus", "cancelled_by_restaurant"] }, then: "Canceled" },
+              {
+                case: { $in: ["$orderStatus", ["cancelled_by_user", "cancelled_by_admin"]] },
+                then: "Canceled",
+              },
+            ],
+            default: { $ifNull: ["$orderStatus", "Pending"] },
+          },
+        },
+      },
+    },
+    { $group: { _id: "$displayStatus", count: { $sum: 1 } } },
+  ]);
+
+  const summary = { ...EMPTY_ORDER_REPORT_STATUS_SUMMARY };
+  let total = 0;
+  for (const row of rows) {
+    const count = Number(row.count || 0);
+    total += count;
+    if (Object.prototype.hasOwnProperty.call(summary, row._id)) {
+      summary[row._id] += count;
+    }
+  }
+  summary.total = total;
+  return summary;
+}
+
+export async function listOrdersAdmin(query) {
+  const includeStatusSummary = isTruthyQueryFlag(query?.includeStatusSummary);
+  const maxLimit = includeStatusSummary ? 500 : 100;
+  const page = Math.max(parseInt(query.page, 10) || 1, 1);
+  const limit = Math.min(Math.max(parseInt(query.limit, 10) || 20, 1), maxLimit);
+  const skip = (page - 1) * limit;
+
+  const filter = await buildListOrdersAdminFilter(query);
+
+  const [docs, total, statusSummary] = await Promise.all([
     FoodOrder.find(filter)
       .populate("userId", "name phone email")
       .populate("restaurantId", "restaurantName area city ownerPhone")
@@ -4672,10 +4718,15 @@ export async function listOrdersAdmin(query) {
       .limit(limit)
       .lean(),
     FoodOrder.countDocuments(filter),
+    includeStatusSummary ? aggregateListOrdersAdminStatusSummary(filter) : Promise.resolve(null),
   ]);
 
   const paginated = buildPaginatedResult({ docs, total, page, limit });
-  return { ...paginated, orders: paginated.data };
+  return {
+    ...paginated,
+    orders: paginated.data,
+    ...(statusSummary ? { statusSummary } : {}),
+  };
 }
 
 export async function assignDeliveryPartnerAdmin(

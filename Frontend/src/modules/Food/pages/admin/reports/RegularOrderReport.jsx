@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from "react"
+import { useState, useEffect } from "react"
 import { BarChart3, ChevronDown, Settings, FileText, FileSpreadsheet, Code, Loader2 } from "lucide-react"
 import { adminAPI } from "@food/api"
 import { toast } from "sonner"
@@ -36,6 +36,72 @@ const statusMeta = {
 
 const PAGE_SIZE = 25
 
+const EMPTY_STATUS_COUNTS = {
+  total: 0,
+  Scheduled: 0,
+  Pending: 0,
+  Accepted: 0,
+  Processing: 0,
+  "Food On The Way": 0,
+  Delivered: 0,
+  Canceled: 0,
+  "Payment Failed": 0,
+  Refunded: 0,
+}
+
+const transformOrderForReport = (order) => {
+  const pricing = order.pricing || {}
+  const items = Array.isArray(order.items) ? order.items : []
+
+  const itemsSubtotal = items.reduce((sum, item) => {
+    const qty = Number(item.quantity || 1)
+    const price = Number(item.price || 0)
+    return sum + qty * price
+  }, 0)
+
+  const subtotal = itemsSubtotal > 0 ? itemsSubtotal : Number(pricing.subtotal || 0)
+  const deliveryCharge = Number(pricing.deliveryFee || 0)
+  const platformFee = Number(pricing.platformFee || 0)
+  const vatTax = Number(pricing.tax || 0)
+  const couponDiscount = Number(pricing.discount || 0)
+  const computedTotal = subtotal + deliveryCharge + platformFee + vatTax - couponDiscount
+  const totalAmount = pricing.total != null ? Number(pricing.total) : computedTotal
+
+  const restaurantName = order.restaurantId?.restaurantName || order.restaurantName || ""
+  const customerName = order.userId?.name || order.customerName || "N/A"
+
+  const backendStatus = String(order.orderStatus || "").toLowerCase()
+  let displayStatus = order.orderStatus
+  if (!backendStatus || backendStatus === "created" || backendStatus === "confirmed") {
+    displayStatus = "Pending"
+  } else if (backendStatus === "preparing" || backendStatus === "ready_for_pickup") {
+    displayStatus = "Processing"
+  } else if (backendStatus === "picked_up") {
+    displayStatus = "Food On The Way"
+  } else if (backendStatus === "delivered") {
+    displayStatus = "Delivered"
+  } else if (
+    backendStatus === "cancelled_by_restaurant" ||
+    backendStatus === "cancelled_by_user" ||
+    backendStatus === "cancelled_by_admin"
+  ) {
+    displayStatus = "Canceled"
+  }
+
+  return {
+    orderId: order.orderId,
+    restaurant: restaurantName,
+    customerName,
+    totalItemAmount: subtotal,
+    couponDiscount,
+    vatTax,
+    deliveryCharge,
+    platformFee,
+    totalAmount,
+    orderStatus: displayStatus,
+  }
+}
+
 export default function RegularOrderReport() {
   const [orders, setOrders] = useState([])
   const [loading, setLoading] = useState(true)
@@ -54,6 +120,13 @@ export default function RegularOrderReport() {
   })
   const [searchQuery, setSearchQuery] = useState("")
   const [currentPage, setCurrentPage] = useState(1)
+  const [pagination, setPagination] = useState({
+    total: 0,
+    page: 1,
+    limit: PAGE_SIZE,
+    totalPages: 1,
+  })
+  const [statusCounts, setStatusCounts] = useState(EMPTY_STATUS_COUNTS)
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
 
@@ -116,6 +189,11 @@ export default function RegularOrderReport() {
     return { fromDate, toDate }
   }
 
+  // Reset to first page when filters or search change
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [searchQuery, filters])
+
   // Fetch orders from backend
   useEffect(() => {
     const fetchOrders = async () => {
@@ -128,8 +206,9 @@ export default function RegularOrderReport() {
       try {
         const { fromDate, toDate } = getDateRange()
         const params = {
-          page: 1,
-          limit: 10000,
+          page: currentPage,
+          limit: PAGE_SIZE,
+          includeStatusSummary: true,
           search: searchQuery || undefined,
           zoneId: filters.zone !== "All Zones" ? filters.zone : undefined,
           restaurantId: filters.restaurant !== "All restaurants" ? filters.restaurant : undefined,
@@ -141,75 +220,15 @@ export default function RegularOrderReport() {
         const response = await adminAPI.getOrders(params)
         
         if (response.data?.success) {
-          // Transform backend orders (FoodOrder docs) to report format
           const rawOrders = response.data.data.orders || []
-          const transformedOrders = rawOrders.map((order) => {
-            const pricing = order.pricing || {}
-            const items = Array.isArray(order.items) ? order.items : []
-
-            const itemsSubtotal = items.reduce((sum, item) => {
-              const qty = Number(item.quantity || 1)
-              const price = Number(item.price || 0)
-              return sum + qty * price
-            }, 0)
-
-            const subtotal =
-              itemsSubtotal > 0
-                ? itemsSubtotal
-                : Number(pricing.subtotal || 0)
-
-            const deliveryCharge = Number(pricing.deliveryFee || 0)
-            const platformFee = Number(pricing.platformFee || 0)
-            const vatTax = Number(pricing.tax || 0)
-            const couponDiscount = Number(pricing.discount || 0)
-            const computedTotal =
-              subtotal + deliveryCharge + platformFee + vatTax - couponDiscount
-
-            const totalAmount =
-              pricing.total != null
-                ? Number(pricing.total)
-                : computedTotal
-
-            const restaurantName =
-              order.restaurantId?.restaurantName ||
-              order.restaurantName ||
-              ""
-
-            const customerName =
-              order.userId?.name ||
-              order.customerName ||
-              "N/A"
-
-            const backendStatus = String(order.orderStatus || "").toLowerCase()
-            let displayStatus = order.orderStatus
-            if (!backendStatus || backendStatus === "created" || backendStatus === "confirmed") {
-              displayStatus = "Pending"
-            } else if (backendStatus === "preparing" || backendStatus === "ready_for_pickup") {
-              displayStatus = "Processing"
-            } else if (backendStatus === "picked_up") {
-              displayStatus = "Food On The Way"
-            } else if (backendStatus === "delivered") {
-              displayStatus = "Delivered"
-            } else if (backendStatus === "cancelled_by_restaurant") {
-              displayStatus = "Canceled"
-            } else if (backendStatus === "cancelled_by_user" || backendStatus === "cancelled_by_admin") {
-              displayStatus = "Canceled"
-            }
-
-            return {
-              orderId: order.orderId,
-              restaurant: restaurantName,
-              customerName,
-              totalItemAmount: subtotal,
-              couponDiscount,
-              vatTax,
-              deliveryCharge,
-              platformFee,
-              totalAmount,
-              orderStatus: displayStatus,
-            }
+          setOrders(rawOrders.map(transformOrderForReport))
+          setStatusCounts(response.data.data.statusSummary || EMPTY_STATUS_COUNTS)
+          setPagination(response.data.data.meta || {
+            total: rawOrders.length,
+            page: currentPage,
+            limit: PAGE_SIZE,
+            totalPages: 1,
           })
-          setOrders(transformedOrders)
         } else {
           setError(response.data?.message || "Failed to fetch orders")
           toast.error(response.data?.message || "Failed to fetch orders")
@@ -226,18 +245,24 @@ export default function RegularOrderReport() {
     }
 
     fetchOrders()
-  }, [filters, searchQuery])
+  }, [filters, searchQuery, currentPage])
 
-  const filteredOrders = useMemo(() => {
-    // Backend already handles search and filters
-    return orders
-  }, [orders])
-
-  const handleExport = (format) => {
-    if (filteredOrders.length === 0) {
-      alert("No data to export")
-      return
+  const buildReportParams = (page = currentPage, limit = PAGE_SIZE) => {
+    const { fromDate, toDate } = getDateRange()
+    return {
+      page,
+      limit,
+      includeStatusSummary: page === 1,
+      search: searchQuery || undefined,
+      zoneId: filters.zone !== "All Zones" ? filters.zone : undefined,
+      restaurantId: filters.restaurant !== "All restaurants" ? filters.restaurant : undefined,
+      userId: filters.customer !== "All customers" ? filters.customer : undefined,
+      startDate: fromDate ? fromDate.toISOString().split("T")[0] : undefined,
+      endDate: toDate ? toDate.toISOString().split("T")[0] : undefined,
     }
+  }
+
+  const handleExport = async (format) => {
     const headers = [
       { key: "orderId", label: "Order ID" },
       { key: "restaurant", label: "Restaurant" },
@@ -250,11 +275,25 @@ export default function RegularOrderReport() {
       { key: "totalAmount", label: "Order Amount" },
       { key: "orderStatus", label: "Status" },
     ]
-    switch (format) {
-      case "csv": exportReportsToCSV(filteredOrders, headers, "regular_order_report"); break
-      case "excel": exportReportsToExcel(filteredOrders, headers, "regular_order_report"); break
-      case "pdf": exportReportsToPDF(filteredOrders, headers, "regular_order_report", "Regular Order Report"); break
-      case "json": exportReportsToJSON(filteredOrders, "regular_order_report"); break
+
+    try {
+      const response = await adminAPI.getOrders(buildReportParams(1, 500))
+      const exportRows = (response?.data?.data?.orders || []).map(transformOrderForReport)
+
+      if (exportRows.length === 0) {
+        alert("No data to export")
+        return
+      }
+
+      switch (format) {
+        case "csv": exportReportsToCSV(exportRows, headers, "regular_order_report"); break
+        case "excel": exportReportsToExcel(exportRows, headers, "regular_order_report"); break
+        case "pdf": exportReportsToPDF(exportRows, headers, "regular_order_report", "Regular Order Report"); break
+        case "json": exportReportsToJSON(exportRows, "regular_order_report"); break
+      }
+    } catch (err) {
+      debugError("Error exporting order report:", err)
+      toast.error("Failed to export order report")
     }
   }
 
@@ -273,37 +312,7 @@ export default function RegularOrderReport() {
 
   const activeFiltersCount = (filters.zone !== "All Zones" ? 1 : 0) + (filters.restaurant !== "All restaurants" ? 1 : 0) + (filters.customer !== "All customers" ? 1 : 0) + (filters.time !== "All Time" ? 1 : 0)
 
-  const totalPages = Math.max(1, Math.ceil(filteredOrders.length / PAGE_SIZE))
-
-  const paginatedOrders = useMemo(() => {
-    const safePage = Math.min(currentPage, totalPages)
-    const start = (safePage - 1) * PAGE_SIZE
-    return filteredOrders.slice(start, start + PAGE_SIZE)
-  }, [filteredOrders, currentPage, totalPages])
-
-  const statusCounts = useMemo(
-    () =>
-      filteredOrders.reduce(
-        (acc, order) => {
-          acc.total += 1
-          if (acc[order.orderStatus] != null) acc[order.orderStatus] += 1
-          return acc
-        },
-        {
-          total: 0,
-          Scheduled: 0,
-          Pending: 0,
-          Accepted: 0,
-          Processing: 0,
-          "Food On The Way": 0,
-          Delivered: 0,
-          Canceled: 0,
-          "Payment Failed": 0,
-          Refunded: 0,
-        }
-      ),
-    [filteredOrders]
-  )
+  const totalPages = Math.max(1, pagination.totalPages || 1)
 
   const formatAmount = (amount) =>
     `₹${Number(amount || 0).toLocaleString("en-IN", {
@@ -581,7 +590,7 @@ export default function RegularOrderReport() {
                 </tr>
               </thead>
               <tbody className={`bg-white divide-y divide-slate-100 transition-opacity duration-200 ${isFiltering ? "opacity-50 pointer-events-none" : "opacity-100"}`}>
-                {paginatedOrders.length === 0 ? (
+                {orders.length === 0 ? (
                   <tr>
                     <td colSpan={11} className="px-6 py-20 text-center">
                       <div className="flex flex-col items-center justify-center">
@@ -591,7 +600,7 @@ export default function RegularOrderReport() {
                     </td>
                   </tr>
                 ) : (
-                  paginatedOrders.map((order, index) => (
+                  orders.map((order, index) => (
                     <tr key={order.orderId} className="hover:bg-slate-50 transition-colors">
                       <td className="px-1.5 py-1">
                         <span className="text-[10px] font-medium text-slate-700">
@@ -642,10 +651,10 @@ export default function RegularOrderReport() {
             <p className="text-[10px] text-slate-500">
               Showing{" "}
               <span className="font-semibold text-slate-700">
-                {paginatedOrders.length === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1} -{" "}
-                {(currentPage - 1) * PAGE_SIZE + paginatedOrders.length}
+                {orders.length === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1} -{" "}
+                {(currentPage - 1) * PAGE_SIZE + orders.length}
               </span>{" "}
-              of <span className="font-semibold text-slate-700">{filteredOrders.length}</span> orders
+              of <span className="font-semibold text-slate-700">{pagination.total}</span> orders
             </p>
 
             <div className="flex items-center gap-1">
