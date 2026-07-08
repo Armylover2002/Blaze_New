@@ -918,8 +918,136 @@ function formatTimeAgo(date) {
 }
 
 
+const mapTransactionReportRow = (tx) => {
+    const order = tx.orderId || {};
+    const pricing = { ...(tx.pricing || {}), ...(order.pricing || {}) };
+    const subtotal = Number(pricing.subtotal || 0) || 0;
+    const packagingFee = Number(pricing.packagingFee || 0) || 0;
+    const deliveryFee = Number(pricing.deliveryFee || 0) || 0;
+    const tax = Number(pricing.tax || 0) || 0;
+    const discount = Number(pricing.discount || 0) || 0;
+    const total = Number(pricing.total || 0) || 0;
+    const { totalDiscount, couponDiscount, itemDiscount, referralDiscount } = resolveTransactionDiscounts(pricing);
+
+    const platformFeeDerived = Math.max(
+        0,
+        total - subtotal - packagingFee - deliveryFee - tax + discount
+    );
+    const platformFee =
+        pricing.platformFee !== undefined && pricing.platformFee !== null
+            ? Number(pricing.platformFee || 0) || 0
+            : platformFeeDerived;
+
+    return {
+        id: tx._id,
+        orderId: tx.orderReadableId || order.orderId || 'N/A',
+        restaurant: tx.restaurantId?.restaurantName || 'N/A',
+        customerName: tx.userId?.name || 'Guest',
+        totalItemAmount: subtotal,
+        itemDiscount,
+        couponDiscount,
+        referralDiscount,
+        discountedAmount: Math.max(0, subtotal - totalDiscount),
+        vatTax: tx.amounts?.taxAmount || pricing.tax || 0,
+        deliveryCharge: pricing.deliveryFee || 0,
+        platformFee,
+        orderAmount: tx.amounts?.totalCustomerPaid || pricing.total || 0,
+        status: tx.status
+    };
+};
+
+const buildTransactionReportSummaryPipeline = () => ([
+    {
+        $lookup: {
+            from: 'food_orders',
+            localField: 'orderId',
+            foreignField: '_id',
+            as: 'order'
+        }
+    },
+    { $unwind: { path: '$order', preserveNullAndEmptyArrays: true } },
+    {
+        $group: {
+            _id: null,
+            completedTransaction: {
+                $sum: {
+                    $cond: [
+                        {
+                            $or: [
+                                { $in: ['$status', ['captured', 'settled']] },
+                                { $eq: ['$order.orderStatus', 'delivered'] }
+                            ]
+                        },
+                        { $ifNull: ['$amounts.totalCustomerPaid', 0] },
+                        0
+                    ]
+                }
+            },
+            refundedTransaction: {
+                $sum: {
+                    $cond: [
+                        {
+                            $or: [
+                                { $eq: ['$status', 'refunded'] },
+                                { $eq: ['$order.orderStatus', 'cancelled_by_admin'] }
+                            ]
+                        },
+                        { $ifNull: ['$amounts.totalCustomerPaid', 0] },
+                        0
+                    ]
+                }
+            },
+            adminEarning: {
+                $sum: {
+                    $cond: [
+                        {
+                            $or: [
+                                { $in: ['$status', ['captured', 'settled']] },
+                                { $eq: ['$order.orderStatus', 'delivered'] }
+                            ]
+                        },
+                        { $ifNull: ['$amounts.platformNetProfit', 0] },
+                        0
+                    ]
+                }
+            },
+            restaurantEarning: {
+                $sum: {
+                    $cond: [
+                        {
+                            $or: [
+                                { $in: ['$status', ['captured', 'settled']] },
+                                { $eq: ['$order.orderStatus', 'delivered'] }
+                            ]
+                        },
+                        { $ifNull: ['$amounts.restaurantShare', 0] },
+                        0
+                    ]
+                }
+            },
+            deliverymanEarning: {
+                $sum: {
+                    $cond: [
+                        {
+                            $or: [
+                                { $in: ['$status', ['captured', 'settled']] },
+                                { $eq: ['$order.orderStatus', 'delivered'] }
+                            ]
+                        },
+                        { $ifNull: ['$amounts.riderShare', 0] },
+                        0
+                    ]
+                }
+            }
+        }
+    }
+]);
+
 export async function getTransactionReport(query = {}) {
     const { fromDate, toDate, zone, restaurant, search } = query;
+    const limit = Math.min(Math.max(parseInt(query.limit, 10) || 50, 1), 500);
+    const page = Math.max(parseInt(query.page, 10) || 1, 1);
+    const skip = (page - 1) * limit;
     const match = { orderType: 'food' };
 
     if (fromDate && toDate) {
@@ -938,100 +1066,56 @@ export async function getTransactionReport(query = {}) {
         ];
     }
 
-    let restaurantIds = null;
     if (zone || restaurant) {
         const restFilter = {};
-        if (zone) restFilter.zoneId = zone; // Assuming zone is an ID or we need to lookup
+        if (zone) restFilter.zoneId = zone;
         if (restaurant && restaurant !== 'All restaurants') {
             const restDoc = await mongoose.model('FoodRestaurant').findOne({ restaurantName: restaurant }).lean();
             if (restDoc) restFilter._id = restDoc._id;
         }
-        
+
         if (Object.keys(restFilter).length > 0) {
             const restaurantsList = await mongoose.model('FoodRestaurant').find(restFilter).select('_id').lean();
-            restaurantIds = restaurantsList.map(r => r._id);
+            const restaurantIds = restaurantsList.map(r => r._id);
             match.restaurantId = { $in: restaurantIds };
         }
     }
 
-    // Include only resolved transactions for reports (or all to match orders)
-    // We will query the FoodTransaction table directly as it is the ledger
-    const transactionRows = await FoodTransaction.find(match)
-        .populate('orderId')
-        .populate('userId', 'name')
-        .populate('restaurantId', 'restaurantName')
-        .sort({ createdAt: -1 })
-        .lean();
+    const [total, transactionRows, summaryRows] = await Promise.all([
+        FoodTransaction.countDocuments(match),
+        FoodTransaction.find(match)
+            .populate('orderId')
+            .populate('userId', 'name')
+            .populate('restaurantId', 'restaurantName')
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(limit)
+            .lean(),
+        FoodTransaction.aggregate([
+            { $match: match },
+            ...buildTransactionReportSummaryPipeline()
+        ])
+    ]);
 
-    const transactions = transactionRows.map((tx) => {
-        const order = tx.orderId || {};
-        const pricing = { ...(tx.pricing || {}), ...(order.pricing || {}) };
-        const subtotal = Number(pricing.subtotal || 0) || 0;
-        const packagingFee = Number(pricing.packagingFee || 0) || 0;
-        const deliveryFee = Number(pricing.deliveryFee || 0) || 0;
-        const tax = Number(pricing.tax || 0) || 0;
-        const discount = Number(pricing.discount || 0) || 0;
-        const total = Number(pricing.total || 0) || 0;
-        const { totalDiscount, couponDiscount, itemDiscount, referralDiscount } = resolveTransactionDiscounts(pricing);
-
-        // "Platform fee" should come from pricing.platformFee when available.
-        // For older orders where pricing.platformFee isn't stored, derive it from the pricing equation:
-        // total = subtotal + packagingFee + deliveryFee + platformFee + tax - discount
-        const platformFeeDerived = Math.max(
-            0,
-            total - subtotal - packagingFee - deliveryFee - tax + discount
-        );
-        const platformFee =
-            pricing.platformFee !== undefined && pricing.platformFee !== null
-                ? Number(pricing.platformFee || 0) || 0
-                : platformFeeDerived;
-        return {
-            id: tx._id,
-            orderId: tx.orderReadableId || order.orderId || 'N/A',
-            restaurant: tx.restaurantId?.restaurantName || 'N/A',
-            customerName: tx.userId?.name || 'Guest',
-            totalItemAmount: subtotal,
-            itemDiscount,
-            couponDiscount,
-            referralDiscount,
-            discountedAmount: Math.max(0, subtotal - totalDiscount),
-            vatTax: tx.amounts?.taxAmount || pricing.tax || 0,
-            deliveryCharge: pricing.deliveryFee || 0,
-            platformFee,
-            orderAmount: tx.amounts?.totalCustomerPaid || pricing.total || 0,
-            status: tx.status
-        };
-    });
-
-    let completedTransaction = 0;
-    let refundedTransaction = 0;
-    let adminEarning = 0;
-    let restaurantEarning = 0;
-    let deliverymanEarning = 0;
-
-    for (const tx of transactionRows) {
-        // Calculate Summary
-        if (tx.status === 'captured' || tx.status === 'settled' || (tx.orderId && tx.orderId.orderStatus === 'delivered')) {
-            completedTransaction += tx.amounts?.totalCustomerPaid || 0;
-            adminEarning += tx.amounts?.platformNetProfit || 0;
-            restaurantEarning += tx.amounts?.restaurantShare || 0;
-            deliverymanEarning += tx.amounts?.riderShare || 0;
-        }
-        if (tx.status === 'refunded' || (tx.orderId && tx.orderId.orderStatus === 'cancelled_by_admin')) {
-            // Count number of refunded transactions according to old logic or sum them
-            refundedTransaction += tx.amounts?.totalCustomerPaid || 0;
-        }
-    }
-
+    const summaryDoc = summaryRows?.[0] || {};
     const summary = {
-        completedTransaction,
-        refundedTransaction, // Returning amount instead of count for consistency, frontend might expect count though
-        adminEarning,
-        restaurantEarning,
-        deliverymanEarning,
+        completedTransaction: Number(summaryDoc.completedTransaction || 0),
+        refundedTransaction: Number(summaryDoc.refundedTransaction || 0),
+        adminEarning: Number(summaryDoc.adminEarning || 0),
+        restaurantEarning: Number(summaryDoc.restaurantEarning || 0),
+        deliverymanEarning: Number(summaryDoc.deliverymanEarning || 0),
     };
 
-    return { transactions, summary };
+    return {
+        transactions: transactionRows.map(mapTransactionReportRow),
+        summary,
+        pagination: {
+            total,
+            page,
+            limit,
+            totalPages: Math.ceil(total / limit) || 1
+        }
+    };
 }
 
 const resolveTransactionDiscounts = (pricing = {}) => {

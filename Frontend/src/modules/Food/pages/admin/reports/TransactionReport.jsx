@@ -21,11 +21,20 @@ const debugWarn = (...args) => {}
 const debugError = (...args) => {}
 
 
+const PAGE_SIZE = 50
+
 export default function TransactionReport() {
   const [searchQuery, setSearchQuery] = useState("")
   const [transactions, setTransactions] = useState([])
   const [loading, setLoading] = useState(true)
   const [isRefreshing, setIsRefreshing] = useState(false)
+  const [currentPage, setCurrentPage] = useState(1)
+  const [pagination, setPagination] = useState({
+    total: 0,
+    page: 1,
+    limit: PAGE_SIZE,
+    totalPages: 1,
+  })
   const [summary, setSummary] = useState({
     completedTransaction: 0,
     refundedTransaction: 0,
@@ -64,6 +73,11 @@ export default function TransactionReport() {
     fetchFilterData()
   }, [])
 
+  // Reset to first page when filters or search change
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [searchQuery, filters])
+
   // Fetch transaction report data
   useEffect(() => {
     const fetchTransactionReport = async () => {
@@ -94,7 +108,8 @@ export default function TransactionReport() {
           restaurant: filters.restaurant !== "All restaurants" ? filters.restaurant : undefined,
           fromDate: fromDate ? fromDate.toISOString() : undefined,
           toDate: toDate ? toDate.toISOString() : undefined,
-          limit: 1000
+          page: currentPage,
+          limit: PAGE_SIZE
         }
 
         const response = await adminAPI.getTransactionReport(params)
@@ -107,6 +122,12 @@ export default function TransactionReport() {
             adminEarning: 0,
             restaurantEarning: 0,
             deliverymanEarning: 0
+          })
+          setPagination(response.data.data.pagination || {
+            total: response.data.data.transactions?.length || 0,
+            page: currentPage,
+            limit: PAGE_SIZE,
+            totalPages: 1,
           })
         } else {
           setTransactions([])
@@ -125,22 +146,65 @@ export default function TransactionReport() {
     }
 
     fetchTransactionReport()
-  }, [searchQuery, filters])
+  }, [searchQuery, filters, currentPage])
 
   const filteredTransactions = useMemo(() => {
     return transactions // Backend already filters, so just return transactions
   }, [transactions])
 
-  const handleExport = (format) => {
-    if (filteredTransactions.length === 0) {
-      alert("No data to export")
-      return
+  const buildReportParams = (page = currentPage, limit = PAGE_SIZE) => {
+    let fromDate = null
+    let toDate = null
+    const now = new Date()
+
+    if (filters.time === "Today") {
+      fromDate = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+      toDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59)
+    } else if (filters.time === "This Week") {
+      const dayOfWeek = now.getDay()
+      const diff = now.getDate() - dayOfWeek
+      fromDate = new Date(now.getFullYear(), now.getMonth(), diff)
+      toDate = new Date(now.getFullYear(), now.getMonth(), diff + 6, 23, 59, 59)
+    } else if (filters.time === "This Month") {
+      fromDate = new Date(now.getFullYear(), now.getMonth(), 1)
+      toDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59)
     }
-    switch (format) {
-      case "csv": exportTransactionReportToCSV(filteredTransactions); break
-      case "excel": exportTransactionReportToExcel(filteredTransactions); break
-      case "pdf": exportTransactionReportToPDF(filteredTransactions); break
-      case "json": exportTransactionReportToJSON(filteredTransactions); break
+
+    return {
+      search: searchQuery || undefined,
+      zone: filters.zone !== "All Zones" ? filters.zone : undefined,
+      restaurant: filters.restaurant !== "All restaurants" ? filters.restaurant : undefined,
+      fromDate: fromDate ? fromDate.toISOString() : undefined,
+      toDate: toDate ? toDate.toISOString() : undefined,
+      page,
+      limit,
+    }
+  }
+
+  const handlePageChange = (newPage) => {
+    if (newPage < 1 || newPage > pagination.totalPages) return
+    setCurrentPage(newPage)
+  }
+
+  const handleExport = async (format) => {
+    try {
+      const response = await adminAPI.getTransactionReport(buildReportParams(1, 500))
+      const exportRows = response?.data?.data?.transactions || transactions
+
+      if (exportRows.length === 0) {
+        alert("No data to export")
+        return
+      }
+
+      switch (format) {
+        case "csv": exportTransactionReportToCSV(exportRows); break
+        case "excel": exportTransactionReportToExcel(exportRows); break
+        case "pdf": exportTransactionReportToPDF(exportRows); break
+        case "json": exportTransactionReportToJSON(exportRows); break
+      }
+    } catch (error) {
+      debugError("Error exporting transaction report:", error)
+      toast.error("Failed to export transaction report")
     }
   }
 
@@ -374,7 +438,7 @@ export default function TransactionReport() {
         {/* Order Transactions Section */}
         <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-3">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
-            <h2 className="text-base font-bold text-slate-900">Order Transactions {filteredTransactions.length}</h2>
+            <h2 className="text-base font-bold text-slate-900">Order Transactions {pagination.total}</h2>
 
             <div className="flex items-center gap-2">
               <div className="relative flex-1 sm:flex-initial min-w-[180px]">
@@ -464,7 +528,7 @@ export default function TransactionReport() {
                       className="hover:bg-slate-50 transition-colors"
                     >
                       <td className="px-1.5 py-1">
-                        <span className="text-[10px] font-medium text-slate-700">{index + 1}</span>
+                        <span className="text-[10px] font-medium text-slate-700">{(currentPage - 1) * PAGE_SIZE + index + 1}</span>
                       </td>
                       <td className="px-1.5 py-1">
                         <span className="text-[10px] text-slate-700">{transaction.orderId}</span>
@@ -509,6 +573,47 @@ export default function TransactionReport() {
                 )}
               </tbody>
             </table>
+          </div>
+
+          <div className="flex items-center justify-between mt-3">
+            <p className="text-[10px] text-slate-500">
+              Showing{" "}
+              <span className="font-semibold text-slate-700">
+                {transactions.length === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1} -{" "}
+                {(currentPage - 1) * PAGE_SIZE + transactions.length}
+              </span>{" "}
+              of <span className="font-semibold text-slate-700">{pagination.total}</span> transactions
+            </p>
+
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => handlePageChange(currentPage - 1)}
+                disabled={currentPage === 1}
+                className="px-2 py-1 text-[10px] rounded border border-slate-300 text-slate-600 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-50"
+              >
+                Prev
+              </button>
+              {Array.from({ length: pagination.totalPages }).map((_, idx) => (
+                <button
+                  key={idx + 1}
+                  onClick={() => handlePageChange(idx + 1)}
+                  className={`w-6 h-6 text-[10px] rounded border ${
+                    currentPage === idx + 1
+                      ? "bg-blue-600 border-blue-600 text-white"
+                      : "border-slate-300 text-slate-700 hover:bg-slate-50"
+                  }`}
+                >
+                  {idx + 1}
+                </button>
+              ))}
+              <button
+                onClick={() => handlePageChange(currentPage + 1)}
+                disabled={currentPage === pagination.totalPages}
+                className="px-2 py-1 text-[10px] rounded border border-slate-300 text-slate-600 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-50"
+              >
+                Next
+              </button>
+            </div>
           </div>
         </div>
       </div>

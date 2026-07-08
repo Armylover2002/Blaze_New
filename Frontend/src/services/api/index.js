@@ -697,7 +697,7 @@ export const adminAPI = {
 
   getTransactionReport: (params = {}) =>
     apiClient.get("/food/admin/reports/transactions", {
-      params: { page: 1, limit: 1000, ...params },
+      params: { page: 1, limit: 50, ...params },
       contextModule: "admin",
     }),
   getTaxReport: (params = {}) =>
