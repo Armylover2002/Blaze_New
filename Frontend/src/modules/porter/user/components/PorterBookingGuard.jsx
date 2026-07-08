@@ -24,6 +24,7 @@ const DRAFT_PATH_PREFIXES = [
 
 const ACTIVE_FLOW_PREFIXES = [
   "/porter/finding-partner",
+  "/porter/scheduled",
   "/porter/partner-assigned",
   "/porter/tracking",
   "/porter/cancel",
@@ -38,7 +39,14 @@ export default function PorterBookingGuard({ children }) {
   useEffect(() => {
     if (!activeShipment?.id) return;
     const status = String(activeShipment.status || "").toLowerCase();
-    if (TERMINAL_STATUSES.has(status)) return;
+    if (TERMINAL_STATUSES.has(status)) {
+      const path = location.pathname;
+      const isActiveFlow = ACTIVE_FLOW_PREFIXES.some((prefix) => path.startsWith(prefix));
+      if (isActiveFlow) {
+        navigate(`/porter/shipment/${activeShipment.id}`, { replace: true });
+      }
+      return;
+    }
 
     const path = location.pathname;
     const target = resolveActiveRouteForStatus(status);
@@ -47,11 +55,19 @@ export default function PorterBookingGuard({ children }) {
     const isActiveFlow = ACTIVE_FLOW_PREFIXES.some((prefix) => path.startsWith(prefix));
 
     if (isDraftPath || isHome) {
+      // Allow schedule picker while rescheduling an already-scheduled order.
+      if (path.startsWith("/porter/schedule") && status === "scheduled") {
+        return;
+      }
       navigate(target, { replace: true });
       return;
     }
 
     if (isActiveFlow && path !== target) {
+      // Allow viewing tracking page during partner-assigned phases
+      if (path === "/porter/tracking" && target === "/porter/partner-assigned") {
+        return;
+      }
       navigate(target, { replace: true });
     }
   }, [activeShipment, location.pathname, navigate]);

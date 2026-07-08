@@ -228,7 +228,9 @@ export const PickupActionModal = ({
                   <div className="flex items-center gap-3 text-xs font-bold text-gray-500">
                     <span className="flex items-center gap-1 text-red-500 bg-red-50 px-2 py-1 rounded-md border border-red-100">
                        <Navigation className="w-3 h-3" />
-                       {(distanceToTarget / 1000).toFixed(1)} km
+                       {Number.isFinite(distanceToTarget)
+                         ? `${(distanceToTarget / 1000).toFixed(1)} km`
+                         : '--'}
                     </span>
                     <span className="flex items-center gap-1 text-amber-600 bg-amber-50 px-2 py-1 rounded-md border border-amber-100">
                        <Clock className="w-3 h-3" />

@@ -52,3 +52,12 @@ export const validateQuotePreviewBody = (body = {}) => {
     }
     return result.data;
 };
+
+export const validateZoneDetectQuery = (query = {}) => {
+    const lat = latSchema.safeParse(query.lat);
+    const lng = lngSchema.safeParse(query.lng);
+    if (!lat.success || !lng.success) {
+        throw new ValidationError('lat and lng query parameters are required');
+    }
+    return { lat: lat.data, lng: lng.data };
+};

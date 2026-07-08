@@ -166,7 +166,7 @@ const Dashboard = () => {
         <StatCard title="Total Revenue" value={`₹${(kpis.totalRevenue ?? 0).toLocaleString("en-IN")}`} icon={<TrendingUp size={18} />} iconBg="bg-green-100 text-green-600" />
         <StatCard title="Delivered" value={String(kpis.deliveredOrders ?? 0)} icon={<CheckCircle size={18} />} iconBg="bg-green-100 text-green-600" />
         <StatCard title="Cancelled" value={String(kpis.cancelledOrders ?? 0)} icon={<XCircle size={18} />} iconBg="bg-red-100 text-red-600" />
-        <StatCard title="Fleet Utilization" value={kpis.fleetUtilization ?? "0%"} icon={<Truck size={18} />} iconBg="bg-cyan-100 text-cyan-600" />
+        <StatCard title="Scheduled Orders" value={String(kpis.scheduledOrders ?? 0)} icon={<Clock size={18} />} iconBg="bg-cyan-100 text-cyan-600" />
       </div>
       )}
 

@@ -11,6 +11,7 @@ export const PORTER_BOOKING_KEYS = {
   coupon: "porter_booking_coupon",
   couponPricing: "porter_booking_coupon_pricing",
   scheduledAt: "porter_booking_scheduled_at",
+  scheduleMeta: "porter_booking_schedule_meta",
   activeShipment: "porter_booking_active_shipment",
   activeOrderId: "porter_active_order_id",
 };
@@ -28,6 +29,7 @@ const DRAFT_KEYS = [
   KEYS.coupon,
   KEYS.couponPricing,
   KEYS.scheduledAt,
+  KEYS.scheduleMeta,
 ];
 
 const ACTIVE_KEYS = [KEYS.activeShipment, KEYS.activeOrderId];
@@ -101,6 +103,10 @@ export const writeStoredCouponPricing = (pricing) => writeJson(KEYS.couponPricin
 
 export const readStoredScheduledAt = () => readJson(KEYS.scheduledAt, null);
 export const writeStoredScheduledAt = (value) => writeJson(KEYS.scheduledAt, value);
+
+/** { date: 'YYYY-MM-DD', time: '10:00 AM', timezone: string } — UI rehydrate only. */
+export const readStoredScheduleMeta = () => readJson(KEYS.scheduleMeta, null);
+export const writeStoredScheduleMeta = (value) => writeJson(KEYS.scheduleMeta, value);
 
 export const readStoredActiveShipment = () => readJson(KEYS.activeShipment, null);
 export const writeStoredActiveShipment = (shipment) => writeJson(KEYS.activeShipment, shipment);

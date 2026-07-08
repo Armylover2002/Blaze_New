@@ -44,19 +44,21 @@ export default function VehicleCard({
               {badge}
             </span>
           )}
-          {maxWeight != null && (
+          {maxWeight != null && Number(maxWeight) > 0 && (
             <span className="flex items-center gap-0.5 text-[11px] font-medium text-gray-500">
-              <Package className="h-3 w-3" /> Up to {maxWeight} kg
+              <Package className="h-3 w-3" /> Supports up to {maxWeight} kg
             </span>
           )}
         </div>
-        {vehicle.description && (
-          <p className="truncate text-[12px] text-gray-500">{vehicle.description}</p>
+        {(vehicle.weightAdvice || vehicle.description) && (
+          <p className="truncate text-[12px] text-gray-500">
+            {vehicle.weightAdvice || vehicle.description}
+          </p>
         )}
         {disabled ? (
           <span className="mt-0.5 flex items-center gap-1 text-[11px] font-semibold text-amber-600">
             <AlertTriangle className="h-3 w-3" />
-            {disabledReason || "Not suitable for this parcel weight."}
+            {disabledReason || "Vehicle unavailable"}
           </span>
         ) : eta != null ? (
           <span className="mt-0.5 flex items-center gap-1 text-[11px] font-semibold text-[#2e7d32]">

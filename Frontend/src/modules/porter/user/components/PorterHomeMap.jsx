@@ -103,6 +103,22 @@ export default function PorterHomeMap({ height = 320, className = "" }) {
         mapRef.current.panTo(position);
         lastPanRef.current = position;
       }
+
+      if (hasRoutePolyline) {
+        if (!pickupMarkerRef.current) {
+          pickupMarkerRef.current = new window.google.maps.Marker({
+            map: mapRef.current,
+            position,
+            title: pickup.title || "Pickup",
+            icon: blazeMarkerIcon(PICKUP_COLOR),
+          });
+        } else {
+          pickupMarkerRef.current.setPosition(position);
+        }
+      } else if (pickupMarkerRef.current) {
+        pickupMarkerRef.current.setMap(null);
+        pickupMarkerRef.current = null;
+      }
     }
 
     if (hasCoordinates(delivery)) {
@@ -147,7 +163,7 @@ export default function PorterHomeMap({ height = 320, className = "" }) {
       polylineRef.current = null;
       lastFitPolylineRef.current = null;
     }
-  }, [pickup, delivery, routeQuote?.route?.polyline]);
+  }, [pickup, delivery, routeQuote?.route?.polyline, loading]);
 
   const handleMyLocation = async (e) => {
     if (e) e.stopPropagation();
@@ -176,7 +192,7 @@ export default function PorterHomeMap({ height = 320, className = "" }) {
     <div className={`relative overflow-hidden ${className}`} onClick={stopMapClick} onKeyDown={stopMapClick} role="presentation">
       <div ref={mapContainerRef} style={{ height, width: "100%" }} />
 
-      <CenterPin color={PICKUP_COLOR} />
+      {!routeQuote?.route?.polyline && <CenterPin color={PICKUP_COLOR} />}
 
       {loading && (
         <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/80">

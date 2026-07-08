@@ -11,58 +11,17 @@ const GEO_OPTIONS = {
 const ACCURACY_WATCH_MS = 8000;
 const GOOD_ACCURACY_M = 80;
 
-/** Prefer a fresh, accurate GPS fix; fall back to a single getCurrentPosition. */
 function getAccuratePosition() {
   if (!navigator.geolocation) {
     return Promise.reject(new Error('Geolocation is not supported on this device.'));
   }
 
   return new Promise((resolve, reject) => {
-    let best = null;
-    let settled = false;
-
-    const finish = (position) => {
-      if (settled) return;
-      settled = true;
-      if (watchId != null) navigator.geolocation.clearWatch(watchId);
-      clearTimeout(timer);
-      resolve(position);
-    };
-
-    const fail = (error) => {
-      if (settled) return;
-      settled = true;
-      if (watchId != null) navigator.geolocation.clearWatch(watchId);
-      clearTimeout(timer);
-      if (best) resolve(best);
-      else reject(error);
-    };
-
-    let watchId = null;
-
-    watchId = navigator.geolocation.watchPosition(
-      (position) => {
-        if (!best || position.coords.accuracy < best.coords.accuracy) {
-          best = position;
-        }
-        if (position.coords.accuracy <= GOOD_ACCURACY_M) {
-          finish(position);
-        }
-      },
-      () => {
-        // watch errors are non-fatal; try getCurrentPosition below
-      },
-      GEO_OPTIONS,
-    );
-
-    const timer = setTimeout(() => {
-      if (best) {
-        finish(best);
-        return;
-      }
-
-      navigator.geolocation.getCurrentPosition(finish, fail, GEO_OPTIONS);
-    }, ACCURACY_WATCH_MS);
+    navigator.geolocation.getCurrentPosition(resolve, reject, {
+      enableHighAccuracy: true,
+      timeout: 10000,
+      maximumAge: 10000, // Allow recently cached position for speed
+    });
   });
 }
 

@@ -257,6 +257,15 @@ export const enrichPorterDeliveryOrder = (order = {}) => {
   if (!isPorterParcelTrip(order)) return order;
   const pickupLoc = normalizeLocationPoint(order.pickup || order.pickupLocation || order.restaurantLocation);
   const dropLoc = normalizeLocationPoint(order.delivery || order.dropLocation || order.customerLocation);
+  const pickupDistanceKm = (() => {
+    const candidates = [order.pickupDistanceKm, order.distanceKm];
+    for (const c of candidates) {
+      const n = Number(c);
+      if (Number.isFinite(n) && n > 0) return n;
+    }
+    return order.pickupDistanceKm ?? null;
+  })();
+
   return {
     ...order,
     module: "parcel",
@@ -267,6 +276,10 @@ export const enrichPorterDeliveryOrder = (order = {}) => {
     customerLocation: dropLoc,
     pickupLocation: pickupLoc,
     dropLocation: dropLoc,
+    // Keep rider→pickup separate from trip route length used for fare.
+    pickupDistanceKm,
+    distanceKm: pickupDistanceKm ?? order.distanceKm,
+    tripDistanceKm: order.tripDistanceKm ?? order.route?.distanceKm ?? null,
     earnings: order.earnings ?? order.pricing?.driverEarning ?? 0,
     riderEarning: order.riderEarning ?? order.pricing?.driverEarning ?? order.earnings ?? 0,
     senderName: order.senderName || order.pickup?.title || order.userName || "Sender",

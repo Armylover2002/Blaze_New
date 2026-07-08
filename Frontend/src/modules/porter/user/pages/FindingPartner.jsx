@@ -17,7 +17,8 @@ import {
 } from "@food/utils/razorpay";
 
 // Statuses where the customer is still waiting for a partner — cancel is allowed.
-const SEARCHING_STATUSES = ["created", "scheduled", "searching_partner", "dispatching"];
+// NOTE: `scheduled` uses /porter/scheduled — do NOT treat it as searching here.
+const SEARCHING_STATUSES = ["created", "searching_partner", "dispatching"];
 // Once a partner accepts, the customer is routed to the Partner Assigned screen.
 const ACCEPTED_STATUSES = ["assigned", "partner_accepted", "en_route_pickup", "at_pickup"];
 const POST_PICKUP_STATUSES = ["picked_up", "in_transit", "at_drop", "delivered", "completed"];
@@ -112,7 +113,9 @@ export default function FindingPartner() {
   useEffect(() => {
     if (userCancelRef.current) return undefined;
     if (!status) return undefined;
-    if (ACCEPTED_STATUSES.includes(status)) {
+    if (status === "scheduled") {
+      navigate("/porter/scheduled", { replace: true });
+    } else if (ACCEPTED_STATUSES.includes(status)) {
       setConfirmOpen(false);
       navigate(getPorterPartnerAssignedPath(), { replace: true });
     } else if (POST_PICKUP_STATUSES.includes(status)) {

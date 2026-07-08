@@ -70,9 +70,12 @@ export async function listAvailablePorterOrdersForDriver(partnerId) {
         })
         .map((o) => {
             const mapped = mapPorterOrderForDriver(o);
-            if (Number.isFinite(lat) && Number.isFinite(lng) && o.pickup?.lat != null) {
-                mapped.distanceKm = Number(haversineKm(lat, lng, o.pickup.lat, o.pickup.lng).toFixed(2));
+            if (Number.isFinite(lat) && Number.isFinite(lng) && o.pickup?.lat != null && o.pickup?.lng != null) {
+                const pickupKm = Number(haversineKm(lat, lng, o.pickup.lat, o.pickup.lng).toFixed(2));
+                mapped.distanceKm = pickupKm;
+                mapped.pickupDistanceKm = pickupKm;
             }
+            mapped.tripDistanceKm = o.route?.distanceKm ?? null;
             return mapped;
         });
 }
@@ -145,7 +148,18 @@ export async function acceptPorterOrder(partnerId, orderId, performer = null) {
             metadata: { partnerId: String(partnerId) },
         });
 
-        return mapPorterOrderForDriver(order);
+        const mapped = mapPorterOrderForDriver(order);
+        const pLat = Number(partner.lastLat);
+        const pLng = Number(partner.lastLng);
+        const pickLat = Number(order.pickup?.lat);
+        const pickLng = Number(order.pickup?.lng);
+        if (Number.isFinite(pLat) && Number.isFinite(pLng) && Number.isFinite(pickLat) && Number.isFinite(pickLng)) {
+            const pickupKm = Number(haversineKm(pLat, pLng, pickLat, pickLng).toFixed(2));
+            mapped.distanceKm = pickupKm;
+            mapped.pickupDistanceKm = pickupKm;
+        }
+        mapped.tripDistanceKm = order.route?.distanceKm ?? null;
+        return mapped;
     } catch (err) {
         await session.abortTransaction();
         throw err;

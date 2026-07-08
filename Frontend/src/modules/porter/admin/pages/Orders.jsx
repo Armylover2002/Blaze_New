@@ -43,9 +43,31 @@ const mapApiOrder = (o) => ({
   deliveryStatus: o.status,
   dispatchStatus: o.dispatch?.status,
   paymentStatus: o.payment?.status,
+  scheduledAt: o.scheduledAt || null,
+  schedule: o.schedule || null,
+  dispatch: o.dispatch || null,
   createdAt: o.createdAt,
   timeline: o.statusHistory || [],
 });
+
+function formatCountdown(ms) {
+  if (!Number.isFinite(ms)) return "—";
+  if (ms <= 0) return "Due";
+  const total = Math.floor(ms / 1000);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  if (h > 48) return `${Math.floor(h / 24)}d ${h % 24}h`;
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
+}
+
+const CANCELLED_SET = new Set([
+  "cancelled_by_user",
+  "cancelled_by_admin",
+  "cancelled_by_driver",
+  "failed",
+]);
+const COMPLETED_SET = new Set(["delivered", "completed"]);
 
 const STATUS_LABELS = {
   pending: "Pending",
@@ -93,14 +115,26 @@ const STATUS_TONES = {
 
 const ORDER_STATUS_OPTIONS = [
   { value: "all", label: "All statuses" },
+  { value: "scheduled", label: "Scheduled" },
   { value: "searching_partner", label: "Searching" },
   { value: "partner_accepted", label: "Accepted" },
   { value: "delivered", label: "Delivered" },
   { value: "cancelled_by_user", label: "Cancelled" },
 ];
 
+const SCHEDULE_FILTER_OPTIONS = [
+  { value: "all", label: "All schedules" },
+  { value: "upcoming", label: "Upcoming" },
+  { value: "today", label: "Today's Schedule" },
+  { value: "missed", label: "Missed Schedule" },
+  { value: "completed", label: "Completed Schedule" },
+  { value: "cancelled", label: "Cancelled Schedule" },
+  { value: "pending_schedule", label: "Pending (status=scheduled)" },
+];
+
 const ORDER_STATUS_TABS = [
   { id: "all", label: "All" },
+  { id: "scheduled", label: "Scheduled" },
   { id: "searching_partner", label: "Searching" },
   { id: "partner_accepted", label: "Active" },
   { id: "delivered", label: "Delivered" },
@@ -117,6 +151,7 @@ const Orders = () => {
   const [driverFilter, setDriverFilter] = useState("all");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [scheduleFilter, setScheduleFilter] = useState("all");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [detailOpen, setDetailOpen] = useState(false);
@@ -201,8 +236,39 @@ const Orders = () => {
     if (driverFilter !== "all") rows = rows.filter((r) => r.driverId === driverFilter);
     if (dateFrom) rows = rows.filter((r) => new Date(r.createdAt) >= new Date(dateFrom));
     if (dateTo) rows = rows.filter((r) => new Date(r.createdAt) <= new Date(dateTo + "T23:59:59"));
+
+    if (scheduleFilter !== "all") {
+      const now = Date.now();
+      const startToday = new Date(); startToday.setHours(0, 0, 0, 0);
+      const endToday = new Date(); endToday.setHours(23, 59, 59, 999);
+
+      rows = rows.filter((r) => {
+        if (!r.scheduledAt) return false;
+        const t = new Date(r.scheduledAt).getTime();
+        const status = r.deliveryStatus;
+
+        if (scheduleFilter === "pending_schedule") return status === "scheduled";
+        if (scheduleFilter === "upcoming") {
+          return status === "scheduled" && t > now;
+        }
+        if (scheduleFilter === "today") {
+          return t >= startToday.getTime() && t <= endToday.getTime();
+        }
+        if (scheduleFilter === "missed") {
+          // Past scheduledAt, still waiting / never dispatched.
+          return status === "scheduled" && t < now;
+        }
+        if (scheduleFilter === "completed") {
+          return COMPLETED_SET.has(status) && Boolean(r.scheduledAt);
+        }
+        if (scheduleFilter === "cancelled") {
+          return CANCELLED_SET.has(status) && Boolean(r.scheduledAt);
+        }
+        return true;
+      });
+    }
     return sortItems(rows, "createdAt", "desc");
-  }, [orders, search, activeTab, statusFilter, vehicleFilter, driverFilter, dateFrom, dateTo]);
+  }, [orders, search, activeTab, statusFilter, vehicleFilter, driverFilter, dateFrom, dateTo, scheduleFilter]);
 
   const { items: pageItems, total, totalPages } = useMemo(
     () => paginateItems(filtered, page, pageSize),
@@ -279,6 +345,40 @@ const Orders = () => {
     }
   };
 
+  const handleStartDispatch = async (row) => {
+    if (!row?.id || actionLoading) return;
+    setActionLoading(true);
+    try {
+      await porterAdminApi.startScheduledDispatch(row.id);
+      await loadOrders();
+      setDetailOpen(false);
+    } catch (err) {
+      alert(err?.response?.data?.message || "Failed to start dispatch");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleAdminReschedule = async (row) => {
+    if (!row?.id || actionLoading) return;
+    const raw = window.prompt("New schedule (ISO or local datetime, e.g. 2026-07-10T16:30)", row.scheduledAt || "");
+    if (!raw) return;
+    const when = new Date(raw);
+    if (Number.isNaN(when.getTime())) {
+      alert("Invalid date/time");
+      return;
+    }
+    setActionLoading(true);
+    try {
+      await porterAdminApi.rescheduleOrder(row.id, when.toISOString());
+      await loadOrders();
+    } catch (err) {
+      alert(err?.response?.data?.message || "Failed to reschedule");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   const openAssign = (row) => {
     setSelected(row);
     setAssignOpen(true);
@@ -292,6 +392,32 @@ const Orders = () => {
     { key: "drop", header: "Drop", cell: (row) => <div className="text-sm line-clamp-2 max-w-[150px] overflow-hidden text-ellipsis" title={row.drop}>{row.drop}</div> },
     { key: "driverName", header: "Driver" },
     { key: "vehicle", header: "Vehicle" },
+    {
+      key: "scheduledAt",
+      header: "Scheduled",
+      cell: (row) => {
+        if (!row.scheduledAt) return <span className="text-xs text-muted-foreground">—</span>;
+        const ms = new Date(row.scheduledAt).getTime() - Date.now();
+        return (
+          <div className="text-xs">
+            <div className="font-medium text-amber-700">{formatDateTime(row.scheduledAt)}</div>
+            {row.deliveryStatus === "scheduled" && (
+              <div className="text-muted-foreground">⏱ {formatCountdown(ms)}</div>
+            )}
+          </div>
+        );
+      },
+    },
+    {
+      key: "dispatchStarted",
+      header: "Dispatch",
+      cell: (row) => {
+        const at = row.schedule?.dispatchStartedAt || row.schedule?.activatedAt;
+        return at
+          ? <span className="text-xs">{formatDateTime(at)}</span>
+          : <span className="text-xs text-muted-foreground">—</span>;
+      },
+    },
     { key: "goodsType", header: "Goods" },
     { key: "distanceKm", header: "Distance", cell: (row) => `${row.distanceKm} km` },
     { key: "amount", header: "Amount", cell: (row) => formatCurrency(row.amount) },
@@ -305,6 +431,11 @@ const Orders = () => {
           <Button variant="ghost" size="sm" onClick={() => openDetail(row)}><Eye size={14} /></Button>
           {["searching_partner", "scheduled", "assigned"].includes(row.deliveryStatus) && (
             <Button variant="ghost" size="sm" onClick={() => openAssign(row)}><UserPlus size={14} /></Button>
+          )}
+          {row.deliveryStatus === "scheduled" && (
+            <Button variant="ghost" size="sm" title="Start dispatch now" onClick={() => handleStartDispatch(row)}>
+              <Truck size={14} />
+            </Button>
           )}
           {!["delivered", "completed", "cancelled_by_user", "cancelled_by_admin", "cancelled_by_driver", "failed"].includes(row.deliveryStatus) && (
             <Button variant="ghost" size="sm" className="text-red-500" onClick={() => openCancel(row.id)}><XCircle size={14} /></Button>
@@ -369,6 +500,9 @@ const Orders = () => {
                 <select className={selectCls} value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}>
                   {ORDER_STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                 </select>
+                <select className={selectCls} value={scheduleFilter} onChange={(e) => { setScheduleFilter(e.target.value); setPage(1); }}>
+                  {SCHEDULE_FILTER_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
                 <select className={selectCls} value={vehicleFilter} onChange={(e) => { setVehicleFilter(e.target.value); setPage(1); }}>
                   <option value="all">All Vehicles</option>
                   {vehicles.map((v) => <option key={v} value={v}>{v}</option>)}
@@ -418,6 +552,27 @@ const Orders = () => {
                       <FormField label="Amount"><div className="text-sm font-medium text-emerald-600">{formatCurrency(selected.amount)}</div></FormField>
                     </FormRow>
                   </FormSection>
+
+                  {(selected.scheduledAt || selected.schedule) && (
+                    <FormSection title="Schedule">
+                      <FormRow>
+                        <FormField label="Scheduled At"><div className="text-sm font-medium text-amber-700">{selected.scheduledAt ? formatDateTime(selected.scheduledAt) : "—"}</div></FormField>
+                        <FormField label="Created At"><div className="text-sm font-medium">{selected.createdAt ? formatDateTime(selected.createdAt) : "—"}</div></FormField>
+                      </FormRow>
+                      <FormRow>
+                        <FormField label="Dispatch Started"><div className="text-sm font-medium">{(selected.schedule?.dispatchStartedAt || selected.schedule?.activatedAt) ? formatDateTime(selected.schedule?.dispatchStartedAt || selected.schedule?.activatedAt) : "—"}</div></FormField>
+                        <FormField label="Driver Assigned"><div className="text-sm font-medium">{selected.dispatch?.assignedAt || selected.dispatch?.acceptedAt ? formatDateTime(selected.dispatch?.assignedAt || selected.dispatch?.acceptedAt) : (selected.driverName !== "—" ? "Assigned" : "—")}</div></FormField>
+                      </FormRow>
+                      <FormRow>
+                        <FormField label="Countdown"><div className="text-sm font-medium">{selected.deliveryStatus === "scheduled" && selected.scheduledAt ? formatCountdown(new Date(selected.scheduledAt).getTime() - Date.now()) : "—"}</div></FormField>
+                        <FormField label="Reminder Sent"><div className="text-sm font-medium">{selected.schedule?.reminderSentAt ? formatDateTime(selected.schedule.reminderSentAt) : "Not yet"}</div></FormField>
+                      </FormRow>
+                      <FormRow>
+                        <FormField label="Timezone"><div className="text-sm font-medium">{selected.schedule?.timezone || "—"}</div></FormField>
+                        <FormField label="Bull Job"><div className="text-sm font-mono text-xs">{selected.schedule?.bullJobId || "poller only"}</div></FormField>
+                      </FormRow>
+                    </FormSection>
+                  )}
 
                   <FormSection title="Parcel Details">
                     <FormRow>
@@ -560,6 +715,11 @@ const Orders = () => {
               </div>
               <div className="px-6 py-4 border-t flex flex-wrap gap-2 justify-end bg-gray-50/50 shrink-0 z-10">
                 <Button variant="outline" size="sm" className="gap-1" onClick={() => window.print()}><FileText size={14} /> Invoice</Button>
+                {selected.deliveryStatus === "scheduled" && (
+                  <Button size="sm" className="gap-1" disabled={actionLoading} onClick={() => handleStartDispatch(selected)}>
+                    <Truck size={14} /> Start Dispatch
+                  </Button>
+                )}
                 {["searching_partner", "scheduled", "assigned"].includes(selected.deliveryStatus) && (
                   <Button size="sm" className="gap-1" onClick={() => openAssign(selected)}><UserPlus size={14} /> Assign Driver</Button>
                 )}
@@ -574,29 +734,47 @@ const Orders = () => {
 
       {/* Assign Driver Dialog */}
       <Dialog open={assignOpen} onOpenChange={setAssignOpen}>
-        <DialogContent className="blaze-theme-scope sm:max-w-[400px]">
-          <DialogHeader><DialogTitle>Assign Driver</DialogTitle></DialogHeader>
-          <select className={selectCls + " w-full"} value={assignDriverId} onChange={(e) => setAssignDriverId(e.target.value)}>
-            <option value="">Select driver</option>
-            {(assignableDrivers.length ? assignableDrivers : drivers).map((d) => (
-              <option key={d.id} value={d.id}>{d.name}{d.phone ? ` · ${d.phone}` : ""}</option>
-            ))}
-          </select>
-          <div className="flex justify-end gap-2 mt-4">
-            <Button variant="outline" onClick={() => setAssignOpen(false)}>Cancel</Button>
-            <Button onClick={handleAssign} disabled={!assignDriverId || actionLoading}>Assign</Button>
+        <DialogContent className="blaze-theme-scope sm:max-w-[460px] p-6">
+          <DialogHeader><DialogTitle className="text-xl font-bold">Assign Driver</DialogTitle></DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <label className="text-sm font-semibold text-gray-700">
+                Select Driver <span className="text-red-500">*</span>
+              </label>
+              <select
+                className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:border-red-500 focus:outline-none focus:ring-1 focus:ring-red-500 transition-colors"
+                value={assignDriverId}
+                onChange={(e) => setAssignDriverId(e.target.value)}
+              >
+                <option value="">Select driver</option>
+                {(assignableDrivers.length ? assignableDrivers : drivers).map((d) => (
+                  <option key={d.id} value={d.id}>{d.name}{d.phone ? ` · ${d.phone}` : ""}</option>
+                ))}
+              </select>
+            </div>
+            <div className="rounded-lg bg-orange-50 p-4 border border-orange-100 mt-2">
+              <p className="text-[13px] text-orange-800 leading-relaxed">
+                <strong>Note:</strong> Selecting a driver will manually assign them to this order and notify them immediately.
+              </p>
+            </div>
+          </div>
+          <div className="flex justify-end gap-3 pt-4 border-t border-gray-100 mt-2">
+            <Button variant="outline" onClick={() => setAssignOpen(false)}>Close</Button>
+            <Button onClick={handleAssign} disabled={!assignDriverId || actionLoading} className="bg-red-600 hover:bg-red-700 text-white">
+              Confirm Assignment
+            </Button>
           </div>
         </DialogContent>
       </Dialog>
 
       {/* Cancel Order Dialog */}
       <Dialog open={cancelOpen} onOpenChange={setCancelOpen}>
-        <DialogContent className="blaze-theme-scope sm:max-w-[460px]">
+        <DialogContent className="blaze-theme-scope sm:max-w-[460px] p-6">
           <DialogHeader>
-            <DialogTitle className="text-lg font-bold">Cancel Order</DialogTitle>
+            <DialogTitle className="text-xl font-bold">Cancel Order</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4 py-2">
-            <div className="space-y-1.5">
+          <div className="space-y-5 py-4">
+            <div className="space-y-2">
               <label className="text-sm font-semibold text-gray-700">
                 Cancellation reason <span className="text-red-500">*</span>
               </label>
@@ -614,7 +792,7 @@ const Orders = () => {
                 <option value="Other">Other</option>
               </select>
             </div>
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               <label className="text-sm font-semibold text-gray-700">Note (optional)</label>
               <textarea
                 className="w-full min-h-[80px] resize-none rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:border-red-500 focus:outline-none focus:ring-1 focus:ring-red-500 transition-colors"
@@ -624,13 +802,13 @@ const Orders = () => {
                 onChange={(e) => setCancelNote(e.target.value)}
               />
             </div>
-            <div className="rounded-lg bg-orange-50 p-3 border border-orange-100">
-              <p className="text-[13px] text-orange-800 leading-tight">
+            <div className="rounded-lg bg-orange-50 p-4 border border-orange-100 mt-2">
+              <p className="text-[13px] text-orange-800 leading-relaxed">
                 <strong>Note:</strong> If the order was paid, the eligible amount will be refunded automatically to the customer's original payment method or wallet.
               </p>
             </div>
           </div>
-          <div className="flex justify-end gap-3 pt-2">
+          <div className="flex justify-end gap-3 pt-4 border-t border-gray-100 mt-2">
             <Button variant="outline" onClick={() => setCancelOpen(false)}>Close</Button>
             <Button variant="destructive" className="bg-red-600 hover:bg-red-700 text-white" onClick={handleCancel} disabled={!cancelReason || actionLoading}>
               Confirm Cancellation

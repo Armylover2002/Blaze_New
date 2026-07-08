@@ -117,6 +117,23 @@ const porterOrderSchema = new mongoose.Schema(
             completedAt: { type: Date },
         },
         scheduledAt: { type: Date, index: true },
+        // Schedule metadata for delayed dispatch / reminders / admin ops UI.
+        schedule: {
+            status: {
+                type: String,
+                enum: ['none', 'scheduled', 'dispatching', 'completed', 'cancelled'],
+                default: 'none',
+            },
+            timezone: { type: String },
+            activatedAt: { type: Date },
+            dispatchStartedAt: { type: Date },
+            scheduledUpdatedAt: { type: Date },
+            lastUpdatedAt: { type: Date },
+            bullJobId: { type: String },
+            reminderJobId: { type: String },
+            reminderScheduledAt: { type: Date },
+            reminderSentAt: { type: Date },
+        },
         rating: { score: { type: Number, min: 1, max: 5 }, comment: { type: String }, tags: [{ type: String }] },
         cancellation: {
             reason: { type: String },

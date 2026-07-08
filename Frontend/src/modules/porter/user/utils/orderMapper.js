@@ -45,6 +45,7 @@ export function mapActiveShipmentFromOrder(order) {
     partner,
     total: order.pricing?.total,
     scheduledAt: order.scheduledAt,
+    schedule: order.schedule,
     rating: order.rating,
     createdAt: order.createdAt,
   };
@@ -52,7 +53,10 @@ export function mapActiveShipmentFromOrder(order) {
 
 export function resolveActiveRouteForStatus(status) {
   const normalized = String(status || "").toLowerCase();
-  if (["searching_partner", "scheduled", "created"].includes(normalized)) {
+  if (normalized === "scheduled") {
+    return "/porter/scheduled";
+  }
+  if (["searching_partner", "created"].includes(normalized)) {
     return "/porter/finding-partner";
   }
   if (["assigned", "partner_accepted", "en_route_pickup", "at_pickup"].includes(normalized)) {

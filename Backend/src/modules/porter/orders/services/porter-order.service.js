@@ -25,7 +25,14 @@ import {
 import { calculatePorterOrderPricing } from './porter-order-pricing.service.js';
 import { chargePorterOrderWallet, applyPorterRefund } from './porter-order-payment.service.js';
 import { startPorterDispatch, emitPorterOrderStatus, emitPorterOrderCancelled } from './porter-order-dispatch.service.js';
-import { schedulePorterOrderDispatch } from './porter-scheduled-dispatch.service.js';
+import {
+    schedulePorterOrderDispatch,
+    isFuturePorterSchedule,
+    parseAndValidatePorterScheduledAt,
+    removePorterScheduledJobs,
+    activateScheduledPorterOrder,
+    normalizePorterTimezone,
+} from './porter-scheduled-dispatch.service.js';
 import { settlePorterOrderEarningsAtomic } from './porter-wallet-atomic.service.js';
 import { parseListQuery, toPorterPagination } from '../../utils/pagination.util.js';
 
@@ -96,6 +103,9 @@ export async function createPorterOrder(userId, dto, performer = null) {
             pickupOtp: generateOtp(4),
         },
         scheduledAt: dto.scheduledAt || null,
+        schedule: dto.timezone
+            ? { timezone: normalizePorterTimezone(dto.timezone) || 'Asia/Kolkata', status: 'none' }
+            : undefined,
         createdBy: performer,
     });
 
@@ -128,7 +138,14 @@ export async function createPorterOrder(userId, dto, performer = null) {
     }
 
     const scheduledDate = dto.scheduledAt ? new Date(dto.scheduledAt) : null;
-    const isScheduled = scheduledDate && scheduledDate.getTime() > Date.now() + 60_000;
+    if (scheduledDate && Number.isNaN(scheduledDate.getTime())) {
+        throw new ValidationError('Invalid scheduledAt');
+    }
+    // Soft gate: near-future times fall through to instant; far-future must pass window.
+    if (scheduledDate && scheduledDate.getTime() > Date.now() + 60_000) {
+        parseAndValidatePorterScheduledAt(scheduledDate);
+    }
+    const isScheduled = isFuturePorterSchedule(scheduledDate);
 
     if (scheduledDate) {
         order.scheduledAt = scheduledDate;
@@ -142,6 +159,16 @@ export async function createPorterOrder(userId, dto, performer = null) {
     if (isScheduled) {
         order.scheduledAt = scheduledDate;
         order.status = PORTER_ORDER_STATUS.SCHEDULED;
+        order.schedule = order.schedule || {};
+        if (dto.timezone) {
+            order.schedule.timezone = normalizePorterTimezone(dto.timezone) || 'Asia/Kolkata';
+        } else if (!order.schedule.timezone) {
+            order.schedule.timezone = 'Asia/Kolkata';
+        }
+        order.schedule.status = 'scheduled';
+        order.schedule.scheduledUpdatedAt = new Date();
+        order.schedule.lastUpdatedAt = new Date();
+        order.markModified('schedule');
         appendStatusHistory(order, PORTER_ORDER_STATUS.SCHEDULED, performer, 'Scheduled for later dispatch');
         await order.save();
 
@@ -161,7 +188,15 @@ export async function createPorterOrder(userId, dto, performer = null) {
             metadata: { scheduledAt: scheduledDate.toISOString() },
         });
 
-        await schedulePorterOrderDispatch(order._id, scheduledDate);
+        await schedulePorterOrderDispatch(order._id, scheduledDate, {
+            timezone: normalizePorterTimezone(dto.timezone || order.schedule?.timezone) || 'Asia/Kolkata',
+        });
+        try {
+            const { notifyPorterOrderScheduled } = await import('./porter-notification.service.js');
+            void notifyPorterOrderScheduled(order);
+        } catch {
+            // non-blocking
+        }
         return mapPorterOrderForUser(order);
     }
 
@@ -276,6 +311,8 @@ export async function cancelPorterOrderByUser(userId, orderId, reason, performer
             $set: {
                 status: PORTER_ORDER_STATUS.CANCELLED_BY_USER,
                 'dispatch.status': PORTER_DISPATCH_STATUS.CANCELLED,
+                'schedule.status': 'cancelled',
+                'schedule.lastUpdatedAt': new Date(),
                 cancellation: { reason, cancelledBy: 'user', cancelledAt: new Date() },
             },
         },
@@ -300,6 +337,9 @@ export async function cancelPorterOrderByUser(userId, orderId, reason, performer
 
     appendStatusHistory(refunded, refunded.status, performer, reason);
     await refunded.save();
+
+    // Drop delayed BullMQ jobs so cancelled schedules don't activate later.
+    void removePorterScheduledJobs(refunded._id, refunded);
 
     const refundResult = await applyPorterRefund(refunded, reason);
 
@@ -353,6 +393,98 @@ export async function ratePorterOrder(userId, orderId, { score, comment, tags })
     return mapPorterOrderForUser(order);
 }
 
+/**
+ * Customer/admin-facing reschedule — only while still in `scheduled` (pre-dispatch).
+ */
+export async function reschedulePorterOrder(userId, orderId, scheduledAtRaw, performer = null, timezone = null) {
+    const when = parseAndValidatePorterScheduledAt(scheduledAtRaw);
+
+    const order = await PorterOrder.findOne({
+        _id: orderId,
+        ...(userId ? { userId: new mongoose.Types.ObjectId(userId) } : {}),
+        status: PORTER_ORDER_STATUS.SCHEDULED,
+        ...baseFilter,
+    });
+
+    if (!order) {
+        throw new ValidationError('Only scheduled orders can be rescheduled before dispatch');
+    }
+
+    const previous = order.scheduledAt;
+    order.scheduledAt = when;
+    order.schedule = order.schedule || {};
+    if (timezone) {
+        order.schedule.timezone = normalizePorterTimezone(timezone) || 'Asia/Kolkata';
+    } else if (!order.schedule.timezone) {
+        order.schedule.timezone = 'Asia/Kolkata';
+    } else {
+        order.schedule.timezone = normalizePorterTimezone(order.schedule.timezone) || order.schedule.timezone;
+    }
+    order.schedule.status = 'scheduled';
+    order.schedule.scheduledUpdatedAt = new Date();
+    order.schedule.lastUpdatedAt = new Date();
+    order.schedule.reminderSentAt = undefined;
+    order.schedule.reminderScheduledAt = undefined;
+    order.markModified('schedule');
+    appendStatusHistory(order, order.status, performer, `Rescheduled to ${when.toISOString()}`);
+    await order.save();
+
+    await schedulePorterOrderDispatch(order._id, when, {
+        timezone: normalizePorterTimezone(timezone || order.schedule?.timezone) || 'Asia/Kolkata',
+    });
+
+    await logPorterOrderAction({
+        orderId: order._id,
+        orderNumber: order.orderNumber,
+        action: 'order_rescheduled',
+        toStatus: order.status,
+        performedBy: performer,
+        metadata: {
+            previousScheduledAt: previous?.toISOString?.() || previous,
+            scheduledAt: when.toISOString(),
+        },
+    });
+
+    await emitPorterOrderStatus(order, order.userId, null);
+
+    try {
+        const { notifyPorterOrderRescheduled } = await import('./porter-notification.service.js');
+        void notifyPorterOrderRescheduled(order, previous);
+    } catch {
+        // non-blocking
+    }
+
+    return mapPorterOrderForUser(order);
+}
+
+export async function adminReschedulePorterOrder(orderId, scheduledAtRaw, performer = null, timezone = null) {
+    return reschedulePorterOrder(null, orderId, scheduledAtRaw, performer, timezone);
+}
+
+export async function adminStartScheduledPorterDispatch(orderId, performer = null) {
+    const order = await PorterOrder.findOne({ _id: orderId, ...baseFilter });
+    if (!order) throw new NotFoundError('Order not found');
+    if (order.status !== PORTER_ORDER_STATUS.SCHEDULED) {
+        throw new ValidationError('Order is not waiting on a schedule');
+    }
+    const activated = await activateScheduledPorterOrder(orderId, performer, {
+        reason: 'Manual dispatch started by admin',
+        allowEarly: true,
+    });
+    if (!activated) throw new ConflictError('Order could not be activated');
+
+    await logPorterOrderAction({
+        orderId: activated._id,
+        orderNumber: activated.orderNumber,
+        action: 'manual_scheduled_dispatch',
+        fromStatus: PORTER_ORDER_STATUS.SCHEDULED,
+        toStatus: activated.status,
+        performedBy: performer,
+    });
+
+    return mapPorterOrderForUser(activated);
+}
+
 // --- Admin ---
 
 export async function listPorterOrdersAdmin(query = {}) {
@@ -363,6 +495,43 @@ export async function listPorterOrdersAdmin(query = {}) {
         filter.$or = [
             { orderNumber: { $regex: parsed.search, $options: 'i' } },
         ];
+    }
+
+    const scheduleFilter = String(query.scheduleFilter || '').toLowerCase();
+    if (scheduleFilter === 'scheduled' || scheduleFilter === 'pending_schedule') {
+        filter.status = PORTER_ORDER_STATUS.SCHEDULED;
+    } else if (scheduleFilter === 'today' || scheduleFilter === 'scheduled_today') {
+        const start = new Date();
+        start.setHours(0, 0, 0, 0);
+        const end = new Date();
+        end.setHours(23, 59, 59, 999);
+        filter.status = PORTER_ORDER_STATUS.SCHEDULED;
+        filter.scheduledAt = { $gte: start, $lte: end };
+    } else if (scheduleFilter === 'tomorrow') {
+        const start = new Date();
+        start.setDate(start.getDate() + 1);
+        start.setHours(0, 0, 0, 0);
+        const end = new Date(start);
+        end.setHours(23, 59, 59, 999);
+        filter.status = PORTER_ORDER_STATUS.SCHEDULED;
+        filter.scheduledAt = { $gte: start, $lte: end };
+    } else if (scheduleFilter === 'week' || scheduleFilter === 'this_week') {
+        const start = new Date();
+        start.setHours(0, 0, 0, 0);
+        const end = new Date(start);
+        end.setDate(end.getDate() + 7);
+        filter.status = PORTER_ORDER_STATUS.SCHEDULED;
+        filter.scheduledAt = { $gte: start, $lte: end };
+    }
+    if (query.scheduledFrom || query.scheduledTo) {
+        filter.scheduledAt = filter.scheduledAt || {};
+        if (query.scheduledFrom) filter.scheduledAt.$gte = new Date(query.scheduledFrom);
+        if (query.scheduledTo) {
+            const to = new Date(query.scheduledTo);
+            if (!String(query.scheduledTo).includes('T')) to.setHours(23, 59, 59, 999);
+            filter.scheduledAt.$lte = to;
+        }
+        if (!filter.status) filter.status = PORTER_ORDER_STATUS.SCHEDULED;
     }
 
     const [docs, total] = await Promise.all([
@@ -377,7 +546,9 @@ export async function listPorterOrdersAdmin(query = {}) {
     ]);
 
     return toPorterPagination({ docs, total, page: parsed.page, limit: parsed.limit });
-}export async function verifyPorterPayment(userId, dto) {
+}
+
+export async function verifyPorterPayment(userId, dto) {
     const order = await PorterOrder.findOne({
         _id: new mongoose.Types.ObjectId(dto.orderId),
         userId: new mongoose.Types.ObjectId(userId),
@@ -402,10 +573,28 @@ export async function listPorterOrdersAdmin(query = {}) {
     order.markModified('payment');
 
     if (order.status === PORTER_ORDER_STATUS.CREATED) {
-        const isScheduled = order.scheduledAt && order.scheduledAt.getTime() > Date.now() + 60_000;
+        const isScheduled = isFuturePorterSchedule(order.scheduledAt)
+            && (() => {
+                try {
+                    parseAndValidatePorterScheduledAt(order.scheduledAt);
+                    return true;
+                } catch {
+                    return false;
+                }
+            })();
         
         if (isScheduled) {
             order.status = PORTER_ORDER_STATUS.SCHEDULED;
+            order.schedule = order.schedule || {};
+            order.schedule.status = 'scheduled';
+            if (!order.schedule.timezone) {
+                order.schedule.timezone = 'Asia/Kolkata';
+            } else {
+                order.schedule.timezone = normalizePorterTimezone(order.schedule.timezone) || 'Asia/Kolkata';
+            }
+            order.schedule.scheduledUpdatedAt = new Date();
+            order.schedule.lastUpdatedAt = new Date();
+            order.markModified('schedule');
             appendStatusHistory(order, PORTER_ORDER_STATUS.SCHEDULED, null, 'Scheduled for later dispatch after payment');
             await order.save();
 
@@ -425,7 +614,15 @@ export async function listPorterOrdersAdmin(query = {}) {
                 metadata: { scheduledAt: order.scheduledAt.toISOString() },
             });
 
-            await schedulePorterOrderDispatch(order._id, order.scheduledAt);
+            await schedulePorterOrderDispatch(order._id, order.scheduledAt, {
+                timezone: normalizePorterTimezone(order.schedule?.timezone) || 'Asia/Kolkata',
+            });
+            try {
+                const { notifyPorterOrderScheduled } = await import('./porter-notification.service.js');
+                void notifyPorterOrderScheduled(order);
+            } catch {
+                // non-blocking
+            }
         } else {
             order.status = PORTER_ORDER_STATUS.SEARCHING_PARTNER;
             appendStatusHistory(order, PORTER_ORDER_STATUS.SEARCHING_PARTNER, null, 'Searching for partner after payment');

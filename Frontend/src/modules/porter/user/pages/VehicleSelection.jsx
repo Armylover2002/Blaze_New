@@ -1,10 +1,9 @@
 import React, { useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { Sparkles } from "lucide-react";
 import Screen from "../components/Screen";
 import PorterRouteMap from "../components/PorterRouteMap";
 import VehicleCard from "../components/VehicleCard";
-import { PrimaryButton, StickyBar, SectionLabel } from "../components/ui";
+import { PrimaryButton, StickyBar } from "../components/ui";
 import { useBooking } from "../context/BookingContext";
 import { getPorterFareEstimatePath } from "../utils/routes";
 
@@ -19,6 +18,12 @@ function VehicleSection({ title, subtitle, children }) {
       <div className="space-y-2">{children}</div>
     </div>
   );
+}
+
+function advisoryBadgeFor(v, isRecommended) {
+  if (isRecommended) return "Recommended";
+  if (v.advisoryBadge) return v.advisoryBadge;
+  return null;
 }
 
 export default function VehicleSelection() {
@@ -36,25 +41,31 @@ export default function VehicleSelection() {
     totalParcelWeight,
   } = useBooking();
 
-  const eligibleVehicles = routeQuote?.eligibleVehicles || [];
-  const ineligibleVehicles = routeQuote?.ineligibleVehicles || [];
+  // All bookable vehicles — weight never hides options.
+  const vehicles = useMemo(() => {
+    const eligible = routeQuote?.eligibleVehicles || [];
+    // Legacy clients may still receive weight-"ineligible"; treat them as selectable
+    // when they have fare data; otherwise only show pricing/config failures as disabled.
+    return eligible;
+  }, [routeQuote]);
+
   const recommendedId = routeQuote?.recommendedVehicleId;
   const weightLabel = totalParcelWeight || parcel.weightKg || 0;
-  const noVehiclesAvailable = Boolean(routeQuote?.noVehiclesAvailable);
+  const noVehiclesAvailable = Boolean(routeQuote?.noVehiclesAvailable) || (!quoteLoading && vehicles.length === 0);
 
   const recommendedVehicle = useMemo(
-    () => eligibleVehicles.find((v) => String(v.id) === String(recommendedId)) || eligibleVehicles[0] || null,
-    [eligibleVehicles, recommendedId],
+    () => vehicles.find((v) => String(v.id) === String(recommendedId)) || vehicles[0] || null,
+    [vehicles, recommendedId],
   );
 
-  const otherEligible = useMemo(
-    () => eligibleVehicles.filter((v) => String(v.id) !== String(recommendedVehicle?.id)),
-    [eligibleVehicles, recommendedVehicle],
+  const otherVehicles = useMemo(
+    () => vehicles.filter((v) => String(v.id) !== String(recommendedVehicle?.id)),
+    [vehicles, recommendedVehicle],
   );
 
   useEffect(() => {
     if (!recommendedVehicle?.id) return;
-    if (!vehicleId || !eligibleVehicles.some((v) => String(v.id) === String(vehicleId))) {
+    if (!vehicleId || !vehicles.some((v) => String(v.id) === String(vehicleId))) {
       selectVehicle(recommendedVehicle.id, {
         id: recommendedVehicle.id,
         name: recommendedVehicle.name,
@@ -63,7 +74,7 @@ export default function VehicleSelection() {
         maxWeight: recommendedVehicle.maxWeight,
       });
     }
-  }, [recommendedVehicle, eligibleVehicles, vehicleId, selectVehicle]);
+  }, [recommendedVehicle, vehicles, vehicleId, selectVehicle]);
 
   const handleSelect = (v) => {
     selectVehicle(v.id, {
@@ -85,15 +96,15 @@ export default function VehicleSelection() {
         <p className="text-[11px] font-bold uppercase tracking-widest text-gray-500">Parcel weight</p>
         <p className="mt-1 text-[22px] font-extrabold text-gray-900">{weightLabel} kg</p>
         <p className="mt-1 text-[12px] text-gray-600">
-          Select any available vehicle for your delivery.
+          Any vehicle can be booked. Capacity labels are advisory only.
         </p>
       </div>
 
-      {quoteLoading && <p className="text-sm text-gray-500">Finding suitable vehicles…</p>}
+      {quoteLoading && <p className="text-sm text-gray-500">Loading vehicles…</p>}
 
       {!quoteLoading && noVehiclesAvailable && (
         <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-medium text-amber-800">
-          {routeQuote?.message || "No delivery vehicle is available for this parcel weight."}
+          {routeQuote?.message || "No delivery vehicles are currently available."}
         </div>
       )}
 
@@ -101,7 +112,7 @@ export default function VehicleSelection() {
         <>
           <VehicleSection
             title="Recommended"
-            subtitle={recommendedVehicle ? `Best match for ${weightLabel} kg` : null}
+            subtitle={recommendedVehicle ? `Suggested for ${weightLabel} kg (you can choose any)` : null}
           >
             {recommendedVehicle && (
               <VehicleCard
@@ -109,41 +120,25 @@ export default function VehicleSelection() {
                 fare={recommendedVehicle.estimatedFare}
                 estimatedTime={recommendedVehicle.estimatedTime}
                 selected={String(vehicleId) === String(recommendedVehicle.id)}
-                badge="Recommended"
+                badge={advisoryBadgeFor(recommendedVehicle, true)}
                 onSelect={() => handleSelect(recommendedVehicle)}
               />
             )}
           </VehicleSection>
 
-          <VehicleSection title="Available" subtitle="Other suitable vehicles for your parcel">
-            {otherEligible.map((v) => (
+          <VehicleSection title="All vehicles" subtitle="Select any vehicle — weight is informational">
+            {otherVehicles.map((v) => (
               <VehicleCard
                 key={v.id}
                 vehicle={v}
                 fare={v.estimatedFare}
                 estimatedTime={v.estimatedTime}
                 selected={String(vehicleId) === String(v.id)}
+                badge={advisoryBadgeFor(v, false)}
                 onSelect={() => handleSelect(v)}
               />
             ))}
           </VehicleSection>
-
-          {ineligibleVehicles.length > 0 && (
-            <VehicleSection title="Not suitable" subtitle="These vehicles cannot carry this parcel weight">
-              {ineligibleVehicles.map((v) => (
-                <VehicleCard
-                  key={v.id}
-                  vehicle={v}
-                  fare={null}
-                  estimatedTime={null}
-                  selected={false}
-                  disabled
-                  disabledReason={v.reason}
-                  onSelect={() => {}}
-                />
-              ))}
-            </VehicleSection>
-          )}
         </>
       )}
 

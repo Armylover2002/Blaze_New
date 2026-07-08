@@ -5,6 +5,7 @@ import { PorterPricing } from '../models/porterPricing.model.js';
 import { PorterVehicle } from '../models/porterVehicle.model.js';
 import { calculateFareFromPricing } from '../utils/porter-pricing-calculator.util.js';
 import { buildParcelVehicleQuotes } from './porter-parcel-vehicle.service.js';
+import { assertPorterLocationsServiceable, findZoneForPoint } from '../orders/services/porter-zone-lookup.service.js';
 import { logger } from '../../../utils/logger.js';
 
 const MAPS_TIMEOUT_MS = 8000;
@@ -151,6 +152,7 @@ export async function getPlaceDetails(placeId) {
 }
 
 export async function getRoutePreview({ pickup, delivery }) {
+    await assertPorterLocationsServiceable(pickup, delivery);
     if (!pickup || !delivery
         || !Number.isFinite(Number(pickup.lat)) || !Number.isFinite(Number(pickup.lng))
         || !Number.isFinite(Number(delivery.lat)) || !Number.isFinite(Number(delivery.lng))) {
@@ -228,6 +230,11 @@ async function resolveVehiclePricing(vehicleId) {
 
 export async function getQuotePreview({ pickup, delivery, vehicleId, parcelWeight }) {
     const route = await getRoutePreview({ pickup, delivery });
+    // Zones already enforced in getRoutePreview; resolve names for UI metadata only.
+    const [pickupZone, dropZone] = await Promise.all([
+        findZoneForPoint(Number(pickup.lat), Number(pickup.lng)),
+        findZoneForPoint(Number(delivery.lat), Number(delivery.lng)),
+    ]);
     const weight = parcelWeight != null && Number(parcelWeight) > 0 ? Number(parcelWeight) : null;
 
     let eligibleVehicles = [];
@@ -292,5 +299,16 @@ export async function getQuotePreview({ pickup, delivery, vehicleId, parcelWeigh
         vehicle,
         fare,
         pricing,
+        serviceability: {
+            status: 'IN_SERVICE',
+            zoneId: pickupZone?._id ? String(pickupZone._id) : null,
+            pickupZone: pickupZone
+                ? { id: String(pickupZone._id), name: pickupZone.name }
+                : null,
+            dropZone: dropZone
+                ? { id: String(dropZone._id), name: dropZone.name }
+                : null,
+            sameZone: Boolean(pickupZone && dropZone && String(pickupZone._id) === String(dropZone._id)),
+        },
     };
 }

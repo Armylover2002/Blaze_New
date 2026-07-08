@@ -6,7 +6,6 @@ import { calculateFareFromPricing } from '../utils/porter-pricing-calculator.uti
 
 const baseFilter = { isDeleted: { $ne: true } };
 const PARCEL_SERVICE = 'parcel';
-const WEIGHT_INELIGIBLE_REASON = 'Not suitable for this parcel weight.';
 
 const vehicleListProjection = {
     name: 1,
@@ -27,19 +26,42 @@ export function computeParcelWeight(parcel = {}) {
     return Math.round(weightKg * quantity * 100) / 100;
 }
 
-export function isParcelVehicleEligible(vehicle, parcelWeight, pricing) {
+/**
+ * Booking eligibility — weight is NEVER a hard block.
+ * Only active parcel vehicles with pricing can be quoted.
+ */
+export function isParcelVehicleEligible(vehicle, _parcelWeight, pricing) {
     if (!vehicle || vehicle.status !== 'active') {
-        return { eligible: false, reason: WEIGHT_INELIGIBLE_REASON };
+        return { eligible: false, reason: 'Vehicle is not available.' };
     }
     if (!Array.isArray(vehicle.supportedServices) || !vehicle.supportedServices.includes(PARCEL_SERVICE)) {
-        return { eligible: false, reason: WEIGHT_INELIGIBLE_REASON };
+        return { eligible: false, reason: 'Vehicle does not support parcel delivery.' };
     }
     if (!pricing) {
         return { eligible: false, reason: 'Pricing not configured for this vehicle.' };
     }
-
-    // Weight limits removed as per user request: user can select any vehicle regardless of weight.
     return { eligible: true, reason: null };
+}
+
+/** Advisory badges only — never used to block selection. */
+export function getParcelVehicleWeightAdvice(vehicle, parcelWeight) {
+    const weight = Number(parcelWeight || 0);
+    const maxW = Number(vehicle?.maxWeight || 0);
+    const minW = Number(vehicle?.minWeight || 0);
+
+    if (weight <= 0) {
+        return maxW > 0 ? { badge: null, label: `Supports up to ${maxW}kg` } : { badge: null, label: null };
+    }
+    if (maxW > 0 && weight > maxW) {
+        return { badge: 'Heavy parcel', label: `Rated up to ${maxW}kg` };
+    }
+    if (minW > 0 && weight < minW) {
+        return { badge: null, label: `Typically from ${minW}kg` };
+    }
+    if (maxW > 0) {
+        return { badge: null, label: `Supports up to ${maxW}kg` };
+    }
+    return { badge: null, label: null };
 }
 
 export async function loadActiveParcelVehiclesWithPricing() {
@@ -67,8 +89,9 @@ export async function loadActiveParcelVehiclesWithPricing() {
     return { vehicles, pricingMap };
 }
 
-function mapEligibleVehicleQuote(vehicle, pricing, route) {
+function mapEligibleVehicleQuote(vehicle, pricing, route, parcelWeight) {
     const pricingBreakdown = calculateFareFromPricing(pricing, route.distanceKm);
+    const advice = getParcelVehicleWeightAdvice(vehicle, parcelWeight);
     return {
         id: String(vehicle._id),
         name: vehicle.name || '',
@@ -81,41 +104,33 @@ function mapEligibleVehicleQuote(vehicle, pricing, route) {
         estimatedTime: route.durationMin,
         pricing: pricingBreakdown,
         eligible: true,
+        weightAdvice: advice.label,
+        advisoryBadge: advice.badge,
     };
 }
 
-function mapIneligibleVehicle(vehicle, reason) {
-    return {
-        id: String(vehicle._id),
-        name: vehicle.name || '',
-        iconUrl: vehicle.iconUrl || '',
-        maxWeight: Number(vehicle.maxWeight || 0),
-        minWeight: Number(vehicle.minWeight || 0),
-        reason: reason || WEIGHT_INELIGIBLE_REASON,
-        eligible: false,
-    };
-}
-
-function sortEligibleVehicles(eligible) {
+function sortEligibleVehicles(eligible, parcelWeight) {
+    const weight = Number(parcelWeight || 0);
     return [...eligible].sort((a, b) => {
+        // Prefer vehicles whose weight band covers the parcel (advisory ranking only).
+        if (weight > 0) {
+            const aFits = (a.minWeight || 0) <= weight && (a.maxWeight <= 0 || weight <= a.maxWeight);
+            const bFits = (b.minWeight || 0) <= weight && (b.maxWeight <= 0 || weight <= b.maxWeight);
+            if (aFits !== bFits) return aFits ? -1 : 1;
+        }
         const fareDiff = Number(a.estimatedFare || 0) - Number(b.estimatedFare || 0);
         if (fareDiff !== 0) return fareDiff;
         return Number(a.maxWeight || 0) - Number(b.maxWeight || 0);
     });
 }
 
+/**
+ * Quote ALL active parcel vehicles with pricing.
+ * Weight never empties the list — users can always pick any vehicle.
+ * `ineligible` kept for backward compatibility (no pricing / inactive only).
+ */
 export async function buildParcelVehicleQuotes({ parcelWeight, route }) {
     const weight = Number(parcelWeight || 0);
-    if (weight <= 0) {
-        return {
-            eligible: [],
-            ineligible: [],
-            recommendedVehicleId: null,
-            noVehiclesAvailable: false,
-            message: null,
-        };
-    }
-
     const { vehicles, pricingMap } = await loadActiveParcelVehiclesWithPricing();
     const eligible = [];
     const ineligible = [];
@@ -124,29 +139,42 @@ export async function buildParcelVehicleQuotes({ parcelWeight, route }) {
         const pricing = pricingMap.get(String(vehicle._id)) || null;
         const { eligible: isEligible, reason } = isParcelVehicleEligible(vehicle, weight, pricing);
         if (isEligible) {
-            eligible.push(mapEligibleVehicleQuote(vehicle, pricing, route));
+            eligible.push(mapEligibleVehicleQuote(vehicle, pricing, route, weight));
         } else {
-            ineligible.push(mapIneligibleVehicle(vehicle, reason));
+            // Unbookable config issue only — surface as advisory disabled in older clients.
+            ineligible.push({
+                id: String(vehicle._id),
+                name: vehicle.name || '',
+                iconUrl: vehicle.iconUrl || '',
+                maxWeight: Number(vehicle.maxWeight || 0),
+                minWeight: Number(vehicle.minWeight || 0),
+                reason: reason || 'Vehicle unavailable',
+                eligible: false,
+            });
         }
     }
 
-    const sortedEligible = sortEligibleVehicles(eligible);
+    const sortedEligible = sortEligibleVehicles(eligible, weight);
     const noVehiclesAvailable = sortedEligible.length === 0;
     return {
         eligible: sortedEligible,
+        // Weight-based ineligible list is intentionally empty for booking UX.
+        // Keep only true config failures for older clients that still read this field.
         ineligible,
         recommendedVehicleId: sortedEligible[0]?.id || null,
         noVehiclesAvailable,
         message: noVehiclesAvailable
-            ? 'No delivery vehicle is available for this parcel weight.'
+            ? 'No delivery vehicles are currently available.'
             : null,
     };
 }
 
+/**
+ * Ensures vehicle exists, is parcel-capable, and has pricing.
+ * Does NOT reject based on parcel weight.
+ */
 export async function assertVehicleEligibleForParcelWeight(vehicleId, parcelWeight) {
     const weight = Number(parcelWeight || 0);
-    if (weight <= 0) return;
-
     const oid = new mongoose.Types.ObjectId(vehicleId);
     const [vehicle, pricing] = await Promise.all([
         PorterVehicle.findOne({
@@ -168,6 +196,6 @@ export async function assertVehicleEligibleForParcelWeight(vehicleId, parcelWeig
 
     const { eligible, reason } = isParcelVehicleEligible(vehicle, weight, pricing);
     if (!eligible) {
-        throw new ValidationError(reason || WEIGHT_INELIGIBLE_REASON);
+        throw new ValidationError(reason || 'Vehicle is not available for booking');
     }
 }
