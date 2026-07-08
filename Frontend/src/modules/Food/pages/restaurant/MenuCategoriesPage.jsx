@@ -62,11 +62,41 @@ export default function MenuCategoriesPage() {
   const [isPhotoPickerOpen, setIsPhotoPickerOpen] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState(null)
   const [deletingCategory, setDeletingCategory] = useState(false)
+  const [isPureVegRestaurant, setIsPureVegRestaurant] = useState(false)
   const fileInputRef = useRef(null)
 
   useEffect(() => {
     fetchCategories()
   }, [])
+
+  useEffect(() => {
+    let isMounted = true
+    const fetchRestaurantProfile = async () => {
+      try {
+        const response = await restaurantAPI.getCurrentRestaurant()
+        const profile =
+          response?.data?.data?.restaurant ||
+          response?.data?.restaurant ||
+          response?.data?.data ||
+          null
+        if (!isMounted) return
+        setIsPureVegRestaurant(profile?.pureVegRestaurant === true)
+      } catch {
+        if (isMounted) setIsPureVegRestaurant(false)
+      }
+    }
+    fetchRestaurantProfile()
+    return () => {
+      isMounted = false
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!isPureVegRestaurant) return
+    setFormData((prev) => (
+      prev.foodTypeScope === "Veg" ? prev : { ...prev, foodTypeScope: "Veg" }
+    ))
+  }, [isPureVegRestaurant, showModal])
 
   useEffect(() => {
     const draftCategoryName = String(location.state?.draftCategoryName || "").trim()
@@ -110,7 +140,7 @@ export default function MenuCategoriesPage() {
 
   const openCreateModal = () => {
     setEditingCategory(null)
-    setFormData(defaultFormData)
+    setFormData(isPureVegRestaurant ? { ...defaultFormData, foodTypeScope: "Veg" } : defaultFormData)
     setSelectedImageFile(null)
     setImagePreview(null)
     setShowModal(true)
@@ -157,9 +187,26 @@ export default function MenuCategoriesPage() {
     }
   }
 
+  const validateCategoryForm = () => {
+    const name = String(formData.name || "").trim()
+    if (!name) return "Category name is required"
+    if (name.length > 200) return "Category name is too long"
+    if (!["Veg", "Non-Veg"].includes(formData.foodTypeScope)) {
+      return "Category diet type must be Veg or Non-Veg"
+    }
+    if (isPureVegRestaurant && formData.foodTypeScope !== "Veg") {
+      return "Pure veg restaurants can only create veg categories"
+    }
+    if (selectedImageFile && selectedImageFile.size > 5 * 1024 * 1024) {
+      return "Image size exceeds 5MB limit."
+    }
+    return null
+  }
+
   const handleSaveCategory = async () => {
-    if (!String(formData.name || "").trim()) {
-      toast.error("Category name is required")
+    const validationError = validateCategoryForm()
+    if (validationError) {
+      toast.error(validationError)
       return
     }
 
@@ -261,9 +308,13 @@ export default function MenuCategoriesPage() {
           className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-slate-900"
         >
           <option value="Veg">Veg</option>
-          <option value="Non-Veg">Non-Veg</option>
-          <option value="Both">Both</option>
+          {!isPureVegRestaurant && <option value="Non-Veg">Non-Veg</option>}
         </select>
+        {isPureVegRestaurant ? (
+          <p className="mt-2 text-xs text-slate-500">Pure veg restaurants can only create veg categories.</p>
+        ) : (
+          <p className="mt-2 text-xs text-slate-500">Choose whether this category is for veg or non-veg dishes.</p>
+        )}
       </div>
 
       <div>
@@ -394,7 +445,7 @@ export default function MenuCategoriesPage() {
           <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-6 py-12 text-center lg:py-16">
             <p className="text-lg font-semibold text-slate-900">No restaurant categories yet</p>
             <p className="mt-2 text-sm text-slate-500">
-              Start with a category and choose whether it should accept veg, non-veg, or both kinds of dishes.
+              Start with a category and choose whether it should accept veg or non-veg dishes.
             </p>
           </div>
         ) : (
@@ -430,7 +481,7 @@ export default function MenuCategoriesPage() {
                           {status.charAt(0).toUpperCase() + status.slice(1)}
                         </span>
                         <span className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] font-semibold ${scopePillClass(category?.foodTypeScope)}`}>
-                          {category?.foodTypeScope || "Both"}
+                          {category?.foodTypeScope || "Veg"}
                         </span>
                         {isGlobal && (
                           <span className="inline-flex items-center rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-[11px] font-semibold text-sky-700">

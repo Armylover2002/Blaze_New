@@ -135,7 +135,7 @@ const resolveCategoryForRestaurant = async (context, body = {}) => {
         ...getAccessibleCategoryFilter(context)
     };
     if (context.pureVegRestaurant) {
-        baseFilter.foodTypeScope = 'Veg';
+        baseFilter.foodTypeScope = { $ne: 'Non-Veg' };
     }
 
     let category = null;
@@ -175,8 +175,8 @@ const resolveCategoryForRestaurant = async (context, body = {}) => {
     if (String(category.approvalStatus || '') !== 'approved') {
         throw new ValidationError('This category is awaiting admin approval');
     }
-    if (context.pureVegRestaurant && String(category.foodTypeScope || '') !== 'Veg') {
-        throw new ValidationError('Pure veg restaurants can only use veg categories');
+    if (context.pureVegRestaurant && String(category.foodTypeScope || '') === 'Non-Veg') {
+        throw new ValidationError('Pure veg restaurants cannot use non-veg categories');
     }
     if (!categoryAllowsFoodType(category.foodTypeScope, foodType)) {
         throw new ValidationError(`This ${category.foodTypeScope} category cannot accept ${foodType} food`);
@@ -203,6 +203,9 @@ export async function createRestaurantFood(restaurantId, body = {}) {
     const image = images.length > 0 ? images[0] : toStr(body.image);
     const isAvailable = body.isAvailable !== false;
     const foodType = normalizeFoodType(body.foodType);
+    if (context.pureVegRestaurant && foodType !== 'Veg') {
+        throw new ValidationError('Pure veg restaurants can only add veg items');
+    }
     const preparationTime = toStr(body.preparationTime);
     const { categoryObjectId, categoryName } = await resolveCategoryForRestaurant(context, { ...body, foodType });
 
@@ -313,6 +316,9 @@ export async function updateRestaurantFood(restaurantId, foodId, body = {}) {
     if (body.preparationTime !== undefined) update.preparationTime = toStr(body.preparationTime);
 
     const targetFoodType = body.foodType !== undefined ? normalizeFoodType(body.foodType) : normalizeFoodType(existing.foodType);
+    if (context.pureVegRestaurant && targetFoodType !== 'Veg') {
+        throw new ValidationError('Pure veg restaurants can only add veg items');
+    }
     if (body.foodType !== undefined) update.foodType = targetFoodType;
 
     if (
