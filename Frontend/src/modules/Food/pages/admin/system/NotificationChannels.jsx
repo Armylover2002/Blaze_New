@@ -1,276 +1,9 @@
-import { useState, useMemo } from "react"
-import { Bell, Info, Search, Download, ChevronDown, Settings, FileText, FileSpreadsheet, Code, Check, Columns, ArrowUpDown } from "lucide-react"
+import { useEffect, useMemo, useState } from "react"
+import { Bell, Search, Download, ChevronDown, Settings, FileText, FileSpreadsheet, Code, Check, Columns, ArrowUpDown, Loader2, Save } from "lucide-react"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@food/components/ui/dropdown-menu"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@food/components/ui/dialog"
 import { exportNotificationsToCSV, exportNotificationsToExcel, exportNotificationsToPDF, exportNotificationsToJSON } from "@food/components/admin/notifications/notificationsExportUtils"
-
-const adminNotifications = [
-  {
-    id: 1,
-    topic: "Forget Password",
-    description: "Choose How Admin Will Get Notified About Sent Notification On Forget Password.",
-    pushNotification: "N/A",
-    mail: true,
-    sms: true
-  },
-  {
-    id: 2,
-    topic: "Deliveryman Self Registration",
-    description: "Choose How Admin Will Get Notified About Sent Notification On Deliveryman Self Registration.",
-    pushNotification: "N/A",
-    mail: true,
-    sms: false
-  },
-  {
-    id: 3,
-    topic: "Restaurant Self Registration",
-    description: "Choose How Admin Will Get Notified About Sent Notification On Restaurant Self Registration.",
-    pushNotification: "N/A",
-    mail: true,
-    sms: false
-  },
-  {
-    id: 4,
-    topic: "Campaign Join Request",
-    description: "Choose How Admin Will Get Notified About Sent Notification On Campaign Join Request.",
-    pushNotification: "N/A",
-    mail: true,
-    sms: false
-  },
-  {
-    id: 5,
-    topic: "Withdraw Request",
-    description: "Choose How Admin Will Get Notified About Sent Notification On Withdraw Request.",
-    pushNotification: "N/A",
-    mail: true,
-    sms: false
-  },
-  {
-    id: 6,
-    topic: "Order Refund Request",
-    description: "Choose How Admin Will Get Notified About Sent Notification On Order Refund Request.",
-    pushNotification: "N/A",
-    mail: true,
-    sms: false
-  },
-  {
-    id: 7,
-    topic: "Advertisement Add",
-    description: "Choose How Admin Will Get Notified About Sent Notification On Advertisement Add.",
-    pushNotification: "N/A",
-    mail: true,
-    sms: false
-  },
-  {
-    id: 8,
-    topic: "Advertisement Update",
-    description: "Choose How Admin Will Get Notified About Sent Notification On Advertisement Update.",
-    pushNotification: "N/A",
-    mail: true,
-    sms: false
-  }
-]
-
-const restaurantNotifications = [
-  {
-    id: 1,
-    topic: "New Order Received",
-    description: "Choose How Restaurant Will Get Notified About New Order Received.",
-    pushNotification: "N/A",
-    mail: true,
-    sms: true
-  },
-  {
-    id: 2,
-    topic: "Order Status Update",
-    description: "Choose How Restaurant Will Get Notified About Order Status Updates.",
-    pushNotification: "N/A",
-    mail: true,
-    sms: false
-  },
-  {
-    id: 3,
-    topic: "Payment Received",
-    description: "Choose How Restaurant Will Get Notified About Payment Received.",
-    pushNotification: "N/A",
-    mail: true,
-    sms: true
-  },
-  {
-    id: 4,
-    topic: "Review Received",
-    description: "Choose How Restaurant Will Get Notified About Customer Reviews.",
-    pushNotification: "N/A",
-    mail: true,
-    sms: false
-  },
-  {
-    id: 5,
-    topic: "Withdrawal Request Status",
-    description: "Choose How Restaurant Will Get Notified About Withdrawal Request Status.",
-    pushNotification: "N/A",
-    mail: true,
-    sms: false
-  },
-  {
-    id: 6,
-    topic: "Campaign Invitation",
-    description: "Choose How Restaurant Will Get Notified About Campaign Invitations.",
-    pushNotification: "N/A",
-    mail: true,
-    sms: false
-  },
-  {
-    id: 7,
-    topic: "Order Cancelled",
-    description: "Choose How Restaurant Will Get Notified About Order Cancellations.",
-    pushNotification: "N/A",
-    mail: true,
-    sms: true
-  },
-  {
-    id: 8,
-    topic: "Food Out of Stock",
-    description: "Choose How Restaurant Will Get Notified About Food Items Out of Stock.",
-    pushNotification: "N/A",
-    mail: true,
-    sms: false
-  }
-]
-
-const customerNotifications = [
-  {
-    id: 1,
-    topic: "Order Confirmation",
-    description: "Choose How Customer Will Get Notified About Order Confirmation.",
-    pushNotification: "N/A",
-    mail: true,
-    sms: true
-  },
-  {
-    id: 2,
-    topic: "Order Status Update",
-    description: "Choose How Customer Will Get Notified About Order Status Updates.",
-    pushNotification: "N/A",
-    mail: true,
-    sms: true
-  },
-  {
-    id: 3,
-    topic: "Order Delivered",
-    description: "Choose How Customer Will Get Notified About Order Delivery.",
-    pushNotification: "N/A",
-    mail: true,
-    sms: true
-  },
-  {
-    id: 4,
-    topic: "Order Cancelled",
-    description: "Choose How Customer Will Get Notified About Order Cancellation.",
-    pushNotification: "N/A",
-    mail: true,
-    sms: true
-  },
-  {
-    id: 5,
-    topic: "Payment Confirmation",
-    description: "Choose How Customer Will Get Notified About Payment Confirmation.",
-    pushNotification: "N/A",
-    mail: true,
-    sms: false
-  },
-  {
-    id: 6,
-    topic: "Promotional Offers",
-    description: "Choose How Customer Will Get Notified About Promotional Offers.",
-    pushNotification: "N/A",
-    mail: true,
-    sms: false
-  },
-  {
-    id: 7,
-    topic: "Refund Processed",
-    description: "Choose How Customer Will Get Notified About Refund Processing.",
-    pushNotification: "N/A",
-    mail: true,
-    sms: true
-  },
-  {
-    id: 8,
-    topic: "Wallet Transaction",
-    description: "Choose How Customer Will Get Notified About Wallet Transactions.",
-    pushNotification: "N/A",
-    mail: true,
-    sms: false
-  }
-]
-
-const deliverymanNotifications = [
-  {
-    id: 1,
-    topic: "New Order Assignment",
-    description: "Choose How Deliveryman Will Get Notified About New Order Assignment.",
-    pushNotification: "N/A",
-    mail: true,
-    sms: true
-  },
-  {
-    id: 2,
-    topic: "Order Pickup Request",
-    description: "Choose How Deliveryman Will Get Notified About Order Pickup Requests.",
-    pushNotification: "N/A",
-    mail: true,
-    sms: true
-  },
-  {
-    id: 3,
-    topic: "Order Delivery Status",
-    description: "Choose How Deliveryman Will Get Notified About Order Delivery Status.",
-    pushNotification: "N/A",
-    mail: true,
-    sms: false
-  },
-  {
-    id: 4,
-    topic: "Payment Received",
-    description: "Choose How Deliveryman Will Get Notified About Payment Received.",
-    pushNotification: "N/A",
-    mail: true,
-    sms: true
-  },
-  {
-    id: 5,
-    topic: "Bonus Notification",
-    description: "Choose How Deliveryman Will Get Notified About Bonus Notifications.",
-    pushNotification: "N/A",
-    mail: true,
-    sms: false
-  },
-  {
-    id: 6,
-    topic: "Incentive Update",
-    description: "Choose How Deliveryman Will Get Notified About Incentive Updates.",
-    pushNotification: "N/A",
-    mail: true,
-    sms: false
-  },
-  {
-    id: 7,
-    topic: "Shift Reminder",
-    description: "Choose How Deliveryman Will Get Notified About Shift Reminders.",
-    pushNotification: "N/A",
-    mail: true,
-    sms: true
-  },
-  {
-    id: 8,
-    topic: "Withdrawal Status",
-    description: "Choose How Deliveryman Will Get Notified About Withdrawal Status.",
-    pushNotification: "N/A",
-    mail: true,
-    sms: false
-  }
-]
+import { adminAPI } from "@food/api"
 
 const tabs = [
   { id: "admin", label: "Admin" },
@@ -279,14 +12,15 @@ const tabs = [
   { id: "deliveryman", label: "Deliveryman" }
 ]
 
-function ToggleSwitch({ enabled, onToggle }) {
+function ToggleSwitch({ enabled, onToggle, disabled = false }) {
   return (
     <button
       type="button"
+      disabled={disabled}
       onClick={onToggle}
-      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-600 focus:ring-offset-2 ${
-        enabled ? "bg-blue-600" : "bg-slate-200"
-      }`}
+      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-600 focus:ring-offset-2 ${
+        disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"
+      } ${enabled ? "bg-blue-600" : "bg-slate-200"}`}
     >
       <span
         aria-hidden="true"
@@ -298,10 +32,30 @@ function ToggleSwitch({ enabled, onToggle }) {
   )
 }
 
+const mapApiTopics = (topics = []) =>
+  (Array.isArray(topics) ? topics : []).map((item, index) => ({
+    id: item.key || item.id || index + 1,
+    key: item.key || String(item.id || index + 1),
+    topic: item.topic || item.title || "Topic",
+    description: item.description || "",
+    pushNotification: item.pushAvailable === false || item.push === "N/A" ? "N/A" : Boolean(item.channels?.push ?? item.push),
+    mail: item.mailAvailable === false || item.mail === "N/A" ? "N/A" : Boolean(item.channels?.mail ?? item.mail),
+    sms: item.smsAvailable === false || item.sms === "N/A" ? "N/A" : Boolean(item.channels?.sms ?? item.sms),
+    inApp: Boolean(item.channels?.inApp ?? item.inApp ?? true),
+    pushAvailable: item.pushAvailable !== false && item.push !== "N/A",
+    mailAvailable: item.mailAvailable !== false && item.mail !== "N/A",
+    smsAvailable: item.smsAvailable !== false && item.sms !== "N/A",
+  }))
+
 export default function NotificationChannels() {
   const [activeTab, setActiveTab] = useState("admin")
   const [searchQuery, setSearchQuery] = useState("")
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [saveMessage, setSaveMessage] = useState("")
+  const [error, setError] = useState("")
+  const [dirty, setDirty] = useState(false)
   const [visibleColumns, setVisibleColumns] = useState({
     si: true,
     topics: true,
@@ -309,53 +63,107 @@ export default function NotificationChannels() {
     mail: true,
     sms: true,
   })
-  
-  const getNotificationsForTab = (tab) => {
-    switch(tab) {
-      case "admin":
-        return adminNotifications
-      case "restaurant":
-        return restaurantNotifications
-      case "customers":
-        return customerNotifications
-      case "deliveryman":
-        return deliverymanNotifications
-      default:
-        return adminNotifications
+  const [notifications, setNotifications] = useState([])
+
+  const loadChannels = async (role = activeTab) => {
+    try {
+      setLoading(true)
+      setError("")
+      setSaveMessage("")
+      const response = await adminAPI.getNotificationChannels({ role })
+      const payload = response?.data?.data || {}
+      const topics = payload?.topics || payload?.roles?.find((item) => item.role === role)?.topics || []
+      setNotifications(mapApiTopics(topics))
+      setDirty(false)
+    } catch (err) {
+      setNotifications([])
+      setError(err?.response?.data?.message || err?.message || "Failed to load notification channels")
+    } finally {
+      setLoading(false)
     }
   }
 
-  const [notifications, setNotifications] = useState(() => getNotificationsForTab("admin"))
+  useEffect(() => {
+    loadChannels(activeTab)
+  }, [activeTab])
 
   const filteredNotifications = useMemo(() => {
-    if (!searchQuery.trim()) {
-      return notifications
-    }
-    
+    if (!searchQuery.trim()) return notifications
     const query = searchQuery.toLowerCase().trim()
-    return notifications.filter(notif =>
-      notif.topic.toLowerCase().includes(query) ||
-      notif.description.toLowerCase().includes(query)
+    return notifications.filter(
+      (notif) =>
+        notif.topic.toLowerCase().includes(query) ||
+        notif.description.toLowerCase().includes(query)
     )
   }, [notifications, searchQuery])
 
-  // Update notifications when tab changes
   const handleTabChange = (tabId) => {
+    if (dirty && !window.confirm("You have unsaved changes. Switch tab anyway?")) return
     setActiveTab(tabId)
-    setNotifications(getNotificationsForTab(tabId))
-    setSearchQuery("") // Reset search when changing tabs
+    setSearchQuery("")
   }
 
-  const handleMailToggle = (id) => {
-    setNotifications(prev => prev.map(notif => 
-      notif.id === id ? { ...notif, mail: !notif.mail } : notif
-    ))
+  const handleMailToggle = (key) => {
+    setNotifications((prev) =>
+      prev.map((notif) =>
+        notif.key === key && notif.mailAvailable
+          ? { ...notif, mail: !notif.mail }
+          : notif
+      )
+    )
+    setDirty(true)
+    setSaveMessage("")
   }
 
-  const handleSMSToggle = (id) => {
-    setNotifications(prev => prev.map(notif => 
-      notif.id === id ? { ...notif, sms: !notif.sms } : notif
-    ))
+  const handleSMSToggle = (key) => {
+    setNotifications((prev) =>
+      prev.map((notif) =>
+        notif.key === key && notif.smsAvailable
+          ? { ...notif, sms: !notif.sms }
+          : notif
+      )
+    )
+    setDirty(true)
+    setSaveMessage("")
+  }
+
+  const handlePushToggle = (key) => {
+    setNotifications((prev) =>
+      prev.map((notif) =>
+        notif.key === key && notif.pushAvailable
+          ? { ...notif, pushNotification: !notif.pushNotification }
+          : notif
+      )
+    )
+    setDirty(true)
+    setSaveMessage("")
+  }
+
+  const handleSave = async () => {
+    try {
+      setSaving(true)
+      setError("")
+      setSaveMessage("")
+      await adminAPI.updateNotificationChannels(
+        activeTab,
+        notifications.map((item) => ({
+          key: item.key,
+          channels: {
+            push: item.pushAvailable ? Boolean(item.pushNotification) : false,
+            mail: item.mailAvailable ? Boolean(item.mail) : false,
+            sms: item.smsAvailable ? Boolean(item.sms) : false,
+            inApp: Boolean(item.inApp),
+          },
+        }))
+      )
+      setDirty(false)
+      setSaveMessage("Channel preferences saved. Broadcast Push / In-App delivery will respect these settings.")
+      await loadChannels(activeTab)
+    } catch (err) {
+      setError(err?.response?.data?.message || err?.message || "Failed to save notification channels")
+    } finally {
+      setSaving(false)
+    }
   }
 
   const handleExport = (format) => {
@@ -363,18 +171,23 @@ export default function NotificationChannels() {
       alert("No data to export")
       return
     }
-    const tabName = activeTab.charAt(0).toUpperCase() + activeTab.slice(1)
     const filename = `notifications_${activeTab}`
+    const exportRows = filteredNotifications.map((item) => ({
+      ...item,
+      pushNotification: item.pushAvailable ? (item.pushNotification ? "On" : "Off") : "N/A",
+      mail: item.mailAvailable ? Boolean(item.mail) : false,
+      sms: item.smsAvailable ? Boolean(item.sms) : false,
+    }))
     switch (format) {
-      case "csv": exportNotificationsToCSV(filteredNotifications, filename); break
-      case "excel": exportNotificationsToExcel(filteredNotifications, filename); break
-      case "pdf": exportNotificationsToPDF(filteredNotifications, filename); break
-      case "json": exportNotificationsToJSON(filteredNotifications, filename); break
+      case "csv": exportNotificationsToCSV(exportRows, filename); break
+      case "excel": exportNotificationsToExcel(exportRows, filename); break
+      case "pdf": exportNotificationsToPDF(exportRows, filename); break
+      case "json": exportNotificationsToJSON(exportRows, filename); break
     }
   }
 
   const toggleColumn = (columnKey) => {
-    setVisibleColumns(prev => ({ ...prev, [columnKey]: !prev[columnKey] }))
+    setVisibleColumns((prev) => ({ ...prev, [columnKey]: !prev[columnKey] }))
   }
 
   const resetColumns = () => {
@@ -398,7 +211,6 @@ export default function NotificationChannels() {
   return (
     <div className="p-2 lg:p-3 bg-slate-50 min-h-screen">
       <div className="w-full mx-auto max-w-6xl">
-        {/* Page Title */}
         <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-3 mb-3">
           <div className="flex items-center gap-2 mb-2">
             <div className="w-7 h-7 rounded-lg bg-blue-500 flex items-center justify-center">
@@ -407,11 +219,10 @@ export default function NotificationChannels() {
             <h1 className="text-lg font-bold text-slate-900">Notification Channels Setup</h1>
           </div>
           <p className="text-xs text-slate-600 ml-9">
-            From here you setup who can see what types of notification from StackFood
+            Configure which channels are used for each notification topic. Push and In-App settings are enforced on admin broadcasts.
           </p>
         </div>
 
-        {/* Tabs */}
         <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-2 mb-3">
           <div className="flex gap-2">
             {tabs.map((tab) => (
@@ -430,7 +241,6 @@ export default function NotificationChannels() {
           </div>
         </div>
 
-        {/* Search and Actions Section */}
         <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-3 mb-3">
           <div className="flex flex-col sm:flex-row sm:items-center gap-2">
             <div className="relative flex-1 min-w-[250px]">
@@ -472,16 +282,26 @@ export default function NotificationChannels() {
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
-            <button 
+            <button
               onClick={() => setIsSettingsOpen(true)}
               className="p-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 transition-all"
             >
               <Settings className="w-4 h-4" />
             </button>
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={saving || !dirty}
+              className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-semibold rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60"
+            >
+              {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+              Save Changes
+            </button>
           </div>
+          {error ? <p className="mt-2 text-xs text-red-600">{error}</p> : null}
+          {saveMessage ? <p className="mt-2 text-xs text-emerald-600">{saveMessage}</p> : null}
         </div>
 
-        {/* Table */}
         <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-4">
           <div className="mb-4">
             <div className="flex items-center gap-2">
@@ -489,126 +309,131 @@ export default function NotificationChannels() {
               <span className="px-3 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-700">
                 {filteredNotifications.length}
               </span>
+              {dirty ? (
+                <span className="px-2 py-1 rounded-full text-[10px] font-semibold bg-amber-50 text-amber-700">
+                  Unsaved changes
+                </span>
+              ) : null}
             </div>
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-slate-50 border-b border-slate-200">
-                <tr>
-                  {visibleColumns.si && (
-                    <th className="px-3 py-2 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">
-                      <div className="flex items-center gap-2">
-                        <span>SI</span>
-                        <ArrowUpDown className="w-3 h-3 text-slate-400 cursor-pointer hover:text-slate-600" />
-                      </div>
-                    </th>
-                  )}
-                  {visibleColumns.topics && (
-                    <th className="px-3 py-2 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">
-                      <div className="flex items-center gap-2">
-                        <span>Topics</span>
-                        <ArrowUpDown className="w-3 h-3 text-slate-400 cursor-pointer hover:text-slate-600" />
-                      </div>
-                    </th>
-                  )}
-                  {visibleColumns.pushNotification && (
-                    <th className="px-3 py-2 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">
-                      <div className="flex items-center gap-2">
-                        <span>Push Notification</span>
-                        <ArrowUpDown className="w-3 h-3 text-slate-400 cursor-pointer hover:text-slate-600" />
-                      </div>
-                    </th>
-                  )}
-                  {visibleColumns.mail && (
-                    <th className="px-3 py-2 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">
-                      <div className="flex items-center gap-2">
-                        <span>Mail</span>
-                        <ArrowUpDown className="w-3 h-3 text-slate-400 cursor-pointer hover:text-slate-600" />
-                      </div>
-                    </th>
-                  )}
-                  {visibleColumns.sms && (
-                    <th className="px-3 py-2 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">
-                      <div className="flex items-center gap-2">
-                        <span>SMS</span>
-                        <ArrowUpDown className="w-3 h-3 text-slate-400 cursor-pointer hover:text-slate-600" />
-                      </div>
-                    </th>
-                  )}
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-slate-100">
-                {filteredNotifications.length === 0 ? (
+            {loading ? (
+              <div className="py-10 text-sm text-slate-500 flex items-center gap-2">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Loading channel settings...
+              </div>
+            ) : (
+              <table className="w-full">
+                <thead className="bg-slate-50 border-b border-slate-200">
                   <tr>
-                    <td colSpan={Object.values(visibleColumns).filter(v => v).length} className="px-6 py-8 text-center">
-                      <p className="text-xs text-slate-500">No notifications found</p>
-                    </td>
+                    {visibleColumns.si && (
+                      <th className="px-3 py-2 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">
+                        <div className="flex items-center gap-2">
+                          <span>SI</span>
+                          <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                        </div>
+                      </th>
+                    )}
+                    {visibleColumns.topics && (
+                      <th className="px-3 py-2 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">
+                        <div className="flex items-center gap-2">
+                          <span>Topics</span>
+                          <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                        </div>
+                      </th>
+                    )}
+                    {visibleColumns.pushNotification && (
+                      <th className="px-3 py-2 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">
+                        Push Notification
+                      </th>
+                    )}
+                    {visibleColumns.mail && (
+                      <th className="px-3 py-2 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">
+                        Mail
+                      </th>
+                    )}
+                    {visibleColumns.sms && (
+                      <th className="px-3 py-2 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">
+                        SMS
+                      </th>
+                    )}
                   </tr>
-                ) : (
-                  filteredNotifications.map((notification, index) => (
-                    <tr key={notification.id} className="hover:bg-slate-50 transition-colors">
-                      {visibleColumns.si && (
-                        <td className="px-3 py-3">
-                          <span className="text-xs text-slate-700">{index + 1}</span>
-                        </td>
-                      )}
-                      {visibleColumns.topics && (
-                        <td className="px-3 py-3">
-                          <div>
-                            <p className="text-xs font-medium text-slate-900 mb-1">
-                              {notification.topic}
-                            </p>
-                            <p className="text-[10px] text-slate-600">
-                              {notification.description}
-                            </p>
-                          </div>
-                        </td>
-                      )}
-                      {visibleColumns.pushNotification && (
-                        <td className="px-3 py-3">
-                          <button
-                            type="button"
-                            className="px-2 py-1 text-[10px] font-medium bg-blue-50 text-blue-600 rounded hover:bg-blue-100 transition-colors"
-                          >
-                            {notification.pushNotification}
-                          </button>
-                        </td>
-                      )}
-                      {visibleColumns.mail && (
-                        <td className="px-3 py-3">
-                          <ToggleSwitch
-                            enabled={notification.mail}
-                            onToggle={() => handleMailToggle(notification.id)}
-                          />
-                        </td>
-                      )}
-                      {visibleColumns.sms && (
-                        <td className="px-3 py-3">
-                          {notification.sms !== false ? (
-                            <ToggleSwitch
-                              enabled={notification.sms}
-                              onToggle={() => handleSMSToggle(notification.id)}
-                            />
-                          ) : (
-                            <button
-                              type="button"
-                              className="px-2 py-1 text-[10px] font-medium bg-blue-50 text-blue-600 rounded hover:bg-blue-100 transition-colors"
-                            >
-                              N/A
-                            </button>
-                          )}
-                        </td>
-                      )}
+                </thead>
+                <tbody className="bg-white divide-y divide-slate-100">
+                  {filteredNotifications.length === 0 ? (
+                    <tr>
+                      <td colSpan={Object.values(visibleColumns).filter(Boolean).length} className="px-6 py-8 text-center">
+                        <p className="text-xs text-slate-500">No notifications found</p>
+                      </td>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+                  ) : (
+                    filteredNotifications.map((notification, index) => (
+                      <tr key={notification.key} className="hover:bg-slate-50 transition-colors">
+                        {visibleColumns.si && (
+                          <td className="px-3 py-3">
+                            <span className="text-xs text-slate-700">{index + 1}</span>
+                          </td>
+                        )}
+                        {visibleColumns.topics && (
+                          <td className="px-3 py-3">
+                            <div>
+                              <p className="text-xs font-medium text-slate-900 mb-1">{notification.topic}</p>
+                              <p className="text-[10px] text-slate-600">{notification.description}</p>
+                            </div>
+                          </td>
+                        )}
+                        {visibleColumns.pushNotification && (
+                          <td className="px-3 py-3">
+                            {notification.pushAvailable ? (
+                              <ToggleSwitch
+                                enabled={Boolean(notification.pushNotification)}
+                                onToggle={() => handlePushToggle(notification.key)}
+                              />
+                            ) : (
+                              <span className="px-2 py-1 text-[10px] font-medium bg-blue-50 text-blue-600 rounded">
+                                N/A
+                              </span>
+                            )}
+                          </td>
+                        )}
+                        {visibleColumns.mail && (
+                          <td className="px-3 py-3">
+                            {notification.mailAvailable ? (
+                              <ToggleSwitch
+                                enabled={Boolean(notification.mail)}
+                                onToggle={() => handleMailToggle(notification.key)}
+                              />
+                            ) : (
+                              <span className="px-2 py-1 text-[10px] font-medium bg-blue-50 text-blue-600 rounded">
+                                N/A
+                              </span>
+                            )}
+                          </td>
+                        )}
+                        {visibleColumns.sms && (
+                          <td className="px-3 py-3">
+                            {notification.smsAvailable ? (
+                              <ToggleSwitch
+                                enabled={Boolean(notification.sms)}
+                                onToggle={() => handleSMSToggle(notification.key)}
+                              />
+                            ) : (
+                              <span className="px-2 py-1 text-[10px] font-medium bg-blue-50 text-blue-600 rounded">
+                                N/A
+                              </span>
+                            )}
+                          </td>
+                        )}
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            )}
           </div>
         </div>
       </div>
 
-      {/* Settings Dialog */}
       <Dialog open={isSettingsOpen} onOpenChange={setIsSettingsOpen}>
         <DialogContent className="max-w-md bg-white p-0">
           <DialogHeader className="px-6 pt-6 pb-4">
@@ -636,9 +461,7 @@ export default function NotificationChannels() {
                       className="w-4 h-4 text-emerald-600 border-slate-300 rounded focus:ring-emerald-500"
                     />
                     <span className="text-xs text-slate-700">{label}</span>
-                    {visibleColumns[key] && (
-                      <Check className="w-4 h-4 text-emerald-600 ml-auto" />
-                    )}
+                    {visibleColumns[key] && <Check className="w-4 h-4 text-emerald-600 ml-auto" />}
                   </label>
                 ))}
               </div>

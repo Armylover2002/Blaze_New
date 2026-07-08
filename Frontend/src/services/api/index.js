@@ -439,6 +439,23 @@ export const adminAPI = {
     apiClient.delete(`/food/admin/notifications/broadcast/${String(id)}`, {
       contextModule: "admin",
     }),
+  getNotificationChannels: (params = {}) =>
+    apiClient.get("/food/admin/notifications/channels", {
+      params,
+      contextModule: "admin",
+    }),
+  updateNotificationChannelTopic: (role, topicKey, channels = {}) =>
+    apiClient.patch(
+      `/food/admin/notifications/channels/${encodeURIComponent(role)}/topics/${encodeURIComponent(topicKey)}`,
+      { channels },
+      { contextModule: "admin" }
+    ),
+  updateNotificationChannels: (role, topics = []) =>
+    apiClient.put(
+      `/food/admin/notifications/channels/${encodeURIComponent(role)}`,
+      { topics },
+      { contextModule: "admin" }
+    ),
   /** List restaurants for admin. Requires admin auth. */
   getRestaurants: (params = {}, config = {}) =>
     apiClient.get("/food/admin/restaurants", {

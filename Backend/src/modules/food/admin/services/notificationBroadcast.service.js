@@ -8,6 +8,7 @@ import { BroadcastNotification } from '../../../../core/notifications/models/not
 import { FoodNotification } from '../../../../core/notifications/models/notification.model.js';
 import { createInboxNotifications } from '../../../../core/notifications/notification.service.js';
 import { notifyOwnersSafely } from '../../../../core/notifications/firebase.service.js';
+import { filterTargetsByChannel } from './notificationChannel.service.js';
 import { FoodAdmin } from '../../../../core/admin/admin.model.js';
 import { getIO, rooms } from '../../../../config/socket.js';
 
@@ -22,9 +23,12 @@ const TARGET_TYPE_MAP = {
 };
 
 const OWNER_LABEL_MAP = {
+    ALL: 'All (Food)',
+    ALL_QC: 'All (Quick Commerce)',
     USER: 'Users',
     RESTAURANT: 'Restaurants',
     SELLER: 'Sellers',
+    DELIVERY: 'Delivery Partners',
     DELIVERY_PARTNER: 'Delivery Partners'
 };
 
@@ -218,7 +222,7 @@ const emitRealtimeNotifications = (targets = [], broadcast) => {
             io.to(rooms.restaurant(ownerId)).emit('admin_notification', payload);
         }
         if (target.ownerType === 'SELLER') {
-            io.to(`seller_${ownerId}`).emit('admin_notification', payload); // Using generic seller room format if rooms.seller isn't available
+            io.to(rooms.seller(ownerId)).emit('admin_notification', payload);
         }
         if (target.ownerType === 'DELIVERY_PARTNER') {
             io.to(rooms.delivery(ownerId)).emit('admin_notification', payload);
@@ -269,35 +273,58 @@ export const createBroadcastNotification = async ({ body = {}, adminId } = {}) =
         targetCount: resolvedTargets.length
     });
 
-    await createInboxNotifications({
-        notifications: resolvedTargets.map((target) =>
-            buildNotificationPayload({
+    // Respect Notification Channels setup (Push / In-App). Mail/SMS for broadcasts
+    // are persisted as preferences but not dispatched here until providers are wired.
+    const [inAppTargets, pushTargets] = await Promise.all([
+        filterTargetsByChannel({
+            targets: resolvedTargets,
+            topicKey: 'admin_broadcast',
+            channel: 'inApp'
+        }),
+        filterTargetsByChannel({
+            targets: resolvedTargets,
+            topicKey: 'admin_broadcast',
+            channel: 'push'
+        })
+    ]);
+
+    // FoodNotification inbox only supports USER / RESTAURANT / DELIVERY_PARTNER.
+    // Seller targets are persisted on the broadcast record and delivered via push/realtime;
+    // SellerNotification inbox wiring is handled separately.
+    const foodInboxTargets = inAppTargets.filter((target) => target.ownerType !== 'SELLER');
+    if (foodInboxTargets.length > 0) {
+        await createInboxNotifications({
+            notifications: foodInboxTargets.map((target) =>
+                buildNotificationPayload({
+                    title,
+                    message,
+                    link,
+                    broadcastId: broadcast._id,
+                    target
+                })
+            )
+        });
+    }
+
+    if (pushTargets.length > 0) {
+        await notifyOwnersSafely(
+            pushTargets.map((target) => ({
+                ownerType: target.ownerType,
+                ownerId: target.ownerId
+            })),
+            {
                 title,
-                message,
-                link,
-                broadcastId: broadcast._id,
-                target
-            })
-        )
-    });
-
-    await notifyOwnersSafely(
-        resolvedTargets.map((target) => ({
-            ownerType: target.ownerType,
-            ownerId: target.ownerId
-        })),
-        {
-            title,
-            body: message,
-            data: {
-                type: 'admin_broadcast',
-                broadcastId: String(broadcast._id),
-                link
+                body: message,
+                data: {
+                    type: 'admin_broadcast',
+                    broadcastId: String(broadcast._id),
+                    link
+                }
             }
-        }
-    );
+        );
+    }
 
-    emitRealtimeNotifications(resolvedTargets, broadcast);
+    emitRealtimeNotifications(inAppTargets, broadcast);
 
     return {
         broadcast,

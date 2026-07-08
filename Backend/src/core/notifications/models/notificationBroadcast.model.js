@@ -4,7 +4,7 @@ const broadcastTargetSchema = new mongoose.Schema(
     {
         ownerType: {
             type: String,
-            enum: ['USER', 'RESTAURANT', 'DELIVERY_PARTNER'],
+            enum: ['USER', 'RESTAURANT', 'SELLER', 'DELIVERY_PARTNER'],
             required: true
         },
         ownerId: {
@@ -39,7 +39,7 @@ const notificationBroadcastSchema = new mongoose.Schema(
         },
         targetType: {
             type: String,
-            enum: ['ALL', 'USER', 'RESTAURANT', 'DELIVERY', 'CUSTOM'],
+            enum: ['ALL', 'ALL_QC', 'USER', 'RESTAURANT', 'SELLER', 'DELIVERY', 'CUSTOM'],
             required: true,
             index: true
         },

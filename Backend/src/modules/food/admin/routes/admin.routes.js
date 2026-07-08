@@ -9,6 +9,7 @@ import * as subscriptionPlanController from '../controllers/subscriptionPlan.con
 
 import * as feedbackExperienceController from '../controllers/feedbackExperience.controller.js';
 import * as notificationBroadcastController from '../controllers/notificationBroadcast.controller.js';
+import * as notificationChannelController from '../controllers/notificationChannel.controller.js';
 import * as diningAdminController from '../../dining/controllers/diningAdmin.controller.js';
 import * as orderController from '../../orders/controllers/order.controller.js';
 import { getAdminPageController, upsertAdminPageController } from '../controllers/pageContent.controller.js';
@@ -33,6 +34,19 @@ router.use(requireAdmin);
 router.post('/notifications/broadcast', checkPermission('food::system_settings::broadcast', 'create'), notificationBroadcastController.createBroadcastNotificationController);
 router.get('/notifications/broadcast', notificationBroadcastController.getBroadcastNotificationsController);
 router.delete('/notifications/broadcast/:id', checkPermission('food::system_settings::broadcast', 'delete'), notificationBroadcastController.deleteBroadcastNotificationController);
+
+// ----- Notification Channels -----
+router.get('/notifications/channels', notificationChannelController.getNotificationChannelsController);
+router.patch(
+    '/notifications/channels/:role/topics/:topicKey',
+    checkPermission('food::system_settings::broadcast', 'edit'),
+    notificationChannelController.updateNotificationChannelTopicController
+);
+router.put(
+    '/notifications/channels/:role',
+    checkPermission('food::system_settings::broadcast', 'edit'),
+    notificationChannelController.updateNotificationChannelsBulkController
+);
 
 // ----- Customers -----
 router.get('/customers', adminController.getCustomers);
