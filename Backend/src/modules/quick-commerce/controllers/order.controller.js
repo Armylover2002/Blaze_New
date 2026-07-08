@@ -32,7 +32,7 @@ import {
 } from '../utils/stock.helpers.js';
 import { processQuickOrderRefund } from '../services/quickRefund.service.js';
 import { fanOutQuickSellerOrdersForParent } from '../services/quickSellerOrderFanout.service.js';
-import { deductWalletBalance } from '../../food/user/services/userWallet.service.js';
+import { deductWalletBalance, refundWalletBalance } from '../../food/user/services/userWallet.service.js';
 import {
     createRazorpayOrder,
     getRazorpayKeyId,
@@ -441,11 +441,6 @@ export const placeOrder = async (req, res) => {
       distanceKm,
     });
 
-    // --- SYNC FIX: Trust the frontend calculated exact fees if provided ---
-    if (typeof req.body?.deliveryFee === 'number') pricing.deliveryFee = Math.max(0, req.body.deliveryFee);
-    if (typeof req.body?.taxTotal === 'number') pricing.gst = Math.max(0, req.body.taxTotal);
-    if (typeof req.body?.platformFee === 'number') pricing.platformFee = Math.max(0, req.body.platformFee);
-
     // Mongoose pricingSchema only has 'tax', not 'gst'. Map gst to tax so it gets saved.
     pricing.tax = pricing.gst;
 
@@ -596,7 +591,43 @@ export const placeOrder = async (req, res) => {
       }
     }
 
-    await decrementQuickOrderItemsStock(items);
+    let stockAdjusted = false;
+    try {
+      if (!isOnlinePayment) {
+        await decrementQuickOrderItemsStock(items);
+        stockAdjusted = true;
+      }
+    } catch (stockErr) {
+      logger.error(
+        `Quick stock deduction failed for ${order.orderId}: ${stockErr?.message || stockErr}`,
+      );
+
+      if (isWalletPayment && idQuery.userId) {
+        try {
+          await refundWalletBalance(
+            idQuery.userId,
+            total,
+            'Quick commerce order payment reversal',
+            {
+              orderId: order.orderId,
+              source: 'quick_order_payment_reversal',
+              orderType: 'quick',
+            },
+          );
+        } catch (refundErr) {
+          logger.error(
+            `Quick wallet refund reversal failed for ${order.orderId}: ${refundErr?.message || refundErr}`,
+          );
+        }
+      }
+
+      await QuickOrder.deleteOne({ _id: order._id });
+
+      return res.status(409).json({
+        success: false,
+        message: 'Some items are no longer available. Please refresh your cart and try again.',
+      });
+    }
 
     const sellerOrdersResults = sellerBuckets.size > 0
         ? await Promise.all(Array.from(sellerBuckets.entries()).map(async ([sellerId, sellerItems]) => {
@@ -700,7 +731,45 @@ export const placeOrder = async (req, res) => {
       );
     }
 
-    await QuickCart.findOneAndUpdate(idQuery, { $set: { items: [] } }, { upsert: false });
+    try {
+      await QuickCart.findOneAndUpdate(idQuery, { $set: { items: [] } }, { upsert: false });
+    } catch (cartErr) {
+      logger.error(`Quick cart clear failed for ${order.orderId}: ${cartErr?.message || cartErr}`);
+      if (stockAdjusted) {
+        try {
+          await restoreQuickOrderItemsStock(order.items);
+        } catch (restoreErr) {
+          logger.error(
+            `Quick stock restore failed after cart clear failure for ${order.orderId}: ${
+              restoreErr?.message || restoreErr
+            }`,
+          );
+        }
+      }
+      if (isWalletPayment && idQuery.userId) {
+        try {
+          await refundWalletBalance(
+            idQuery.userId,
+            total,
+            'Quick commerce order payment reversal',
+            {
+              orderId: order.orderId,
+              source: 'quick_order_payment_reversal',
+              orderType: 'quick',
+            },
+          );
+        } catch (refundErr) {
+          logger.error(
+            `Quick wallet refund reversal failed for ${order.orderId}: ${refundErr?.message || refundErr}`,
+          );
+        }
+      }
+      await QuickOrder.deleteOne({ _id: order._id });
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to finalize order. Please try again.',
+      });
+    }
 
     emitQuickOrderStatusUpdate(order, 'Quick order placed successfully.');
 
@@ -777,6 +846,18 @@ export const verifyPayment = async (req, res) => {
     if (!isValid) {
       return res.status(400).json({ success: false, message: 'Invalid payment signature' });
     }
+
+    await decrementQuickOrderItemsStock(
+      Array.isArray(order.items)
+        ? order.items.map((item) => ({
+            productId: item.itemId || item.productId,
+            quantity: item.quantity,
+            variantName: item.variantName || item.notes || '',
+            variantKey: item.variantKey || '',
+            variantSku: item.variantSku || '',
+          }))
+        : [],
+    );
 
     order.payment.status = 'paid';
     if (order.payment.razorpay) {
@@ -1052,7 +1133,12 @@ export const cancelOrder = async (req, res) => {
       reason: cancellationReason,
     });
 
-    await restoreQuickOrderItemsStock(order.items);
+    const shouldRestoreStock =
+      order.payment?.method !== 'razorpay' ||
+      ['paid', 'refunded'].includes(String(order.payment?.status || '').toLowerCase());
+    if (shouldRestoreStock) {
+      await restoreQuickOrderItemsStock(order.items);
+    }
     await order.save();
 
     try {

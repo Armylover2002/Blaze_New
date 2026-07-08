@@ -144,6 +144,7 @@ export const handleRazorpayWebhook = async (req, res) => {
                     });
                 } catch (ledgerErr) {
                     logger.error(`Webhook Ledger Error (Order ${order.orderId}): ${ledgerErr.message}`);
+                    return res.status(500).json({ message: 'Ledger sync failed; retrying webhook' });
                 }
                 logger.info(`Webhook [payment.captured]: Synced Order ${order.orderId} (Status=paid)`);
             } else {

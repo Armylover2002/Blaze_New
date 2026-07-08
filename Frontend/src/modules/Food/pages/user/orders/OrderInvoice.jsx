@@ -8,6 +8,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "@food/components/ui/ca
 import { Button } from "@food/components/ui/button"
 import { Badge } from "@food/components/ui/badge"
 import { useOrders } from "@food/context/OrdersContext"
+import { orderAPI } from "@food/api"
 import { useCompanyName } from "@food/hooks/useCompanyName"
 
 export default function OrderInvoice() {
