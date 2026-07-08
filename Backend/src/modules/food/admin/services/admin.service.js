@@ -5163,44 +5163,31 @@ export async function approveDeliveryPartner(id, performer = null) {
         console.error('Failed to send delivery partner approval notification:', e);
     }
 
-    // Referral crediting: on approval, credit the referrer and referee partners' pocket balances via DeliveryBonusTransaction.
+    // Referral crediting: pending log first, wallet/bonus credit, then mark credited (retryable on later approval runs).
     try {
         const referrerId = partner.referredBy ? String(partner.referredBy) : '';
         if (referrerId && mongoose.Types.ObjectId.isValid(referrerId)) {
-            const already = await FoodReferralLog.findOne({ refereeId: partner._id, role: 'DELIVERY_PARTNER' }).lean();
-            if (!already) {
+            let log = await FoodReferralLog.findOne({ refereeId: partner._id, role: 'DELIVERY_PARTNER' });
+
+            if (!log) {
                 const settingsDoc = await FoodReferralSettings.findOne({ isActive: true }).sort({ createdAt: -1 }).lean();
-                
+
                 const referrerReward = Math.max(0, Number(settingsDoc?.delivery?.referrerReward) || 0);
                 const refereeReward = Math.max(0, Number(settingsDoc?.delivery?.refereeReward) || 0);
                 const limit = Math.max(0, Number(settingsDoc?.delivery?.limit) || 0);
-                
-                const referrer = await FoodDeliveryPartner.findById(referrerId).select('_id referralCount status').lean();
+
+                const referrer = await FoodDeliveryPartner.findById(referrerId).select('_id referralCount status name').lean();
 
                 if (referrer && referrer.status === 'approved' && (referrerReward > 0 || refereeReward > 0) && limit > 0 && Number(referrer.referralCount || 0) < limit) {
-                    const log = await FoodReferralLog.create({
+                    log = await FoodReferralLog.create({
                         referrerId: referrer._id,
                         refereeId: partner._id,
                         role: 'DELIVERY_PARTNER',
                         rewardAmount: referrerReward,
                         referrerRewardAmount: referrerReward,
                         refereeRewardAmount: refereeReward,
-                        status: 'credited'
+                        status: 'pending'
                     });
-
-                    await Promise.all([
-                        FoodDeliveryPartner.updateOne({ _id: referrer._id }, { $inc: { referralCount: 1 } }),
-                        // Credit Referrer
-                        referrerReward > 0 ? addDeliveryPartnerBonus(
-                            { deliveryPartnerId: String(referrer._id), amount: referrerReward, reference: `Referral bonus for referring ${partner.name || 'new partner'}` },
-                            null
-                        ) : Promise.resolve(),
-                        // Credit Referee (The approved partner)
-                        refereeReward > 0 ? addDeliveryPartnerBonus(
-                            { deliveryPartnerId: String(partner._id), amount: refereeReward, reference: `Sign-up referral bonus via ${referrer.name || 'existing partner'}` },
-                            null
-                        ) : Promise.resolve()
-                    ]);
                 } else {
                     await FoodReferralLog.create({
                         referrerId: new mongoose.Types.ObjectId(referrerId),
@@ -5212,9 +5199,58 @@ export async function approveDeliveryPartner(id, performer = null) {
                     });
                 }
             }
+
+            if (log?.status === 'pending') {
+                const referrerReward = Math.max(0, Number(log.referrerRewardAmount) || 0);
+                const refereeReward = Math.max(0, Number(log.refereeRewardAmount) || 0);
+                const referrerBonusRef = `referral_log:${String(log._id)}:referrer`;
+                const refereeBonusRef = `referral_log:${String(log._id)}:referee`;
+
+                const [existingReferrerBonus, existingRefereeBonus] = await Promise.all([
+                    referrerReward > 0
+                        ? DeliveryBonusTransaction.findOne({ reference: referrerBonusRef }).select('_id').lean()
+                        : Promise.resolve(null),
+                    refereeReward > 0
+                        ? DeliveryBonusTransaction.findOne({ reference: refereeBonusRef }).select('_id').lean()
+                        : Promise.resolve(null)
+                ]);
+
+                await Promise.all([
+                    referrerReward > 0 && !existingReferrerBonus
+                        ? addDeliveryPartnerBonus(
+                            {
+                                deliveryPartnerId: String(log.referrerId),
+                                amount: referrerReward,
+                                reference: referrerBonusRef
+                            },
+                            null
+                        )
+                        : Promise.resolve(),
+                    refereeReward > 0 && !existingRefereeBonus
+                        ? addDeliveryPartnerBonus(
+                            {
+                                deliveryPartnerId: String(partner._id),
+                                amount: refereeReward,
+                                reference: refereeBonusRef
+                            },
+                            null
+                        )
+                        : Promise.resolve()
+                ]);
+
+                // Atomic pending → credited so retries cannot double-increment referralCount.
+                const marked = await FoodReferralLog.findOneAndUpdate(
+                    { _id: log._id, status: 'pending' },
+                    { $set: { status: 'credited' } },
+                    { new: true }
+                );
+                if (marked) {
+                    await FoodDeliveryPartner.updateOne({ _id: log.referrerId }, { $inc: { referralCount: 1 } });
+                }
+            }
         }
     } catch (e) {
-        // Never fail approval due to referral errors.
+        // Never fail approval due to referral errors. Pending logs stay retryable.
         // eslint-disable-next-line no-console
         console.warn('Referral crediting failed (delivery approval):', e?.message || e);
     }
