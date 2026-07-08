@@ -2421,6 +2421,15 @@ export async function getRestaurantAnalytics(restaurantId) {
     });
     const yearlyProfit = sum(yearlyCompletedTx, (tx) => tx?.amounts?.restaurantShare);
 
+    const joinDate = new Date(restaurant.createdAt || now);
+    const monthsSinceJoin = Math.max(
+        1,
+        (currentYear - joinDate.getFullYear()) * 12 + (currentMonth - joinDate.getMonth()) + 1
+    );
+    const yearsSinceJoin = Math.max(1, currentYear - joinDate.getFullYear() + 1);
+    const averageMonthlyProfit = restaurantProfit / monthsSinceJoin;
+    const averageYearlyProfit = restaurantProfit / yearsSinceJoin;
+
     const totalOrdersCount = orders.length;
     const avgOrderValue = completedTx.length > 0 ? totalRevenue / completedTx.length : 0;
 
@@ -2446,8 +2455,8 @@ export async function getRestaurantAnalytics(restaurantId) {
         restaurantProfit,
         monthlyOrders: monthlyOrdersList.length,
         yearlyOrders: yearlyOrdersList.length,
-        averageMonthlyProfit: monthlyProfit, // Placeholder: can be improved if historical data exists
-        averageYearlyProfit: yearlyProfit,   // Placeholder: can be improved if historical data exists
+        averageMonthlyProfit,
+        averageYearlyProfit,
         status: restaurant.status === 'approved' ? 'active' : 'inactive',
         joinDate: restaurant.createdAt,
         totalCustomers: uniqueCustomers,
