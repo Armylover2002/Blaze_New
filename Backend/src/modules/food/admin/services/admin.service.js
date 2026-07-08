@@ -2365,61 +2365,222 @@ export async function getRestaurantAnalytics(restaurantId) {
     if (!restaurantId || !mongoose.Types.ObjectId.isValid(restaurantId)) return null;
     const rId = new mongoose.Types.ObjectId(restaurantId);
 
-    const [restaurant, orders, txRows] = await Promise.all([
+    const now = new Date();
+    const currentMonth = now.getMonth();
+    const currentYear = now.getFullYear();
+    const monthStart = new Date(currentYear, currentMonth, 1);
+    const nextMonthStart = new Date(currentYear, currentMonth + 1, 1);
+    const yearStart = new Date(currentYear, 0, 1);
+    const nextYearStart = new Date(currentYear + 1, 0, 1);
+
+    const [restaurant, orderStats, txStats] = await Promise.all([
         FoodRestaurant.findById(rId).lean(),
-        FoodOrder.find({ restaurantId: rId, orderType: 'food' }).lean(),
-        FoodTransaction.find({ restaurantId: rId })
-            .populate('orderId', 'orderStatus createdAt pricing')
-            .sort({ createdAt: -1 })
-            .lean(),
+        FoodOrder.aggregate([
+            { $match: { restaurantId: rId, orderType: 'food' } },
+            {
+                $facet: {
+                    counts: [
+                        {
+                            $group: {
+                                _id: null,
+                                totalOrders: { $sum: 1 },
+                                completedOrders: {
+                                    $sum: { $cond: [{ $eq: ['$orderStatus', 'delivered'] }, 1, 0] }
+                                },
+                                cancelledOrders: {
+                                    $sum: {
+                                        $cond: [
+                                            {
+                                                $in: [
+                                                    '$orderStatus',
+                                                    ['cancelled_by_user', 'cancelled_by_restaurant', 'cancelled_by_admin']
+                                                ]
+                                            },
+                                            1,
+                                            0
+                                        ]
+                                    }
+                                },
+                                monthlyOrders: {
+                                    $sum: {
+                                        $cond: [
+                                            {
+                                                $and: [
+                                                    { $gte: ['$createdAt', monthStart] },
+                                                    { $lt: ['$createdAt', nextMonthStart] }
+                                                ]
+                                            },
+                                            1,
+                                            0
+                                        ]
+                                    }
+                                },
+                                yearlyOrders: {
+                                    $sum: {
+                                        $cond: [
+                                            {
+                                                $and: [
+                                                    { $gte: ['$createdAt', yearStart] },
+                                                    { $lt: ['$createdAt', nextYearStart] }
+                                                ]
+                                            },
+                                            1,
+                                            0
+                                        ]
+                                    }
+                                }
+                            }
+                        }
+                    ],
+                    customers: [
+                        { $group: { _id: '$userId', orderCount: { $sum: 1 } } },
+                        {
+                            $group: {
+                                _id: null,
+                                totalCustomers: { $sum: 1 },
+                                repeatCustomers: {
+                                    $sum: { $cond: [{ $gt: ['$orderCount', 1] }, 1, 0] }
+                                }
+                            }
+                        }
+                    ]
+                }
+            }
+        ]),
+        FoodTransaction.aggregate([
+            { $match: { restaurantId: rId } },
+            {
+                $lookup: {
+                    from: 'food_orders',
+                    localField: 'orderId',
+                    foreignField: '_id',
+                    as: 'order'
+                }
+            },
+            { $unwind: { path: '$order', preserveNullAndEmptyArrays: true } },
+            {
+                $addFields: {
+                    effectiveDate: { $ifNull: ['$createdAt', '$order.createdAt'] },
+                    isCompleted: {
+                        $cond: [
+                            { $ne: [{ $ifNull: ['$order.orderStatus', null] }, null] },
+                            { $eq: ['$order.orderStatus', 'delivered'] },
+                            { $in: ['$status', ['captured', 'authorized', 'settled']] }
+                        ]
+                    }
+                }
+            },
+            { $match: { isCompleted: true } },
+            {
+                $facet: {
+                    lifetime: [
+                        {
+                            $group: {
+                                _id: null,
+                                completedTxCount: { $sum: 1 },
+                                totalRevenue: {
+                                    $sum: {
+                                        $ifNull: [
+                                            '$amounts.totalCustomerPaid',
+                                            { $ifNull: ['$pricing.total', { $ifNull: ['$order.pricing.total', 0] }] }
+                                        ]
+                                    }
+                                },
+                                restaurantEarning: { $sum: { $ifNull: ['$amounts.restaurantShare', 0] } },
+                                subtotal: {
+                                    $sum: {
+                                        $ifNull: ['$pricing.subtotal', { $ifNull: ['$order.pricing.subtotal', 0] }]
+                                    }
+                                },
+                                tax: {
+                                    $sum: {
+                                        $ifNull: [
+                                            '$pricing.tax',
+                                            { $ifNull: ['$amounts.taxAmount', { $ifNull: ['$order.pricing.tax', 0] }] }
+                                        ]
+                                    }
+                                },
+                                packagingFee: {
+                                    $sum: {
+                                        $ifNull: ['$pricing.packagingFee', { $ifNull: ['$order.pricing.packagingFee', 0] }]
+                                    }
+                                },
+                                deliveryFee: {
+                                    $sum: {
+                                        $ifNull: ['$pricing.deliveryFee', { $ifNull: ['$order.pricing.deliveryFee', 0] }]
+                                    }
+                                },
+                                platformFee: {
+                                    $sum: {
+                                        $ifNull: ['$pricing.platformFee', { $ifNull: ['$order.pricing.platformFee', 0] }]
+                                    }
+                                },
+                                discount: {
+                                    $sum: {
+                                        $ifNull: ['$pricing.discount', { $ifNull: ['$order.pricing.discount', 0] }]
+                                    }
+                                },
+                                riderShare: { $sum: { $ifNull: ['$amounts.riderShare', 0] } },
+                                platformNetProfit: { $sum: { $ifNull: ['$amounts.platformNetProfit', 0] } }
+                            }
+                        }
+                    ],
+                    monthly: [
+                        {
+                            $match: {
+                                effectiveDate: { $gte: monthStart, $lt: nextMonthStart }
+                            }
+                        },
+                        {
+                            $group: {
+                                _id: null,
+                                monthlyProfit: { $sum: { $ifNull: ['$amounts.restaurantShare', 0] } }
+                            }
+                        }
+                    ],
+                    yearly: [
+                        {
+                            $match: {
+                                effectiveDate: { $gte: yearStart, $lt: nextYearStart }
+                            }
+                        },
+                        {
+                            $group: {
+                                _id: null,
+                                yearlyProfit: { $sum: { $ifNull: ['$amounts.restaurantShare', 0] } }
+                            }
+                        }
+                    ]
+                }
+            }
+        ])
     ]);
 
     if (!restaurant) return null;
 
-    const now = new Date();
-    const currentMonth = now.getMonth();
-    const currentYear = now.getFullYear();
+    const orderFacet = orderStats?.[0] || {};
+    const orderCounts = orderFacet.counts?.[0] || {};
+    const customerStats = orderFacet.customers?.[0] || {};
 
-    const completedOrders = orders.filter(o => o.orderStatus === 'delivered');
-    const cancelledOrders = orders.filter(o => ['cancelled_by_user', 'cancelled_by_restaurant', 'cancelled_by_admin'].includes(o.orderStatus));
+    const txFacet = txStats?.[0] || {};
+    const lifetimeTx = txFacet.lifetime?.[0] || {};
+    const monthlyTx = txFacet.monthly?.[0] || {};
+    const yearlyTx = txFacet.yearly?.[0] || {};
 
-    // Money metrics should come from the ledger (FoodTransaction), not FoodOrder.
-    const completedTx = (txRows || []).filter((tx) => {
-        const orderStatus = tx?.orderId?.orderStatus;
-        if (orderStatus) return orderStatus === 'delivered';
-        return tx?.status === 'captured' || tx?.status === 'authorized' || tx?.status === 'settled';
-    });
+    const totalOrdersCount = Number(orderCounts.totalOrders || 0);
+    const completedOrders = Number(orderCounts.completedOrders || 0);
+    const cancelledOrders = Number(orderCounts.cancelledOrders || 0);
+    const monthlyOrders = Number(orderCounts.monthlyOrders || 0);
+    const yearlyOrders = Number(orderCounts.yearlyOrders || 0);
+    const totalCustomers = Number(customerStats.totalCustomers || 0);
+    const repeatCustomers = Number(customerStats.repeatCustomers || 0);
 
-    const sum = (arr, pick) => (arr || []).reduce((s, it) => s + (Number(pick(it)) || 0), 0);
-
-    // 1) Total order value (gross customer paid)
-    const totalRevenue = sum(completedTx, (tx) => tx?.amounts?.totalCustomerPaid ?? tx?.pricing?.total ?? tx?.orderId?.pricing?.total);
-
-    // 2) Restaurant share (payout to restaurant)
-    const restaurantEarning = sum(completedTx, (tx) => tx?.amounts?.restaurantShare);
-
-    // 3) Restaurant profit (in this system, equals restaurant share)
+    const completedTxCount = Number(lifetimeTx.completedTxCount || 0);
+    const totalRevenue = Number(lifetimeTx.totalRevenue || 0);
+    const restaurantEarning = Number(lifetimeTx.restaurantEarning || 0);
     const restaurantProfit = restaurantEarning;
-
-    const monthlyOrdersList = orders.filter(o => {
-        const d = new Date(o.createdAt);
-        return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
-    });
-    const monthlyCompletedTx = completedTx.filter((tx) => {
-        const d = new Date(tx?.createdAt || tx?.orderId?.createdAt || 0);
-        return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
-    });
-    const monthlyProfit = sum(monthlyCompletedTx, (tx) => tx?.amounts?.restaurantShare);
-
-    const yearlyOrdersList = orders.filter(o => {
-        const d = new Date(o.createdAt);
-        return d.getFullYear() === currentYear;
-    });
-    const yearlyCompletedTx = completedTx.filter((tx) => {
-        const d = new Date(tx?.createdAt || tx?.orderId?.createdAt || 0);
-        return d.getFullYear() === currentYear;
-    });
-    const yearlyProfit = sum(yearlyCompletedTx, (tx) => tx?.amounts?.restaurantShare);
+    const monthlyProfit = Number(monthlyTx.monthlyProfit || 0);
+    const yearlyProfit = Number(yearlyTx.yearlyProfit || 0);
 
     const joinDate = new Date(restaurant.createdAt || now);
     const monthsSinceJoin = Math.max(
@@ -2429,57 +2590,44 @@ export async function getRestaurantAnalytics(restaurantId) {
     const yearsSinceJoin = Math.max(1, currentYear - joinDate.getFullYear() + 1);
     const averageMonthlyProfit = restaurantProfit / monthsSinceJoin;
     const averageYearlyProfit = restaurantProfit / yearsSinceJoin;
-
-    const totalOrdersCount = orders.length;
-    const avgOrderValue = completedTx.length > 0 ? totalRevenue / completedTx.length : 0;
-
-    const uniqueCustomers = new Set(orders.map(o => String(o.userId))).size;
-    const customerOrderCounts = orders.reduce((acc, o) => {
-        const uid = String(o.userId);
-        acc[uid] = (acc[uid] || 0) + 1;
-        return acc;
-    }, {});
-    const repeatCustomers = Object.values(customerOrderCounts).filter(count => count > 1).length;
+    const avgOrderValue = completedTxCount > 0 ? totalRevenue / completedTxCount : 0;
 
     const analytics = {
         totalOrders: totalOrdersCount,
-        cancelledOrders: cancelledOrders.length,
-        completedOrders: completedOrders.length,
+        cancelledOrders,
+        completedOrders,
         averageRating: Number(restaurant.rating || 0),
         totalRatings: Number(restaurant.totalRatings || 0),
         monthlyProfit,
         yearlyProfit,
         averageOrderValue: avgOrderValue,
         totalRevenue,
-        restaurantEarning, // restaurant share
+        restaurantEarning,
         restaurantProfit,
-        monthlyOrders: monthlyOrdersList.length,
-        yearlyOrders: yearlyOrdersList.length,
+        monthlyOrders,
+        yearlyOrders,
         averageMonthlyProfit,
         averageYearlyProfit,
         status: restaurant.status === 'approved' ? 'active' : 'inactive',
         joinDate: restaurant.createdAt,
-        totalCustomers: uniqueCustomers,
+        totalCustomers,
         repeatCustomers,
-        cancellationRate: totalOrdersCount > 0 ? (cancelledOrders.length / totalOrdersCount) * 100 : 0,
-        completionRate: totalOrdersCount > 0 ? (completedOrders.length / totalOrdersCount) * 100 : 0
+        cancellationRate: totalOrdersCount > 0 ? (cancelledOrders / totalOrdersCount) * 100 : 0,
+        completionRate: totalOrdersCount > 0 ? (completedOrders / totalOrdersCount) * 100 : 0
     };
 
     const paymentSummary = {
-        // Pricing (what customer paid components)
-        subtotal: sum(completedTx, (tx) => tx?.pricing?.subtotal ?? tx?.orderId?.pricing?.subtotal),
-        tax: sum(completedTx, (tx) => tx?.pricing?.tax ?? tx?.amounts?.taxAmount ?? tx?.orderId?.pricing?.tax),
-        packagingFee: sum(completedTx, (tx) => tx?.pricing?.packagingFee ?? tx?.orderId?.pricing?.packagingFee),
-        deliveryFee: sum(completedTx, (tx) => tx?.pricing?.deliveryFee ?? tx?.orderId?.pricing?.deliveryFee),
-        platformFee: sum(completedTx, (tx) => tx?.pricing?.platformFee ?? tx?.orderId?.pricing?.platformFee),
-        discount: sum(completedTx, (tx) => tx?.pricing?.discount ?? tx?.orderId?.pricing?.discount),
+        subtotal: Number(lifetimeTx.subtotal || 0),
+        tax: Number(lifetimeTx.tax || 0),
+        packagingFee: Number(lifetimeTx.packagingFee || 0),
+        deliveryFee: Number(lifetimeTx.deliveryFee || 0),
+        platformFee: Number(lifetimeTx.platformFee || 0),
+        discount: Number(lifetimeTx.discount || 0),
         total: totalRevenue,
         currency: 'INR',
-
-        // Split (who got what)
         restaurantShare: restaurantEarning,
-        riderShare: sum(completedTx, (tx) => tx?.amounts?.riderShare),
-        platformNetProfit: sum(completedTx, (tx) => tx?.amounts?.platformNetProfit),
+        riderShare: Number(lifetimeTx.riderShare || 0),
+        platformNetProfit: Number(lifetimeTx.platformNetProfit || 0),
     };
 
     return { restaurant, analytics, paymentSummary };
