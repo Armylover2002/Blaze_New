@@ -767,6 +767,8 @@ export default function Inventory() {
   const [expandedCategories, setExpandedCategories] = useState([])
   const [togglePopupOpen, setTogglePopupOpen] = useState(false)
   const [toggleTarget, setToggleTarget] = useState(null)
+  const [categoryAssignmentItems, setCategoryAssignmentItems] = useState([])
+  const [categoryAssignmentOpen, setCategoryAssignmentOpen] = useState(false)
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const [isAddPopupOpen, setIsAddPopupOpen] = useState(false)
 
@@ -883,7 +885,9 @@ export default function Inventory() {
                   price: item.price ?? "",
                   variants: Array.isArray(item.variants) ? item.variants : (Array.isArray(item.variations) ? item.variations : []),
                   category: section.name || "",
-                  categoryId: section.categoryId || section.id || "",
+                  categoryId: item.categoryId || section.categoryId || section.id || "",
+                  hasValidCategory: item.hasValidCategory === true,
+                  needsCategoryAssignment: item.needsCategoryAssignment === true || !item.categoryId,
                   inStock: item.isAvailable !== undefined ? item.isAvailable : true,
                   isAvailable: item.isAvailable !== undefined ? item.isAvailable : true,
                   isVeg: item.foodType === "Veg",
@@ -915,7 +919,9 @@ export default function Inventory() {
                       price: item.price ?? "",
                       variants: Array.isArray(item.variants) ? item.variants : (Array.isArray(item.variations) ? item.variations : []),
                       category: section.name || subsection.name || "",
-                      categoryId: section.categoryId || section.id || "",
+                      categoryId: item.categoryId || section.categoryId || section.id || "",
+                      hasValidCategory: item.hasValidCategory === true,
+                      needsCategoryAssignment: item.needsCategoryAssignment === true || !item.categoryId,
                       inStock: item.isAvailable !== undefined ? item.isAvailable : true,
                       isAvailable: item.isAvailable !== undefined ? item.isAvailable : true,
                       isVeg: item.foodType === "Veg",
@@ -1552,9 +1558,52 @@ export default function Inventory() {
     return itemId ? [String(itemId)] : []
   }
 
+  const itemNeedsCategoryAssignment = (item) => {
+    if (!item) return true
+    return item.needsCategoryAssignment === true || !item.categoryId || item.hasValidCategory === false
+  }
+
+  const getItemsMissingCategory = (type, categoryId, itemId) => {
+    const category = categories.find((entry) => entry.id === categoryId)
+    const items = Array.isArray(category?.items) ? category.items : []
+
+    if (type === "category") {
+      return items.filter((item) => itemNeedsCategoryAssignment(item))
+    }
+
+    const item = items.find((entry) => String(entry.id) === String(itemId))
+    return itemNeedsCategoryAssignment(item) ? [item] : []
+  }
+
+  const openCategoryAssignmentFlow = (items = []) => {
+    const blockedItems = (items || []).filter(Boolean)
+    if (!blockedItems.length) return
+    setCategoryAssignmentItems(blockedItems)
+    setCategoryAssignmentOpen(true)
+  }
+
+  const handleOpenCategoryAssignmentEditor = (itemId) => {
+    const targetId = String(itemId || categoryAssignmentItems[0]?.id || "").trim()
+    if (!targetId) return
+    setCategoryAssignmentOpen(false)
+    setCategoryAssignmentItems([])
+    navigate(`/food/restaurant/hub-menu/item/${targetId}`, {
+      state: {
+        backTo: "/food/restaurant/inventory",
+        focusCategory: true,
+      },
+    })
+  }
+
   // Handle toggle click
   const handleToggleChange = async (type, categoryId, itemId, nextChecked) => {
     if (nextChecked) {
+      const blockedItems = getItemsMissingCategory(type, categoryId, itemId)
+      if (blockedItems.length > 0) {
+        openCategoryAssignmentFlow(blockedItems)
+        return
+      }
+
       const targetItemIds = getTargetItemIds(type, categoryId, itemId)
 
       // Turning ON - apply immediately without popup
@@ -1802,6 +1851,132 @@ export default function Inventory() {
     })
   }
 
+  const renderAddonForm = () => (
+    <div className="grid grid-cols-1 gap-4">
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-1">Add-on Name *</label>
+        <input
+          type="text"
+          value={addonName}
+          onChange={(e) => setAddonName(e.target.value)}
+          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-black focus:outline-none"
+          placeholder="e.g., Coke, Chips"
+        />
+      </div>
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+        <textarea
+          value={addonDescription}
+          onChange={(e) => setAddonDescription(e.target.value)}
+          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-black focus:outline-none resize-none"
+          rows={3}
+          placeholder="Describe the add-on..."
+        />
+      </div>
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-2">Food Type *</label>
+        <div className="flex items-center gap-4">
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="radio"
+              name="addonFoodType"
+              value="Veg"
+              checked={addonFoodType === "Veg"}
+              onChange={(e) => setAddonFoodType(e.target.value)}
+              className="w-4 h-4 text-[#FF0000] border-gray-300 focus:ring-[#FF0000]"
+            />
+            <div className="flex items-center gap-1.5">
+              <span className="flex items-center justify-center w-4 h-4 rounded-sm border border-green-600">
+                <span className="w-2 h-2 rounded-full bg-green-600"></span>
+              </span>
+              <span className="text-sm text-gray-700">Veg</span>
+            </div>
+          </label>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="radio"
+              name="addonFoodType"
+              value="Non-Veg"
+              checked={addonFoodType === "Non-Veg"}
+              onChange={(e) => setAddonFoodType(e.target.value)}
+              className="w-4 h-4 text-[#FF0000] border-gray-300 focus:ring-[#FF0000]"
+            />
+            <div className="flex items-center gap-1.5">
+              <span className="flex items-center justify-center w-4 h-4 rounded-sm border border-red-600">
+                <span className="w-2 h-2 rounded-full bg-red-600"></span>
+              </span>
+              <span className="text-sm text-gray-700">Non-Veg</span>
+            </div>
+          </label>
+        </div>
+      </div>
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-1">Price (₹) *</label>
+        <input
+          type="number"
+          value={addonPrice}
+          onChange={(e) => setAddonPrice(e.target.value)}
+          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-black focus:outline-none"
+          min="0"
+          step="0.01"
+          placeholder="0.00"
+        />
+      </div>
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-1">Image (1 only)</label>
+        {addonImagePreview && (
+          <div className="mb-2">
+            <img
+              src={addonImagePreview}
+              alt="Preview"
+              className="w-24 h-24 object-cover rounded border"
+              onError={(e) => (e.target.style.display = "none")}
+            />
+          </div>
+        )}
+        <input
+          ref={addonImageInputRef}
+          type="file"
+          accept="image/*"
+          onChange={handleAddonImageSelect}
+          className="hidden"
+        />
+        <button
+          type="button"
+          onClick={() => addonImageInputRef.current?.click()}
+          className="w-full rounded-md border border-gray-300 bg-gray-50 px-3 py-3 text-left transition-colors hover:bg-gray-100"
+        >
+          <span className="flex items-center gap-2 text-sm font-medium text-gray-900">
+            <Upload className="h-4 w-4 text-gray-500" />
+            {addonImageFile?.name || "Upload image"}
+          </span>
+          <span className="mt-1 block text-xs text-gray-500">
+            {addonImageFile ? "Image selected successfully" : "Tap to choose 1 image from your device"}
+          </span>
+        </button>
+        <p className="text-xs text-gray-500 mt-1">PNG, JPG, WEBP, HEIC up to 5MB.</p>
+      </div>
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          onClick={resetAddonForm}
+          className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={handleSaveAddon}
+          disabled={savingAddon}
+          className="px-4 py-2 bg-[#FF0000] text-white rounded-md text-sm font-medium hover:bg-[#E64D02] disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+        >
+          {savingAddon && <Loader2 className="h-4 w-4 animate-spin" />}
+          <span>{savingAddon ? "Saving..." : "Submit for approval"}</span>
+        </button>
+      </div>
+    </div>
+  )
+
   return (
     <div className="min-h-screen bg-[#f3f5f8] flex flex-col lg:h-screen lg:overflow-hidden">
       {/* Navbar */}
@@ -1940,7 +2115,7 @@ export default function Inventory() {
             className="h-11 px-5 bg-[#27a15a] text-white rounded-xl font-semibold hover:bg-[#1f874a] transition-colors flex items-center gap-2 shrink-0"
           >
             <Plus className="w-4 h-4" />
-            Add item
+            {activeTab === "add-ons" ? "Add add-on" : "Add item"}
           </button>
         </div>
         </div>
@@ -2261,132 +2436,7 @@ export default function Inventory() {
             <>
               {isAddAddonOpen && (
                 <div className="bg-white border border-gray-200 rounded-lg p-4 mb-4 shadow-sm">
-                  <div className="grid grid-cols-1 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Add-on Name *</label>
-                      <input
-                        type="text"
-                        value={addonName}
-                        onChange={(e) => setAddonName(e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-black focus:outline-none"
-                        placeholder="e.g., Coke, Chips"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-                      <textarea
-                        value={addonDescription}
-                        onChange={(e) => setAddonDescription(e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-black focus:outline-none resize-none"
-                        rows={3}
-                        placeholder="Describe the add-on..."
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Food Type *</label>
-                      <div className="flex items-center gap-4">
-                        <label className="flex items-center gap-2 cursor-pointer">
-                          <input
-                            type="radio"
-                            name="addonFoodType"
-                            value="Veg"
-                            checked={addonFoodType === "Veg"}
-                            onChange={(e) => setAddonFoodType(e.target.value)}
-                            className="w-4 h-4 text-[#FF0000] border-gray-300 focus:ring-[#FF0000]"
-                          />
-                          <div className="flex items-center gap-1.5">
-                            <span className="flex items-center justify-center w-4 h-4 rounded-sm border border-green-600">
-                              <span className="w-2 h-2 rounded-full bg-green-600"></span>
-                            </span>
-                            <span className="text-sm text-gray-700">Veg</span>
-                          </div>
-                        </label>
-                        <label className="flex items-center gap-2 cursor-pointer">
-                          <input
-                            type="radio"
-                            name="addonFoodType"
-                            value="Non-Veg"
-                            checked={addonFoodType === "Non-Veg"}
-                            onChange={(e) => setAddonFoodType(e.target.value)}
-                            className="w-4 h-4 text-[#FF0000] border-gray-300 focus:ring-[#FF0000]"
-                          />
-                          <div className="flex items-center gap-1.5">
-                            <span className="flex items-center justify-center w-4 h-4 rounded-sm border border-red-600">
-                              <span className="w-2 h-2 rounded-full bg-red-600"></span>
-                            </span>
-                            <span className="text-sm text-gray-700">Non-Veg</span>
-                          </div>
-                        </label>
-                      </div>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Price (₹) *</label>
-                      <input
-                        type="number"
-                        value={addonPrice}
-                        onChange={(e) => setAddonPrice(e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-black focus:outline-none"
-                        min="0"
-                        step="0.01"
-                        placeholder="0.00"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Image (1 only)</label>
-                      {addonImagePreview && (
-                        <div className="mb-2">
-                          <img
-                            src={addonImagePreview}
-                            alt="Preview"
-                            className="w-24 h-24 object-cover rounded border"
-                            onError={(e) => (e.target.style.display = "none")}
-                          />
-                        </div>
-                      )}
-                      <input
-                        ref={addonImageInputRef}
-                        type="file"
-                        accept="image/*"
-                        onChange={handleAddonImageSelect}
-                        className="hidden"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => addonImageInputRef.current?.click()}
-                        className="w-full rounded-md border border-gray-300 bg-gray-50 px-3 py-3 text-left transition-colors hover:bg-gray-100"
-                      >
-                        <span className="flex items-center gap-2 text-sm font-medium text-gray-900">
-                          <Upload className="h-4 w-4 text-gray-500" />
-                          {addonImageFile?.name || "Upload image"}
-                        </span>
-                        <span className="mt-1 block text-xs text-gray-500">
-                          {addonImageFile ? "Image selected successfully" : "Tap to choose 1 image from your device"}
-                        </span>
-                      </button>
-                      <p className="text-xs text-gray-500 mt-1">PNG, JPG, WEBP, HEIC up to 5MB.</p>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          resetAddonForm()
-                          setIsAddAddonOpen(false)
-                        }}
-                        className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50"
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleSaveAddon}
-                        disabled={savingAddon}
-                        className="px-4 py-2 bg-[#FF0000] text-white rounded-md text-sm font-medium hover:bg-[#E64D02] disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                      >
-                        {savingAddon && <Loader2 className="h-4 w-4 animate-spin" />}
-                        <span>{savingAddon ? "Saving..." : "Submit for approval"}</span>
-                      </button>
-                    </div>
-                  </div>
+                  {renderAddonForm()}
                 </div>
               )}
               {loadingAddons ? (
@@ -2785,6 +2835,117 @@ export default function Inventory() {
         )}
       </AnimatePresence>
 
+      {/* Category assignment required popup */}
+      <AnimatePresence>
+        {categoryAssignmentOpen && categoryAssignmentItems.length > 0 && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => {
+                setCategoryAssignmentOpen(false)
+                setCategoryAssignmentItems([])
+              }}
+              className="fixed inset-0 bg-black/50 z-[72]"
+            />
+            <motion.div
+              initial={{ y: "100%" }}
+              animate={{ y: 0 }}
+              exit={{ y: "100%" }}
+              transition={{ type: "spring", damping: 30, stiffness: 300 }}
+              className="fixed bottom-0 left-0 right-0 z-[73] rounded-t-2xl bg-white shadow-2xl max-h-[80vh] overflow-y-auto lg:hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="p-5">
+                <h2 className="text-lg font-bold text-gray-900">Add items to a category first</h2>
+                <p className="mt-2 text-sm text-gray-600">
+                  These items were unassigned or their category was deleted. Assign a category before making them active again.
+                </p>
+                <div className="mt-4 space-y-2">
+                  {categoryAssignmentItems.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => handleOpenCategoryAssignmentEditor(item.id)}
+                      className="flex w-full items-center justify-between rounded-xl border border-gray-200 px-4 py-3 text-left hover:bg-gray-50"
+                    >
+                      <span className="text-sm font-medium text-gray-900">{item.name}</span>
+                      <span className="text-xs font-semibold text-[#FF0000]">Edit item</span>
+                    </button>
+                  ))}
+                </div>
+                <div className="mt-5 flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCategoryAssignmentOpen(false)
+                      setCategoryAssignmentItems([])
+                    }}
+                    className="flex-1 rounded-xl border border-gray-300 py-3 text-sm font-medium text-gray-700"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleOpenCategoryAssignmentEditor()}
+                    className="flex-1 rounded-xl bg-[#FF0000] py-3 text-sm font-semibold text-white"
+                  >
+                    Add to category
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+            <div className="fixed inset-0 z-[73] hidden lg:flex items-center justify-center p-6 pointer-events-none">
+              <motion.div
+                initial={{ opacity: 0, scale: 0.96, y: 12 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.96, y: 12 }}
+                className="pointer-events-auto w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <h2 className="text-lg font-bold text-gray-900">Add items to a category first</h2>
+                <p className="mt-2 text-sm text-gray-600">
+                  These items were unassigned or their category was deleted. Assign a category before making them active again.
+                </p>
+                <div className="mt-4 max-h-56 space-y-2 overflow-y-auto">
+                  {categoryAssignmentItems.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => handleOpenCategoryAssignmentEditor(item.id)}
+                      className="flex w-full items-center justify-between rounded-xl border border-gray-200 px-4 py-3 text-left hover:bg-gray-50"
+                    >
+                      <span className="text-sm font-medium text-gray-900">{item.name}</span>
+                      <span className="text-xs font-semibold text-[#FF0000]">Edit item</span>
+                    </button>
+                  ))}
+                </div>
+                <div className="mt-6 flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCategoryAssignmentOpen(false)
+                      setCategoryAssignmentItems([])
+                    }}
+                    className="flex-1 rounded-xl border border-gray-300 py-3 text-sm font-medium text-gray-700"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleOpenCategoryAssignmentEditor()}
+                    className="flex-1 rounded-xl bg-[#FF0000] py-3 text-sm font-semibold text-white"
+                  >
+                    Add to category
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          </>
+        )}
+      </AnimatePresence>
+
       {/* Toggle Popup */}
       <AnimatePresence>
         {togglePopupOpen && toggleTarget && (
@@ -2973,6 +3134,47 @@ export default function Inventory() {
         initialPeriod={selectedTime.period}
         onConfirm={handleTimePickerConfirm}
       />
+
+      {/* Desktop Add-on Modal */}
+      <AnimatePresence>
+        {isAddAddonOpen && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={resetAddonForm}
+              className="fixed inset-0 bg-black/50 z-[70] hidden lg:block"
+            />
+            <div className="fixed inset-0 z-[71] hidden lg:flex items-center justify-center p-6 pointer-events-none">
+              <motion.div
+                initial={{ opacity: 0, scale: 0.96, y: 12 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.96, y: 12 }}
+                transition={{ type: "spring", damping: 30, stiffness: 300 }}
+                className="pointer-events-auto w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl bg-white shadow-2xl"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="sticky top-0 z-10 flex items-center justify-between border-b border-gray-200 bg-white px-6 py-4">
+                  <div>
+                    <h2 className="text-lg font-bold text-gray-900">Add add-on</h2>
+                    <p className="mt-0.5 text-sm text-gray-500">Submit a new add-on for admin approval</p>
+                  </div>
+                  <button
+                    onClick={resetAddonForm}
+                    className="rounded-full p-1 hover:bg-gray-100"
+                  >
+                    <X className="w-5 h-5 text-gray-600" />
+                  </button>
+                </div>
+                <div className="px-6 py-5">
+                  {renderAddonForm()}
+                </div>
+              </motion.div>
+            </div>
+          </>
+        )}
+      </AnimatePresence>
 
       {/* Add Popup */}
       <AnimatePresence>

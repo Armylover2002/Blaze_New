@@ -30,6 +30,7 @@ const Users = () => {
   const [totalPages, setTotalPages] = useState(1);
   const [detailOpen, setDetailOpen] = useState(false);
   const [selected, setSelected] = useState(null);
+  const [loadingDetail, setLoadingDetail] = useState(false);
 
   const cities = useMemo(() => [...new Set(users.map((u) => u.city).filter(Boolean))], [users]);
 
@@ -66,7 +67,21 @@ const Users = () => {
     else { setSortKey(key); setSortDir("asc"); }
   };
 
-  const openDetail = (row) => { setSelected(row); setDetailOpen(true); };
+  const openDetail = async (row) => { 
+    setSelected(row);
+    setDetailOpen(true); 
+    
+    // Fetch full user details to get recent orders and latest wallet balance
+    setLoadingDetail(true);
+    try {
+      const fullUser = await porterAdminApi.getUserById(row.id);
+      setSelected(fullUser);
+    } catch (err) {
+      toast.error("Failed to load user details");
+    } finally {
+      setLoadingDetail(false);
+    }
+  };
 
   const sortableHeader = (label, key) => (
     <button type="button" className="inline-flex items-center gap-1" onClick={() => toggleSort(key)}>
@@ -174,7 +189,13 @@ const Users = () => {
                   </FormRow>
                   <FormField label="Address"><div className="text-sm font-medium flex items-center gap-2"><MapPin size={14} className="text-muted-foreground"/> {selected.address}</div></FormField>
                   <FormRow>
-                    <FormField label="Wallet"><div className="text-sm font-medium flex items-center gap-2 text-emerald-600"><Wallet size={14}/> {formatCurrency(selected.walletBalance)}</div></FormField>
+                    <FormField label="Wallet">
+                      <div className="flex items-center gap-3">
+                        <div className="text-sm font-medium flex items-center gap-2 text-emerald-600">
+                          <Wallet size={14}/> {formatCurrency(selected.walletBalance)}
+                        </div>
+                      </div>
+                    </FormField>
                   </FormRow>
                 </FormSection>
 
@@ -199,18 +220,24 @@ const Users = () => {
 
                   <h4 className="font-semibold text-sm mb-2 text-gray-700">Recent Orders</h4>
                   <div className="space-y-2">
-                    {selected.recentOrders.map((o) => (
-                      <div key={o.id} className="flex items-center justify-between rounded-lg border p-2.5 text-sm bg-gray-50/30">
-                        <div>
-                          <span className="font-medium text-gray-900">{o.id}</span>
-                          <span className="text-muted-foreground"> · {o.goodsType}</span>
+                    {loadingDetail ? (
+                      <div className="flex justify-center p-4"><Loader2 className="animate-spin text-muted-foreground" size={20} /></div>
+                    ) : selected.recentOrders && selected.recentOrders.length > 0 ? (
+                      selected.recentOrders.map((o) => (
+                        <div key={o.id} className="flex items-center justify-between rounded-lg border p-2.5 text-sm bg-gray-50/30">
+                          <div>
+                            <span className="font-medium text-gray-900">{o.id}</span>
+                            <span className="text-muted-foreground"> · {o.goodsType}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium">{formatCurrency(o.amount)}</span>
+                            <StatusBadge status={o.status} label={o.status.replace("_", " ")} />
+                          </div>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <span className="font-medium">{formatCurrency(o.amount)}</span>
-                          <StatusBadge status={o.status} label={o.status.replace("_", " ")} />
-                        </div>
-                      </div>
-                    ))}
+                      ))
+                    ) : (
+                      <div className="text-sm text-muted-foreground text-center py-2 border rounded-lg bg-gray-50/30">No recent orders</div>
+                    )}
                   </div>
                 </FormSection>
                 <div className="pt-2 text-xs text-muted-foreground text-center">Registered on {formatDateTime(selected.registeredAt)}</div>

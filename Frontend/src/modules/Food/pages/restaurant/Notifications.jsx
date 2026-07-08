@@ -132,27 +132,29 @@ export default function Notifications() {
   }
 
   return (
-    <div className="min-h-screen bg-white flex flex-col">
+    <div className="min-h-full bg-white lg:bg-slate-50 flex flex-col">
       {/* Header */}
-      <div className="px-4 pt-4 pb-3 flex items-center gap-3 border-b border-gray-200">
-        <button
-          onClick={() => navigate("/restaurant")}
-          className="p-2 rounded-full hover:bg-gray-100"
-          aria-label="Back"
-        >
-          <ArrowLeft className="w-5 h-5 text-gray-900" />
-        </button>
-        <h1 className="text-base font-semibold text-gray-900 flex-1">Notifications</h1>
-        <button
-          onClick={handleRefresh}
-          className="p-2 rounded-full hover:bg-gray-100"
-          aria-label="Refresh"
-        >
-          <RefreshCw className="w-4 h-4 text-gray-700" />
-        </button>
+      <div className="sticky top-0 z-40 border-b border-gray-200 bg-white/95 backdrop-blur">
+        <div className="px-4 pt-4 pb-3 flex items-center gap-3 lg:max-w-4xl lg:mx-auto lg:px-8 lg:py-5 lg:w-full">
+          <button
+            onClick={() => navigate("/food/restaurant")}
+            className="p-2 rounded-full hover:bg-gray-100 lg:hidden"
+            aria-label="Back"
+          >
+            <ArrowLeft className="w-5 h-5 text-gray-900" />
+          </button>
+          <h1 className="text-base font-semibold text-gray-900 flex-1 lg:text-2xl lg:font-bold">Notifications</h1>
+          <button
+            onClick={handleRefresh}
+            className="p-2 rounded-full hover:bg-gray-100"
+            aria-label="Refresh"
+          >
+            <RefreshCw className="w-4 h-4 text-gray-700" />
+          </button>
+        </div>
       </div>
 
-      <div className="flex-1 px-4 pt-4 pb-28">
+      <div className="flex-1 px-4 pt-4 pb-28 lg:max-w-4xl lg:mx-auto lg:px-8 lg:py-6 lg:pb-8 lg:w-full">
         {!loading && notifications.length > 0 && (
           <div className="flex justify-end mb-2">
             <button
@@ -169,12 +171,12 @@ export default function Notifications() {
         ) : notifications.length === 0 ? (
           <div className="text-center text-sm text-gray-600 py-12">No notifications</div>
         ) : (
-          <div className="space-y-2">
+          <div className="space-y-2 lg:space-y-3">
             {notifications.map((item) => (
               <div
                 key={item.id}
                 onClick={() => item.source === "broadcast" ? markBroadcastAsRead(item.id) : undefined}
-                className={`border rounded-lg p-3 flex items-start justify-between gap-3 ${item.source === "broadcast" && !item.read ? "border-blue-200 bg-blue-50/40 cursor-pointer" : "border-gray-200"}`}
+                className={`border rounded-lg p-3 flex items-start justify-between gap-3 lg:rounded-xl lg:p-4 lg:shadow-sm ${item.source === "broadcast" && !item.read ? "border-blue-200 bg-blue-50/40 cursor-pointer" : "border-gray-200 lg:bg-white"}`}
               >
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">

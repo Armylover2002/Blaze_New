@@ -184,8 +184,18 @@ export const requestUserOtp = async (phone) => {
     }
   }
 
-  const existingUser = await findExistingFoodUserByIdentifier(phone);
-  assertUserEligibleForOtp(existingUser);
+  // Check if the user exists and is deactivated
+  let userDoc;
+  if (isEmail) {
+    const emailLower = String(phone || "").trim().toLowerCase();
+    userDoc = await FoodUser.findOne({ email: emailLower });
+  } else {
+    userDoc = await FoodUser.findOne({ phone });
+  }
+
+  if (userDoc && (userDoc.isActive === false || userDoc.isDeleted === true || userDoc.accountStatus === 'deleted')) {
+    throw new AuthError("Your account has been deleted/deactivated. Please contact support.");
+  }
 
   const otp = await createOrUpdateOtp(phone);
   const shouldExposeOtp =
@@ -563,12 +573,17 @@ export const verifyRestaurantOtpAndLogin = async (phone, otp, fcmToken, platform
     };
   }
 
-  // Pending approval — issue a session so the partner can poll status without re-login
-  if (restaurant.status === "pending") {
+  // Pending first-time approval — issue session for status polling only for new restaurants
+  if (restaurant.status === "pending" && restaurant.wasEverApproved !== true) {
     return {
       ...(await issueRestaurantSession(restaurant)),
       isPendingApproval: true,
     };
+  }
+
+  // Re-verification or profile review after first approval — full panel access
+  if (restaurant.status === "pending" && restaurant.wasEverApproved === true) {
+    return issueRestaurantSession(restaurant);
   }
 
   // Block deactivated restaurants that are not awaiting first-time approval
@@ -606,7 +621,8 @@ export const issueRestaurantSession = async (restaurant) => {
     refreshToken,
     user,
     needsRegistration: false,
-    isPendingApproval: user?.status === "pending",
+    isPendingApproval:
+      user?.status === "pending" && user?.wasEverApproved !== true,
   };
 };
 

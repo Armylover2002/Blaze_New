@@ -7,7 +7,7 @@ import RestaurantNavbar from "@food/components/restaurant/RestaurantNavbar"
 import { restaurantAPI, zoneAPI } from "@food/api"
 import { getGoogleMapsApiKey } from "@food/utils/googleMapsApiKey"
 import { loadGoogleMaps as loadGoogleMapsSdk } from "@core/services/googleMapsLoader"
-import { clearModuleAuth } from "@food/utils/auth"
+import { updateStoredModuleUser } from "@food/utils/auth"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -535,8 +535,8 @@ export default function ZoneSetup() {
             ? "Zone and Address Update" 
             : "Location Address Update"
         },
-        status: "pending", // Force pending status for re-approval
-        isActive: false,     // Deactivate until approval
+        status: "pending",
+        // Keep outlet active while admin reviews the update
 
         // Update onboarding data as well, as admin panel/backend might prioritize it for pending requests
         onboarding: {
@@ -563,17 +563,15 @@ export default function ZoneSetup() {
       const response = await restaurantAPI.updateProfile(payload)
 
       if (response?.data?.success) {
-        toast.success("Location updated! Logging out for re-verification...")
-        
-        // Delay logout slightly to let user see the toast
-        const phone = restaurantData?.ownerPhone || ""
-        setTimeout(() => {
-          clearModuleAuth("restaurant")
-          navigate("/food/restaurant/pending-verification", { 
-            replace: true,
-            state: { phone } 
-          });
-        }, 1500)
+        const updatedRestaurant =
+          response?.data?.data?.restaurant ||
+          response?.data?.data ||
+          response?.data?.restaurant
+        if (updatedRestaurant) {
+          updateStoredModuleUser("restaurant", updatedRestaurant)
+        }
+        toast.success("Location update submitted for admin review. You can keep using the restaurant panel.")
+        navigate("/food/restaurant/explore", { replace: false })
       } else {
         throw new Error("Failed to submit location update")
       }
@@ -586,98 +584,102 @@ export default function ZoneSetup() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <RestaurantNavbar />
-      <div className="p-4 md:p-6 max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-6">
-          <div className="flex items-center gap-3 mb-4 md:mb-0">
-            {/* Back Button */}
+    <div className="min-h-full bg-white md:bg-slate-50 md:pb-8">
+      <div className="md:hidden">
+        <RestaurantNavbar />
+      </div>
+
+      {/* Header */}
+      <div className="sticky top-0 z-40 border-b border-gray-200 bg-white/95 backdrop-blur">
+        <div className="flex items-center justify-between px-4 py-3 md:mx-auto md:max-w-7xl md:px-8 md:py-5">
+          <div className="flex items-center gap-3">
             <button
-              onClick={() => navigate("/food/restaurant")}
-              className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+              onClick={() => navigate("/food/restaurant/explore")}
+              className="rounded-lg p-1.5 transition-colors hover:bg-gray-100 md:hidden"
               aria-label="Go back"
             >
-              <ArrowLeft className="w-5 h-5 text-gray-700" />
+              <ArrowLeft className="h-6 w-6 text-gray-900" />
             </button>
-            <div className="w-10 h-10 rounded-lg bg-red-500 flex items-center justify-center">
-              <MapPin className="w-5 h-5 text-white" />
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-red-500 md:h-12 md:w-12">
+              <MapPin className="h-5 w-5 text-white md:h-6 md:w-6" />
             </div>
             <div>
-              <h1 className="text-2xl font-bold text-gray-900">Zone Setup</h1>
-              <p className="text-sm text-gray-600">Set your restaurant location on the map</p>
+              <h1 className="text-lg font-bold text-gray-900 md:text-2xl">Zone setup</h1>
+              <p className="text-sm text-gray-500">Set your restaurant location on the map</p>
             </div>
           </div>
         </div>
+      </div>
 
-        {/* Search Bar */}
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-6">
-          <div className="flex items-center gap-3">
-            <div className="flex-1 relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
-              <input
-                ref={autocompleteInputRef}
-                type="text"
-                value={locationSearch}
-                onChange={(e) => setLocationSearch(e.target.value)}
-                placeholder="Search for your restaurant location..."
-                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent"
-              />
-            </div>
-            <button
-              onClick={handleSaveLocation}
-              disabled={!selectedLocation || saving}
-              className="flex items-center gap-2 px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
-            >
-              {saving ? (
-                <>
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                  <span>Saving...</span>
-                </>
-              ) : (
-                <>
-                  <Save className="w-5 h-5" />
-                  <span>Save Location</span>
-                </>
-              )}
-            </button>
-          </div>
-          {selectedLocation && (
-            <div className="mt-3 p-3 bg-green-50 border border-green-200 rounded-lg">
-              <p className="text-sm text-gray-700">
-                <strong>Selected Location:</strong> {selectedAddress}
-              </p>
-              <p className="text-xs text-gray-500 mt-1">
-                Coordinates: {selectedLocation.lat.toFixed(6)}, {selectedLocation.lng.toFixed(6)}
-              </p>
-            </div>
-          )}
-        </div>
-
-        {/* Instructions */}
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
-          <h3 className="text-sm font-semibold text-blue-900 mb-2">How to set your location:</h3>
-          <ul className="text-sm text-blue-800 space-y-1 list-disc list-inside">
-            <li>Search for your location using the search bar above, or</li>
-            <li>Click anywhere on the map to place a pin at that location</li>
-            <li>You can drag the pin to adjust the exact position</li>
-            <li>Click "Save Location" to save your restaurant location</li>
-          </ul>
-        </div>
-
-        {/* Map Container */}
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden relative">
-          {/* Always render the map div, show loading overlay on top */}
-          <div ref={mapRef} className="w-full h-[600px]" style={{ minHeight: '600px' }} />
-          {mapLoading && (
-            <div className="absolute inset-0 bg-white flex items-center justify-center z-10">
-              <div className="text-center">
-                <Loader2 className="w-8 h-8 animate-spin text-red-600 mx-auto mb-2" />
-                <p className="text-gray-600">Loading map...</p>
-                <p className="text-xs text-gray-400 mt-2">If this takes too long, please refresh the page</p>
+      <div className="p-4 md:mx-auto md:max-w-7xl md:px-8 md:py-6">
+        <div className="md:grid md:grid-cols-[minmax(300px,380px)_1fr] md:gap-6 md:items-start">
+          {/* Left panel — search & instructions */}
+          <div className="space-y-4 md:sticky md:top-28">
+            <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm md:p-5">
+              <h2 className="mb-3 text-sm font-semibold text-gray-900 md:text-base">Search location</h2>
+              <div className="relative mb-3">
+                <Search className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400" />
+                <input
+                  ref={autocompleteInputRef}
+                  type="text"
+                  value={locationSearch}
+                  onChange={(e) => setLocationSearch(e.target.value)}
+                  placeholder="Search for your restaurant location..."
+                  className="w-full rounded-xl border border-gray-300 py-2.5 pl-10 pr-4 text-sm focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-500/20"
+                />
               </div>
+              <button
+                onClick={handleSaveLocation}
+                disabled={!selectedLocation || saving}
+                className="flex w-full items-center justify-center gap-2 rounded-xl bg-red-600 px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-gray-400"
+              >
+                {saving ? (
+                  <>
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                    <span>Saving...</span>
+                  </>
+                ) : (
+                  <>
+                    <Save className="h-5 w-5" />
+                    <span>Save location</span>
+                  </>
+                )}
+              </button>
+              {selectedLocation && (
+                <div className="mt-3 rounded-xl border border-green-200 bg-green-50 p-3">
+                  <p className="text-sm text-gray-700">
+                    <strong>Selected:</strong> {selectedAddress}
+                  </p>
+                  <p className="mt-1 text-xs text-gray-500">
+                    {selectedLocation.lat.toFixed(6)}, {selectedLocation.lng.toFixed(6)}
+                  </p>
+                </div>
+              )}
             </div>
-          )}
+
+            <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4 md:block">
+              <h3 className="mb-2 text-sm font-semibold text-blue-900">How to set your location</h3>
+              <ul className="list-inside list-disc space-y-1 text-sm text-blue-800">
+                <li>Search using the bar above, or</li>
+                <li>Click anywhere on the map to place a pin</li>
+                <li>Drag the pin to adjust the position</li>
+                <li>Click &quot;Save location&quot; when done</li>
+              </ul>
+            </div>
+          </div>
+
+          {/* Right panel — map */}
+          <div className="relative mt-4 overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm md:mt-0">
+            <div ref={mapRef} className="h-[420px] w-full md:h-[calc(100vh-12rem)] md:min-h-[560px]" />
+            {mapLoading && (
+              <div className="absolute inset-0 z-10 flex items-center justify-center bg-white">
+                <div className="text-center">
+                  <Loader2 className="mx-auto mb-2 h-8 w-8 animate-spin text-red-600" />
+                  <p className="text-gray-600">Loading map...</p>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 

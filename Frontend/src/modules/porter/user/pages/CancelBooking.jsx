@@ -12,8 +12,13 @@ export default function CancelBooking() {
   const navigate = useNavigate();
   const { resetBooking, activeShipment } = useBooking();
   const [reason, setReason] = useState("");
+  const [customReason, setCustomReason] = useState("");
   const [confirmed, setConfirmed] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+
+  const isOther = reason === "Other";
+  const finalReason = isOther ? customReason.trim() : reason;
+  const canSubmit = Boolean(finalReason) && !submitting;
 
   const cancel = async () => {
     const orderId = activeShipment?.id;
@@ -21,9 +26,13 @@ export default function CancelBooking() {
       toast.error("No active order to cancel");
       return;
     }
+    if (!finalReason) {
+      toast.error("Please provide a cancellation reason");
+      return;
+    }
     setSubmitting(true);
     try {
-      await porterUserApi.cancelOrder(orderId, reason);
+      await porterUserApi.cancelOrder(orderId, finalReason);
       setConfirmed(true);
       resetBooking();
       setTimeout(() => navigate("/porter", { replace: true }), 1500);
@@ -56,6 +65,12 @@ export default function CancelBooking() {
         </p>
       </div>
 
+      <div className="mb-5 rounded-2xl bg-[#FFF1F1] p-4 border border-[#FF0000]/20">
+        <p className="text-[13px] text-[#FF0000] leading-tight">
+          <strong>Note:</strong> If the order was paid, the eligible amount will be refunded automatically to your wallet or original payment method.
+        </p>
+      </div>
+
       <p className="mb-3 text-[12px] font-bold uppercase tracking-wider text-gray-400">Reason for cancellation</p>
       <div className="space-y-2">
         {CANCEL_REASONS.map((r) => (
@@ -73,12 +88,24 @@ export default function CancelBooking() {
         ))}
       </div>
 
+      {isOther && (
+        <textarea
+          value={customReason}
+          onChange={(e) => setCustomReason(e.target.value)}
+          maxLength={500}
+          rows={3}
+          autoFocus
+          placeholder="Tell us why you're cancelling..."
+          className="mt-3 w-full resize-none rounded-2xl border border-gray-200 p-3 text-[14px] text-gray-900 outline-none focus:border-[#FF0000]"
+        />
+      )}
+
       <StickyBar>
         <div className="flex gap-2">
           <PrimaryButton variant="outline" className="flex-1" onClick={() => navigate(-1)} disabled={submitting}>
             Keep booking
           </PrimaryButton>
-          <PrimaryButton className="flex-1" disabled={!reason || submitting} onClick={cancel}>
+          <PrimaryButton className="flex-1" disabled={!canSubmit} onClick={cancel}>
             {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Cancel shipment"}
           </PrimaryButton>
         </div>

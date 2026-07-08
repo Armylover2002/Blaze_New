@@ -145,6 +145,11 @@ export async function recordTransactionWithSession(payload, session) {
         await Model.updateOne(filter, { $set: { balance: newBalance } }, { session });
     }
 
+    if (entityType === 'user') {
+        const { FoodUser } = await import('../../core/users/user.model.js');
+        await FoodUser.updateOne({ _id: entityOid }, { $set: { walletBalance: newBalance } }, { session });
+    }
+
     return {
         transaction: txn.toObject(),
         wallet: { balance: newBalance }

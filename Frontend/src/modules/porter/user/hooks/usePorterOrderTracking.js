@@ -43,14 +43,20 @@ export function usePorterOrderTracking(orderId, { pollMs = 5000, enabled = true 
     pollTimerRef.current = setInterval(refresh, pollMs);
   }, [orderId, enabled, pollMs, refresh, clearPollTimer]);
 
+  // Initial fetch when orderId or enabled changes
+  useEffect(() => {
+    if (orderId && enabled) {
+      setLoading(true);
+      refresh();
+    }
+  }, [orderId, enabled, refresh]);
+
+  // Manage polling interval based on socket connection
   useEffect(() => {
     if (!orderId || !enabled) {
       clearPollTimer();
       return undefined;
     }
-
-    setLoading(true);
-    refresh();
 
     if (isConnected) {
       clearPollTimer();
@@ -59,10 +65,9 @@ export function usePorterOrderTracking(orderId, { pollMs = 5000, enabled = true 
     }
 
     return () => {
-      seqRef.current += 1;
       clearPollTimer();
     };
-  }, [orderId, enabled, isConnected, refresh, startPolling, clearPollTimer]);
+  }, [orderId, enabled, isConnected, startPolling, clearPollTimer]);
 
   useEffect(() => {
     if (!lastUpdate || !orderId) return;

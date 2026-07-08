@@ -119,16 +119,17 @@ export default function FssaiUpdate() {
       console.log("Update response result:", result)
 
       if (result?.requireLogout || result?.restaurant?.requireLogout) {
-        console.log("Triggering re-verification logout...")
-        toast.success("FSSAI details updated. Account sent for re-verification.")
-        setTimeout(() => {
-          clearModuleAuth("restaurant")
-          window.location.href = "/food/restaurant/pending-verification"
-        }, 2000)
-        return
+        if (!result?.restaurant?.wasEverApproved && !result?.wasEverApproved) {
+          toast.success("FSSAI details updated. Account sent for re-verification.")
+          setTimeout(() => {
+            clearModuleAuth("restaurant")
+            window.location.href = "/food/restaurant/pending-verification"
+          }, 2000)
+          return
+        }
       }
 
-      toast.success("FSSAI details updated successfully")
+      toast.success("FSSAI details updated and sent for admin review")
       navigate("/food/restaurant/fssai")
     } catch (error) {
       console.error("Error updating FSSAI:", error)
@@ -140,7 +141,7 @@ export default function FssaiUpdate() {
 
   if (fetching) {
     return (
-      <div className="min-h-screen bg-white flex flex-col items-center justify-center">
+      <div className="min-h-full bg-white lg:bg-slate-50 flex flex-col items-center justify-center">
         <Loader2 className="w-8 h-8 text-blue-600 animate-spin mb-2" />
         <p className="text-sm text-gray-500">Loading current details...</p>
       </div>
@@ -148,22 +149,27 @@ export default function FssaiUpdate() {
   }
 
   return (
-    <div className="min-h-screen bg-white flex flex-col">
-      {/* Header */}
-      <div className="px-4 pt-4 pb-3 flex items-center gap-3 border-b border-gray-200">
-        <button
-          onClick={() => navigate("/food/restaurant/fssai")}
-          className="p-2 rounded-full hover:bg-gray-100"
-          aria-label="Back"
-        >
-          <ArrowLeft className="w-5 h-5 text-gray-900" />
-        </button>
-        <h1 className="text-base font-semibold text-gray-900">Update FSSAI</h1>
+    <div className="min-h-full bg-white lg:bg-slate-50 flex flex-col">
+      <div className="sticky top-0 z-40 border-b border-gray-200 bg-white/95 backdrop-blur">
+        <div className="px-4 pt-4 pb-3 flex items-center gap-3 lg:max-w-2xl lg:mx-auto lg:px-8 lg:py-5 lg:w-full">
+          <button
+            onClick={() => navigate("/food/restaurant/fssai")}
+            className="p-2 rounded-full hover:bg-gray-100 lg:hidden"
+            aria-label="Back"
+          >
+            <ArrowLeft className="w-5 h-5 text-gray-900" />
+          </button>
+          <div>
+            <h1 className="text-base font-semibold text-gray-900 lg:text-2xl lg:font-bold">Update FSSAI</h1>
+            <p className="hidden text-sm text-gray-500 lg:block">Upload or update your food license details</p>
+          </div>
+        </div>
       </div>
 
-      <form onSubmit={handleSubmit} id="fssai-form" className="flex-1 px-4 pt-4 pb-28 space-y-4">
+      <form onSubmit={handleSubmit} id="fssai-form" className="flex-1 px-4 pt-4 pb-28 lg:max-w-2xl lg:mx-auto lg:px-8 lg:py-6 lg:pb-4 lg:w-full space-y-4 lg:rounded-2xl lg:border lg:border-slate-200 lg:bg-white lg:p-8 lg:shadow-sm lg:mb-8">
+        <div className="grid gap-4 lg:grid-cols-2">
         <div>
-          <label className="block text-xs font-medium text-gray-700 mb-1">
+          <label className="block text-xs font-medium text-gray-700 mb-1 lg:text-sm">
             FSSAI registration number
           </label>
           <input
@@ -193,8 +199,8 @@ export default function FssaiUpdate() {
           />
         </div>
 
-        <div className="space-y-2">
-          <label className="block text-xs font-medium text-gray-700">
+        <div className="space-y-2 lg:col-span-2">
+          <label className="block text-xs font-medium text-gray-700 lg:text-sm">
             Upload your FSSAI license
           </label>
           <div 
@@ -234,14 +240,15 @@ export default function FssaiUpdate() {
           </div>
 
         </div>
+        </div>
       </form>
 
       {/* Bottom button */}
-      <div className="px-4 pb-6 pt-2 border-t border-gray-200 bg-white">
+      <div className="px-4 pb-6 pt-2 border-t border-gray-200 bg-white lg:max-w-2xl lg:mx-auto lg:px-8 lg:w-full lg:border-t-0 lg:bg-transparent lg:pb-8">
         <button
           type="submit"
           form="fssai-form"
-          className={`w-full py-3 rounded-full text-sm font-medium transition-colors flex items-center justify-center gap-2 ${
+          className={`w-full py-3 rounded-full text-sm font-medium transition-colors flex items-center justify-center gap-2 lg:rounded-xl lg:py-3.5 ${
             fssaiNumber 
               ? "bg-black text-white hover:bg-gray-900" 
               : "bg-gray-200 text-gray-500 cursor-not-allowed"

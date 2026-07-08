@@ -2,7 +2,6 @@ import React, { useState, useEffect } from "react";
 import { NavLink, useNavigate, useLocation } from "react-router-dom";
 import {
   Store,
-  LayoutDashboard,
   FileText,
   Calendar,
   History,
@@ -16,12 +15,21 @@ import {
   Bell,
   LifeBuoy,
   ShieldCheck,
-  LogOut
+  LogOut,
+  Gift,
+  Star,
+  Edit,
+  Building2,
+  FileCheck,
+  IndianRupee,
+  Info,
+  Compass,
 } from "lucide-react";
 import { restaurantAPI } from "@food/api";
 import { getAppLogo, getCompanyName } from "@common/utils/businessSettings";
 import useNotificationInbox from "@food/hooks/useNotificationInbox";
 import { clearModuleAuth } from "@food/utils/auth";
+import RestaurantProfile from "@food/pages/restaurant/RestaurantProfile";
 
 const extractRestaurantPayload = (response) =>
   response?.data?.data?.restaurant ||
@@ -37,6 +45,7 @@ export default function DesktopSidebar() {
   const [restaurantData, setRestaurantData] = useState(null);
   const [companyName, setCompanyName] = useState(() => getCompanyName() || "rj kitchen");
   const [logoUrl, setLogoUrl] = useState(() => getAppLogo("restaurant"));
+  const [profileOpen, setProfileOpen] = useState(false);
   const { unreadCount } = useNotificationInbox("restaurant", { limit: 20, pollMs: 5 * 60 * 1000 });
 
   useEffect(() => {
@@ -55,48 +64,67 @@ export default function DesktopSidebar() {
   }, []);
 
   const restaurantName = restaurantData?.name || companyName || "rj kitchen";
-  const ownerName = restaurantData?.ownerName || restaurantData?.name || "Afasd"; // Fallback from screenshot
+  const ownerName = restaurantData?.ownerName || restaurantData?.name || "Owner";
+  const ownerImage = restaurantData?.profileImage?.url || restaurantData?.ownerImage?.url || "";
 
   const sections = [
     {
       title: "OPERATIONS",
       items: [
         { name: "Live orders", path: "/food/restaurant", icon: FileText, exact: true },
-        { name: "Reservations", path: "/food/restaurant/reservations", icon: Calendar },
         { name: "Order history", path: "/food/restaurant/orders/all", icon: History },
-      ]
+        { name: "Complaints", path: "/food/restaurant/feedback?tab=complaints", icon: Star },
+        { name: "Reviews", path: "/food/restaurant/feedback", icon: MessageSquare },
+      ],
     },
     {
       title: "MENU",
       items: [
         { name: "Menu inventory", path: "/food/restaurant/inventory", icon: Book },
-        { name: "Categories", path: "/food/restaurant/menu-categories", icon: LayoutGrid },
-      ]
+        { name: "Menu categories", path: "/food/restaurant/menu-categories", icon: LayoutGrid },
+        { name: "Create coupons", path: "/food/restaurant/create-coupons", icon: Gift },
+      ],
     },
     {
-      title: "BUSINESS",
+      title: "MANAGE OUTLET",
       items: [
-        { name: "Delivery", path: "/food/restaurant/delivery-settings", icon: Truck },
-        { name: "Accounting", path: "/food/restaurant/hub-finance", icon: Receipt },
-        { name: "Feedback", path: "/food/restaurant/feedback", icon: MessageSquare },
-      ]
+        { name: "Outlet info", path: "/food/restaurant/outlet-info", icon: Info },
+        { name: "Outlet timings", path: "/food/restaurant/outlet-timings", icon: Clock },
+        { name: "Dining reservations", path: "/food/restaurant/reservations", icon: Calendar },
+      ],
     },
     {
-      title: "OUTLET",
+      title: "SETTINGS",
       items: [
-        { name: "Outlet info", path: "/food/restaurant/outlet-info", icon: Store },
-        { name: "Hours & status", path: "/food/restaurant/outlet-timings", icon: Clock },
+        { name: "Delivery settings", path: "/food/restaurant/delivery-settings", icon: Truck },
         { name: "Zone setup", path: "/food/restaurant/zone-setup", icon: Map },
-      ]
+        { name: "Refer & earn", path: "/food/restaurant/refer-earn", icon: Gift },
+      ],
+    },
+    {
+      title: "FINANCE",
+      items: [
+        { name: "Payout", path: "/food/restaurant/hub-finance", icon: IndianRupee },
+        { name: "Invoices", path: "/food/restaurant/hub-finance?tab=invoices", icon: Receipt },
+        { name: "Bank details", path: "/food/restaurant/update-bank-details", icon: Building2 },
+        { name: "COD verification", path: "/food/restaurant/finance/cod-verification", icon: FileCheck },
+      ],
+    },
+    {
+      title: "HELP",
+      items: [
+        { name: "Support", path: "/food/restaurant/help-centre/support", icon: LifeBuoy },
+        { name: "Share feedback", path: "/food/restaurant/share-feedback", icon: Edit },
+        { name: "Explore more", path: "/food/restaurant/explore", icon: Compass },
+      ],
     },
     {
       title: "ACCOUNT",
       items: [
         { name: "Notifications", path: "/food/restaurant/notifications", icon: Bell, badge: unreadCount },
-        { name: "Support", path: "/food/restaurant/help-centre/support", icon: LifeBuoy },
         { name: "FSSAI", path: "/food/restaurant/fssai", icon: ShieldCheck },
-      ]
-    }
+      ],
+    },
   ];
 
   const onLogout = async () => {
@@ -136,9 +164,10 @@ export default function DesktopSidebar() {
             </h3>
             <ul className="space-y-1">
               {section.items.map((item, itemIdx) => {
-                const isActive = item.exact 
-                  ? location.pathname === item.path || location.pathname === item.path + "/"
-                  : location.pathname.startsWith(item.path);
+                const itemPath = String(item.path || "").split("?")[0]
+                const isActive = item.exact
+                  ? location.pathname === itemPath || location.pathname === `${itemPath}/`
+                  : location.pathname === itemPath || location.pathname.startsWith(`${itemPath}/`)
                   
                 return (
                   <li key={itemIdx}>
@@ -172,15 +201,23 @@ export default function DesktopSidebar() {
 
       {/* Footer Profile */}
       <div className="p-4 bg-white border-t border-gray-100">
-        <div className="flex items-center gap-3 p-2 bg-gray-50 rounded-xl mb-3">
-          <div className="w-8 h-8 rounded-full bg-green-600 text-white flex items-center justify-center font-bold text-sm shrink-0">
-            {ownerName.charAt(0).toUpperCase()}
+        <button
+          type="button"
+          onClick={() => setProfileOpen(true)}
+          className="flex w-full items-center gap-3 rounded-xl bg-gray-50 p-2 mb-3 text-left transition-colors hover:bg-gray-100"
+        >
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-green-600 text-sm font-bold text-white">
+            {ownerImage ? (
+              <img src={ownerImage} alt={ownerName} className="h-full w-full object-cover" />
+            ) : (
+              ownerName.charAt(0).toUpperCase()
+            )}
           </div>
-          <div className="flex flex-col min-w-0">
-            <span className="font-semibold text-gray-900 text-sm truncate">{ownerName}</span>
-            <span className="text-xs text-gray-500 truncate">Owner</span>
+          <div className="min-w-0 flex flex-col">
+            <span className="truncate text-sm font-semibold text-gray-900">{ownerName}</span>
+            <span className="truncate text-xs text-gray-500">My profile</span>
           </div>
-        </div>
+        </button>
         <button
           onClick={onLogout}
           className="w-full flex items-center justify-center gap-2 py-2 text-sm font-medium text-gray-600 hover:text-gray-900 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors"
@@ -189,6 +226,8 @@ export default function DesktopSidebar() {
           Logout
         </button>
       </div>
+
+      <RestaurantProfile isOpen={profileOpen} onClose={() => setProfileOpen(false)} />
     </aside>
   );
 }

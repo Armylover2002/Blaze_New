@@ -7,6 +7,7 @@ import {
 } from '@food/components/ui/loading-skeletons'
 
 import ProtectedRoute from '@core/guards/ProtectedRoute'
+import FoodProtectedRoute from '../modules/Food/components/ProtectedRoute'
 import RoleGuard from '@core/guards/RoleGuard'
 import { AuthPageGuard } from '@core/guards/RouteGuard'
 import { UserRole } from '@core/constants/roles'
@@ -200,10 +201,10 @@ const AppRoutes = () => {
             <Route path="/cart/checkout" element={<ProtectedRoute requiredRole="user" loginPath="/user/auth/login"><GlobalCheckoutPage /></ProtectedRoute>} />
             <Route path="/cart/select-address" element={<ProtectedRoute requiredRole="user" loginPath="/user/auth/login"><GlobalSelectAddressPage /></ProtectedRoute>} />
             <Route path="/cart/address-selector" element={<ProtectedRoute requiredRole="user" loginPath="/user/auth/login"><GlobalAddressSelectorPage /></ProtectedRoute>} />
-            <Route path="/profile" element={<ProtectedRoute requiredRole="user" loginPath="/user/auth/login"><SharedProfilePage /></ProtectedRoute>} />
-            <Route path="/profile/edit" element={<ProtectedRoute requiredRole="user" loginPath="/user/auth/login"><SharedProfileEditPage /></ProtectedRoute>} />
-            <Route path="/profile/support" element={<ProtectedRoute requiredRole="user" loginPath="/user/auth/login"><SharedProfileSupportPage /></ProtectedRoute>} />
-            <Route path="/profile/coupons" element={<ProtectedRoute requiredRole="user" loginPath="/user/auth/login"><SharedProfileCouponsPage /></ProtectedRoute>} />
+            <Route path="/profile" element={<FoodProtectedRoute requiredRole="user" loginPath="/user/auth/login"><SharedProfilePage /></FoodProtectedRoute>} />
+            <Route path="/profile/edit" element={<FoodProtectedRoute requiredRole="user" loginPath="/user/auth/login"><SharedProfileEditPage /></FoodProtectedRoute>} />
+            <Route path="/profile/support" element={<FoodProtectedRoute requiredRole="user" loginPath="/user/auth/login"><SharedProfileSupportPage /></FoodProtectedRoute>} />
+            <Route path="/profile/coupons" element={<FoodProtectedRoute requiredRole="user" loginPath="/user/auth/login"><SharedProfileCouponsPage /></FoodProtectedRoute>} />
             <Route path="/profile/about" element={<SharedProfileAboutPage />} />
             <Route path="/profile/terms" element={<SharedProfileTermsPage />} />
             <Route path="/profile/privacy" element={<SharedProfilePrivacyPage />} />
@@ -239,7 +240,6 @@ const AppRoutes = () => {
           <Route path="/restaurant/*" element={<RedirectToFood />} />
           <Route path="/delivery/*" element={<RedirectToFood />} />
           <Route path="/usermain/*" element={<RedirectToFood />} />
-          <Route path="/profile/*" element={<Navigate to="/profile" replace />} />
           <Route path="/orders/*" element={<RedirectToFood />} />
         </Route>
 

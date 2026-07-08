@@ -3,17 +3,17 @@ import { useNavigate } from "react-router-dom";
 import { Check, X } from "lucide-react";
 import Screen from "../components/Screen";
 import BottomSheet from "../components/BottomSheet";
-import { PrimaryButton, StickyBar, inr } from "../components/ui";
+import { PrimaryButton, inr } from "../components/ui";
 import { useBooking } from "../context/BookingContext";
 import { usePorterHomeData } from "../hooks/usePorterHomeData";
 
 export default function PromoCode() {
   const navigate = useNavigate();
-  const { coupon, setCoupon, baseFare, discount, total } = useBooking();
+  const { coupon, setCoupon, applyCoupon, baseFare, discount } = useBooking();
   const { coupons } = usePorterHomeData();
-  const [code, setCode] = useState("");
   const [error, setError] = useState("");
   const [selectedCoupon, setSelectedCoupon] = useState(null);
+  const [applying, setApplying] = useState(false);
 
   const getDiscountText = React.useCallback((c) => {
     const type = (c?.discountType || '').toLowerCase();
@@ -31,20 +31,28 @@ export default function PromoCode() {
     return '';
   }, []);
 
-  const applyCode = (c) => {
-    if (baseFare < c.minOrderValue) {
+  const applyCode = async (c) => {
+    if (baseFare != null && baseFare < c.minOrderValue) {
       setError(`Minimum order value is ${inr(c.minOrderValue)}`);
       return;
     }
-    setCoupon(c);
+
+    setApplying(true);
     setError("");
-    setCode(c.code);
-    setSelectedCoupon(null);
+    try {
+      await applyCoupon(c);
+      setSelectedCoupon(null);
+      navigate(-1);
+    } catch (err) {
+      const message = err?.response?.data?.message || err?.message || "Could not apply this coupon";
+      setError(message);
+    } finally {
+      setApplying(false);
+    }
   };
 
   const removeCoupon = () => {
     setCoupon(null);
-    setCode("");
     setError("");
   };
 
@@ -90,7 +98,7 @@ export default function PromoCode() {
 
       <BottomSheet
         open={!!selectedCoupon}
-        onClose={() => setSelectedCoupon(null)}
+        onClose={() => !applying && setSelectedCoupon(null)}
         title="Coupon Details"
       >
         {selectedCoupon && (
@@ -179,9 +187,10 @@ export default function PromoCode() {
             <div className="mt-4 pt-2">
                <PrimaryButton 
                   onClick={() => applyCode(selectedCoupon)}
+                  disabled={applying}
                   className="w-full"
                >
-                  Apply Coupon
+                  {applying ? "Applying..." : "Apply Coupon"}
                </PrimaryButton>
             </div>
           </div>

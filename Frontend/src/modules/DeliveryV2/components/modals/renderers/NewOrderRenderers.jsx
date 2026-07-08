@@ -1,6 +1,6 @@
 import React from 'react';
 import { MapPin, ChefHat, Package, Clock, Phone } from 'lucide-react';
-import { formatDeliveryAddressText, isMixedOrder, normalizePickupPoints, isReturnPickupTrip, getReturnPickupStopLabels } from '@/modules/DeliveryV2/utils/orderRouting';
+import { formatDeliveryAddressText, isMixedOrder, normalizePickupPoints, isReturnPickupTrip, getReturnPickupStopLabels, isPorterParcelTrip } from '@/modules/DeliveryV2/utils/orderRouting';
 
 const BaseOrderHeader = ({ title, subtitle, badges, earnings, timeLeft, bgColor = 'bg-[#FF0000]', orderId }) => (
   <div className={`${bgColor} p-5 flex justify-between items-center text-white border-b border-black/10`}>
@@ -215,6 +215,7 @@ const ParcelOrderRenderer = ({ order, distanceKm, etaMins, timeLeft }) => {
 
 export const RenderNewOrder = (props) => {
   const { order } = props;
+  if (isPorterParcelTrip(order)) return <ParcelOrderRenderer {...props} />;
   const moduleType = String(order?.module || order?.orderType || order?.serviceType || order?.type || '').toLowerCase();
   
   if (moduleType === 'parcel') return <ParcelOrderRenderer {...props} />;

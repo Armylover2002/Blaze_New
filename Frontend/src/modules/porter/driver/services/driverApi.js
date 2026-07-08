@@ -24,18 +24,32 @@ const porterDriverApi = {
 
   rejectOrder: (orderId) => axiosInstance.post(`/porter/driver/orders/${orderId}/reject`).then(unwrap),
 
+  cancelOrder: (orderId, reason) => axiosInstance
+    .post(`/porter/driver/orders/${orderId}/cancel`, { reason })
+    .then(unwrap),
+
   reachedPickup: (orderId) => axiosInstance.post(`/porter/driver/orders/${orderId}/reached-pickup`).then(unwrap),
 
   verifyPickupOtp: (orderId, otp) => axiosInstance
     .post(`/porter/driver/orders/${orderId}/verify-pickup-otp`, { otp })
     .then(unwrap),
 
-  confirmPickedUp: (orderId) => axiosInstance.post(`/porter/driver/orders/${orderId}/picked-up`).then(unwrap),
+  confirmPickedUp: (orderId, payload = {}) => axiosInstance
+    .post(`/porter/driver/orders/${orderId}/picked-up`, payload)
+    .then(unwrap),
 
   reachedDrop: (orderId) => axiosInstance.post(`/porter/driver/orders/${orderId}/reached-drop`).then(unwrap),
 
-  completeDelivery: (orderId, otp) => axiosInstance
-    .post(`/porter/driver/orders/${orderId}/complete`, { otp })
+  createCollectQr: (orderId, body = {}) => axiosInstance
+    .post(`/porter/driver/orders/${orderId}/collect-qr`, body)
+    .then(unwrap),
+
+  getPaymentStatus: (orderId) => axiosInstance
+    .get(`/porter/driver/orders/${orderId}/payment-status`)
+    .then(unwrap),
+
+  completeDelivery: (orderId, payload) => axiosInstance
+    .post(`/porter/driver/orders/${orderId}/complete`, payload)
     .then(unwrap),
 
   listTrips: (params = {}) => axiosInstance.get('/porter/driver/trips', { params }).then(unwrap),

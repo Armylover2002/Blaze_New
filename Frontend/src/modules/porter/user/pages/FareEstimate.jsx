@@ -6,13 +6,22 @@ import Screen from "../components/Screen";
 import PorterRouteMap from "../components/PorterRouteMap";
 import { PrimaryButton, StickyBar, FareRow, SectionLabel, inr } from "../components/ui";
 import { useBooking } from "../context/BookingContext";
+import { toast } from "sonner";
 import {
   getPorterFindingPartnerPath,
   getPorterPromoPath,
   getPorterPaymentPath,
   getPorterSchedulePath,
+  getPorterVehiclePath,
 } from "../utils/routes";
 import { PAYMENT_METHODS } from "../constants/booking";
+import porterUserApi from "../services/userApi";
+import {
+  initRazorpayPayment,
+  isFlutterWebView,
+  handleFlutterRazorpayPayment,
+} from "@food/utils/razorpay";
+import { mapActiveShipmentFromOrder } from "../utils/orderMapper";
 
 export default function FareEstimate() {
   const navigate = useNavigate();
@@ -30,12 +39,18 @@ export default function FareEstimate() {
     distanceText,
     durationText,
     baseFare,
+    serviceTax,
     discount,
     total,
     routeQuote,
+    quoteLoading,
+    resolvedVehicleId,
+    setActiveShipment,
+    clearBookingDraft,
   } = useBooking();
 
   const [walletBalance, setWalletBalance] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     userAPI.getWallet()
@@ -185,14 +200,95 @@ export default function FareEstimate() {
         {(durationText || durationMin != null) && (
           <FareRow label="ETA" value={durationText || `${durationMin} min`} />
         )}
+        {serviceTax > 0 && <FareRow label="Service Tax / GST" value={inr(serviceTax)} />}
         {discount > 0 && <FareRow label="Promo discount" value={`−${inr(discount)}`} accent />}
         <div className="my-2 border-t border-gray-100" />
         <FareRow label="Total Payable" value={inr(payable)} strong />
       </div>
 
       <StickyBar>
-        <PrimaryButton onClick={() => navigate(getPorterFindingPartnerPath())}>
-          Book Parcel
+        <PrimaryButton
+          disabled={!resolvedVehicleId || quoteLoading || submitting}
+          onClick={async () => {
+            if (!resolvedVehicleId) {
+              toast.error("Please select a delivery vehicle.");
+              navigate(getPorterVehiclePath());
+              return;
+            }
+            
+            setSubmitting(true);
+            try {
+              const result = await porterUserApi.createOrder({
+                pickup,
+                delivery,
+                vehicleId: resolvedVehicleId,
+                parcel,
+                couponCode: coupon?.code,
+                paymentMethod: paymentMethodId,
+                scheduledAt: scheduledAt || undefined,
+              });
+
+              const order = result?.order || result;
+              if (!order?.id && !order?._id) throw new Error("Order creation failed");
+
+              if (order.payment?.method === "razorpay" && order.payment?.status === "pending") {
+                const rzpData = order.payment.razorpay;
+                const rzpOptions = {
+                  key: rzpData.key,
+                  amount: rzpData.amount,
+                  currency: rzpData.currency || "INR",
+                  order_id: rzpData.orderId,
+                  name: "Blaze Porter",
+                  description: "Porter Order Payment",
+                };
+
+                let paymentResult;
+                if (isFlutterWebView()) {
+                  paymentResult = await handleFlutterRazorpayPayment(rzpOptions);
+                } else {
+                  paymentResult = await new Promise((resolve, reject) => {
+                    initRazorpayPayment({
+                      ...rzpOptions,
+                      handler: resolve,
+                      onError: reject,
+                      onClose: () => reject(new Error("Payment cancelled")),
+                    });
+                  });
+                }
+
+                await porterUserApi.verifyPayment({
+                  orderId: order.id || order._id,
+                  razorpayOrderId: paymentResult.razorpay_order_id,
+                  razorpayPaymentId: paymentResult.razorpay_payment_id,
+                  razorpaySignature: paymentResult.razorpay_signature,
+                });
+              }
+
+              const mapped = mapActiveShipmentFromOrder(order);
+              setActiveShipment(mapped || {
+                id: order.id || order._id,
+                orderNumber: order.orderNumber,
+                trackingId: order.orderNumber,
+                status: order.status,
+                stage: "searching_partner",
+                pickup,
+                delivery,
+                vehicle: vehicle?.name,
+                total: order.pricing?.total ?? total,
+                createdAt: order.createdAt || new Date().toISOString(),
+              });
+              clearBookingDraft();
+
+              navigate(getPorterFindingPartnerPath(), { replace: true });
+            } catch (error) {
+              console.error("Order error:", error);
+              toast.error(error?.message || "Failed to place order");
+            } finally {
+              setSubmitting(false);
+            }
+          }}
+        >
+          {submitting ? "Processing..." : "Book Parcel"}
         </PrimaryButton>
       </StickyBar>
     </Screen>

@@ -4,7 +4,7 @@ import * as driverOrderService from '../services/porter-driver-order.service.js'
 import { setDeliveryPartnerActiveVehicle } from '../../../food/delivery/services/delivery.service.js';
 import { FoodDeliveryPartner } from '../../../food/delivery/models/deliveryPartner.model.js';
 import { getDeliveryPartnerVehiclePayload } from '../services/porter-driver-vehicle.service.js';
-import { porterOtpSchema } from '../validators/porterOrder.validator.js';
+import { porterOtpSchema, porterCompleteDeliverySchema } from '../validators/porterOrder.validator.js';
 import { extractPerformer } from '../../../../core/utils/performer.js';
 import { NotFoundError, ValidationError } from '../../../../core/auth/errors.js';
 
@@ -29,6 +29,14 @@ export const rejectPorterOrder = asyncHandler(async (req, res) => {
     return sendResponse(res, 200, 'Order rejected', { rejected: true });
 });
 
+export const cancelPorterDriverOrder = asyncHandler(async (req, res) => {
+    const reason = String(req.body?.reason || '').trim();
+    if (!reason) throw new ValidationError('Cancellation reason is required');
+    const performer = extractPerformer(req.user);
+    const result = await driverOrderService.cancelPorterOrderByDriver(req.user.userId, req.params.id, reason, performer);
+    return sendResponse(res, 200, 'Order cancelled', result);
+});
+
 export const confirmPorterReachedPickup = asyncHandler(async (req, res) => {
     const performer = extractPerformer(req.user);
     const order = await driverOrderService.confirmPorterReachedPickup(req.user.userId, req.params.id, performer);
@@ -37,14 +45,30 @@ export const confirmPorterReachedPickup = asyncHandler(async (req, res) => {
 
 export const verifyPorterPickupOtp = asyncHandler(async (req, res) => {
     const { otp } = porterOtpSchema.parse(req.body);
-    await driverOrderService.verifyPorterPickupOtp(req.user.userId, req.params.id, otp);
+    const performer = extractPerformer(req.user);
+    await driverOrderService.verifyPorterPickupOtp(req.user.userId, req.params.id, otp, performer);
     return sendResponse(res, 200, 'Pickup OTP verified', { verified: true });
 });
 
 export const confirmPorterPickedUp = asyncHandler(async (req, res) => {
     const performer = extractPerformer(req.user);
-    const order = await driverOrderService.confirmPorterPickedUp(req.user.userId, req.params.id, performer);
+    const pickupPhotoUrl = req.body?.pickupPhotoUrl || null;
+    const order = await driverOrderService.confirmPorterPickedUp(req.user.userId, req.params.id, performer, pickupPhotoUrl);
     return sendResponse(res, 200, 'Picked up', { order });
+});
+
+export const createPorterCollectQr = asyncHandler(async (req, res) => {
+    const result = await driverOrderService.createPorterOrderCollectQr(
+        req.user.userId,
+        req.params.id,
+        { name: req.body?.name, phone: req.body?.phone, email: req.body?.email },
+    );
+    return sendResponse(res, 200, 'Collect QR created', result);
+});
+
+export const getPorterPaymentStatus = asyncHandler(async (req, res) => {
+    const result = await driverOrderService.getPorterOrderPaymentStatus(req.user.userId, req.params.id);
+    return sendResponse(res, 200, 'Payment status', result);
 });
 
 export const confirmPorterReachedDrop = asyncHandler(async (req, res) => {
@@ -54,9 +78,14 @@ export const confirmPorterReachedDrop = asyncHandler(async (req, res) => {
 });
 
 export const completePorterDelivery = asyncHandler(async (req, res) => {
-    const { otp } = porterOtpSchema.parse(req.body);
+    const { deliveryPhotoUrl } = porterCompleteDeliverySchema.parse(req.body);
     const performer = extractPerformer(req.user);
-    const order = await driverOrderService.completePorterDelivery(req.user.userId, req.params.id, otp, performer);
+    const order = await driverOrderService.completePorterDelivery(
+        req.user.userId,
+        req.params.id,
+        deliveryPhotoUrl,
+        performer,
+    );
     return sendResponse(res, 200, 'Delivery completed', { order });
 });
 

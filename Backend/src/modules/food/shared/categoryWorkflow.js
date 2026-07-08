@@ -201,8 +201,8 @@ export const serializeCategoryForResponse = (category = {}, options = {}) => {
             ? Boolean(restaurantId && restaurantId === String(options.currentRestaurantId))
             : true,
         canDelete: options.currentRestaurantId
-            ? Boolean(restaurantId && restaurantId === String(options.currentRestaurantId) && Number(stats?.totalFoods || 0) === 0)
-            : Number(stats?.totalFoods || 0) === 0,
+            ? Boolean(restaurantId && restaurantId === String(options.currentRestaurantId))
+            : true,
         restaurant: category?.restaurantId?._id
             ? {
                 _id: category.restaurantId._id,

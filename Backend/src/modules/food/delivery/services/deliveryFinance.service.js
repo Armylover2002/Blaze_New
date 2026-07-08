@@ -18,6 +18,10 @@ import { getTransactionsByEntity } from "../../../../core/payments/transaction.s
 import { FoodDeliveryWallet } from "../models/deliveryWallet.model.js";
 import { creditWallet } from "../../../../core/payments/wallet.service.js";
 import { logger } from "../../../../utils/logger.js";
+import {
+  sumPorterDriverCashCollected,
+  countPorterDriverDeliveries,
+} from "../../../porter/orders/services/porter-driver-finance.service.js";
 
 
 /**
@@ -209,6 +213,19 @@ export const getDeliveryPartnerWalletEnhanced = async (deliveryPartnerId) => {
     }),
   ]);
 
+  // Fold in Porter (parcel) cash + deliveries so the SHARED pocket / cash-limit
+  // screens stay accurate. Additive only — never touches Food aggregation.
+  let porterCashCollected = 0;
+  let porterDeliveries = 0;
+  try {
+    [porterCashCollected, porterDeliveries] = await Promise.all([
+      sumPorterDriverCashCollected(partnerId),
+      countPorterDriverDeliveries(partnerId),
+    ]);
+  } catch (err) {
+    logger.error(`Porter cash/deliveries merge failed: ${err.message}`);
+  }
+
   const wallet = walletDoc || {
     balance: 0,
     totalEarnings: 0,
@@ -220,7 +237,8 @@ export const getDeliveryPartnerWalletEnhanced = async (deliveryPartnerId) => {
   const effectiveBonus = Math.max(recordedBonus, aggregatedBonus);
   const missingBonusBalance = Math.max(0, effectiveBonus - recordedBonus);
 
-  const grossCashCollected = Number(cashCollectedAgg?.[0]?.cashCollected) || 0;
+  const grossCashCollected =
+    (Number(cashCollectedAgg?.[0]?.cashCollected) || 0) + Number(porterCashCollected || 0);
   const totalDepositedCash =
     Number(totalDepositedCashAgg?.[0]?.depositedCash) || 0;
   const cashInHand = Math.max(0, grossCashCollected - totalDepositedCash);
@@ -269,7 +287,7 @@ export const getDeliveryPartnerWalletEnhanced = async (deliveryPartnerId) => {
     totalCashLimit,
     availableCashLimit: Math.max(0, totalCashLimit - cashInHand),
     deliveryWithdrawalLimit,
-    totalDeliveries: Number(totalDeliveries) || 0,
+    totalDeliveries: (Number(totalDeliveries) || 0) + Number(porterDeliveries || 0),
     subscriptionBalance: Number(wallet.subscriptionBalance || 0),
     transactions,
   };

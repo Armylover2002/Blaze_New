@@ -370,14 +370,36 @@ export async function deleteRestaurantCategory(restaurantId, id) {
         throw new ValidationError('Invalid category id');
     }
 
-    const category = await FoodCategory.findOne({ _id: id, restaurantId: context.restaurantId }).select('_id').lean();
+    const category = await FoodCategory.findOne({ _id: id, restaurantId: context.restaurantId })
+        .select('_id name')
+        .lean();
     if (!category?._id) return null;
 
-    const inUse = await FoodItem.countDocuments({ categoryId: id, restaurantId: context.restaurantId });
-    if (inUse > 0) {
-        throw new ValidationError('Cannot delete category while it has items');
+    const linkedItems = await FoodItem.find({
+        categoryId: id,
+        restaurantId: context.restaurantId
+    })
+        .select('_id name categoryName')
+        .lean();
+
+    if (linkedItems.length > 0) {
+        await FoodItem.updateMany(
+            { categoryId: id, restaurantId: context.restaurantId },
+            {
+                $set: {
+                    isAvailable: false,
+                    categoryId: null
+                }
+            }
+        );
     }
 
     const deleted = await FoodCategory.findOneAndDelete({ _id: id, restaurantId: context.restaurantId }).lean();
-    return deleted ? { id } : null;
+    if (!deleted) return null;
+
+    return {
+        id,
+        deactivatedItemCount: linkedItems.length,
+        deactivatedItemIds: linkedItems.map((item) => String(item._id))
+    };
 }

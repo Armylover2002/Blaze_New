@@ -12,6 +12,26 @@ const pickCustomerToken = () => {
   return valid || candidates[0] || null;
 };
 
+const pickDeliveryToken = () => {
+  const candidates = [
+    localStorage.getItem('delivery_accessToken'),
+    localStorage.getItem('auth_delivery'),
+    localStorage.getItem('token'),
+  ].filter((token) => token && token !== 'null' && token !== 'undefined');
+
+  const valid = candidates.find((token) => !isTokenExpired(token));
+  return valid || candidates[0] || null;
+};
+
+const isDeliveryContext = (pagePath = '', url = '') => (
+  pagePath.startsWith('/delivery')
+  || pagePath.startsWith('/food/delivery')
+  || pagePath.startsWith('/porter/driver')
+  || url.startsWith('/delivery')
+  || url.startsWith('/food/delivery')
+  || url.startsWith('/porter/driver')
+);
+
 const axiosInstance = axios.create({
     baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api/v1',
     headers: {
@@ -33,8 +53,8 @@ axiosInstance.interceptors.request.use(
             token = localStorage.getItem('auth_seller');
         } else if (pagePath.startsWith('/admin') || pagePath.startsWith('/porter/admin')) {
             token = localStorage.getItem('auth_admin');
-        } else if (pagePath.startsWith('/delivery') || pagePath.startsWith('/porter/driver')) {
-            token = localStorage.getItem('auth_delivery');
+        } else if (isDeliveryContext(pagePath, url)) {
+            token = pickDeliveryToken();
         } else if (pagePath.startsWith('/customer') || pagePath.startsWith('/quick')) {
             token = pickCustomerToken();
         }
@@ -43,7 +63,7 @@ axiosInstance.interceptors.request.use(
         if (!token) {
             if (url.startsWith('/seller')) token = localStorage.getItem('auth_seller');
             else if (url.startsWith('/admin') || url.startsWith('/porter/admin')) token = localStorage.getItem('auth_admin');
-            else if (url.startsWith('/delivery') || url.startsWith('/porter/driver')) token = localStorage.getItem('auth_delivery');
+            else if (isDeliveryContext(pagePath, url)) token = pickDeliveryToken();
             else if (
               url.startsWith('/customer') ||
               url.startsWith('/quick-commerce') ||
@@ -58,7 +78,7 @@ axiosInstance.interceptors.request.use(
         }
 
         // 3. Final default: if we are on a general page and STILL no token, try customer token
-        if (!token && !pagePath.startsWith('/admin') && !pagePath.startsWith('/porter/admin') && !pagePath.startsWith('/seller') && !pagePath.startsWith('/delivery') && !pagePath.startsWith('/porter/driver')) {
+        if (!token && !pagePath.startsWith('/admin') && !pagePath.startsWith('/porter/admin') && !pagePath.startsWith('/seller') && !isDeliveryContext(pagePath, url)) {
             token = pickCustomerToken();
         }
 
@@ -99,14 +119,14 @@ axiosInstance.interceptors.response.use(
                 ? 'seller'
                 : path.startsWith('/admin')
                     ? 'admin'
-                    : path.startsWith('/delivery')
+                    : (path.startsWith('/delivery') || path.startsWith('/food/delivery'))
                         ? 'delivery'
                         : 'customer';
             const requestModule = requestUrl.startsWith('/seller')
                 ? 'seller'
                 : requestUrl.startsWith('/admin')
                     ? 'admin'
-                    : requestUrl.startsWith('/delivery')
+                    : (requestUrl.startsWith('/delivery') || requestUrl.startsWith('/food/delivery') || requestUrl.startsWith('/porter/driver'))
                         ? 'delivery'
                         : requestUrl.startsWith('/user') || requestUrl.startsWith('/customer') || requestUrl.startsWith('/auth')
                             ? 'customer'

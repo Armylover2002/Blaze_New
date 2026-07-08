@@ -1,10 +1,10 @@
 import { Link, useLocation } from "react-router-dom"
-import { Tag, User, Truck, UtensilsCrossed, ArrowUpRight } from "lucide-react"
-import { useAuth } from "@core/context/AuthContext"
+import { Tag, User, Truck, UtensilsCrossed } from "lucide-react"
+import { isModuleAuthenticated } from "@food/utils/auth"
 
 export default function BottomNavigation() {
   const location = useLocation()
-  const { isAuthenticated } = useAuth()
+  const isUserAuthenticated = isModuleAuthenticated("user")
   const pathname = location.pathname
   const profileSource = new URLSearchParams(location.search).get("from")
   const redirectTo = `${location.pathname || "/food/user"}${location.search || ""}${location.hash || ""}`
@@ -103,8 +103,8 @@ export default function BottomNavigation() {
 
         {/* Profile Tab */}
         <Link
-          to={isAuthenticated ? "/food/user/profile" : "/user/auth/login"}
-          state={!isAuthenticated ? { redirectTo: "/food/user/profile" } : undefined}
+          to={isUserAuthenticated ? "/profile" : "/user/auth/login"}
+          state={!isUserAuthenticated ? { redirectTo: "/profile" } : undefined}
           className={`flex flex-1 flex-col items-center gap-1.5 px-2 sm:px-3 py-2 transition-all duration-200 relative ${isProfile
               ? "text-primary-orange dark:text-primary-orange"
               : "text-gray-600 dark:text-gray-400"

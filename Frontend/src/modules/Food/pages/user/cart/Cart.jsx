@@ -199,6 +199,7 @@ export default function Cart() {
   const [isPlacingOrder, setIsPlacingOrder] = useState(false)
   const [showBillDetails, setShowBillDetails] = useState(true)
   const [showPlacingOrder, setShowPlacingOrder] = useState(false)
+  const [deliveryType, setDeliveryType] = useState("standard")
   const [isScheduled, setIsScheduled] = useState(false)
   const [scheduledDate, setScheduledDate] = useState("")
   const [scheduledTime, setScheduledTime] = useState("")
@@ -1038,10 +1039,11 @@ export default function Cart() {
 
     return Number(feeSettings.baseDeliveryFee || 0)
   })()
-  const deliveryFee =
+  const baseComputedDeliveryFee =
     pricing?.deliveryFee !== undefined && pricing?.deliveryFee !== null
       ? Number(pricing.deliveryFee || 0)
       : fallbackDeliveryFee
+  const deliveryFee = baseComputedDeliveryFee + (deliveryType === "fastest" ? 5 : 0)
   const deliveryFeeBreakdown = pricing?.deliveryFeeBreakdown || null
   const hasDistanceDeliveryBreakdown =
     deliveryFeeBreakdown?.source === "distance" &&
@@ -2570,6 +2572,66 @@ export default function Cart() {
                 )}
               </div>
 
+              {/* Delivery Type */}
+              <div className="bg-white dark:bg-[#1a1a1a] rounded-2xl overflow-hidden border border-slate-100 dark:border-gray-800 shadow-sm flex flex-col p-4 md:p-5">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-[15px] font-bold text-[#118A42] dark:text-green-500">Delivery Modes</h3>
+                    <span className="bg-[#118A42] text-white text-[10px] font-bold px-1.5 py-0.5 rounded tracking-wide">NEW</span>
+                  </div>
+                  <span className="text-sm font-medium text-gray-500">Instructions</span>
+                </div>
+                
+                <div className="flex flex-col gap-0">
+                  {/* Quick Delivery */}
+                  <div
+                    onClick={() => setDeliveryType("fastest")}
+                    className={`flex items-start gap-3 p-3 cursor-pointer rounded-xl transition-all ${
+                      deliveryType === "fastest" ? "bg-gray-50 dark:bg-gray-800/50" : "bg-transparent"
+                    }`}
+                  >
+                    <div className="mt-1">
+                      <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${
+                        deliveryType === "fastest" ? "border-[#118A42]" : "border-gray-300 dark:border-gray-600"
+                      }`}>
+                        {deliveryType === "fastest" && <div className="w-2.5 h-2.5 bg-[#118A42] rounded-full" />}
+                      </div>
+                    </div>
+                    <div className="flex-1 flex flex-col">
+                      <div className="flex items-center justify-between w-full">
+                        <span className={`text-[15px] font-semibold ${deliveryType === "fastest" ? "text-gray-900 dark:text-white" : "text-gray-600 dark:text-gray-400"}`}>
+                          Quick ⚡
+                        </span>
+                        <span className="text-[15px] font-medium text-gray-700 dark:text-gray-300">+{RUPEE_SYMBOL}5</span>
+                      </div>
+                      <span className="text-xs text-gray-400 mt-0.5">Add address to check delivery time</span>
+                    </div>
+                  </div>
+
+                  {/* Basic Delivery */}
+                  <div
+                    onClick={() => setDeliveryType("standard")}
+                    className={`flex items-start gap-3 p-3 cursor-pointer rounded-xl transition-all ${
+                      deliveryType === "standard" ? "bg-gray-50 dark:bg-gray-800/50" : "bg-transparent"
+                    }`}
+                  >
+                    <div className="mt-1">
+                      <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${
+                        deliveryType === "standard" ? "border-[#118A42]" : "border-gray-300 dark:border-gray-600"
+                      }`}>
+                        {deliveryType === "standard" && <div className="w-2.5 h-2.5 bg-[#118A42] rounded-full" />}
+                      </div>
+                    </div>
+                    <div className="flex-1 flex flex-col">
+                      <span className={`text-[15px] font-semibold ${deliveryType === "standard" ? "text-gray-900 dark:text-white" : "text-gray-600 dark:text-gray-400"}`}>
+                        Basic
+                      </span>
+                      <span className="text-xs text-gray-400 mt-0.5">Add address to check delivery time</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               {/* Delivery Address */}
               <div className="bg-white dark:bg-[#1a1a1a] px-4 md:px-6 py-5 rounded-2xl shadow-sm border border-slate-100 dark:border-gray-800">
                 <div className="flex items-start justify-between w-full text-left">
@@ -2801,31 +2863,30 @@ export default function Cart() {
                             Other: {RUPEE_SYMBOL}{otherPlatformSubtotal.toFixed(0)}
                           </span>
                         )}
-                        <span className="text-gray-800 dark:text-gray-200 font-medium">{RUPEE_SYMBOL}{subtotal.toFixed(2)}</span>
+                        <span className="text-gray-800 dark:text-gray-200 font-medium">{RUPEE_SYMBOL}{subtotal.toFixed(0)}</span>
                       </div>
                     </div>
                     <div className="flex justify-between text-sm">
-                      <span className="text-gray-600 dark:text-gray-400">Delivery Fee</span>
+                      <span className="text-gray-600 dark:text-gray-400 border-b border-dashed border-gray-400 pb-[1px]">
+                        Delivery Fee {hasDistanceDeliveryBreakdown ? `| ${Number(deliveryFeeBreakdown.distanceKm).toFixed(1)} kms` : ""}
+                      </span>
                       <div className="text-right">
                         <span className={deliveryFee === 0 ? "text-[#FF0000] font-semibold" : "text-gray-800 dark:text-gray-200 font-medium"}>
-                          {deliveryFee === 0 ? "FREE" : `${RUPEE_SYMBOL}${deliveryFee.toFixed(2)}`}
+                          {deliveryFee === 0 ? "FREE" : `${RUPEE_SYMBOL}${deliveryFee.toFixed(0)}`}
                         </span>
                       </div>
                     </div>
 
-                    {deliveryFeeBreakdownText && (
-                      <div className="text-[11px] text-gray-500 dark:text-gray-400 -mt-1.5 ml-1 border-l-2 border-gray-100 pl-2">
-                        {deliveryFeeBreakdownText}
+                    {platformFee > 0 && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-600 dark:text-gray-400">Platform Fee</span>
+                        <div className="text-right">
+                          <span className="text-gray-800 dark:text-gray-200 font-medium">{RUPEE_SYMBOL}{platformFee.toFixed(0)}</span>
+                        </div>
                       </div>
                     )}
                     <div className="flex justify-between text-sm">
-                      <span className="text-gray-600 dark:text-gray-400">Platform Fee</span>
-                      <div className="text-right">
-                        <span className="text-gray-800 dark:text-gray-200 font-medium">{RUPEE_SYMBOL}{platformFee.toFixed(2)}</span>
-                      </div>
-                    </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-gray-600 dark:text-gray-400">GST and Restaurant Charges</span>
+                      <span className="text-gray-600 dark:text-gray-400 border-b border-dashed border-gray-400 pb-[1px]">Government Taxes</span>
                       <span className="text-gray-800 dark:text-gray-200 font-medium">{RUPEE_SYMBOL}{gstCharges.toFixed(2)}</span>
                     </div>
                     {discount > 0 && (

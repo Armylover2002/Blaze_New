@@ -4,6 +4,7 @@ import {
     getPorterDashboardStats,
     getPorterReportsStats,
     getPorterAdminTransactions,
+    getPorterAdminWallets,
 } from '../services/porter-admin-analytics.service.js';
 
 export const getPorterDashboard = asyncHandler(async (req, res) => {
@@ -19,4 +20,9 @@ export const getPorterReports = asyncHandler(async (req, res) => {
 export const getPorterTransactions = asyncHandler(async (req, res) => {
     const data = await getPorterAdminTransactions(req.query);
     return sendResponse(res, 200, 'Porter transactions fetched', data);
+});
+
+export const getPorterWallets = asyncHandler(async (req, res) => {
+    const data = await getPorterAdminWallets(req.query);
+    return sendResponse(res, 200, 'Porter wallets fetched', data);
 });

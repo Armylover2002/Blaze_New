@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { getApprovedVehicles } from '@/modules/DeliveryV2/utils/deliveryPartnerSync'
+import { isPorterParcelTrip } from '@/modules/DeliveryV2/utils/orderRouting'
 
 /**
  * useDeliveryStore - Professional Zustand store for Delivery V2
@@ -102,7 +103,11 @@ export const useDeliveryStore = create(
 
       getCurrentModule: () => {
         const { activeOrder } = get();
-        return activeOrder?.module || 'food';
+        if (isPorterParcelTrip(activeOrder)) return 'parcel';
+        const moduleType = String(activeOrder?.module || activeOrder?.orderType || '').toLowerCase();
+        if (moduleType === 'quick' || moduleType === 'quick_commerce') return 'quick';
+        if (moduleType === 'food') return 'food';
+        return activeOrder?.documentType === 'seller_return' ? 'food' : (activeOrder ? moduleType || 'food' : 'food');
       },
     }),
     {

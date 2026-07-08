@@ -9,7 +9,8 @@ import {
   setAuthData as setRestaurantAuthData,
   setRestaurantPendingPhone,
 } from "@food/utils/auth"
-import { checkOnboardingStatus, isRestaurantOnboardingComplete } from "@food/utils/onboardingUtils"
+import { isRestaurantOnboardingComplete, checkOnboardingStatus } from "@food/utils/onboardingUtils"
+import { isRestaurantInitialPendingApproval } from "@food/utils/restaurantApproval"
 import { useCompanyName } from "@food/hooks/useCompanyName"
 import { loadBusinessSettings, getAppLogo, getRestaurantLoginBanner } from "@common/utils/businessSettings"
 
@@ -323,7 +324,7 @@ export default function RestaurantOTP() {
         sessionStorage.removeItem("restaurantAuthData")
         sessionStorage.removeItem("restaurantLoginPhone")
 
-        if (data?.isPendingApproval || String(restaurant?.status || "").toLowerCase() === "pending") {
+        if (data?.isPendingApproval || isRestaurantInitialPendingApproval(restaurant)) {
           navigate("/food/restaurant/pending-verification", {
             replace: true,
             state: {

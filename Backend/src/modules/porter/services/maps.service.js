@@ -5,9 +5,47 @@ import { PorterPricing } from '../models/porterPricing.model.js';
 import { PorterVehicle } from '../models/porterVehicle.model.js';
 import { calculateFareFromPricing } from '../utils/porter-pricing-calculator.util.js';
 import { buildParcelVehicleQuotes } from './porter-parcel-vehicle.service.js';
+import { logger } from '../../../utils/logger.js';
 
 const MAPS_TIMEOUT_MS = 8000;
 const baseFilter = { isDeleted: { $ne: true } };
+
+// Straight-line → approximate on-road distance multiplier for urban routing.
+const ROAD_DISTANCE_FACTOR = 1.3;
+// Rough average urban driving speed (km/h) used only for fallback ETA.
+const FALLBACK_AVG_SPEED_KMPH = 22;
+const EARTH_RADIUS_KM = 6371;
+
+function haversineKm(a, b) {
+    const toRad = (deg) => (deg * Math.PI) / 180;
+    const dLat = toRad(b.lat - a.lat);
+    const dLng = toRad(b.lng - a.lng);
+    const lat1 = toRad(a.lat);
+    const lat2 = toRad(b.lat);
+    const h = Math.sin(dLat / 2) ** 2
+        + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+    return 2 * EARTH_RADIUS_KM * Math.asin(Math.sqrt(h));
+}
+
+// Deterministic offline estimate so pricing/coupon/quote flows keep working
+// when Google Maps is unreachable (DNS/network) or the API key is missing.
+function buildFallbackRoute(pickup, delivery) {
+    const straightKm = haversineKm(pickup, delivery);
+    const distanceKm = Math.round(straightKm * ROAD_DISTANCE_FACTOR * 100) / 100;
+    const distanceMeters = Math.round(distanceKm * 1000);
+    const durationMin = Math.max(1, Math.round((distanceKm / FALLBACK_AVG_SPEED_KMPH) * 60));
+    return {
+        distanceMeters,
+        distanceKm,
+        durationSeconds: durationMin * 60,
+        durationMin,
+        distanceText: `${distanceKm} km`,
+        durationText: `${durationMin} mins`,
+        polyline: '',
+        bounds: null,
+        estimated: true,
+    };
+}
 
 const getMapsKey = () => {
     const key = process.env.GOOGLE_MAPS_API_KEY || process.env.GOOGLE_MAP_API_KEY;
@@ -113,36 +151,58 @@ export async function getPlaceDetails(placeId) {
 }
 
 export async function getRoutePreview({ pickup, delivery }) {
-    const key = getMapsKey();
-    const origin = `${pickup.lat},${pickup.lng}`;
-    const destination = `${delivery.lat},${delivery.lng}`;
-    const data = await googleGet(
-        `https://maps.googleapis.com/maps/api/directions/json?origin=${origin}&destination=${destination}&mode=driving&key=${key}`,
-    );
-
-    if (data.status !== 'OK' || !data.routes?.length) {
-        throw new ValidationError(data.error_message || `Directions failed: ${data.status}`);
+    if (!pickup || !delivery
+        || !Number.isFinite(Number(pickup.lat)) || !Number.isFinite(Number(pickup.lng))
+        || !Number.isFinite(Number(delivery.lat)) || !Number.isFinite(Number(delivery.lng))) {
+        throw new ValidationError('Pickup and delivery coordinates are required');
     }
 
-    const route = data.routes[0];
-    const leg = route.legs?.[0];
-    if (!leg) throw new ValidationError('No route leg returned');
+    let key;
+    try {
+        key = getMapsKey();
+    } catch (err) {
+        // No API key configured — degrade to a straight-line estimate.
+        logger.warn(`[Porter] Maps key unavailable, using fallback route estimate: ${err?.message || err}`);
+        return buildFallbackRoute(pickup, delivery);
+    }
 
-    const distanceMeters = leg.distance?.value || 0;
-    const durationSeconds = leg.duration?.value || 0;
-    const distanceKm = Math.round((distanceMeters / 1000) * 100) / 100;
-    const durationMin = Math.max(1, Math.round(durationSeconds / 60));
+    const origin = `${pickup.lat},${pickup.lng}`;
+    const destination = `${delivery.lat},${delivery.lng}`;
 
-    return {
-        distanceMeters,
-        distanceKm,
-        durationSeconds,
-        durationMin,
-        distanceText: leg.distance?.text || `${distanceKm} km`,
-        durationText: leg.duration?.text || `${durationMin} mins`,
-        polyline: route.overview_polyline?.points || '',
-        bounds: route.bounds || null,
-    };
+    try {
+        const data = await googleGet(
+            `https://maps.googleapis.com/maps/api/directions/json?origin=${origin}&destination=${destination}&mode=driving&key=${key}`,
+        );
+
+        const leg = data.status === 'OK' ? data.routes?.[0]?.legs?.[0] : null;
+        if (!leg) {
+            // Maps responded but with no usable route — fall back gracefully.
+            logger.warn(`[Porter] Directions returned no route (${data.status}); using fallback estimate`);
+            return buildFallbackRoute(pickup, delivery);
+        }
+
+        const route = data.routes[0];
+        const distanceMeters = leg.distance?.value || 0;
+        const durationSeconds = leg.duration?.value || 0;
+        const distanceKm = Math.round((distanceMeters / 1000) * 100) / 100;
+        const durationMin = Math.max(1, Math.round(durationSeconds / 60));
+
+        return {
+            distanceMeters,
+            distanceKm,
+            durationSeconds,
+            durationMin,
+            distanceText: leg.distance?.text || `${distanceKm} km`,
+            durationText: leg.duration?.text || `${durationMin} mins`,
+            polyline: route.overview_polyline?.points || '',
+            bounds: route.bounds || null,
+        };
+    } catch (err) {
+        // Network/DNS/timeout (e.g. ENOTFOUND maps.googleapis.com) — never let a
+        // Maps outage block booking/pricing/coupon flows; use offline estimate.
+        logger.warn(`[Porter] Directions request failed (${err?.code || err?.message}); using fallback route estimate`);
+        return buildFallbackRoute(pickup, delivery);
+    }
 }
 
 async function resolveVehiclePricing(vehicleId) {

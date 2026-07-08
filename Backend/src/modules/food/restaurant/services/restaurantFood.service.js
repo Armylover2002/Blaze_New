@@ -288,7 +288,28 @@ export async function updateRestaurantFood(restaurantId, foodId, body = {}) {
         update.images = img ? [img] : [];
     }
     Object.assign(update, getUpdatedFoodPricing(existing, body));
-    if (body.isAvailable !== undefined) update.isAvailable = body.isAvailable !== false;
+    const nextIsAvailable = body.isAvailable !== undefined
+        ? body.isAvailable !== false
+        : existing.isAvailable !== false;
+
+    if (body.isAvailable !== undefined) {
+        if (nextIsAvailable) {
+            const categoryIdForCheck = body.categoryId !== undefined ? body.categoryId : existing.categoryId;
+            const categoryNameForCheck = body.categoryName !== undefined ? body.categoryName : existing.categoryName;
+            const foodTypeForCheck = body.foodType !== undefined ? normalizeFoodType(body.foodType) : normalizeFoodType(existing.foodType);
+
+            if (!categoryIdForCheck && !toStr(categoryNameForCheck)) {
+                throw new ValidationError('Assign this item to a category before making it available');
+            }
+
+            await resolveCategoryForRestaurant(context, {
+                categoryId: categoryIdForCheck,
+                categoryName: categoryNameForCheck,
+                foodType: foodTypeForCheck
+            });
+        }
+        update.isAvailable = nextIsAvailable;
+    }
     if (body.preparationTime !== undefined) update.preparationTime = toStr(body.preparationTime);
 
     const targetFoodType = body.foodType !== undefined ? normalizeFoodType(body.foodType) : normalizeFoodType(existing.foodType);

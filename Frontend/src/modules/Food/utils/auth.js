@@ -4,6 +4,7 @@
  */
 
 import { clearOnboardingDraft } from "@food/utils/onboardingDraftStorage"
+import { isRestaurantInitialPendingApproval } from "@food/utils/restaurantApproval"
 
 /**
  * Decode JWT token without verification (client-side only)
@@ -154,7 +155,7 @@ export function updateStoredModuleUser(module, user) {
 }
 
 export function isRestaurantPendingApproval(user) {
-  return String(user?.status || "").toLowerCase() === "pending";
+  return isRestaurantInitialPendingApproval(user)
 }
 
 /**
@@ -215,6 +216,7 @@ export function clearModuleAuth(module) {
     sessionStorage.removeItem("sellerReonboard");
   }
   if (module === "delivery") {
+    localStorage.removeItem("auth_delivery");
     sessionStorage.removeItem("deliveryIsRejected");
   }
   // Also clear any sessionStorage data
@@ -347,6 +349,9 @@ export function setAuthData(module, token, user, refreshToken = null) {
       localStorage.setItem("auth_customer", token);
       localStorage.setItem("accessToken", token);
       localStorage.setItem("token", token);
+    }
+    if (module === "delivery") {
+      localStorage.setItem("auth_delivery", token);
     }
     if (refreshToken && typeof refreshToken === "string") {
       localStorage.setItem(refreshTokenKey, refreshToken);

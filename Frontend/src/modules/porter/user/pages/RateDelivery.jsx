@@ -29,10 +29,10 @@ export default function RateDelivery() {
     }
     setSubmitting(true);
     try {
-      const tagNote = tags.length ? ` Tags: ${tags.join(", ")}` : "";
       await porterUserApi.rateOrder(orderId, {
         score: rating,
-        comment: `${comment}${tagNote}`.trim(),
+        comment: comment.trim(),
+        tags: tags,
       });
       resetBooking();
       navigate("/porter/shipments", { replace: true });
@@ -46,11 +46,17 @@ export default function RateDelivery() {
   return (
     <Screen title="Rate delivery" subtitle="How was your parcel delivery?">
       <div className="mb-6 flex flex-col items-center rounded-2xl bg-white p-6 shadow-sm">
-        <div className="mb-3 flex h-16 w-16 items-center justify-center rounded-full bg-[#FFF1F1] text-[24px] font-bold text-[#FF0000]">
-          P
-        </div>
-        <p className="text-[16px] font-extrabold text-gray-900">Your delivery partner</p>
-        <p className="text-[12px] text-gray-500">{activeShipment?.vehicle || "Parcel"}</p>
+        {activeShipment?.partner?.profilePhoto ? (
+          <img src={activeShipment.partner.profilePhoto} alt={activeShipment.partner.name || "Partner"} className="mb-3 h-16 w-16 rounded-full object-cover ring-2 ring-[#FFF1F1]" />
+        ) : (
+          <div className="mb-3 flex h-16 w-16 items-center justify-center rounded-full bg-[#FFF1F1] text-[24px] font-bold text-[#FF0000] uppercase">
+            {activeShipment?.partner?.name ? activeShipment.partner.name.charAt(0) : "P"}
+          </div>
+        )}
+        <p className="text-[16px] font-extrabold text-gray-900">{activeShipment?.partner?.name || "Your delivery partner"}</p>
+        <p className="text-[12px] text-gray-500">
+            {[activeShipment?.partner?.vehicle, activeShipment?.partner?.vehicleNumber].filter(Boolean).join(" · ") || activeShipment?.vehicle || "Parcel delivery"}
+        </p>
       </div>
 
       <div className="mb-6 flex justify-center gap-2">
