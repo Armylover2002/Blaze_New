@@ -3929,8 +3929,6 @@ export async function approveRestaurant(id, performer = null) {
                         },
                         { upsert: true }
                     );
-                    // Increment referrer count
-                    await FoodRestaurant.updateOne({ _id: referralLog.referrerId }, { $inc: { referralCount: 1 } });
                 }
 
                 // Credit Referee (Approved Restaurant)
@@ -3948,8 +3946,18 @@ export async function approveRestaurant(id, performer = null) {
                     );
                 }
 
-                // Update log to credited
-                await FoodReferralLog.updateOne({ _id: referralLog._id }, { $set: { status: 'credited' } });
+                // Count against limit for any successful credit (referrer and/or referee reward).
+                const marked = await FoodReferralLog.findOneAndUpdate(
+                    { _id: referralLog._id, status: 'pending' },
+                    { $set: { status: 'credited' } },
+                    { new: true }
+                );
+                if (marked) {
+                    await FoodRestaurant.updateOne(
+                        { _id: referralLog.referrerId },
+                        { $inc: { referralCount: 1 } }
+                    );
+                }
             }
         } catch (e) {
             console.error('Referral crediting failed on approval:', e);
