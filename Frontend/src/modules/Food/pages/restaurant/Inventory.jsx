@@ -1892,6 +1892,7 @@ export default function Inventory() {
               <span className="text-sm text-gray-700">Veg</span>
             </div>
           </label>
+          {!isPureVegRestaurant && (
           <label className="flex items-center gap-2 cursor-pointer">
             <input
               type="radio"
@@ -1908,6 +1909,7 @@ export default function Inventory() {
               <span className="text-sm text-gray-700">Non-Veg</span>
             </div>
           </label>
+          )}
         </div>
       </div>
       <div>

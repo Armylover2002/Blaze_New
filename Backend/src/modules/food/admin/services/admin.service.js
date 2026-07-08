@@ -3091,11 +3091,15 @@ export async function getCategories(query) {
 export async function createCategory(body) {
     const name = typeof body.name === 'string' ? body.name.trim() : '';
     if (!name) throw new ValidationError('Category name is required');
+    const foodTypeScope = normalizeCategoryFoodTypeScope(body.foodTypeScope, '');
+    if (!foodTypeScope) {
+        throw new ValidationError('Category diet type must be Veg or Non-Veg');
+    }
     const doc = new FoodCategory({
         name,
         image: typeof body.image === 'string' ? body.image.trim() : '',
         type: typeof body.type === 'string' ? body.type.trim() : '',
-        foodTypeScope: normalizeCategoryFoodTypeScope(body.foodTypeScope, 'Both'),
+        foodTypeScope,
         zoneId:
             body.zoneId && String(body.zoneId).trim()
                 ? (() => {
@@ -3188,10 +3192,14 @@ export async function updateCategory(id, body) {
     const previousIsActive = doc.isActive !== false;
 
     const nextFoodTypeScope = body.foodTypeScope !== undefined
-        ? normalizeCategoryFoodTypeScope(body.foodTypeScope, doc.foodTypeScope || 'Both')
-        : normalizeCategoryFoodTypeScope(doc.foodTypeScope, 'Both');
+        ? normalizeCategoryFoodTypeScope(body.foodTypeScope, doc.foodTypeScope || 'Veg')
+        : normalizeCategoryFoodTypeScope(doc.foodTypeScope, 'Veg');
 
-    if (body.foodTypeScope !== undefined && nextFoodTypeScope !== 'Both') {
+    if (body.foodTypeScope !== undefined && !nextFoodTypeScope) {
+        throw new ValidationError('Category diet type must be Veg or Non-Veg');
+    }
+
+    if (body.foodTypeScope !== undefined) {
         const incompatibleFoods = await FoodItem.countDocuments({
             categoryId: doc._id,
             foodType: nextFoodTypeScope === 'Veg' ? 'Non-Veg' : 'Veg'

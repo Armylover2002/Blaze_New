@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react"
+import { useState, useRef, useEffect, useMemo } from "react"
 import { useNavigate, useParams, useLocation } from "react-router-dom"
 import useRestaurantBackNavigation from "@food/hooks/useRestaurantBackNavigation"
 import { motion, AnimatePresence } from "framer-motion"
@@ -22,6 +22,7 @@ import { Switch } from "@food/components/ui/switch"
 import api from "@food/api"
 import { restaurantAPI, uploadAPI, mediaAPI } from "@food/api"
 import { toast } from "sonner"
+import CreateCategoryModal from "@food/components/restaurant/CreateCategoryModal"
 import { ImageSourcePicker } from "@food/components/ImageSourcePicker"
 import ReusableImageLibraryModal from "@food/components/ReusableImageLibraryModal"
 import Cropper from "react-easy-crop"
@@ -32,6 +33,11 @@ import {
   DEFAULT_FOOD_VARIANT_UNIT,
   normalizeFoodVariantUnit,
 } from "@food/constants/foodVariantUnits"
+import {
+  canSelectNonVegFoodType,
+  categoryAcceptsFoodType,
+  filterCategoriesForRestaurant,
+} from "@food/utils/categoryDietScope"
 
 const scopePillClass = (scope, selected = false) => {
   if (selected) return "border-white/30 bg-white/10 text-white"
@@ -40,7 +46,7 @@ const scopePillClass = (scope, selected = false) => {
   return "border-slate-200 bg-slate-100 text-slate-700"
 }
 
-const scopePillLabel = (scope) => scope || "Both"
+const scopePillLabel = (scope) => scope || "Veg"
 
 const globalPillClass = (isGlobal, selected = false) => {
   if (selected) return "border-white/30 bg-white/10 text-white"
@@ -95,7 +101,7 @@ export default function ItemDetailsPage() {
   const [itemSizeQuantity, setItemSizeQuantity] = useState("")
   const [itemSizeUnit, setItemSizeUnit] = useState("piece")
   const [itemDescription, setItemDescription] = useState("")
-  const [foodType, setFoodType] = useState("Non-Veg")
+  const [foodType, setFoodType] = useState("Veg")
   const [basePrice, setBasePrice] = useState("")
   const [otherPrice, setOtherPrice] = useState("")
   const [variants, setVariants] = useState([])
@@ -128,6 +134,8 @@ export default function ItemDetailsPage() {
   const [direction, setDirection] = useState(0)
   const carouselRef = useRef(null)
   const [isCategoryPopupOpen, setIsCategoryPopupOpen] = useState(false)
+  const [isCreateCategoryModalOpen, setIsCreateCategoryModalOpen] = useState(false)
+  const [categoriesRefreshKey, setCategoriesRefreshKey] = useState(0)
   const [isServesPopupOpen, setIsServesPopupOpen] = useState(false)
   const [isItemSizePopupOpen, setIsItemSizePopupOpen] = useState(false)
   const [isGstPopupOpen, setIsGstPopupOpen] = useState(false)
@@ -138,12 +146,44 @@ export default function ItemDetailsPage() {
   const [keyboardInset, setKeyboardInset] = useState(0)
   const [isPureVegRestaurant, setIsPureVegRestaurant] = useState(false)
 
-  // Auto-suggestions states & cache
   const [suggestedImages, setSuggestedImages] = useState([])
   const [loadingSuggestions, setLoadingSuggestions] = useState(false)
   const [errorSuggestions, setErrorSuggestions] = useState(false)
   const debounceTimerRef = useRef(null)
   const suggestionCacheRef = useRef({ queryKey: "", results: [] })
+
+  const selectableCategories = useMemo(
+    () => filterCategoriesForRestaurant(categories, { pureVegRestaurant: isPureVegRestaurant }),
+    [categories, isPureVegRestaurant],
+  )
+
+  const selectedCategory = useMemo(
+    () => selectableCategories.find((cat) => String(cat.id) === String(selectedCategoryId || "")),
+    [selectableCategories, selectedCategoryId],
+  )
+
+  const showNonVegFoodType = canSelectNonVegFoodType({
+    pureVegRestaurant: isPureVegRestaurant,
+    categoryFoodTypeScope: selectedCategory?.foodTypeScope,
+  })
+
+  useEffect(() => {
+    if (!showNonVegFoodType && foodType !== "Veg") {
+      setFoodType("Veg")
+    }
+  }, [showNonVegFoodType, foodType])
+
+  useEffect(() => {
+    if (!isPureVegRestaurant || selectableCategories.length === 0) return
+    const currentStillValid = selectableCategories.some(
+      (cat) => String(cat.id) === String(selectedCategoryId || ""),
+    )
+    if (currentStillValid) return
+    const nextCategory = selectableCategories[0]
+    setSelectedCategoryId(nextCategory.id)
+    setCategory(nextCategory.name)
+    setFoodType("Veg")
+  }, [isPureVegRestaurant, selectableCategories, selectedCategoryId])
 
   // Auto-suggestions query logic with 450ms debounce and deduplication/cache
   useEffect(() => {
@@ -388,7 +428,7 @@ export default function ItemDetailsPage() {
           const formattedCategories = response.data.data.categories.map(cat => ({
             id: cat._id || cat.id,
             name: cat.name,
-            foodTypeScope: cat.foodTypeScope || "Both",
+            foodTypeScope: cat.foodTypeScope || "Veg",
             isGlobal: Boolean(cat.isGlobal),
           }))
 
@@ -417,7 +457,7 @@ export default function ItemDetailsPage() {
     }
 
     fetchCategories()
-  }, [category, defaultCategory, defaultCategoryId, isNewItem, selectedCategoryId])
+  }, [category, defaultCategory, defaultCategoryId, isNewItem, selectedCategoryId, categoriesRefreshKey])
 
   // Keep focused form fields visible above mobile keyboard
   useEffect(() => {
@@ -721,10 +761,16 @@ export default function ItemDetailsPage() {
   }
 
   const handleCategorySelect = (catId, subCat) => {
-    const selectedCategory = categories.find(c => c.id === catId)
+    const selectedCategory = selectableCategories.find(c => c.id === catId)
     setSelectedCategoryId(selectedCategory?.id || "")
     setCategory(selectedCategory?.name || "")
     setSubCategory(subCat)
+    if (!canSelectNonVegFoodType({
+      pureVegRestaurant: isPureVegRestaurant,
+      categoryFoodTypeScope: selectedCategory?.foodTypeScope,
+    })) {
+      setFoodType("Veg")
+    }
     setIsCategoryPopupOpen(false)
   }
 
@@ -751,11 +797,86 @@ export default function ItemDetailsPage() {
     )
   }
 
-  const handleSave = async () => {
+  const validateItemFormBeforeUpload = () => {
     if (!itemName.trim()) {
-      toast.error("Please enter an item name")
+      return { message: "Please enter an item name" }
+    }
+
+    const matchedCategory = selectedCategory
+    const categoryId = matchedCategory?.id || matchedCategory?._id || null
+    if (!categoryId) {
+      return { message: "Please select an approved category first", openCategoryPopup: true }
+    }
+
+    if (!categoryAcceptsFoodType(matchedCategory?.foodTypeScope, foodType)) {
+      return {
+        message: `This ${matchedCategory.foodTypeScope} category cannot accept ${foodType} food`,
+      }
+    }
+
+    const trimmedDescription = itemDescription.trim()
+    if (trimmedDescription.length > 0 && trimmedDescription.length < minDescriptionLength) {
+      return { message: "Item description must be at least 5 characters" }
+    }
+
+    const normalizedVariants = variants
+      .map((variant) => ({
+        persistedId: String(variant.persistedId || "").trim(),
+        name: String(variant.name || "").trim(),
+        unit: normalizeFoodVariantUnit(variant.unit),
+        price: Number(variant.price),
+        otherPrice: Number(variant.otherPrice) || 0,
+      }))
+      .filter((variant) => variant.name || variant.persistedId || variant.price)
+
+    if (normalizedVariants.some((variant) => !variant.name)) {
+      return { message: "Each variant must have a name" }
+    }
+
+    if (normalizedVariants.some((variant) => !Number.isFinite(variant.price) || variant.price <= 0)) {
+      return { message: "Each variant price must be greater than 0" }
+    }
+
+    const hasVariants = normalizedVariants.length > 0
+    const parsedBasePrice = Number(basePrice)
+    if (!hasVariants && (!Number.isFinite(parsedBasePrice) || parsedBasePrice < 0)) {
+      return { message: "Please enter a valid base price" }
+    }
+
+    return {
+      matchedCategory,
+      categoryId,
+      normalizedVariants,
+      hasVariants,
+      parsedBasePrice,
+    }
+  }
+
+  const handleSave = async () => {
+    const validation = validateItemFormBeforeUpload()
+    if (validation.message) {
+      toast.error(validation.message)
+      if (validation.openCategoryPopup) {
+        setIsCategoryPopupOpen(true)
+      }
       return
     }
+
+    const {
+      matchedCategory,
+      categoryId,
+      normalizedVariants,
+      hasVariants,
+      parsedBasePrice,
+    } = validation
+    const categoryName = matchedCategory?.name || category || ""
+    const variantPayload = normalizedVariants.map((variant) => ({
+      ...(variant.persistedId ? { _id: variant.persistedId } : {}),
+      name: variant.name,
+      unit: variant.unit,
+      price: variant.price,
+      otherPrice: Number(variant.otherPrice) || 0,
+    }))
 
     try {
       setUploadingImages(true)
@@ -833,68 +954,6 @@ export default function ItemDetailsPage() {
       debugLog('Newly uploaded URLs:', uploadedImageUrls.length, uploadedImageUrls)
       debugLog('Total image URLs to save:', allImageUrls.length, allImageUrls)
       debugLog('==========================')
-
-      // Resolve categoryId from fetched categories (so FoodItem stores categoryId efficiently).
-      const matchedCategory = Array.isArray(categories)
-        ? categories.find((c) => String(c?.id || "") === String(selectedCategoryId || ""))
-        : null
-      const categoryId = matchedCategory?.id || matchedCategory?._id || null
-      const categoryName = matchedCategory?.name || category || ""
-
-      if (!categoryId) {
-        toast.error("Please select an approved category first")
-        setIsCategoryPopupOpen(true)
-        setUploadingImages(false)
-        return
-      }
-
-      if (
-        matchedCategory?.foodTypeScope &&
-        matchedCategory.foodTypeScope !== "Both" &&
-        matchedCategory.foodTypeScope !== foodType
-      ) {
-        toast.error(`This ${matchedCategory.foodTypeScope} category cannot accept ${foodType} food`)
-        setUploadingImages(false)
-        return
-      }
-
-      const normalizedVariants = variants
-        .map((variant) => ({
-          persistedId: String(variant.persistedId || "").trim(),
-          name: String(variant.name || "").trim(),
-          unit: normalizeFoodVariantUnit(variant.unit),
-          price: Number(variant.price),
-          otherPrice: Number(variant.otherPrice) || 0,
-        }))
-        .filter((variant) => variant.name || variant.persistedId || variant.price)
-
-      if (normalizedVariants.some((variant) => !variant.name)) {
-        toast.error("Each variant must have a name")
-        setUploadingImages(false)
-        return
-      }
-
-      if (normalizedVariants.some((variant) => !Number.isFinite(variant.price) || variant.price <= 0)) {
-        toast.error("Each variant price must be greater than 0")
-        setUploadingImages(false)
-        return
-      }
-
-      const hasVariants = normalizedVariants.length > 0
-      const parsedBasePrice = Number(basePrice)
-      if (!hasVariants && (!Number.isFinite(parsedBasePrice) || parsedBasePrice < 0)) {
-        toast.error("Please enter a valid base price")
-        setUploadingImages(false)
-        return
-      }
-
-      const variantPayload = normalizedVariants.map((variant) => ({
-        ...(variant.persistedId ? { _id: variant.persistedId } : {}),
-        name: variant.name,
-        unit: variant.unit,
-        price: variant.price,
-        otherPrice: Number(variant.otherPrice) || 0,
-      }))
 
       // Create/update FoodItem in DB (single call per explicit Save; no autosave spam)
       let itemId
@@ -1004,6 +1063,26 @@ export default function ItemDetailsPage() {
     goBack()
   }
 
+  const handleOpenCreateCategory = () => {
+    setIsCreateCategoryModalOpen(true)
+  }
+
+  const handleCategoryCreated = (createdCategory) => {
+    setCategoriesRefreshKey((key) => key + 1)
+    const createdId = String(createdCategory?._id || createdCategory?.id || "").trim()
+    const createdName = String(createdCategory?.name || "").trim()
+    if (createdId && createdName) {
+      setSelectedCategoryId(createdId)
+      setCategory(createdName)
+      if (!canSelectNonVegFoodType({
+        pureVegRestaurant: isPureVegRestaurant,
+        categoryFoodTypeScope: createdCategory?.foodTypeScope,
+      })) {
+        setFoodType("Veg")
+      }
+    }
+  }
+
   if (loadingItem) {
     return (
       <div className="h-screen bg-white flex flex-col items-center justify-center">
@@ -1011,28 +1090,6 @@ export default function ItemDetailsPage() {
         <p className="text-sm font-medium text-gray-500 mt-3 animate-pulse">Loading item details...</p>
       </div>
     )
-  }
-
-  const handleNavigateToAddCategory = () => {
-    const currentDraft = {
-      itemName,
-      category,
-      selectedCategoryId,
-      itemDescription,
-      foodType,
-      basePrice,
-      variants,
-      preparationTime,
-      images,
-    }
-    sessionStorage.setItem("item_form_draft", JSON.stringify(currentDraft))
-    setIsCategoryPopupOpen(false)
-    navigate("/food/restaurant/menu-categories", {
-      state: {
-        backTo: location.pathname,
-        id: id,
-      },
-    })
   }
 
   const categoryPickerHeader = (
@@ -1043,7 +1100,7 @@ export default function ItemDetailsPage() {
       </div>
       <div className="flex items-center gap-2">
         <button
-          onClick={handleNavigateToAddCategory}
+          onClick={handleOpenCreateCategory}
           className="p-2 rounded-lg bg-black text-white hover:bg-gray-800 transition-colors flex items-center gap-1.5"
           title="Add Category"
         >
@@ -1066,14 +1123,11 @@ export default function ItemDetailsPage() {
         <div className="flex items-center justify-center py-12">
           <Loader2 className="w-6 h-6 animate-spin text-gray-600" />
         </div>
-      ) : categories.length === 0 ? (
+      ) : selectableCategories.length === 0 ? (
         <div className="text-center py-12 space-y-4">
           <p className="text-sm text-gray-500">No categories available</p>
           <button
-            onClick={() => {
-              setIsCategoryPopupOpen(false)
-              navigate("/food/restaurant/menu-categories")
-            }}
+            onClick={handleOpenCreateCategory}
             className="inline-flex items-center gap-2 px-4 py-2 bg-black text-white rounded-lg font-semibold hover:bg-gray-800 transition-colors"
           >
             <Plus className="w-5 h-5" />
@@ -1082,7 +1136,7 @@ export default function ItemDetailsPage() {
         </div>
       ) : (
         <div className="space-y-2 p-2">
-          {categories.map((cat) => {
+          {selectableCategories.map((cat) => {
             const isSelected = String(selectedCategoryId || "") === String(cat.id)
             return (
               <button
@@ -1353,9 +1407,7 @@ export default function ItemDetailsPage() {
               className="w-full px-4 py-3 border border-gray-300 rounded-xl text-left flex items-center justify-between gap-3 bg-white hover:bg-gray-50 transition-colors"
             >
               {(() => {
-                const selected = categories.find(
-                  (cat) => String(cat.id) === String(selectedCategoryId || "")
-                )
+                const selected = selectedCategory
                 if (!selected) {
                   return (
                     <>
@@ -1455,7 +1507,7 @@ export default function ItemDetailsPage() {
                 {foodType === "Veg" && <Check className="w-4 h-4" />}
                 <span>Veg</span>
               </button>
-              {!isPureVegRestaurant && (
+              {!showNonVegFoodType ? null : (
                 <button
                   onClick={() => setFoodType("Non-Veg")}
                   className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${foodType === "Non-Veg"
@@ -1838,6 +1890,13 @@ export default function ItemDetailsPage() {
         onClose={() => setIsLibraryOpen(false)}
         onSelect={handleSelectLibraryImage}
         initialCategory={category}
+      />
+
+      <CreateCategoryModal
+        isOpen={isCreateCategoryModalOpen}
+        onClose={() => setIsCreateCategoryModalOpen(false)}
+        onCreated={handleCategoryCreated}
+        isPureVegRestaurant={isPureVegRestaurant}
       />
 
       {/* Crop Modal */}
