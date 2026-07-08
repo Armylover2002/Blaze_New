@@ -2501,13 +2501,13 @@ export const userAPI = {
       contextModule: "user",
     }),
   /**
-   * Legacy UI compatibility: update "current user location".
-   * We already persist the user's selected location in localStorage in the UI.
-   * Keep this as a no-op success so existing flows don't break.
+   * @deprecated No backend persistence is currently wired for this call.
+   * Legacy compatibility only: resolves success so older flows do not break.
+   * Source of truth for user checkout location remains saved address + localStorage.
    */
   updateLocation: (_payload) =>
     Promise.resolve({
-      data: { success: true, message: "Location saved (client)", data: null },
+      data: { success: true, message: "Location saved (client-only)", data: null, persisted: false },
     }),
   saveFcmToken: (token, options = {}) => {
     if (!token) return Promise.reject(new Error("FCM token is required"));

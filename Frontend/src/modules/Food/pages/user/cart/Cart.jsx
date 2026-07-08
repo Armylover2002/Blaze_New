@@ -1272,18 +1272,23 @@ export default function Cart() {
         return
       }
 
-      // Update location in backend
-      await userAPI.updateLocation({
-        latitude,
-        longitude,
-        address: `${address.street}, ${address.city}`,
-        city: address.city,
-        state: address.state,
-        area: address.additionalDetails || "",
-        formattedAddress: address.additionalDetails
-          ? `${address.additionalDetails}, ${address.street}, ${address.city}, ${address.state}${address.zipCode ? ` ${address.zipCode}` : ''}`
-          : `${address.street}, ${address.city}, ${address.state}${address.zipCode ? ` ${address.zipCode}` : ''}`
-      })
+      // Legacy userAPI.updateLocation is currently a client-only no-op.
+      // Keep checkout flow deterministic by using saved address + local cache as source of truth.
+      try {
+        await userAPI.updateLocation({
+          latitude,
+          longitude,
+          address: `${address.street}, ${address.city}`,
+          city: address.city,
+          state: address.state,
+          area: address.additionalDetails || "",
+          formattedAddress: address.additionalDetails
+            ? `${address.additionalDetails}, ${address.street}, ${address.city}, ${address.state}${address.zipCode ? ` ${address.zipCode}` : ''}`
+            : `${address.street}, ${address.city}, ${address.state}${address.zipCode ? ` ${address.zipCode}` : ''}`
+        })
+      } catch {
+        // best effort only; do not block address selection
+      }
 
       // Update the location in localStorage
       const locationData = {
