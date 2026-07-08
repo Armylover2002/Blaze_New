@@ -59,6 +59,12 @@ import {
     serializeFoodVariants
 } from './foodVariant.service.js';
 import { notifyCategoryStatusChange } from './categoryStatusNotification.service.js';
+import { getCache, setCache } from '../../../../utils/cacheManager.js';
+import {
+    buildDashboardStatsCacheKey,
+    DASHBOARD_STATS_CACHE_TTL_MS,
+    invalidateDashboardStatsCache
+} from '../utils/dashboardStatsCache.js';
 
 const parseBooleanLike = (value, fieldName) => {
     if (typeof value === 'boolean') return value;
@@ -540,6 +546,10 @@ const getDashboardTrendConfig = (periodRaw, periodRange, now = new Date()) => {
 };
 
 export async function getDashboardStats(query = {}) {
+    const cacheKey = buildDashboardStatsCacheKey(query);
+    const cached = getCache(cacheKey);
+    if (cached) return cached;
+
     const periodRange = getDateRangeByPeriod(query.period);
     const zoneId = query.zoneId && mongoose.Types.ObjectId.isValid(query.zoneId)
         ? new mongoose.Types.ObjectId(query.zoneId)
@@ -862,7 +872,7 @@ export async function getDashboardStats(query = {}) {
         };
     });
 
-    return {
+    const result = {
         orders: {
             total: Number(totals.totalOrders || 0),
             byStatus: {
@@ -899,6 +909,9 @@ export async function getDashboardStats(query = {}) {
         monthlyData,
         liveSignals: finalLiveSignals
     };
+
+    setCache(cacheKey, result, DASHBOARD_STATS_CACHE_TTL_MS);
+    return result;
 }
 
 function formatTimeAgo(date) {
@@ -2878,7 +2891,7 @@ export async function updateRestaurantStatus(id, body = {}) {
     const isActive = parseBooleanLike(raw, 'status');
     const status = isActive ? 'approved' : 'rejected';
 
-    return FoodRestaurant.findByIdAndUpdate(
+    const updated = await FoodRestaurant.findByIdAndUpdate(
         id,
         {
             $set: {
@@ -2890,6 +2903,8 @@ export async function updateRestaurantStatus(id, body = {}) {
         },
         { new: true, runValidators: false }
     ).lean();
+    if (updated) invalidateDashboardStatsCache();
+    return updated;
 }
 
 export async function toggleRestaurantListing(id, isListed) {
@@ -3863,6 +3878,7 @@ export async function approveRestaurant(id, performer = null) {
         } catch (e) {
             console.error('Failed to send opening-days approval notification:', e);
         }
+        invalidateDashboardStatsCache();
         return updated;
     }
 
@@ -3953,6 +3969,7 @@ export async function approveRestaurant(id, performer = null) {
             console.error('Failed to send restaurant approval notification:', e);
         }
     }
+    if (updated) invalidateDashboardStatsCache();
     return updated;
 }
 
@@ -3985,6 +4002,7 @@ export async function rejectRestaurant(id, reason, performer = null) {
         } catch (e) {
             console.error('Failed to send opening-days rejection notification:', e);
         }
+        invalidateDashboardStatsCache();
         return updated;
     }
 
@@ -4022,6 +4040,7 @@ export async function rejectRestaurant(id, reason, performer = null) {
             console.error('Failed to send restaurant rejection notification:', e);
         }
     }
+    if (updated) invalidateDashboardStatsCache();
     return updated;
 }
 
@@ -5194,6 +5213,7 @@ export async function approveDeliveryPartner(id, performer = null) {
         // eslint-disable-next-line no-console
         console.warn('Referral crediting failed (delivery approval):', e?.message || e);
     }
+    invalidateDashboardStatsCache();
     return partner.toObject();
 }
 
@@ -5234,6 +5254,7 @@ export async function rejectDeliveryPartner(id, reason, performer = null) {
             console.error('Failed to send delivery partner rejection notification:', e);
         }
     }
+    if (updated) invalidateDashboardStatsCache();
     return updated;
 }
 
