@@ -33,7 +33,14 @@ export const detectZonePublicController = async (req, res, next) => {
 
         const zones = await FoodZone.find({ isActive: true }).lean();
         for (const zone of zones) {
-            const coords = Array.isArray(zone.coordinates) ? zone.coordinates : [];
+            const coords = (Array.isArray(zone.coordinates) ? zone.coordinates : [])
+                .map((point) => {
+                    const latitude = toFinite(point?.latitude);
+                    const longitude = toFinite(point?.longitude);
+                    if (latitude === null || longitude === null) return null;
+                    return { latitude, longitude };
+                })
+                .filter(Boolean);
             if (coords.length < 3) continue;
             if (isPointInPolygon(lat, lng, coords)) {
                 return res.status(200).json({

@@ -5325,10 +5325,15 @@ export async function createZone(body) {
     const coordinates = Array.isArray(body.coordinates) ? body.coordinates : [];
     if (coordinates.length < 3) return { error: 'At least 3 coordinates (polygon points) are required' };
 
-    const normalized = coordinates.map((c) => ({
-        latitude: Number(c.latitude) || 0,
-        longitude: Number(c.longitude) || 0
-    }));
+    const normalized = [];
+    for (const c of coordinates) {
+        const latitude = Number(c?.latitude);
+        const longitude = Number(c?.longitude);
+        if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+            return { error: 'Each coordinate must have valid finite latitude and longitude values' };
+        }
+        normalized.push({ latitude, longitude });
+    }
 
     const country = (body.country && body.country.trim()) || 'India';
     const overlapResult = await assertNoZoneOverlap(FoodZone, normalized, { extraFilter: { country } });
@@ -5358,10 +5363,15 @@ export async function updateZone(id, body) {
     if (body.unit !== undefined) zone.unit = body.unit === 'miles' ? 'miles' : 'kilometer';
     if (body.isActive !== undefined) zone.isActive = body.isActive !== false;
     if (Array.isArray(body.coordinates) && body.coordinates.length >= 3) {
-        const normalizedCoords = body.coordinates.map((c) => ({
-            latitude: Number(c.latitude) || 0,
-            longitude: Number(c.longitude) || 0
-        }));
+        const normalizedCoords = [];
+        for (const c of body.coordinates) {
+            const latitude = Number(c?.latitude);
+            const longitude = Number(c?.longitude);
+            if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+                return { error: 'Each coordinate must have valid finite latitude and longitude values' };
+            }
+            normalizedCoords.push({ latitude, longitude });
+        }
         const overlapResult = await assertNoZoneOverlap(FoodZone, normalizedCoords, {
             excludeId: id,
             extraFilter: { country: zone.country },
