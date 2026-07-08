@@ -4,6 +4,7 @@ import { FoodUser } from '../../../../core/users/user.model.js';
 import { FoodRestaurant } from '../../restaurant/models/restaurant.model.js';
 import { FoodDeliveryPartner } from '../../delivery/models/deliveryPartner.model.js';
 import { Seller } from '../../../quick-commerce/seller/models/seller.model.js';
+import { SellerNotification } from '../../../quick-commerce/seller/models/sellerNotification.model.js';
 import { BroadcastNotification } from '../../../../core/notifications/models/notificationBroadcast.model.js';
 import { FoodNotification } from '../../../../core/notifications/models/notification.model.js';
 import { createInboxNotifications } from '../../../../core/notifications/notification.service.js';
@@ -198,6 +199,43 @@ const buildNotificationPayload = ({ title, message, link, broadcastId, target })
     }
 });
 
+const upsertSellerInboxNotifications = async ({ targets = [], broadcast, title, message, link }) => {
+    const sellerTargets = (Array.isArray(targets) ? targets : []).filter((target) => target?.ownerType === 'SELLER');
+    if (!sellerTargets.length) return;
+
+    const broadcastId = String(broadcast?._id || '');
+    if (!broadcastId) return;
+
+    const operations = sellerTargets
+        .map((target) => String(target?.ownerId || '').trim())
+        .filter((sellerId) => mongoose.Types.ObjectId.isValid(sellerId))
+        .map((sellerId) => ({
+            updateOne: {
+                filter: {
+                    sellerId: new mongoose.Types.ObjectId(sellerId),
+                    key: `broadcast:${broadcastId}`
+                },
+                update: {
+                    $set: {
+                        type: 'system',
+                        title,
+                        message,
+                        metadata: {
+                            source: 'admin_broadcast',
+                            broadcastId,
+                            link: String(link || '').trim()
+                        }
+                    },
+                    $setOnInsert: { isRead: false }
+                },
+                upsert: true
+            }
+        }));
+
+    if (!operations.length) return;
+    await SellerNotification.bulkWrite(operations, { ordered: false });
+};
+
 const emitRealtimeNotifications = (targets = [], broadcast) => {
     const io = getIO();
     if (!io) return;
@@ -305,6 +343,13 @@ export const createBroadcastNotification = async ({ body = {}, adminId } = {}) =
             )
         });
     }
+    await upsertSellerInboxNotifications({
+        targets: inAppTargets,
+        broadcast,
+        title,
+        message,
+        link
+    });
 
     if (pushTargets.length > 0) {
         await notifyOwnersSafely(
@@ -370,10 +415,13 @@ export const deleteBroadcastNotification = async (broadcastId) => {
         throw new NotFoundError('Broadcast notification not found');
     }
 
-    const result = await FoodNotification.deleteMany({ broadcastId: normalizedId });
+    const [foodDeleteResult, sellerDeleteResult] = await Promise.all([
+        FoodNotification.deleteMany({ broadcastId: normalizedId }),
+        SellerNotification.deleteMany({ key: `broadcast:${String(normalizedId)}` })
+    ]);
 
     return {
         broadcast,
-        deletedInboxCount: Number(result?.deletedCount || 0)
+        deletedInboxCount: Number(foodDeleteResult?.deletedCount || 0) + Number(sellerDeleteResult?.deletedCount || 0)
     };
 };
