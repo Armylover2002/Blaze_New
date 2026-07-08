@@ -35,6 +35,7 @@ router.get('/:id', checkRoleViewPermission, roleController.getRoleById);
 router.post('/', checkPermission('food::staff_management::roles', 'create'), roleController.createRole);
 router.patch('/:id', checkPermission('food::staff_management::roles', 'edit'), roleController.updateRole);
 router.patch('/:id/toggle', checkPermission('food::staff_management::roles', 'edit'), roleController.toggleRoleStatus);
+router.delete('/:id', checkPermission('food::staff_management::roles', 'delete'), roleController.deleteRole);
 
 export default router;
 

@@ -446,6 +446,10 @@ export const adminLogin = async (email, password, roleId) => {
     }
   }
 
+  if (admin.isActive === false) {
+    throw new AuthError("Your account has been deactivated. Please contact support.");
+  }
+
   await clearAdminLoginLockout(lockoutKey);
 
   const payload = { userId: admin._id.toString(), role: admin.role };
@@ -1288,13 +1292,13 @@ export const refreshAccessToken = async (token) => {
     throw new AuthError("Invalid refresh token");
   }
 
-  // If deactivated user or admin, do not issue fresh access tokens (forces logout on client)
+  // If deactivated user/admin/employee, do not issue fresh access tokens (forces logout on client)
   if (payload?.role === "USER") {
     const u = await FoodUser.findById(payload.userId).select("isActive").lean();
     if (!u || u.isActive === false) {
       throw new AuthError("User account is deactivated");
     }
-  } else if (payload?.role === "ADMIN") {
+  } else if (payload?.role === "ADMIN" || payload?.role === "EMPLOYEE") {
     const a = await FoodAdmin.findById(payload.userId).select("isActive").lean();
     if (!a || a.isActive === false) {
       throw new AuthError("Admin account is deactivated");

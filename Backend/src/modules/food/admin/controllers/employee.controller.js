@@ -1,5 +1,6 @@
 import { FoodAdmin } from '../../../../core/admin/admin.model.js';
 import { AdminRole } from '../../../../core/admin/role.model.js';
+import { FoodRefreshToken } from '../../../../core/refreshTokens/refreshToken.model.js';
 import { sendResponse, sendError } from '../../../../utils/response.js';
 import { sendEmployeeCredentialsEmail } from '../../../../utils/email.js';
 import { uploadImageBuffer } from '../../../../services/cloudinary.service.js';
@@ -255,6 +256,11 @@ export const deleteEmployee = async (req, res) => {
     try {
         const employee = await FoodAdmin.findOneAndDelete({ _id: req.params.id, role: 'EMPLOYEE' });
         if (!employee) return sendError(res, 404, 'Employee not found');
+        try {
+            await FoodRefreshToken.deleteMany({ userId: employee._id });
+        } catch (revokeError) {
+            logger.warn(`Failed to revoke sessions after employee delete: ${revokeError.message}`);
+        }
         return sendResponse(res, 200, 'Employee deleted successfully', employee);
     } catch (error) {
         return sendError(res, 500, error.message);
@@ -268,6 +274,15 @@ export const toggleEmployeeStatus = async (req, res) => {
         
         employee.isActive = !employee.isActive;
         await employee.save();
+
+        // Force logout inactive employees so stale tokens cannot be refreshed.
+        if (!employee.isActive) {
+            try {
+                await FoodRefreshToken.deleteMany({ userId: employee._id });
+            } catch (revokeError) {
+                logger.warn(`Failed to revoke sessions after employee deactivation: ${revokeError.message}`);
+            }
+        }
         
         return sendResponse(res, 200, `Employee status changed to ${employee.isActive ? 'Active' : 'Inactive'}`, employee);
     } catch (error) {

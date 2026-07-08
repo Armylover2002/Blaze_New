@@ -45,6 +45,15 @@ export const authMiddleware = (req, res, next) => {
             }).catch(() => sendError(res, 401, 'Authentication failed'));
             return;
         }
+        if (decoded.role === 'ADMIN' || decoded.role === 'EMPLOYEE') {
+            FoodAdmin.findById(decoded.userId).select('isActive').lean().then((doc) => {
+                if (!doc || doc.isActive === false) {
+                    return sendError(res, 401, 'Admin account is deactivated');
+                }
+                next();
+            }).catch(() => sendError(res, 401, 'Authentication failed'));
+            return;
+        }
         return next();
     } catch (error) {
         return sendError(res, 401, 'Invalid or expired token');
