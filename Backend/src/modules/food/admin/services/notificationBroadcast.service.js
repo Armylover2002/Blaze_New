@@ -8,10 +8,11 @@ import { SellerNotification } from '../../../quick-commerce/seller/models/seller
 import { BroadcastNotification } from '../../../../core/notifications/models/notificationBroadcast.model.js';
 import { FoodNotification } from '../../../../core/notifications/models/notification.model.js';
 import { createInboxNotifications } from '../../../../core/notifications/notification.service.js';
-import { notifyOwnersSafely } from '../../../../core/notifications/firebase.service.js';
+import { notifyOwnersWithReport } from '../../../../core/notifications/firebase.service.js';
 import { filterTargetsByChannel } from './notificationChannel.service.js';
 import { FoodAdmin } from '../../../../core/admin/admin.model.js';
 import { getIO, rooms } from '../../../../config/socket.js';
+import { logger } from '../../../../utils/logger.js';
 
 const TARGET_TYPE_MAP = {
     ALL: 'ALL',
@@ -351,8 +352,20 @@ export const createBroadcastNotification = async ({ body = {}, adminId } = {}) =
         link
     });
 
+    let pushDeliveryReport = {
+        summary: {
+            attemptedRecipients: 0,
+            recipientsWithSuccess: 0,
+            recipientsWithoutTokens: 0,
+            recipientsWithFailures: 0,
+            totalTokenAttempts: 0,
+            totalTokenSuccess: 0,
+            totalTokenFailures: 0
+        },
+        recipients: []
+    };
     if (pushTargets.length > 0) {
-        await notifyOwnersSafely(
+        pushDeliveryReport = await notifyOwnersWithReport(
             pushTargets.map((target) => ({
                 ownerType: target.ownerType,
                 ownerId: target.ownerId
@@ -367,13 +380,29 @@ export const createBroadcastNotification = async ({ body = {}, adminId } = {}) =
                 }
             }
         );
+
+        if (
+            pushDeliveryReport.summary.attemptedRecipients > 0 &&
+            pushDeliveryReport.summary.recipientsWithSuccess === 0
+        ) {
+            logger.error(
+                `Broadcast ${String(broadcast._id)} push delivery failed for all recipients (attempted=${pushDeliveryReport.summary.attemptedRecipients}, noTokens=${pushDeliveryReport.summary.recipientsWithoutTokens}, tokenFailures=${pushDeliveryReport.summary.totalTokenFailures})`
+            );
+        }
     }
 
     emitRealtimeNotifications(inAppTargets, broadcast);
 
     return {
         broadcast,
-        targetPreview: resolvedTargets.slice(0, 10)
+        targetPreview: resolvedTargets.slice(0, 10),
+        deliveryReport: {
+            inAppRecipients: inAppTargets.length,
+            push: pushDeliveryReport,
+            hasPushDeliveryFailure:
+                pushDeliveryReport.summary.attemptedRecipients > 0 &&
+                pushDeliveryReport.summary.recipientsWithSuccess === 0
+        }
     };
 };
 
