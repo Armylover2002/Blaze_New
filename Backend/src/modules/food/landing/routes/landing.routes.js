@@ -46,6 +46,7 @@ import {
 } from '../controllers/publicLanding.controller.js';
 import { detectZonePublicController, listZonesPublicController, listZonesNearbyPublicController } from '../controllers/zonePublic.controller.js';
 import { getPublicEnvController } from '../controllers/publicEnv.controller.js';
+import { getPublicFeeSettingsController } from '../controllers/publicFeeSettings.controller.js';
 import {
     listGourmetAdmin,
     createGourmetAdmin,
@@ -132,6 +133,7 @@ router.get('/zones/detect', detectZonePublicController);
 router.get('/zones/nearby', listZonesNearbyPublicController);
 router.get('/zones/public', cacheResponse(600, 'landing_zones'), listZonesPublicController);
 router.get('/public/env', getPublicEnvController);
+router.get('/fee-settings/public', cacheResponse(60, 'fee_settings'), getPublicFeeSettingsController);
 // Admin landing settings (old paths used by admin UI)
 router.get('/hero-banners/landing/settings', getAdminLandingSettingsController);
 router.patch('/hero-banners/landing/settings', updateAdminLandingSettingsController);

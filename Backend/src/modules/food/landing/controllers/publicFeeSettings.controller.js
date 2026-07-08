@@ -1,0 +1,33 @@
+import * as adminService from '../../admin/services/admin.service.js';
+
+function toPublicFeeSettings(settings) {
+  if (!settings || typeof settings !== 'object') return null;
+  return {
+    baseDistanceKm: settings.baseDistanceKm ?? null,
+    baseDeliveryFee: settings.baseDeliveryFee ?? settings.deliveryFee ?? null,
+    deliveryFee: settings.deliveryFee ?? settings.baseDeliveryFee ?? null,
+    perKmCharge: settings.perKmCharge ?? null,
+    platformFee: settings.platformFee ?? null,
+    gstRate: settings.gstRate ?? null,
+    deliveryDistanceSlabs: Array.isArray(settings.deliveryDistanceSlabs)
+      ? settings.deliveryDistanceSlabs
+      : [],
+    mixedOrderDistanceLimit: settings.mixedOrderDistanceLimit ?? null,
+    mixedOrderAngleLimit: settings.mixedOrderAngleLimit ?? null,
+    isActive: settings.isActive !== false,
+  };
+}
+
+export async function getPublicFeeSettingsController(req, res, next) {
+  try {
+    const data = await adminService.getFeeSettings();
+    const feeSettings = toPublicFeeSettings(data?.feeSettings || null);
+    return res.status(200).json({
+      success: true,
+      message: 'Fee settings fetched successfully',
+      data: { feeSettings },
+    });
+  } catch (error) {
+    next(error);
+  }
+}

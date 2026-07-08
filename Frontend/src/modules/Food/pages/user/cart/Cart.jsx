@@ -255,13 +255,13 @@ export default function Cart() {
   const [loadingCoupons, setLoadingCoupons] = useState(false)
   const [userOrderCount, setUserOrderCount] = useState(0)
 
-  // Fee settings from database (used for platform fee and GST fallback only)
+  // Fee settings from public API (UI fallback only; createOrder recalculates server-side)
   const [feeSettings, setFeeSettings] = useState({
-    baseDistanceKm: 3,
-    baseDeliveryFee: 25,
-    perKmCharge: 10,
-    platformFee: 5,
-    gstRate: 5,
+    baseDistanceKm: 0,
+    baseDeliveryFee: 0,
+    perKmCharge: 0,
+    platformFee: 0,
+    gstRate: 0,
   })
 
 
@@ -992,27 +992,25 @@ export default function Cart() {
     fetchOrderCount()
   }, [])
 
-  // Fetch fee settings on mount
+  // Fetch public fee settings for display fallback when calculateOrder is unavailable
   useEffect(() => {
     const fetchFeeSettings = async () => {
-      if (typeof adminAPI.getPublicFeeSettings !== "function") return
       try {
         const response = await adminAPI.getPublicFeeSettings()
-        if (response.data.success && response.data.data.feeSettings) {
+        const settings = response?.data?.data?.feeSettings
+        if (response?.data?.success && settings) {
           setFeeSettings({
-            baseDistanceKm: response.data.data.feeSettings.baseDistanceKm || 3,
-            baseDeliveryFee:
-              response.data.data.feeSettings.baseDeliveryFee ||
-              response.data.data.feeSettings.deliveryFee ||
-              25,
-            perKmCharge: response.data.data.feeSettings.perKmCharge || 10,
-            platformFee: response.data.data.feeSettings.platformFee || 5,
-            gstRate: response.data.data.feeSettings.gstRate || 5,
+            baseDistanceKm: Number(settings.baseDistanceKm ?? 0),
+            baseDeliveryFee: Number(
+              settings.baseDeliveryFee ?? settings.deliveryFee ?? 0,
+            ),
+            perKmCharge: Number(settings.perKmCharge ?? 0),
+            platformFee: Number(settings.platformFee ?? 0),
+            gstRate: Number(settings.gstRate ?? 0),
           })
         }
       } catch (error) {
         debugError('Error fetching fee settings:', error)
-        // Keep default values on error
       }
     }
 
@@ -1030,7 +1028,7 @@ export default function Cart() {
     }
   }, [])
 
-  // Use backend pricing if available, otherwise fallback to database fee settings
+  // Prefer backend calculateOrder pricing; feeSettings is display fallback only
   const subtotal = pricing?.subtotal || cart.reduce((sum, item) => sum + (item.price || 0) * (item.quantity || 1), 0)
   const fallbackDeliveryFee = (() => {
     if (appliedCoupon?.freeDelivery) {
@@ -1051,8 +1049,8 @@ export default function Cart() {
   const deliveryFeeBreakdownText = hasDistanceDeliveryBreakdown
     ? `Distance ${Number(deliveryFeeBreakdown.distanceKm).toFixed(1)} km: ${RUPEE_SYMBOL}${Number(deliveryFeeBreakdown.basePayout || 0).toFixed(0)} base + ${Number(deliveryFeeBreakdown.extraDistanceKm || 0).toFixed(1)} km x ${RUPEE_SYMBOL}${Number(deliveryFeeBreakdown.commissionPerKm || 0).toFixed(0)}`
     : null
-  const platformFee = pricing?.platformFee ?? feeSettings.platformFee
-  const gstCharges = pricing?.tax ?? Math.round(subtotal * (feeSettings.gstRate / 100))
+  const platformFee = pricing?.platformFee ?? Number(feeSettings.platformFee || 0)
+  const gstCharges = pricing?.tax ?? Math.round(subtotal * (Number(feeSettings.gstRate || 0) / 100))
   const discount = pricing?.discount ?? (appliedCoupon ? Math.min(appliedCoupon.discount, subtotal * 0.5) : 0)
   const totalBeforeDiscount = subtotal + deliveryFee + platformFee + gstCharges
   const total = pricing?.total ?? (totalBeforeDiscount - discount)
