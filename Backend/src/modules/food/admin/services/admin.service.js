@@ -29,7 +29,7 @@ import { FoodRestaurantSupportTicket } from '../../restaurant/models/supportTick
 import { FoodOrder } from '../../orders/models/order.model.js';
 import { FoodTransaction } from '../../orders/models/foodTransaction.model.js';
 import { FoodRestaurantWithdrawal } from '../../restaurant/models/foodRestaurantWithdrawal.model.js';
-import { applyPendingOpenDaysUpdate, discardPendingOpenDaysUpdate } from '../../restaurant/services/outletTimings.service.js';
+import { applyPendingOpenDaysUpdate, discardPendingOpenDaysUpdate, syncOutletTimingsFromOpenDays } from '../../restaurant/services/outletTimings.service.js';
 import { 
     creditWallet, 
     debitWallet
@@ -3753,7 +3753,7 @@ export async function deleteFood(id) {
 }
 
 /** Admin creates a restaurant (JSON body with image URLs already uploaded). Single API. */
-export async function createRestaurantByAdmin(body) {
+export async function createRestaurantByAdmin(body, performer = null) {
     const loc = body.location || {};
     const toStr = (v) => (v != null && v !== undefined ? String(v).trim() : '');
     const toUrl = (v) => (v && (typeof v === 'string' ? v : v.url)) ? (typeof v === 'string' ? v : v.url) : undefined;
@@ -3819,7 +3819,8 @@ export async function createRestaurantByAdmin(body) {
             }
             : undefined,
         status: 'approved',
-        approvedAt: new Date()
+        approvedAt: new Date(),
+        approvedBy: performer || undefined
     };
 
     if (body.zoneId !== undefined) {
@@ -3859,6 +3860,14 @@ export async function createRestaurantByAdmin(body) {
     }
 
     const restaurant = await FoodRestaurant.create(doc);
+
+    await syncOutletTimingsFromOpenDays(
+        restaurant._id,
+        doc.openDays,
+        doc.openingTime,
+        doc.closingTime
+    );
+
     return restaurant.toObject();
 }
 

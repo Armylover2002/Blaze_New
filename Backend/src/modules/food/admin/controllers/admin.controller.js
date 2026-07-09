@@ -1037,7 +1037,8 @@ export async function approveRestaurant(req, res, next) {
 
 export async function createRestaurant(req, res, next) {
     try {
-        const restaurant = await adminService.createRestaurantByAdmin(req.body || {});
+        const performer = await resolveActionPerformerSnapshot(req.user);
+        const restaurant = await adminService.createRestaurantByAdmin(req.body || {}, performer);
         res.status(201).json({
             success: true,
             message: 'Restaurant created successfully',

@@ -86,18 +86,17 @@ export default function AdminCODDepositVerification() {
       <div className="w-full mx-auto max-w-7xl space-y-6">
         
         {/* Elegant Header Banner */}
-        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-950 p-6 md:p-8 shadow-lg shadow-indigo-950/10">
-          <div className="absolute right-0 top-0 -mr-16 -mt-16 w-64 h-64 bg-indigo-500/10 rounded-full blur-3xl"></div>
-          <div className="absolute left-1/3 bottom-0 -mb-16 w-64 h-64 bg-emerald-500/5 rounded-full blur-3xl"></div>
+        <div className="relative overflow-hidden rounded-2xl bg-white border border-slate-200 p-6 md:p-8 shadow-sm">
+          <div className="absolute right-0 top-0 -mr-16 -mt-16 w-64 h-64 bg-red-500/5 rounded-full blur-3xl"></div>
           
           <div className="relative flex flex-col md:flex-row md:items-center md:justify-between gap-6">
             <div className="flex items-center gap-4">
-              <div className="w-14 h-14 rounded-xl bg-indigo-500/20 border border-indigo-400/20 flex items-center justify-center backdrop-blur-sm">
-                <ShieldCheck className="w-7 h-7 text-indigo-400" />
+              <div className="w-14 h-14 rounded-xl bg-red-50 border border-red-100 flex items-center justify-center">
+                <ShieldCheck className="w-7 h-7 text-red-600" />
               </div>
               <div>
-                <h1 className="text-2xl md:text-3xl font-bold text-white tracking-tight">COD Deposit Verification</h1>
-                <p className="text-slate-300 text-sm md:text-base mt-1 font-medium">
+                <h1 className="text-2xl md:text-3xl font-bold text-slate-800 tracking-tight">COD Deposit Verification</h1>
+                <p className="text-slate-500 text-sm md:text-base mt-1 font-medium">
                   Audit and approve physical cash deposit handovers accepted by flagship Zone Hub restaurants.
                 </p>
               </div>
