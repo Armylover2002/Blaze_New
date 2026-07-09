@@ -30,6 +30,7 @@ import {
     verifyPaymentSignature,
     getRazorpayKeyId,
     isRazorpayConfigured,
+    fetchRazorpayPayment,
     fetchRazorpayPaymentLink,
     initiateRazorpayRefund
 } from '../helpers/razorpay.helper.js';
@@ -2765,12 +2766,39 @@ export async function verifyPayment(userId, dto) {
   if (order.payment.status === "paid")
     return { order: order.toObject(), payment: order.payment };
 
+  const expectedRazorpayOrderId = String(order.payment?.razorpay?.orderId || "").trim();
+  const providedRazorpayOrderId = String(dto.razorpayOrderId || "").trim();
+  if (!expectedRazorpayOrderId || providedRazorpayOrderId !== expectedRazorpayOrderId) {
+    throw new ValidationError("Payment order mismatch");
+  }
+
   const valid = verifyPaymentSignature(
-    dto.razorpayOrderId,
+    expectedRazorpayOrderId,
     dto.razorpayPaymentId,
     dto.razorpaySignature,
   );
   if (!valid) throw new ValidationError("Payment verification failed");
+
+  if (isRazorpayConfigured()) {
+    const fetchedPayment = await fetchRazorpayPayment(dto.razorpayPaymentId);
+    const fetchedOrderId = String(fetchedPayment?.order_id || "").trim();
+    const fetchedStatus = String(fetchedPayment?.status || "").toLowerCase();
+    const fetchedAmountPaise = Number(fetchedPayment?.amount || 0);
+    const expectedAmountPaise = Math.round(Number(order.payment?.amountDue || 0) * 100);
+
+    if (fetchedOrderId !== expectedRazorpayOrderId) {
+      throw new ValidationError("Payment order mismatch");
+    }
+    if (fetchedStatus !== "captured") {
+      throw new ValidationError("Payment not captured");
+    }
+    if (!Number.isFinite(expectedAmountPaise) || expectedAmountPaise < 100) {
+      throw new ValidationError("Invalid order payment amount");
+    }
+    if (fetchedAmountPaise !== expectedAmountPaise) {
+      throw new ValidationError("Payment amount mismatch");
+    }
+  }
 
   order.payment.status = "paid";
   order.payment.razorpay.paymentId = dto.razorpayPaymentId;
