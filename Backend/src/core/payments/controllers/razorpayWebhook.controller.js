@@ -13,6 +13,7 @@ import { processOrderPostPaymentFulfillment } from '../../../modules/food/orders
 
 import * as walletService from '../../../modules/food/subscriptions/services/wallet.service.js';
 import { invalidateSubscriptionStatsCache } from '../../../modules/food/admin/utils/subscriptionStatsCache.js';
+import { sendNotificationToOwners } from '../../../core/notifications/firebase.service.js';
 
 /**
  * ✅ NEW: Centralized Razorpay Webhook Handler (Core Layer)
@@ -207,6 +208,68 @@ export const handleRazorpayWebhook = async (req, res) => {
             } else {
                 // ✅ ADDED: Log warn if order not found for refund
                 logger.warn(`Webhook [refund.processed]: Order not found or already refunded for RZ-Payment: ${rzPaymentId}`);
+            }
+        }
+
+        // --- 🔴 Handle Payment Failed ---
+        if (event === 'payment.failed') {
+            const paymentObj = payload?.payment?.entity || {};
+            const rzOrderId = String(paymentObj?.order_id || '').trim();
+            const rzPaymentId = String(paymentObj?.id || '').trim();
+            const failureReason =
+                String(paymentObj?.error_description || paymentObj?.error_reason || paymentObj?.error_code || '').trim()
+                || 'Payment failed';
+
+            if (rzOrderId) {
+                const order = await FoodOrder.findOneAndUpdate(
+                    {
+                        'payment.razorpay.orderId': rzOrderId,
+                        'payment.status': { $nin: ['paid', 'refunded', 'cancelled', 'failed'] },
+                    },
+                    {
+                        $set: {
+                            'payment.status': 'failed',
+                            ...(rzPaymentId ? { 'payment.razorpay.paymentId': rzPaymentId } : {}),
+                        },
+                    },
+                    { new: true },
+                );
+
+                if (order) {
+                    try {
+                        await foodTransactionService.updateTransactionStatus(order._id, 'failed', {
+                            status: 'failed',
+                            razorpayPaymentId: rzPaymentId || undefined,
+                            note: `Payment failed via webhook: ${failureReason}`,
+                        });
+                    } catch (txnErr) {
+                        logger.error(`Webhook payment.failed transaction sync failed for ${order.orderId}: ${txnErr?.message || txnErr}`);
+                    }
+
+                    try {
+                        await sendNotificationToOwners(
+                            [{ ownerType: 'USER', ownerId: order.userId }],
+                            {
+                                title: 'Payment Failed',
+                                body: `Payment failed for Order #${order.orderId}. Please retry checkout.`,
+                                data: {
+                                    type: 'payment_failed',
+                                    orderId: String(order.orderId),
+                                    orderMongoId: String(order._id),
+                                    reason: failureReason,
+                                },
+                            },
+                        );
+                    } catch (notifyErr) {
+                        logger.warn(`Webhook payment.failed notify failed: ${notifyErr?.message || notifyErr}`);
+                    }
+
+                    logger.info(`Webhook [payment.failed]: Marked Order ${order.orderId} as failed`);
+                } else {
+                    logger.warn(`Webhook [payment.failed]: Order not found or not eligible for failure update: ${rzOrderId}`);
+                }
+            } else {
+                logger.warn('Webhook [payment.failed]: Missing razorpay order id');
             }
         }
 
