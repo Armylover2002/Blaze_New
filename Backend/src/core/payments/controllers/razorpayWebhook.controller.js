@@ -151,8 +151,28 @@ export const handleRazorpayWebhook = async (req, res) => {
                 }
                 logger.info(`Webhook [payment.captured]: Synced Order ${order.orderId} (Status=paid)`);
             } else {
-                // ✅ ADDED: Log warn if order not found but payment was captured
-                logger.warn(`Webhook [payment.captured]: Order not found or already paid for RZ-Order: ${rzOrderId}`);
+                const existingPaidOrder = await FoodOrder.findOne({
+                    "payment.razorpay.orderId": rzOrderId,
+                    "payment.status": 'paid',
+                });
+
+                if (existingPaidOrder) {
+                    try {
+                        await foodTransactionService.updateTransactionStatus(existingPaidOrder._id, 'captured', {
+                            status: 'captured',
+                            razorpayPaymentId: rzPaymentId,
+                            note: 'Payment status re-synced via Webhook retry (payment.captured)',
+                        });
+                        await processOrderPostPaymentFulfillment(existingPaidOrder, { notifyCustomer: false });
+                        logger.info(`Webhook [payment.captured]: Re-synced paid Order ${existingPaidOrder.orderId} on retry`);
+                    } catch (retryLedgerErr) {
+                        logger.error(`Webhook Retry Ledger Error (Order ${existingPaidOrder.orderId}): ${retryLedgerErr.message}`);
+                        return res.status(500).json({ message: 'Ledger sync failed; retrying webhook' });
+                    }
+                } else {
+                    // ✅ ADDED: Log warn if order not found but payment was captured
+                    logger.warn(`Webhook [payment.captured]: Order not found for RZ-Order: ${rzOrderId}`);
+                }
             }
 
             // 📂 CASE C: Onboarding Payment
