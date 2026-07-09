@@ -9,7 +9,7 @@ const getStatusColor = (orderStatus) => {
     "Accepted": "bg-green-100 text-green-700",
     "Processing": "bg-red-100 text-red-700",
     "Food On The Way": "bg-yellow-100 text-yellow-700",
-    "Canceled": "bg-rose-100 text-rose-700",
+    "Cancelled": "bg-rose-100 text-rose-700",
     "Cancelled by Restaurant": "bg-red-100 text-red-700",
     "Cancelled by User": "bg-red-100 text-red-700",
     "Payment Failed": "bg-red-100 text-red-700",
@@ -43,6 +43,7 @@ export default function OrdersTable({
   onAcceptOrder,
   onRejectOrder,
   actionLoadingOrderId,
+  actionLoadingType,
   deletingOrderId,
 }) {
   const [currentPage, setCurrentPage] = useState(1)
@@ -370,7 +371,7 @@ export default function OrdersTable({
                           className="px-2.5 py-1.5 rounded text-xs font-medium text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors flex items-center gap-1"
                           title="Accept Order"
                         >
-                          {actionLoadingOrderId === (order.id || order.orderId) ? (
+                          {actionLoadingOrderId === (order.id || order.orderId) && actionLoadingType === 'accept' ? (
                             <Loader2 className="w-3.5 h-3.5 animate-spin" />
                           ) : (
                             <Check className="w-3.5 h-3.5" />
@@ -385,7 +386,7 @@ export default function OrdersTable({
                           className="px-2.5 py-1.5 rounded text-xs font-medium text-white bg-rose-600 hover:bg-rose-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors flex items-center gap-1"
                           title="Reject Order"
                         >
-                          {actionLoadingOrderId === (order.id || order.orderId) ? (
+                          {actionLoadingOrderId === (order.id || order.orderId) && actionLoadingType === 'reject' ? (
                             <Loader2 className="w-3.5 h-3.5 animate-spin" />
                           ) : (
                             <X className="w-3.5 h-3.5" />
@@ -427,6 +428,7 @@ export default function OrdersTable({
                         const isCancelled = order.orderStatus === "Cancelled by Restaurant" || 
                                           order.orderStatus === "Cancelled" || 
                                           order.orderStatus === "Cancelled by User" ||
+                                          order.orderStatus === "Cancelled by Admin" ||
                                           (order.status === "cancelled" && (order.cancelledBy === "user" || order.cancelledBy === "restaurant"));
                         
                         // Check if payment type is Online or Wallet (not Cash on Delivery)
@@ -455,6 +457,10 @@ export default function OrdersTable({
                               {order.paymentType === "Wallet" || order.payment?.method === "wallet" 
                                 ? "Wallet Refunded" 
                                 : "Refunded"}
+                            </span>
+                          ) : order.orderStatus === "Cancelled by Admin" ? (
+                            <span className="px-3 py-1.5 rounded-md text-xs font-medium bg-amber-100 text-amber-700">
+                              Refund Pending
                             </span>
                           ) : onRefund ? (
                             <button 

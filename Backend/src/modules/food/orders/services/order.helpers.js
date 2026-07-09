@@ -191,13 +191,26 @@ export function toGeoPoint(lat, lng) {
   return { type: "Point", coordinates: [b, a] };
 }
 
+export function isTerminalOrderStatus(status) {
+  const s = String(status || "").trim().toLowerCase();
+  return (
+    s === "cancelled_by_user" ||
+    s === "cancelled_by_restaurant" ||
+    s === "cancelled_by_admin" ||
+    s === "cancelled_by_system"
+  );
+}
+
 export function pushStatusHistory(order, { byRole, byId, from, to, note = "" }) {
+  const fromNorm = String(from || "").trim();
+  const toNorm = String(to || "").trim();
+  if (!toNorm || fromNorm === toNorm) return;
   order.statusHistory.push({
     at: new Date(),
     byRole,
     byId: byId || undefined,
-    from,
-    to,
+    from: fromNorm,
+    to: toNorm,
     note,
   });
 }

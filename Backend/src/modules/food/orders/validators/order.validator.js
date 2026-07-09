@@ -224,7 +224,8 @@ export function validateOrderStatusDto(body) {
             'picked_up',
             'delivered',
             'cancelled_by_restaurant'
-        ])
+        ]),
+        reason: z.string().optional(),
     });
     const result = schema.safeParse(body);
     if (!result.success) {
@@ -242,8 +243,8 @@ export function validateOrderStatusDto(body) {
 export function validateAdminOrderStatusDto(body) {
     const schema = z.object({
         orderStatus: z.enum([
-            'preparing',
-            'cancelled_by_restaurant',
+            'confirmed',
+            'cancelled_by_admin',
         ]),
         reason: z.string().optional(),
     });

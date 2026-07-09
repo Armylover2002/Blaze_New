@@ -214,7 +214,8 @@ const deliveryStateSchema = new mongoose.Schema(
                 'en_route_to_delivery',
                 'at_drop',
                 'delivered',
-                'completed'
+                'completed',
+                'cancelled'
             ],
             default: 'en_route_to_pickup'
         },
@@ -350,7 +351,8 @@ const orderSchema = new mongoose.Schema(
                 'delivered',
                 'cancelled_by_user',
                 'cancelled_by_restaurant',
-                'cancelled_by_admin'
+                'cancelled_by_admin',
+                'cancelled_by_system'
             ],
             default: 'created'
         },

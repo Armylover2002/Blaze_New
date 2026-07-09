@@ -49,6 +49,7 @@ import {
 import { resolveDeliveryDocumentType } from '../../../quick-commerce/services/dispatchDocument.service.js';
 import { DISPATCH_DOCUMENT_TYPES } from '../../../quick-commerce/utils/dispatchDocument.constants.js';
 import * as returnPickupDelivery from '../../../quick-commerce/services/returnPickupDelivery.service.js';
+import { refundWalletBalance } from '../../user/services/userWallet.service.js';
 
 export {
   tryAutoAssign,
@@ -217,6 +218,80 @@ function buildOrderIdentityFilter(orderIdOrMongoId) {
   return { orderId: raw };
 }
 
+function isTerminalCancelStatus(status) {
+  const s = String(status || "").trim().toLowerCase();
+  return (
+    s === "cancelled_by_user" ||
+    s === "cancelled_by_restaurant" ||
+    s === "cancelled_by_admin" ||
+    s === "cancelled_by_system"
+  );
+}
+
+function applyCancellationTerminalState(order, { cancelledStatus, reason = "" } = {}) {
+  if (!order || typeof order !== "object") return;
+
+  // Dispatch: stop rider assignment and mark cancelled.
+  if (!order.dispatch || typeof order.dispatch !== "object") order.dispatch = {};
+  order.dispatch.status = "cancelled";
+  order.dispatch.deliveryPartnerId = null;
+  order.dispatch.acceptedAt = null;
+  order.dispatch.assignedAt = null;
+  if (Array.isArray(order.dispatch.offeredTo)) {
+    // Keep audit trail but prevent further repeats from old offers.
+    order.dispatch.offeredTo = order.dispatch.offeredTo.map((x) => ({
+      ...x,
+      action: x.action || "offered",
+    }));
+  } else {
+    order.dispatch.offeredTo = [];
+  }
+
+  // DispatchPlan: make it terminal but keep legs for audit.
+  if (!order.dispatchPlan || typeof order.dispatchPlan !== "object")
+    order.dispatchPlan = {};
+  order.dispatchPlan.combinedPickupEligible = false;
+  order.dispatchPlan.reason = reason
+    ? `Cancelled: ${reason}`
+    : `Cancelled (${String(cancelledStatus || "cancelled").replace(/_/g, " ")})`;
+  if (Array.isArray(order.dispatchPlan.legs)) {
+    order.dispatchPlan.legs = order.dispatchPlan.legs.map((leg) => ({
+      ...leg,
+      deliveryPartnerId: null,
+      assignedAt: null,
+      partnerCandidates: [],
+    }));
+  }
+
+  // DeliveryState: mark terminal cancelled.
+  if (!order.deliveryState || typeof order.deliveryState !== "object")
+    order.deliveryState = {};
+  order.deliveryState.currentPhase = "cancelled";
+  order.deliveryState.status = "cancelled";
+
+  // Payment: for non-paid flows, keep it cancelled.
+  if (order.payment && typeof order.payment === "object") {
+    const method = String(order.payment.method || "").trim().toLowerCase();
+    const paid =
+      ["razorpay", "razorpay_qr"].includes(method) &&
+      String(order.payment.status || "").trim().toLowerCase() === "paid";
+    if (
+      !paid &&
+      String(order.payment.status || "").trim().toLowerCase() !== "refunded"
+    ) {
+      order.payment.status = "cancelled";
+    }
+  }
+}
+
+function safePushStatusHistory(order, { byRole, byId, from, to, note = "" }) {
+  if (!order) return;
+  const fromNorm = String(from || "").trim();
+  const toNorm = String(to || "").trim();
+  if (!toNorm || fromNorm === toNorm) return;
+  pushStatusHistory(order, { byRole, byId, from: fromNorm, to: toNorm, note });
+}
+
 function generateOrderId() {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   let s = "";
@@ -317,8 +392,15 @@ function normalizeOrderItems(items = [], fallbackOrderType = "food") {
 
 function getPointLatLng(locationLike) {
   const coords = locationLike?.coordinates;
-  if (!Array.isArray(coords) || coords.length !== 2) return null;
-  const [lng, lat] = coords;
+  if (Array.isArray(coords) && coords.length === 2) {
+    const [lng, lat] = coords;
+    if (!Number.isFinite(Number(lat)) || !Number.isFinite(Number(lng))) return null;
+    return { lat: Number(lat), lng: Number(lng) };
+  }
+
+  // Accept non-GeoJSON shapes used by some legacy payloads.
+  const lat = locationLike?.lat ?? locationLike?.latitude;
+  const lng = locationLike?.lng ?? locationLike?.longitude;
   if (!Number.isFinite(Number(lat)) || !Number.isFinite(Number(lng))) return null;
   return { lat: Number(lat), lng: Number(lng) };
 }
@@ -650,11 +732,15 @@ async function evaluateCombinedPickupEligibility(pickupPoints = [], deliveryAddr
   const quickPoint = getPointLatLng(quickPickup?.location);
   const userPoint = getPointLatLng(deliveryAddress?.location);
   if (!foodPoint || !quickPoint || !userPoint) {
+    const missing = [];
+    if (!foodPoint) missing.push("food pickup");
+    if (!quickPoint) missing.push("quick pickup");
+    if (!userPoint) missing.push("delivery");
     return {
       eligible: false,
       pickupDistanceKm: null,
       sameDirection: false,
-      reason: "Pickup or delivery coordinates are unavailable",
+      reason: `${missing.join(" and ")} coordinates are unavailable`,
     };
   }
 
@@ -683,6 +769,70 @@ async function evaluateCombinedPickupEligibility(pickupPoints = [], deliveryAddr
         ? `Pickups are more than ${distLimit} km apart`
         : `Pickups are not in the same direction (exceeds ${angleLimit}° deviation)`,
   };
+}
+
+async function resolveDispatchPlanMeta(orderType, pickupPoints = [], deliveryAddress) {
+  if (orderType === "mixed") {
+    return evaluateCombinedPickupEligibility(pickupPoints, deliveryAddress);
+  }
+
+  const primaryPickup = pickupPoints[0];
+  const pickupPoint = getPointLatLng(primaryPickup?.location);
+  const deliveryPoint = getPointLatLng(deliveryAddress?.location);
+
+  if (!pickupPoint) {
+    return {
+      eligible: false,
+      pickupDistanceKm: null,
+      sameDirection: false,
+      reason: "Pickup coordinates are unavailable",
+    };
+  }
+  if (!deliveryPoint) {
+    return {
+      eligible: false,
+      pickupDistanceKm: null,
+      sameDirection: false,
+      reason: "Delivery coordinates are unavailable",
+    };
+  }
+
+  const distanceKm = haversineKm(
+    pickupPoint.lat,
+    pickupPoint.lng,
+    deliveryPoint.lat,
+    deliveryPoint.lng,
+  );
+
+  return {
+    eligible: true,
+    pickupDistanceKm: Number.isFinite(distanceKm)
+      ? Number(distanceKm.toFixed(2))
+      : null,
+    sameDirection: true,
+    reason:
+      orderType === "quick"
+        ? "Quick commerce single pickup delivery"
+        : "Single pickup delivery",
+  };
+}
+
+async function populateDispatchLegPartnerCandidates(dispatchPlan, pickupPoints = []) {
+  if (!dispatchPlan || !Array.isArray(dispatchPlan.legs) || !pickupPoints.length) {
+    return;
+  }
+
+  const legCandidates = await Promise.all(
+    pickupPoints.map(async (point) => ({
+      legId: `${point.pickupType}:${point.sourceId}`,
+      partnerCandidates: await listNearbyPartnersForPoint(point),
+    })),
+  );
+
+  for (const leg of dispatchPlan.legs) {
+    const found = legCandidates.find((candidate) => candidate.legId === leg.legId);
+    if (found) leg.partnerCandidates = found.partnerCandidates;
+  }
 }
 
 async function listNearbyPartnersForPoint(point, { maxKm = 15, limit = 5 } = {}) {
@@ -739,12 +889,15 @@ async function listNearbyPartnersForPoint(point, { maxKm = 15, limit = 5 } = {})
 }
 
 function pushStatusHistory(order, { byRole, byId, from, to, note = "" }) {
+  const fromNorm = String(from || "").trim();
+  const toNorm = String(to || "").trim();
+  if (!toNorm || fromNorm === toNorm) return;
   order.statusHistory.push({
     at: new Date(),
     byRole,
     byId: byId || undefined,
-    from,
-    to,
+    from: fromNorm,
+    to: toNorm,
     note,
   });
 }
@@ -2177,7 +2330,8 @@ export async function createOrder(userId, dto) {
   const isCash = paymentMethod === "cash";
   const isWallet = paymentMethod === "wallet";
   const pickupPoints = buildPickupPointsFromItems(items, sourceMap);
-  const combinedPickup = await evaluateCombinedPickupEligibility(
+  const combinedPickup = await resolveDispatchPlanMeta(
+    orderType,
     pickupPoints,
     deliveryAddress,
   );
@@ -2394,18 +2548,7 @@ export async function createOrder(userId, dto) {
     })),
   };
 
-  if (dispatchStrategy === "express_split" || dispatchStrategy === "split") {
-    const legCandidates = await Promise.all(
-      pickupPoints.map(async (point) => ({
-        legId: `${point.pickupType}:${point.sourceId}`,
-        partnerCandidates: await listNearbyPartnersForPoint(point),
-      })),
-    );
-    for (const leg of dispatchPlan.legs) {
-      const found = legCandidates.find((candidate) => candidate.legId === leg.legId);
-      if (found) leg.partnerCandidates = found.partnerCandidates;
-    }
-  }
+  await populateDispatchLegPartnerCandidates(dispatchPlan, pickupPoints);
 
   const order = new FoodOrder({
     orderType,
@@ -2625,13 +2768,6 @@ export async function verifyPayment(userId, dto) {
   order.payment.status = "paid";
   order.payment.razorpay.paymentId = dto.razorpayPaymentId;
   order.payment.razorpay.signature = dto.razorpaySignature;
-  pushStatusHistory(order, {
-    byRole: "USER",
-    byId: userId,
-    from: order.orderStatus,
-    to: order.orderStatus === "scheduled" ? "scheduled" : "created",
-    note: "Payment verified",
-  });
   await order.save();
 
   await foodTransactionService.updateTransactionStatus(order._id, 'captured', {
@@ -2844,12 +2980,16 @@ export async function cancelOrder(orderId, userId, reason, refundTo) {
 
   const from = order.orderStatus;
   order.orderStatus = "cancelled_by_user";
-  pushStatusHistory(order, {
+  safePushStatusHistory(order, {
     byRole: "USER",
     byId: userId,
     from,
     to: "cancelled_by_user",
     note: reason || "",
+  });
+  applyCancellationTerminalState(order, {
+    cancelledStatus: "cancelled_by_user",
+    reason: reason || "",
   });
 
   const paymentMethod = String(order.payment?.method || "").trim().toLowerCase();
@@ -3138,26 +3278,44 @@ export async function updateOrderStatusRestaurant(
   orderId,
   restaurantId,
   orderStatus,
+  reason = ""
 ) {
-  if (!mongoose.Types.ObjectId.isValid(orderId)) {
-    throw new ValidationError("Invalid order id");
-  }
+  const identity = buildOrderIdentityFilter(orderId);
+  if (!identity) throw new ValidationError("Order id required");
   if (!mongoose.Types.ObjectId.isValid(restaurantId)) {
     throw new ValidationError("Invalid restaurant id");
   }
   let order = await FoodOrder.findOne({
-    _id: new mongoose.Types.ObjectId(orderId),
+    ...identity,
     restaurantId: new mongoose.Types.ObjectId(restaurantId),
   });
   if (!order) throw new NotFoundError("Order not found");
   const from = order.orderStatus;
-  order.orderStatus = orderStatus;
-  pushStatusHistory(order, {
-    byRole: "RESTAURANT",
-    byId: restaurantId,
-    from,
-    to: orderStatus,
-  });
+
+  // Enforce actor-specific cancellation status and terminal side effects.
+  if (isTerminalCancelStatus(orderStatus)) {
+    order.orderStatus = "cancelled_by_restaurant";
+    safePushStatusHistory(order, {
+      byRole: "RESTAURANT",
+      byId: restaurantId,
+      from,
+      to: "cancelled_by_restaurant",
+      note: String(reason || "").trim(),
+    });
+    applyCancellationTerminalState(order, {
+      cancelledStatus: "cancelled_by_restaurant",
+      reason: String(reason || "").trim(),
+    });
+  } else {
+    order.orderStatus = orderStatus;
+    safePushStatusHistory(order, {
+      byRole: "RESTAURANT",
+      byId: restaurantId,
+      from,
+      to: orderStatus,
+      note: String(reason || "").trim(),
+    });
+  }
   await order.save();
 
   // Real-time: status update to restaurant room.
@@ -3179,6 +3337,15 @@ export async function updateOrderStatusRestaurant(
         payload,
       );
       io.to(rooms.user(order.userId)).emit("order_status_update", payload);
+      if (payload?.orderStatus && String(payload.orderStatus).includes("cancel")) {
+        // Ensure delivery app drops stale active trip immediately.
+        io.to(rooms.delivery(order.dispatch?.deliveryPartnerId)).emit("order_cancelled", payload);
+        for (const leg of order.dispatchPlan?.legs || []) {
+          if (leg?.deliveryPartnerId) {
+            io.to(rooms.delivery(leg.deliveryPartnerId)).emit("order_cancelled", payload);
+          }
+        }
+      }
     }
 
     let title = `Order ${order.orderId} updated`;
@@ -3454,6 +3621,206 @@ export async function updateOrderStatusRestaurant(
     }
 
     return order.toObject();
+}
+
+export async function updateOrderStatusAdmin(orderId, adminId, orderStatus, reason = "") {
+  const identity = buildOrderIdentityFilter(orderId);
+  if (!identity) throw new ValidationError("Order id required");
+  if (!mongoose.Types.ObjectId.isValid(adminId)) {
+    throw new ValidationError("Invalid admin id");
+  }
+
+  const order = await FoodOrder.findOne(identity);
+  if (!order) throw new NotFoundError("Order not found");
+
+  const from = order.orderStatus;
+  const next = String(orderStatus || "").trim();
+  const note = String(reason || "").trim();
+
+  if (isTerminalCancelStatus(next)) {
+    order.orderStatus = "cancelled_by_admin";
+    safePushStatusHistory(order, {
+      byRole: "ADMIN",
+      byId: adminId,
+      from,
+      to: "cancelled_by_admin",
+      note,
+    });
+    applyCancellationTerminalState(order, {
+      cancelledStatus: "cancelled_by_admin",
+      reason: note,
+    });
+  } else {
+    order.orderStatus = next;
+    safePushStatusHistory(order, {
+      byRole: "ADMIN",
+      byId: adminId,
+      from,
+      to: next,
+      note,
+    });
+  }
+
+  await order.save();
+
+  if (order.orderStatus === "cancelled_by_admin") {
+    if (order.orderType === "mixed" || order.orderType === "quick") {
+      await cancelSellerOrdersForParent(order, "Cancelled by admin");
+    }
+
+    try {
+      const paymentMethod = String(order.payment?.method || "").trim().toLowerCase();
+      const isOnlinePaid =
+        ["razorpay", "razorpay_qr"].includes(paymentMethod) &&
+        ["paid", "refunded"].includes(String(order.payment?.status || "").trim().toLowerCase());
+      await foodTransactionService.updateTransactionStatus(order._id, "cancelled_by_admin", {
+        status: isOnlinePaid ? "refunded" : "failed",
+        note: note ? `Order cancelled by admin: ${note}` : "Order cancelled by admin",
+        recordedByRole: "ADMIN",
+        recordedById: adminId,
+      });
+    } catch (err) {
+      logger.warn(`updateOrderStatusAdmin transaction sync failed: ${err?.message || err}`);
+    }
+  }
+
+  // ✅ Automated refund on ADMIN cancel (same behavior as restaurant-cancel)
+  // - Wallet payment: credit back to user wallet immediately.
+  // - Razorpay payment: initiate Razorpay refund (full amount).
+  if (
+    order.orderStatus === "cancelled_by_admin" &&
+    order.userId &&
+    order.payment &&
+    (!order.payment?.refund || order.payment?.refund?.status !== "processed") &&
+    order.payment?.status !== "refunded"
+  ) {
+    const paymentMethod = String(order.payment?.method || "").trim().toLowerCase();
+    const totalAmount = Number(order.pricing?.total || 0);
+    const canRefundAmount = Number.isFinite(totalAmount) && totalAmount > 0;
+
+    try {
+      if (paymentMethod === "wallet" && canRefundAmount) {
+        await refundWalletBalance(
+          order.userId,
+          totalAmount,
+          "Order refund",
+          {
+            orderId: String(order._id),
+            orderReadableId: String(order.orderId || ""),
+            source: "admin_auto_refund",
+          },
+        );
+        order.payment.status = "refunded";
+        order.payment.refund = {
+          status: "processed",
+          amount: totalAmount,
+          refundId: `wallet_refund_${Date.now()}`,
+          requestedMethod: "wallet",
+          processedMethod: "wallet",
+          requestedAt: new Date(),
+          requestedByUser: false,
+          reason: String(reason || ""),
+          processedAt: new Date(),
+        };
+        await order.save();
+      } else if (
+        ["razorpay", "razorpay_qr"].includes(paymentMethod) &&
+        order.payment?.status === "paid" &&
+        order.payment?.razorpay?.paymentId &&
+        canRefundAmount
+      ) {
+        const refundResult = await initiateRazorpayRefund(
+          order.payment.razorpay.paymentId,
+          totalAmount,
+        );
+
+        if (refundResult?.success) {
+          order.payment.status = "refunded";
+          order.payment.refund = {
+            status: "processed",
+            amount: totalAmount,
+            refundId: refundResult.refundId || "",
+            requestedMethod: "gateway",
+            processedMethod: "gateway",
+            requestedAt: new Date(),
+            requestedByUser: false,
+            reason: String(reason || ""),
+            processedAt: new Date(),
+          };
+        } else {
+          order.payment.refund = {
+            status: "failed",
+            amount: totalAmount,
+            requestedMethod: "gateway",
+            processedMethod: "gateway",
+            requestedAt: new Date(),
+            requestedByUser: false,
+            reason: String(reason || ""),
+          };
+        }
+        await order.save();
+      } else if (!["paid", "refunded"].includes(String(order.payment?.status || ""))) {
+        // COD/unpaid orders: keep payment cancelled marker consistent.
+        order.payment.status = "cancelled";
+        await order.save();
+      }
+    } catch (err) {
+      logger.warn(
+        `Automated refund failed for Order ${orderId} (Admin Cancel): ${err?.message || err}`,
+      );
+      try {
+        if (canRefundAmount) {
+          order.payment.refund = {
+            status: "failed",
+            amount: totalAmount,
+            requestedMethod: paymentMethod === "wallet" ? "wallet" : "gateway",
+            requestedAt: new Date(),
+            requestedByUser: false,
+            reason: String(reason || ""),
+          };
+          await order.save();
+        }
+      } catch (_) {}
+    }
+  }
+
+  // Emit the same canonical realtime event so all panels converge.
+  try {
+    const io = getIO();
+    if (io) {
+      const payload = {
+        orderMongoId: order._id?.toString?.(),
+        orderId: order.orderId,
+        orderStatus: order.orderStatus,
+        title: `Order ${order.orderId} updated`,
+        message: `Status changed to ${String(order.orderStatus).replace(/_/g, " ")}`,
+      };
+      if (order.userId) io.to(rooms.user(order.userId)).emit("order_status_update", payload);
+      if (order.restaurantId) io.to(rooms.restaurant(order.restaurantId)).emit("order_status_update", payload);
+      if (String(order.orderStatus).includes("cancel")) {
+        if (order.dispatch?.deliveryPartnerId) {
+          io.to(rooms.delivery(order.dispatch.deliveryPartnerId)).emit("order_cancelled", payload);
+        }
+        for (const leg of order.dispatchPlan?.legs || []) {
+          if (leg?.deliveryPartnerId) {
+            io.to(rooms.delivery(leg.deliveryPartnerId)).emit("order_cancelled", payload);
+          }
+        }
+      }
+    }
+  } catch (err) {
+    logger.warn(`updateOrderStatusAdmin socket emit failed: ${err?.message || err}`);
+  }
+
+  enqueueOrderEvent("admin_order_status_updated", {
+    orderMongoId: order._id?.toString?.(),
+    orderId: order.orderId,
+    adminId,
+    from,
+    to: order.orderStatus,
+  });
+
+  return order.toObject();
 }
 
 /**
@@ -4585,7 +4952,12 @@ async function buildListOrdersAdminFilter(query = {}) {
       case "canceled":
       case "cancelled":
         filter.orderStatus = {
-          $in: ["cancelled_by_user", "cancelled_by_restaurant", "cancelled_by_admin"],
+          $in: [
+            "cancelled_by_user",
+            "cancelled_by_restaurant",
+            "cancelled_by_admin",
+            "cancelled_by_system",
+          ],
         };
         break;
       case "restaurant-cancelled":
@@ -4859,13 +5231,18 @@ export async function recoverStuckOrders() {
     const results = await Promise.all(stuckOrders.map(async (order) => {
       try {
         const oldStatus = order.orderStatus;
-        order.orderStatus = 'cancelled_by_admin';
+        order.orderStatus = 'cancelled_by_system';
         
         pushStatusHistory(order, {
           byRole: 'SYSTEM',
           from: oldStatus,
-          to: 'cancelled_by_admin',
+          to: 'cancelled_by_system',
           note: 'Watchdog auto-recovery: Order was stuck in transient state for more than 2 hours.'
+        });
+
+        applyCancellationTerminalState(order, {
+          cancelledStatus: 'cancelled_by_system',
+          reason: 'Watchdog auto-recovery: Order was stuck in transient state for more than 2 hours.',
         });
 
         await order.save({ validateBeforeSave: false });

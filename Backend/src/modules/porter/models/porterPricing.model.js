@@ -7,7 +7,6 @@ const porterPricingSchema = new mongoose.Schema(
             type: mongoose.Schema.Types.ObjectId,
             ref: 'PorterVehicle',
             required: true,
-            index: true,
         },
 
         enableDistanceCharges: {

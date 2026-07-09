@@ -172,7 +172,12 @@ export async function updateOrderStatusRestaurantController(req, res, next) {
         const restaurantId = req.user?.userId;
         const orderId = req.params.orderId;
         const dto = validateOrderStatusDto(req.body);
-        const order = await orderService.updateOrderStatusRestaurant(orderId, restaurantId, dto.orderStatus);
+        const order = await orderService.updateOrderStatusRestaurant(
+            orderId,
+            restaurantId,
+            dto.orderStatus,
+            dto.reason || "",
+        );
         return sendResponse(res, 200, 'Order status updated', { order });
     } catch (err) {
         next(err);
@@ -351,19 +356,13 @@ export async function updateOrderStatusAdminController(req, res, next) {
     try {
         const orderId = req.params.orderId;
         const dto = validateAdminOrderStatusDto(req.body);
+        const adminId = req.user?.userId;
 
-        // Resolve order (supports both mongo _id and orderId string).
-        const resolved = await orderService.getOrderById(orderId, { admin: true });
-        const order = resolved?.order || resolved;
-        const restaurantId = order?.restaurantId?._id || order?.restaurantId;
-        if (!order?._id || !restaurantId) {
-            return sendResponse(res, 404, 'Order not found', { order: null });
-        }
-
-        const updated = await orderService.updateOrderStatusRestaurant(
-            String(order._id),
-            String(restaurantId),
+        const updated = await orderService.updateOrderStatusAdmin(
+            orderId,
+            adminId,
             dto.orderStatus,
+            dto.reason || "",
         );
         return sendResponse(res, 200, 'Order status updated', { order: updated });
     } catch (err) {

@@ -10,6 +10,63 @@ const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
 
+const formatHistoryTimestamp = (value) => {
+  if (!value) return ""
+  const d = value instanceof Date ? value : new Date(value)
+  if (Number.isNaN(d.getTime())) return ""
+  return d
+    .toLocaleString("en-US", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true,
+    })
+    .toUpperCase()
+}
+
+const getBackendStatusLabel = (raw) => {
+  const s = String(raw || "").toLowerCase().trim()
+  if (!s) return "—"
+  if (s === "created" || s === "placed") return "Pending"
+  if (s === "scheduled") return "Scheduled"
+  if (s === "confirmed") return "Accepted"
+  if (s === "preparing" || s === "ready_for_pickup") return "Processing"
+  if (s === "picked_up") return "Food On The Way"
+  if (s === "delivered") return "Delivered"
+  if (s === "cancelled_by_restaurant") return "Cancelled by Restaurant"
+  if (s === "cancelled_by_user") return "Cancelled by User"
+  if (s === "cancelled_by_admin" || s === "cancelled_by_system") return "Canceled"
+  return raw
+}
+
+const normalizeStatusHistory = (statusHistory) => {
+  const list = Array.isArray(statusHistory) ? statusHistory.filter(Boolean) : []
+  return list
+    .map((entry) => {
+      // Backend shape: { at, from, to, byRole, note }
+      // Legacy/alt shapes supported: { timestamp, status }
+      const at = entry.at || entry.timestamp || entry.time || entry.createdAt
+      const to = entry.to ?? entry.status ?? entry.state ?? ""
+      const from = entry.from ?? ""
+      return {
+        at,
+        from,
+        to,
+        byRole: entry.byRole || entry.role || "",
+        note: entry.note || entry.reason || "",
+        label: getBackendStatusLabel(to),
+        timeLabel: formatHistoryTimestamp(at),
+      }
+    })
+    .sort((a, b) => {
+      const ta = a.at ? new Date(a.at).getTime() : 0
+      const tb = b.at ? new Date(b.at).getTime() : 0
+      return ta - tb
+    })
+}
+
 
 const getStatusColor = (orderStatus) => {
   const colors = {
@@ -39,6 +96,7 @@ const getPaymentStatusColor = (paymentStatus) => {
 
 export default function ViewOrderDialog({ isOpen, onOpenChange, order }) {
   if (!order) return null
+  const statusHistory = normalizeStatusHistory(order.statusHistory)
 
   // Debug: Log order data to check billImageUrl
   if (order.billImageUrl) {
@@ -223,6 +281,54 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order }) {
             </div>
           </div>
 
+          {/* Status History */}
+          <div className="border-t border-slate-200 pt-4">
+            <h3 className="text-sm font-semibold text-slate-700 mb-4 flex items-center gap-2">
+              <Clock className="w-4 h-4" />
+              Status History
+            </h3>
+            {statusHistory.length === 0 ? (
+              <p className="text-sm text-slate-500">No status history available</p>
+            ) : (
+              <div className="relative">
+                <div className="absolute left-3 top-0 bottom-0 w-px bg-slate-200" />
+                <div className="space-y-4">
+                  {statusHistory.map((entry, idx) => (
+                    <div key={`${entry.to}-${entry.at || idx}`} className="relative flex items-start gap-3">
+                      <div className="relative z-10 mt-1 h-6 w-6 rounded-full bg-white border-2 border-slate-300 flex items-center justify-center">
+                        <div className="h-2 w-2 rounded-full bg-slate-500" />
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold text-slate-900 truncate">
+                              {entry.label || "Status Updated"}
+                            </p>
+                            {(entry.byRole || entry.note) && (
+                              <p className="text-xs text-slate-500 mt-0.5">
+                                {entry.byRole ? `${entry.byRole}${entry.note ? " • " : ""}` : ""}
+                                {entry.note || ""}
+                              </p>
+                            )}
+                            {(entry.from && entry.to && entry.from !== entry.to) && (
+                              <p className="text-xs text-slate-500 mt-0.5">
+                                From <span className="font-medium text-slate-600">{getBackendStatusLabel(entry.from)}</span>{" "}
+                                to <span className="font-medium text-slate-600">{getBackendStatusLabel(entry.to)}</span>
+                              </p>
+                            )}
+                          </div>
+                          {entry.timeLabel ? (
+                            <p className="text-xs text-slate-500 whitespace-nowrap">{entry.timeLabel}</p>
+                          ) : null}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* Customer Information */}
           <div className="border-t border-slate-200 pt-4">
             <h3 className="text-sm font-semibold text-slate-700 mb-4 flex items-center gap-2">
@@ -362,11 +468,6 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order }) {
               </h3>
               <div className="space-y-2 p-4 bg-slate-50 rounded-lg">
                 <p className="text-sm text-slate-900">{formatAddress(order.address)}</p>
-                {getCoordinates(order.address) && (
-                  <p className="text-xs text-slate-500 mt-2">
-                    <span className="font-medium">Coordinates:</span> {getCoordinates(order.address)}
-                  </p>
-                )}
                 {order.address.label && (
                   <p className="text-xs text-slate-500">
                     <span className="font-medium">Label:</span> {order.address.label}
