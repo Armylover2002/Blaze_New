@@ -50,6 +50,28 @@ const DEFAULT_SETTINGS = {
   onlineEnabled: true,
 };
 
+function normalizeGlobalSettings(raw) {
+  if (!raw || typeof raw !== "object") return {};
+
+  const social = raw.socialLinks || {};
+  const phoneNumber = raw.phone?.number || "";
+
+  return {
+    ...raw,
+    appName: raw.appName || raw.companyName || DEFAULT_SETTINGS.appName,
+    logoUrl: raw.logoUrl || raw.userLogo?.url || DEFAULT_SETTINGS.logoUrl,
+    faviconUrl: raw.faviconUrl || raw.userFavicon?.url || DEFAULT_SETTINGS.faviconUrl,
+    primaryColor: raw.primaryColor || raw.themeColor || DEFAULT_SETTINGS.primaryColor,
+    supportEmail: raw.supportEmail || raw.email || DEFAULT_SETTINGS.supportEmail,
+    supportPhone: raw.supportPhone || phoneNumber || DEFAULT_SETTINGS.supportPhone,
+    facebook: raw.facebook || social.facebook || DEFAULT_SETTINGS.facebook,
+    twitter: raw.twitter || social.twitter || DEFAULT_SETTINGS.twitter,
+    instagram: raw.instagram || social.instagram || DEFAULT_SETTINGS.instagram,
+    linkedin: raw.linkedin || social.linkedin || DEFAULT_SETTINGS.linkedin,
+    youtube: raw.youtube || social.youtube || DEFAULT_SETTINGS.youtube,
+  };
+}
+
 /**
  * Applies theme CSS variables to document root from settings.
  * Called when settings are loaded so the whole app uses dynamic colors.
@@ -86,12 +108,15 @@ export const SettingsProvider = ({ children }) => {
       setError(null);
       const cached = getCachedSettings();
       if (cached) {
-        const merged = { ...DEFAULT_SETTINGS, ...cached };
+        const merged = { ...DEFAULT_SETTINGS, ...normalizeGlobalSettings(cached) };
         setSettings(merged);
         applyThemeVariables(merged);
       }
       const data = await loadBusinessSettings();
-      const merged = { ...DEFAULT_SETTINGS, ...(data || {}) };
+      const merged = {
+        ...DEFAULT_SETTINGS,
+        ...normalizeGlobalSettings(data || {}),
+      };
       setSettings(merged);
       applyThemeVariables(merged);
     } catch (err) {
