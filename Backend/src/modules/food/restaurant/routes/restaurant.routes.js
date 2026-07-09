@@ -100,6 +100,20 @@ router.get('/restaurants/under-250', cacheResponse(300, 'restaurants_under_250')
 router.get('/restaurants/:id', cacheResponse(600, 'restaurant_detail'), getApprovedRestaurantController);
 router.get('/restaurants/:id/menu', cacheResponse(600, 'restaurant_menu'), getPublicRestaurantMenuController);
 router.get('/restaurants/:id/outlet-timings', cacheResponse(600, 'restaurant_timings'), getOutletTimingsByRestaurantIdController);
+router.get('/debug-counts', async (req, res) => {
+    try {
+        const { FoodRestaurant } = await import('../models/restaurant.model.js');
+        const all = await FoodRestaurant.find({}).lean();
+        res.json({
+            total: all.length,
+            approvedAndListed: all.filter(r => r.status === 'approved' && r.isListed).length,
+            zoneMatch: all.filter(r => String(r.zoneId) === req.query.zoneId).length,
+            sample: all[0]
+        });
+    } catch (e) {
+        res.json({ error: e.message });
+    }
+});
 router.get('/offers', cacheResponse(300, 'offers'), listPublicOffersController);
 // Public: categories list (zone-aware; returns zone categories + global)
 router.get('/categories/public', cacheResponse(600, 'categories'), listCategoriesController);

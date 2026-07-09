@@ -22,6 +22,10 @@ const porterUserApi = {
     .post('/porter/maps/quote-preview', { pickup, delivery, vehicleId, parcelWeight })
     .then(unwrap),
 
+  detectZone: (lat, lng, options = {}) => axiosInstance
+    .get('/porter/maps/zone-detect', { params: { lat, lng }, signal: options.signal })
+    .then(unwrap),
+
   createOrder: (payload, options = {}) => axiosInstance
     .post('/porter/orders', payload, { signal: options.signal })
     .then((response) => {
@@ -46,6 +50,27 @@ const porterUserApi = {
   cancelOrder: (id, reason) => axiosInstance
     .post(`/porter/orders/${id}/cancel`, { reason })
     .then(unwrap),
+
+  rescheduleOrder: (id, scheduledAt, timezone) => {
+    const tz = (() => {
+      if (timezone && timezone !== 'Asia/Calcutta' && timezone !== 'local') return timezone;
+      try {
+        const resolved = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        return resolved === 'Asia/Calcutta' ? 'Asia/Kolkata' : (resolved || 'Asia/Kolkata');
+      } catch {
+        return 'Asia/Kolkata';
+      }
+    })();
+    return axiosInstance
+      .patch(`/porter/orders/${id}/reschedule`, {
+        scheduledAt,
+        timezone: tz,
+      })
+      .then((response) => {
+        invalidateCache('/porter/orders/active');
+        return unwrap(response);
+      });
+  },
 
   rateOrder: (id, payload) => axiosInstance
     .post(`/porter/orders/${id}/rate`, payload)

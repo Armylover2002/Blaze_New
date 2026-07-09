@@ -24,6 +24,7 @@ import {
   buildDeliverySocketPayload,
   buildOrderIdentityFilter,
   haversineKm,
+  isTerminalOrderStatus,
   notifyOwnerSafely,
   notifyOwnersSafely,
 } from "./order.helpers.js";
@@ -734,10 +735,20 @@ async function runDispatchHunt({
 async function tryAutoAssignForwardOrder(orderId, options = {}) {
   const attempt = options.attempt || 1;
   const lockTimeout = 55000;
+  const activeOrderStatuses = [
+    "created",
+    "placed",
+    "scheduled",
+    "confirmed",
+    "preparing",
+    "ready_for_pickup",
+    "picked_up",
+  ];
 
   const order = await FoodOrder.findOneAndUpdate(
     {
       _id: new mongoose.Types.ObjectId(orderId),
+      orderStatus: { $in: activeOrderStatuses },
       $or: [
         { "dispatch.status": "unassigned" },
         {
@@ -780,6 +791,12 @@ async function tryAutoAssignForwardOrder(orderId, options = {}) {
           sourceType: isQuickOrder ? "quick" : "food",
         }),
       persistOffers: async (offeredToEntries) => {
+        const fresh = await FoodOrder.findById(order._id).select("orderStatus dispatch").lean();
+        if (!fresh || isTerminalOrderStatus(fresh.orderStatus) || fresh.dispatch?.status === "cancelled") {
+          logger.info(`tryAutoAssign forward: Skip persistOffers for cancelled order ${orderId}`);
+          return;
+        }
+
         order.dispatch.status = "unassigned";
         order.dispatch.deliveryPartnerId = null;
         order.dispatch.offeredTo.push(...offeredToEntries);
@@ -977,6 +994,10 @@ export async function processDispatchTimeout(documentId, partnerId, jobData = {}
 
   const order = await FoodOrder.findById(documentId);
   if (!order) return;
+  if (isTerminalOrderStatus(order.orderStatus) || order.dispatch?.status === "cancelled") {
+    logger.info(`processDispatchTimeout: Skip cancelled order ${documentId}`);
+    return;
+  }
 
   const stillAssigned =
     order.dispatch?.status === "assigned" &&

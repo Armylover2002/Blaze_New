@@ -95,11 +95,17 @@ async function listNearbyPorterPartners({ lat, lng, maxKm, orderVehicleId, rejec
 
 function buildPorterSocketPayload(order, partnerDistanceKm) {
     const mapped = mapPorterOrderForDriver(order);
+    const pickupKm = Number.isFinite(Number(partnerDistanceKm))
+        ? Number(Number(partnerDistanceKm).toFixed(2))
+        : null;
     return {
         ...mapped,
         documentType: PORTER_DISPATCH_DOCUMENT_TYPE,
         module: 'parcel',
-        distanceKm: partnerDistanceKm,
+        // Rider → pickup (what the accept popup must show) — NOT trip route length.
+        distanceKm: pickupKm,
+        pickupDistanceKm: pickupKm,
+        tripDistanceKm: mapped?.route?.distanceKm ?? null,
         earnings: order.pricing?.driverEarning ?? 0,
         pickupLocation: order.pickup,
         dropLocation: order.delivery,

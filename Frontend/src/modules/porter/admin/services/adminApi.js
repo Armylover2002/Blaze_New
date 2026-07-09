@@ -235,6 +235,14 @@ export const porterAdminApi = {
     const response = await axiosInstance.post(`/porter/admin/orders/${orderId}/force-close`, payload);
     return unwrap(response).order;
   },
+  rescheduleOrder: async (orderId, scheduledAt) => {
+    const response = await axiosInstance.patch(`/porter/admin/orders/${orderId}/reschedule`, { scheduledAt });
+    return unwrap(response).order || unwrap(response);
+  },
+  startScheduledDispatch: async (orderId) => {
+    const response = await axiosInstance.post(`/porter/admin/orders/${orderId}/start-dispatch`);
+    return unwrap(response).order || unwrap(response);
+  },
   getDashboard: async () => {
     const response = await axiosInstance.get('/porter/admin/dashboard');
     return unwrap(response);

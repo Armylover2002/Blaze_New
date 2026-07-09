@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Package } from "lucide-react";
+import { Package, CalendarClock } from "lucide-react";
 import Screen from "../components/Screen";
 import { inr } from "../components/ui";
 import { getPorterShipmentDetailsPath } from "../utils/routes";
@@ -8,6 +8,7 @@ import porterUserApi from "../services/userApi";
 
 const TABS = [
   { id: "all", label: "All" },
+  { id: "scheduled", label: "Scheduled" },
   { id: "active", label: "Active" },
   { id: "delivered", label: "Delivered" },
   { id: "cancelled", label: "Cancelled" },
@@ -17,6 +18,19 @@ const ACTIVE_STATUSES = new Set([
   "searching_partner", "assigned", "partner_accepted", "en_route_pickup",
   "at_pickup", "picked_up", "in_transit", "at_drop",
 ]);
+
+function formatSchedule(iso) {
+  if (!iso) return null;
+  try {
+    const d = new Date(iso);
+    return {
+      date: d.toLocaleDateString("en-IN", { day: "numeric", month: "short" }),
+      time: d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }),
+    };
+  } catch {
+    return null;
+  }
+}
 
 export default function ShipmentHistory() {
   const navigate = useNavigate();
@@ -38,7 +52,8 @@ export default function ShipmentHistory() {
 
   const filtered = orders.filter((s) => {
     if (tab === "all") return true;
-    if (tab === "active") return ACTIVE_STATUSES.has(s.status);
+    if (tab === "scheduled") return s.status === "scheduled";
+    if (tab === "active") return ACTIVE_STATUSES.has(s.status) || s.status === "scheduled";
     if (tab === "delivered") return ["delivered", "completed"].includes(s.status);
     if (tab === "cancelled") return String(s.status || "").startsWith("cancelled");
     return true;
@@ -71,31 +86,49 @@ export default function ShipmentHistory() {
         </div>
       ) : (
         <div className="space-y-3">
-          {filtered.map((s) => (
-            <button
-              key={s.id}
-              type="button"
-              onClick={() => navigate(getPorterShipmentDetailsPath(s.id))}
-              className="w-full rounded-2xl border border-gray-100 bg-white p-4 text-left shadow-sm"
-            >
-              <div className="flex items-center justify-between gap-2 mb-3 border-b border-gray-50 pb-3">
-                <p className="text-[13px] font-bold text-gray-900">#{s.orderNumber}</p>
-                <span className={`text-[11px] font-bold uppercase ${["delivered", "completed"].includes(s.status) ? "text-green-600" : "text-[#FF0000]"}`}>{String(s.status || "").replace(/_/g, " ")}</span>
-              </div>
-              <div className="relative pl-5 mb-3">
-                 <div className="absolute left-1.5 top-1.5 bottom-1.5 w-[1px] bg-gray-200"></div>
-                 <div className="relative mb-3">
-                    <div className="absolute -left-[18.5px] top-1.5 h-2 w-2 rounded-full border-2 border-green-600 bg-white"></div>
+          {filtered.map((s) => {
+            const sched = formatSchedule(s.scheduledAt);
+            const isScheduled = s.status === "scheduled";
+            return (
+              <button
+                key={s.id}
+                type="button"
+                onClick={() => navigate(getPorterShipmentDetailsPath(s.id))}
+                className="w-full rounded-2xl border border-gray-100 bg-white p-4 text-left shadow-sm"
+              >
+                <div className="flex items-center justify-between gap-2 mb-3 border-b border-gray-50 pb-3">
+                  <p className="text-[13px] font-bold text-gray-900">#{s.orderNumber}</p>
+                  <div className="flex items-center gap-2">
+                    {isScheduled && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-extrabold uppercase text-amber-700">
+                        <CalendarClock className="h-3 w-3" /> Waiting
+                      </span>
+                    )}
+                    <span className={`text-[11px] font-bold uppercase ${["delivered", "completed"].includes(s.status) ? "text-green-600" : "text-[#FF0000]"}`}>
+                      {String(s.status || "").replace(/_/g, " ")}
+                    </span>
+                  </div>
+                </div>
+                {sched && (
+                  <p className="mb-2 text-[12px] font-semibold text-gray-600">
+                    Scheduled · {sched.date} · {sched.time}
+                  </p>
+                )}
+                <div className="relative pl-5 mb-3">
+                  <div className="absolute left-1.5 top-1.5 bottom-1.5 w-[1px] bg-gray-200" />
+                  <div className="relative mb-3">
+                    <div className="absolute -left-[18.5px] top-1.5 h-2 w-2 rounded-full border-2 border-green-600 bg-white" />
                     <p className="text-[12px] text-gray-700 font-medium line-clamp-1">{s.pickup?.address || "Pickup address"}</p>
-                 </div>
-                 <div className="relative">
-                    <div className="absolute -left-[18.5px] top-1.5 h-2 w-2 rounded-full border-2 border-[#FF0000] bg-white"></div>
+                  </div>
+                  <div className="relative">
+                    <div className="absolute -left-[18.5px] top-1.5 h-2 w-2 rounded-full border-2 border-[#FF0000] bg-white" />
                     <p className="text-[12px] text-gray-700 font-medium line-clamp-1">{s.delivery?.address || "Delivery address"}</p>
-                 </div>
-              </div>
-              <p className="text-[14px] font-bold text-gray-900">{inr(s.pricing?.total ?? 0)}</p>
-            </button>
-          ))}
+                  </div>
+                </div>
+                <p className="text-[14px] font-bold text-gray-900">{inr(s.pricing?.total ?? 0)}</p>
+              </button>
+            );
+          })}
         </div>
       )}
     </Screen>

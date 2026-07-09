@@ -652,6 +652,19 @@ export const adminAPI = {
     apiClient.get(`/food/admin/orders/${String(orderId)}`, {
       contextModule: "admin",
     }),
+  /** Admin Accept/Reject (acts on behalf of restaurant) */
+  acceptOrder: (orderId, prepTimeMins = null) =>
+    apiClient.patch(
+      `/food/admin/orders/${String(orderId)}/status`,
+            { orderStatus: "confirmed", ...(prepTimeMins != null ? { prepTimeMins } : {}) },
+      { contextModule: "admin" },
+    ),
+  rejectOrder: (orderId, reason = "") =>
+    apiClient.patch(
+      `/food/admin/orders/${String(orderId)}/status`,
+            { orderStatus: "cancelled_by_admin", reason: String(reason || "").trim() },
+      { contextModule: "admin" },
+    ),
   processRefund: (orderId, body = {}) =>
     apiClient.post(`/food/admin/orders/${String(orderId)}/refund`, body ?? {}, {
       contextModule: "admin",
@@ -1474,6 +1487,7 @@ export const restaurantAPI = {
   rejectOrder: (orderId, _reason = "") =>
     restaurantAPI.updateOrderStatus(orderId, {
       orderStatus: "cancelled_by_restaurant",
+      reason: String(_reason || "").trim(),
     }),
   /** Mark order ready (restaurant handoff). */
   markOrderReady: (orderId) =>

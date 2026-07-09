@@ -70,7 +70,10 @@ export async function adminAssignPorterDriver(orderId, driverId, performer = nul
     }
 
     if (order.status === PORTER_ORDER_STATUS.SCHEDULED) {
-        await activateScheduledPorterOrder(orderId, performer);
+        await activateScheduledPorterOrder(orderId, performer, {
+            reason: 'Manual assign activated scheduled order',
+            allowEarly: true,
+        });
     }
 
     const { support } = await validateAssignablePartner(driverId, order.vehicleId);
@@ -191,6 +194,8 @@ export async function adminCancelPorterOrder(orderId, reason, performer = null, 
             $set: {
                 status: PORTER_ORDER_STATUS.CANCELLED_BY_ADMIN,
                 'dispatch.status': PORTER_DISPATCH_STATUS.CANCELLED,
+                'schedule.status': 'cancelled',
+                'schedule.lastUpdatedAt': new Date(),
                 cancellation: { reason, cancelledBy: 'admin', cancelledAt: new Date(), note: note || undefined },
             },
         },
@@ -201,6 +206,9 @@ export async function adminCancelPorterOrder(orderId, reason, performer = null, 
 
     appendStatusHistory(cancelled, cancelled.status, performer, note ? `${reason} — ${note}` : reason);
     await cancelled.save();
+
+    const { removePorterScheduledJobs } = await import('./porter-scheduled-dispatch.service.js');
+    void removePorterScheduledJobs(cancelled._id, cancelled);
 
     const refundResult = await applyPorterRefund(cancelled, reason);
 

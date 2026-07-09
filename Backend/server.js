@@ -127,8 +127,12 @@ const startServer = async () => {
 
         const runPorterScheduledDispatch = async () => {
             try {
-                const { processDueScheduledPorterOrders } = await import('./src/modules/porter/orders/services/porter-scheduled-dispatch.service.js');
+                const {
+                    processDueScheduledPorterOrders,
+                    processDuePorterScheduleReminders,
+                } = await import('./src/modules/porter/orders/services/porter-scheduled-dispatch.service.js');
                 await processDueScheduledPorterOrders();
+                await processDuePorterScheduleReminders();
             } catch (err) {
                 logger.error(`Porter scheduled dispatch error: ${err.message}`);
             }
@@ -197,4 +201,3 @@ const startServer = async () => {
 };
 
 startServer();
-

@@ -6,7 +6,7 @@ import { PorterOrder } from '../models/porterOrder.model.js';
 import { NotFoundError, ValidationError } from '../../../../core/auth/errors.js';
 import { validateCouponForRedemption } from '../../services/coupon.service.js';
 import { getRoutePreview } from '../../services/maps.service.js';
-import { findZoneForPoint } from './porter-zone-lookup.service.js';
+import { assertPorterLocationsServiceable } from './porter-zone-lookup.service.js';
 import { calculateFareFromPricing } from '../../utils/porter-pricing-calculator.util.js';
 import {
     assertVehicleEligibleForParcelWeight,
@@ -110,7 +110,8 @@ export async function calculatePorterOrderPricing({
     const parcelWeight = computeParcelWeight(parcel);
     await assertVehicleEligibleForParcelWeight(vehicleId, parcelWeight);
     const { vehicle, pricing } = await resolveVehiclePricing(vehicleId);
-    const zone = await findZoneForPoint(pickup.lat, pickup.lng);
+    const serviceability = await assertPorterLocationsServiceable(pickup, delivery);
+    const zone = serviceability.pickupZone;
 
     const fareParts = calculateFareFromPricing(pricing, route.distanceKm);
     let coupon = null;
@@ -132,6 +133,8 @@ export async function calculatePorterOrderPricing({
         route,
         vehicle: { id: String(vehicle._id), name: vehicle.name, vehicleCode: vehicle.vehicleCode },
         zoneId: zone?._id ? String(zone._id) : null,
+        dropZoneId: serviceability.dropZone?._id ? String(serviceability.dropZone._id) : null,
+        sameZone: serviceability.sameZone,
         pricing: {
             ...fareParts,
             discount,

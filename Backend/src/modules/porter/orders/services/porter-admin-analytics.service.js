@@ -30,6 +30,7 @@ export async function getPorterDashboardStats() {
         todayOrders,
         deliveredOrders,
         cancelledOrders,
+        scheduledOrders,
         revenueAgg,
         todayRevenueAgg,
         recentOrders,
@@ -47,6 +48,7 @@ export async function getPorterDashboardStats() {
         PorterOrder.countDocuments({ ...baseFilter, createdAt: { $gte: todayStart } }),
         PorterOrder.countDocuments({ ...baseFilter, status: { $in: ['delivered', 'completed'] } }),
         PorterOrder.countDocuments({ ...baseFilter, status: { $regex: '^cancelled' } }),
+        PorterOrder.countDocuments({ ...baseFilter, status: 'scheduled' }),
         PorterOrder.aggregate([
             { $match: { ...baseFilter, status: { $in: ['delivered', 'completed'] } } },
             { $group: { _id: null, total: { $sum: '$pricing.total' }, count: { $sum: 1 } } },
@@ -86,6 +88,7 @@ export async function getPorterDashboardStats() {
             todayOrders,
             deliveredOrders,
             cancelledOrders,
+            scheduledOrders,
             totalRevenue,
             todayRevenue,
             avgOrderValue,
@@ -140,13 +143,21 @@ export async function getPorterReportsStats({ range = 'monthly' } = {}) {
         ]),
         PorterOrder.aggregate([
             { $match: { ...baseFilter, createdAt: { $gte: since } } },
-            { $group: { _id: '$vehicleName', orders: { $sum: 1 }, revenue: { $sum: '$pricing.total' } } },
+            { $group: { 
+                _id: '$vehicleName', 
+                orders: { $sum: 1 }, 
+                revenue: { $sum: { $cond: [{ $in: ['$status', ['delivered', 'completed']] }, '$pricing.total', 0] } } 
+            } },
             { $sort: { orders: -1 } },
             { $limit: 8 },
         ]),
         PorterOrder.aggregate([
             { $match: { ...baseFilter, createdAt: { $gte: since }, zoneId: { $ne: null } } },
-            { $group: { _id: '$zoneId', orders: { $sum: 1 }, revenue: { $sum: '$pricing.total' } } },
+            { $group: { 
+                _id: '$zoneId', 
+                orders: { $sum: 1 }, 
+                revenue: { $sum: { $cond: [{ $in: ['$status', ['delivered', 'completed']] }, '$pricing.total', 0] } } 
+            } },
             { $sort: { orders: -1 } },
             { $limit: 8 },
             {

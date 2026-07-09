@@ -1,12 +1,24 @@
 import React, { useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { MapPin, Phone, Star, FileText, Loader2 } from "lucide-react";
+import { MapPin, Phone, Star, FileText, Loader2, CalendarClock } from "lucide-react";
 import Screen from "../components/Screen";
 import { PrimaryButton, FareRow, SectionLabel, inr } from "../components/ui";
 import { useBooking } from "../context/BookingContext";
-import { getPorterInvoicePath, getPorterTrackingPath } from "../utils/routes";
+import { getPorterInvoicePath, getPorterTrackingPath, getPorterScheduledWaitingPath } from "../utils/routes";
 import { usePorterOrderTracking } from "../hooks/usePorterOrderTracking";
 import { mapActiveShipmentFromOrder } from "../utils/orderMapper";
+
+function fmt(iso) {
+  if (!iso) return "—";
+  try {
+    return new Date(iso).toLocaleString("en-IN", {
+      day: "numeric", month: "short", year: "numeric",
+      hour: "2-digit", minute: "2-digit",
+    });
+  } catch {
+    return "—";
+  }
+}
 
 export default function ShipmentDetails() {
   const { id } = useParams();
@@ -97,6 +109,25 @@ export default function ShipmentDetails() {
         <p className="mt-1"><span className="text-gray-500">Vehicle:</span> <span className="font-bold">{shipment.vehicle || "Any"}</span></p>
       </div>
 
+      {(shipment.scheduledAt || shipment.schedule) && (
+        <>
+          <SectionLabel>Schedule</SectionLabel>
+          <div className="mb-4 rounded-2xl border border-amber-100 bg-amber-50/40 p-4 text-[13px]">
+            <div className="mb-2 flex items-center gap-2">
+              <CalendarClock className="h-4 w-4 text-amber-700" />
+              <span className="font-extrabold text-amber-800">
+                {shipment.status === "scheduled" ? "Waiting for scheduled time" : "Was scheduled"}
+              </span>
+            </div>
+            <p><span className="text-gray-500">Scheduled:</span> <span className="font-bold">{fmt(shipment.scheduledAt)}</span></p>
+            <p className="mt-1"><span className="text-gray-500">Created:</span> <span className="font-bold">{fmt(shipment.createdAt)}</span></p>
+            <p className="mt-1"><span className="text-gray-500">Activated:</span> <span className="font-bold">{fmt(shipment.schedule?.activatedAt)}</span></p>
+            <p className="mt-1"><span className="text-gray-500">Dispatch started:</span> <span className="font-bold">{fmt(shipment.dispatch?.scheduledDispatchedAt || shipment.schedule?.activatedAt)}</span></p>
+            <p className="mt-1"><span className="text-gray-500">Driver assigned:</span> <span className="font-bold">{fmt(shipment.dispatch?.assignedAt || shipment.dispatch?.acceptedAt)}</span></p>
+          </div>
+        </>
+      )}
+
       {shipment.partner && (
         <>
           <SectionLabel>Delivery partner</SectionLabel>
@@ -166,7 +197,12 @@ export default function ShipmentDetails() {
       </div>
 
       <div className="flex gap-2">
-        {isActive && (
+        {shipment.status === "scheduled" && (
+          <PrimaryButton className="flex-1" onClick={() => navigate(getPorterScheduledWaitingPath())}>
+            View schedule
+          </PrimaryButton>
+        )}
+        {isActive && shipment.status !== "scheduled" && (
           <PrimaryButton className="flex-1" onClick={() => navigate(getPorterTrackingPath())}>
             Track parcel
           </PrimaryButton>

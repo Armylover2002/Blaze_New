@@ -121,9 +121,29 @@ export default function PorterRouteMap({
       lastFitPolylineRef.current = null;
     }
 
+    if (routeQuote?.route?.polyline && window.google?.maps?.geometry?.encoding) {
+      try {
+        const path = window.google.maps.geometry.encoding.decodePath(routeQuote.route.polyline);
+        polylineRef.current = new window.google.maps.Polyline({
+          path,
+          map: mapRef.current,
+          strokeColor: "#FF0000",
+          strokeWeight: 5,
+          strokeOpacity: 0.9,
+        });
+        
+        const bounds = new window.google.maps.LatLngBounds();
+        path.forEach((p) => bounds.extend(p));
+        mapRef.current.fitBounds(bounds);
+        setError("");
+        return;
+      } catch (err) {
+        console.error("Polyline decode failed", err);
+      }
+    }
+
     if (!directionsRendererRef.current) {
-      const directionsService = new window.google.maps.DirectionsService();
-      const directionsRenderer = new window.google.maps.DirectionsRenderer({
+      directionsRendererRef.current = new window.google.maps.DirectionsRenderer({
         map: mapRef.current,
         suppressMarkers: true,
         preserveViewport: false,
@@ -133,27 +153,27 @@ export default function PorterRouteMap({
           strokeOpacity: 0.9,
         },
       });
-      directionsRendererRef.current = directionsRenderer;
-
-      directionsService.route(
-        {
-          origin,
-          destination,
-          travelMode: window.google.maps.TravelMode.DRIVING,
-        },
-        (result, status) => {
-          if (status === "OK" && result) {
-            directionsRenderer.setDirections(result);
-            setError("");
-            return;
-          }
-          setError("Unable to preview route.");
-        },
-      );
     }
 
+    const directionsService = new window.google.maps.DirectionsService();
+    directionsService.route(
+      {
+        origin,
+        destination,
+        travelMode: window.google.maps.TravelMode.DRIVING,
+      },
+      (result, status) => {
+        if (status === "OK" && result) {
+          directionsRendererRef.current.setDirections(result);
+          setError("");
+          return;
+        }
+        setError("Unable to preview route.");
+      },
+    );
+
     return undefined;
-  }, [pickup?.lat, pickup?.lng, delivery?.lat, delivery?.lng, routeQuote?.route?.polyline]);
+  }, [pickup?.lat, pickup?.lng, delivery?.lat, delivery?.lng, routeQuote?.route?.polyline, loading]);
 
   if (!hasCoordinates(pickup) || !hasCoordinates(delivery)) {
     return null;

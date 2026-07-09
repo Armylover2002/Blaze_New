@@ -23,6 +23,7 @@ const PaymentSelection = lazy(() => import("./user/pages/PaymentSelection"));
 const RateDelivery = lazy(() => import("./user/pages/RateDelivery"));
 const CancelBooking = lazy(() => import("./user/pages/CancelBooking"));
 const SchedulePickup = lazy(() => import("./user/pages/SchedulePickup"));
+const ScheduleWaiting = lazy(() => import("./user/pages/ScheduleWaiting"));
 const SOS = lazy(() => import("./user/pages/SOS"));
 const EmergencyContacts = lazy(() => import("./user/pages/EmergencyContacts"));
 const DeliveryInvoice = lazy(() => import("./user/pages/DeliveryInvoice"));
@@ -49,6 +50,7 @@ function PorterInnerRoutes() {
           <Route path="rate" element={<RateDelivery />} />
           <Route path="cancel" element={<CancelBooking />} />
           <Route path="schedule" element={<SchedulePickup />} />
+          <Route path="scheduled" element={<ScheduleWaiting />} />
           <Route path="sos" element={<SOS />} />
           <Route path="emergency-contacts" element={<EmergencyContacts />} />
           <Route path="invoice/:id" element={<DeliveryInvoice />} />

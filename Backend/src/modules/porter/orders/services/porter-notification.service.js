@@ -175,3 +175,102 @@ export async function notifyPorterAdminAlert(order, message, detail = '') {
         logger.warn(`[PorterFCM] admin alert failed: ${err.message}`);
     }
 }
+
+function formatScheduleLocal(scheduledAt) {
+    if (!scheduledAt) return '';
+    try {
+        return new Date(scheduledAt).toLocaleString('en-IN', {
+            day: 'numeric',
+            month: 'short',
+            hour: '2-digit',
+            minute: '2-digit',
+        });
+    } catch {
+        return String(scheduledAt);
+    }
+}
+
+export async function notifyPorterOrderScheduled(order) {
+    if (!order) return;
+    const userId = order.userId?._id || order.userId;
+    if (!userId) return;
+    const when = formatScheduleLocal(order.scheduledAt);
+    try {
+        await notifyOwnerSafely(
+            { ownerType: 'USER', ownerId: String(userId) },
+            {
+                title: 'Order scheduled successfully',
+                body: when
+                    ? `Your Porter pickup is scheduled for ${when}. We'll notify you before we start searching.`
+                    : 'Your Porter pickup has been scheduled successfully.',
+                data: { ...buildData(order, PORTER_ORDER_STATUS.SCHEDULED), link: '/porter/scheduled' },
+            },
+        );
+    } catch (err) {
+        logger.warn(`[PorterFCM] schedule notify failed: ${err.message}`);
+    }
+}
+
+export async function notifyPorterScheduleReminder(order) {
+    if (!order) return;
+    const userId = order.userId?._id || order.userId;
+    if (!userId) return;
+    const when = formatScheduleLocal(order.scheduledAt);
+    try {
+        await notifyOwnerSafely(
+            { ownerType: 'USER', ownerId: String(userId) },
+            {
+                title: 'Pickup starting soon',
+                body: when
+                    ? `Your scheduled Porter pickup starts at ${when}. Please keep your parcel ready.`
+                    : 'Your scheduled Porter pickup starts in about 15 minutes.',
+                data: { ...buildData(order, PORTER_ORDER_STATUS.SCHEDULED), link: '/porter/scheduled' },
+            },
+        );
+    } catch (err) {
+        logger.warn(`[PorterFCM] schedule reminder failed: ${err.message}`);
+    }
+}
+
+export async function notifyPorterSearchingAfterSchedule(order) {
+    if (!order) return;
+    const userId = order.userId?._id || order.userId;
+    if (!userId) return;
+    try {
+        await notifyOwnerSafely(
+            { ownerType: 'USER', ownerId: String(userId) },
+            {
+                title: 'Searching for a driver',
+                body: `It's time for order ${order.orderNumber || ''}. We're finding a nearby delivery partner.`.trim(),
+                data: { ...buildData(order, PORTER_ORDER_STATUS.SEARCHING_PARTNER), link: '/porter/finding-partner' },
+            },
+        );
+    } catch (err) {
+        logger.warn(`[PorterFCM] searching-after-schedule notify failed: ${err.message}`);
+    }
+}
+
+export async function notifyPorterOrderRescheduled(order, previousScheduledAt) {
+    if (!order) return;
+    const userId = order.userId?._id || order.userId;
+    if (!userId) return;
+    const when = formatScheduleLocal(order.scheduledAt);
+    try {
+        await notifyOwnerSafely(
+            { ownerType: 'USER', ownerId: String(userId) },
+            {
+                title: 'Order rescheduled',
+                body: when
+                    ? `Your Porter pickup was moved to ${when}.`
+                    : 'Your Porter schedule was updated.',
+                data: {
+                    ...buildData(order, PORTER_ORDER_STATUS.SCHEDULED),
+                    previousScheduledAt: previousScheduledAt ? String(previousScheduledAt) : '',
+                    link: '/porter/scheduled',
+                },
+            },
+        );
+    } catch (err) {
+        logger.warn(`[PorterFCM] reschedule notify failed: ${err.message}`);
+    }
+}

@@ -32,34 +32,60 @@ export const NewOrderModal = ({ order, onAccept, onReject, onMinimize }) => {
   const { distanceKm, etaMins } = useMemo(() => {
     if (!order) return { distanceKm: null, etaMins: null };
 
-    // A. Use provided data if available (Direct distance from socket)
-    const rawDist = order.pickupDistanceKm || order.distanceKm;
-    const rawEta = order.estimatedTime || order.duration || order.eta;
+    const rawEta = order.estimatedTime || order.duration || order.eta || order.route?.durationMin;
 
-    if (rawDist != null) {
-      return {
-        distanceKm: Number(rawDist).toFixed(1),
-        etaMins: rawEta && rawEta > 0 ? Math.ceil(rawEta) : Math.ceil((rawDist * 1000) / 416) + 5
-      };
+    // Prefer rider→pickup distance. Never treat trip route length as the offer "KM"
+    // (Porter persists route.distanceKm for pricing; it can be 0 / unrelated to the rider).
+    const pickupCandidates = [
+      order.pickupDistanceKm,
+      // Only treat top-level distanceKm as pickup when it is not clearly the route total.
+      order.distanceKm,
+    ];
+    let resolvedKm = null;
+    for (const candidate of pickupCandidates) {
+      const n = Number(candidate);
+      if (Number.isFinite(n) && n > 0) {
+        resolvedKm = n;
+        break;
+      }
     }
 
-    // B. Calculate from locations (Local calculation fallback)
-    const rest = primaryPickup?.location || order.restaurantLocation || order.restaurantId?.location || {};
-    const resLat = parseFloat(order.restaurant_lat || order.restaurantLat || rest.latitude || rest.lat);
-    const resLng = parseFloat(order.restaurant_lng || order.restaurantLng || rest.longitude || rest.lng);
+    // Local haversine: rider → parcel pickup (or restaurant)
+    const rest = primaryPickup?.location || order.restaurantLocation || order.pickupLocation || order.pickup || order.restaurantId?.location || {};
+    const resLat = parseFloat(
+      order.restaurant_lat ?? order.restaurantLat ?? rest.latitude ?? rest.lat,
+    );
+    const resLng = parseFloat(
+      order.restaurant_lng ?? order.restaurantLng ?? rest.longitude ?? rest.lng,
+    );
 
-    if (riderLocation && !isNaN(resLat) && !isNaN(resLng)) {
+    if (riderLocation && Number.isFinite(resLat) && Number.isFinite(resLng)) {
       const distM = getHaversineDistance(
-        riderLocation.lat, riderLocation.lng,
-        resLat, resLng
+        Number(riderLocation.lat),
+        Number(riderLocation.lng),
+        resLat,
+        resLng,
       );
-      const km = distM / 1000;
-      // Assume 25km/h avg for initial estimate (roughly 416m/min)
-      const mins = Math.ceil(distM / 416) + (order.prepTime || 5);
+      if (Number.isFinite(distM) && distM >= 0) {
+        const km = distM / 1000;
+        // Prefer live GPS when server distance is missing / zero.
+        if (resolvedKm == null || resolvedKm <= 0 || Math.abs(km - resolvedKm) > 0.01) {
+          resolvedKm = km;
+        }
+        const mins = Math.ceil(distM / 416) + (order.prepTime || 5);
+        return {
+          distanceKm: Number(resolvedKm).toFixed(1),
+          etaMins: rawEta && Number(rawEta) > 0 ? Math.ceil(Number(rawEta)) : mins,
+        };
+      }
+    }
 
+    if (resolvedKm != null && resolvedKm > 0) {
       return {
-        distanceKm: km.toFixed(1),
-        etaMins: mins
+        distanceKm: Number(resolvedKm).toFixed(1),
+        etaMins: rawEta && Number(rawEta) > 0
+          ? Math.ceil(Number(rawEta))
+          : Math.ceil((resolvedKm * 1000) / 416) + 5,
       };
     }
 

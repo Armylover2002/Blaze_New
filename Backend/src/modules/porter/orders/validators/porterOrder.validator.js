@@ -26,6 +26,13 @@ export const createPorterOrderSchema = z.object({
     couponCode: z.string().optional(),
     paymentMethod: z.enum(['wallet', 'cash', 'razorpay']).default('wallet'),
     scheduledAt: z.union([z.string(), z.date()]).optional().nullable(),
+    /** IANA timezone from client (informational; scheduledAt must already be absolute UTC). */
+    timezone: z.string().max(80).optional().nullable(),
+});
+
+export const reschedulePorterOrderSchema = z.object({
+    scheduledAt: z.union([z.string(), z.date()]),
+    timezone: z.string().max(80).optional().nullable(),
 });
 
 export const cancelPorterOrderSchema = z.object({
@@ -65,6 +72,9 @@ export const listPorterOrdersQuerySchema = z.object({
     limit: z.coerce.number().optional(),
     status: z.string().optional(),
     search: z.string().optional(),
+    scheduleFilter: z.string().optional(),
+    scheduledFrom: z.string().optional(),
+    scheduledTo: z.string().optional(),
 });
 
 export const adminAssignDriverSchema = z.object({

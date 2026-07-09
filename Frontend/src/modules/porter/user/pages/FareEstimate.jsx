@@ -9,6 +9,7 @@ import { useBooking } from "../context/BookingContext";
 import { toast } from "sonner";
 import {
   getPorterFindingPartnerPath,
+  getPorterScheduledWaitingPath,
   getPorterPromoPath,
   getPorterPaymentPath,
   getPorterSchedulePath,
@@ -22,6 +23,7 @@ import {
   handleFlutterRazorpayPayment,
 } from "@food/utils/razorpay";
 import { mapActiveShipmentFromOrder } from "../utils/orderMapper";
+import { getPorterClientTimezone } from "../utils/timezone";
 
 export default function FareEstimate() {
   const navigate = useNavigate();
@@ -133,7 +135,9 @@ export default function FareEstimate() {
           <div className="flex items-center gap-2">
             <Calendar className="h-4 w-4 text-[#FF0000]" />
             <span className="text-[14px] font-bold text-gray-900">
-              {parcel.isScheduled && scheduledAt ? `Scheduled: ${new Date(scheduledAt).toLocaleString()}` : "Schedule Delivery"}
+              {scheduledAt
+                ? `Scheduled: ${new Date(scheduledAt).toLocaleString("en-IN")}`
+                : "Schedule Delivery"}
             </span>
           </div>
           <ChevronRight className="h-4 w-4 text-gray-400" />
@@ -225,7 +229,10 @@ export default function FareEstimate() {
                 parcel,
                 couponCode: coupon?.code,
                 paymentMethod: paymentMethodId,
-                scheduledAt: scheduledAt || undefined,
+                scheduledAt: (parcel.isScheduled && scheduledAt) ? scheduledAt : undefined,
+                timezone: (parcel.isScheduled && scheduledAt)
+                  ? getPorterClientTimezone()
+                  : undefined,
               });
 
               const order = result?.order || result;
@@ -265,7 +272,15 @@ export default function FareEstimate() {
               }
 
               const mapped = mapActiveShipmentFromOrder(order);
-              setActiveShipment(mapped || {
+              // After Razorpay verify, refetch so scheduled status is accurate.
+              let finalOrder = order;
+              try {
+                const refreshed = await porterUserApi.getOrder(order.id || order._id, { forceRefresh: true });
+                finalOrder = refreshed?.order || refreshed || order;
+              } catch {
+                // keep original order
+              }
+              const shipment = mapActiveShipmentFromOrder(finalOrder) || mapped || {
                 id: order.id || order._id,
                 orderNumber: order.orderNumber,
                 trackingId: order.orderNumber,
@@ -275,11 +290,16 @@ export default function FareEstimate() {
                 delivery,
                 vehicle: vehicle?.name,
                 total: order.pricing?.total ?? total,
+                scheduledAt: finalOrder.scheduledAt || scheduledAt || null,
                 createdAt: order.createdAt || new Date().toISOString(),
-              });
+              };
+              setActiveShipment(shipment);
               clearBookingDraft();
 
-              navigate(getPorterFindingPartnerPath(), { replace: true });
+              const next = String(shipment.status || "").toLowerCase() === "scheduled"
+                ? getPorterScheduledWaitingPath()
+                : getPorterFindingPartnerPath();
+              navigate(next, { replace: true });
             } catch (error) {
               console.error("Order error:", error);
               toast.error(error?.message || "Failed to place order");

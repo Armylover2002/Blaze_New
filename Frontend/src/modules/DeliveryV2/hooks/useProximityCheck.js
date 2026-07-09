@@ -1,11 +1,17 @@
 import { useMemo } from 'react';
 import { useDeliveryStore } from '@/modules/DeliveryV2/store/useDeliveryStore';
 import { calculateDistance } from '@/modules/DeliveryV2/hooks/proximity.utils';
+import {
+  normalizeLocationPoint,
+  getPrimaryPickupLocation,
+  getReturnDropLocation,
+  isReturnPickupTrip,
+} from '@/modules/DeliveryV2/utils/orderRouting';
 
 /**
  * useProximityCheck - Professional hook for dynamic range monitoring.
  * Ensures rider can only advance based on Admin-defined ranges.
- * 
+ *
  * @returns {Object} { distanceToTarget, isWithinRange, actionLimit }
  */
 export const useProximityCheck = () => {
@@ -17,17 +23,29 @@ export const useProximityCheck = () => {
   // Determine current target based on trip state
   const targetLocation = useMemo(() => {
     if (!activeOrder) return null;
-    
-    // If heading to pickup or arrived at pickup, target is restaurant
+
     if (['PICKING_UP', 'REACHED_PICKUP'].includes(tripStatus)) {
-      return activeOrder.restaurantLocation || activeOrder.restaurant_location;
+      return (
+        normalizeLocationPoint(activeOrder.restaurantLocation) ||
+        normalizeLocationPoint(activeOrder.pickupLocation) ||
+        normalizeLocationPoint(activeOrder.pickup) ||
+        getPrimaryPickupLocation(activeOrder) ||
+        normalizeLocationPoint(activeOrder.restaurant_location)
+      );
     }
-    
-    // If heading to drop or arrived at drop, target is customer
+
     if (['PICKED_UP', 'REACHED_DROP'].includes(tripStatus)) {
-      return activeOrder.customerLocation || activeOrder.customer_location;
+      if (isReturnPickupTrip(activeOrder)) {
+        return getReturnDropLocation(activeOrder) || normalizeLocationPoint(activeOrder.dropPoint);
+      }
+      return (
+        normalizeLocationPoint(activeOrder.customerLocation) ||
+        normalizeLocationPoint(activeOrder.dropLocation) ||
+        normalizeLocationPoint(activeOrder.delivery) ||
+        normalizeLocationPoint(activeOrder.customer_location)
+      );
     }
-    
+
     return null;
   }, [activeOrder, tripStatus]);
 
@@ -40,18 +58,19 @@ export const useProximityCheck = () => {
 
   // Calculate real-time distance
   const distanceToTarget = useMemo(() => {
-    if (!riderLocation || !targetLocation) return Infinity;
-    
+    const rider = normalizeLocationPoint(riderLocation);
+    if (!rider || !targetLocation) return Infinity;
+
     return calculateDistance(
-      riderLocation.lat,
-      riderLocation.lng,
+      rider.lat,
+      rider.lng,
       targetLocation.lat,
-      targetLocation.lng
+      targetLocation.lng,
     );
   }, [riderLocation, targetLocation]);
 
   // Dev mode bypass
-  const isDevMode = import.meta.env.VITE_APP_MODE === 'developer' || 
+  const isDevMode = import.meta.env.VITE_APP_MODE === 'developer' ||
                     import.meta.env.VITE_ENABLE_RANGE_BYPASS === 'true' ||
                     import.meta.env.DEV;
 

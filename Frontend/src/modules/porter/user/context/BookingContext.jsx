@@ -18,6 +18,8 @@ import {
   writeStoredCouponPricing,
   readStoredScheduledAt,
   writeStoredScheduledAt,
+  readStoredScheduleMeta,
+  writeStoredScheduleMeta,
   readStoredActiveShipment,
   writeStoredActiveShipment,
   clearStoredBookingDraft,
@@ -126,6 +128,7 @@ export function PorterProvider({ children }) {
   const [couponPricing, setCouponPricingState] = useState(() => readStoredCouponPricing());
   const [paymentMethodId, setPaymentMethodIdState] = useState(() => readStoredPaymentMethod());
   const [scheduledAt, setScheduledAtState] = useState(() => readStoredScheduledAt());
+  const [scheduleMeta, setScheduleMetaState] = useState(() => readStoredScheduleMeta());
   const [activeShipment, setActiveShipment] = useState(() => readStoredActiveShipment());
   const [routeQuote, setRouteQuote] = useState(null);
   const [quoteLoading, setQuoteLoading] = useState(false);
@@ -208,6 +211,30 @@ export function PorterProvider({ children }) {
   const setScheduledAt = useCallback((value) => {
     setScheduledAtState(value);
     writeStoredScheduledAt(value);
+    if (value == null) {
+      setScheduleMetaState(null);
+      writeStoredScheduleMeta(null);
+    }
+  }, []);
+
+  const setScheduleMeta = useCallback((value) => {
+    setScheduleMetaState(value);
+    writeStoredScheduleMeta(value);
+  }, []);
+
+  /** Atomically persist schedule decision for the booking draft. */
+  const applyScheduleSelection = useCallback(({ isScheduled, scheduledAt: when, meta = null } = {}) => {
+    setParcelState((prev) => {
+      const next = { ...prev, isScheduled: Boolean(isScheduled) };
+      writeStoredParcel(next);
+      return next;
+    });
+    const iso = when || null;
+    setScheduledAtState(iso);
+    writeStoredScheduledAt(iso);
+    const nextMeta = isScheduled && iso ? (meta || null) : null;
+    setScheduleMetaState(nextMeta);
+    writeStoredScheduleMeta(nextMeta);
   }, []);
 
   const selectVehicle = useCallback((nextVehicleId, vehicleMeta = null) => {
@@ -351,6 +378,15 @@ export function PorterProvider({ children }) {
       if (seq !== quoteSeqRef.current) return null;
       console.error("[Porter] route quote failed:", err);
       setRouteQuote(null);
+      const message = err?.response?.data?.message || err?.message;
+      if (message && /service area|outside/i.test(String(message))) {
+        try {
+          const { toast } = await import("sonner");
+          toast.error(message);
+        } catch {
+          // ignore toast load failure
+        }
+      }
       return null;
     } finally {
       if (seq === quoteSeqRef.current) setQuoteLoading(false);
@@ -505,6 +541,7 @@ export function PorterProvider({ children }) {
     setCouponPricingState(null);
     setPaymentMethodIdState("wallet");
     setScheduledAtState(null);
+    setScheduleMetaState(null);
     setRouteQuote(null);
     clearStoredBookingDraft();
   }, []);
@@ -525,7 +562,7 @@ export function PorterProvider({ children }) {
       resolvedVehicleId, suggestedVehicleId,
       coupon, setCoupon, applyCoupon, couponPricing,
       paymentMethodId, setPaymentMethodId,
-      scheduledAt, setScheduledAt,
+      scheduledAt, setScheduledAt, scheduleMeta, setScheduleMeta, applyScheduleSelection,
       activeShipment, setActiveShipment: setActiveShipmentPersisted, refreshActiveOrder,
       activeOrderEvent: lastUpdate,
       routeQuote, quoteLoading, refreshRouteQuote, totalParcelWeight,
@@ -536,7 +573,8 @@ export function PorterProvider({ children }) {
       pickup, delivery, setPickup, setDelivery, parcel, updateParcel,
       vehicleId, setVehicleId, selectVehicle, selectedVehicle, vehicle,
       resolvedVehicleId, suggestedVehicleId, coupon, paymentMethodId,
-      scheduledAt, activeShipment, routeQuote, quoteLoading, refreshRouteQuote, totalParcelWeight,
+      scheduledAt, scheduleMeta, applyScheduleSelection, setScheduleMeta,
+      activeShipment, routeQuote, quoteLoading, refreshRouteQuote, totalParcelWeight,
       distanceKm, durationMin, distanceText, durationText, baseFare, serviceTax, discount, total, resetBooking, clearBookingDraft,
       refreshActiveOrder, lastUpdate,
       applyCoupon, couponPricing, setActiveShipmentPersisted, setCoupon, setPaymentMethodId, setScheduledAt,
@@ -556,7 +594,8 @@ export function useBooking() {
       resolvedVehicleId: null, suggestedVehicleId: null,
       coupon: null, setCoupon: () => {}, applyCoupon: async () => null, couponPricing: null,
       paymentMethodId: "wallet", setPaymentMethodId: () => {},
-      scheduledAt: null, setScheduledAt: () => {}, activeShipment: null, setActiveShipment: () => {},
+      scheduledAt: null, setScheduledAt: () => {}, scheduleMeta: null, setScheduleMeta: () => {}, applyScheduleSelection: () => {},
+      activeShipment: null, setActiveShipment: () => {},
       refreshActiveOrder: async () => null, activeOrderEvent: null,
       routeQuote: null, quoteLoading: false, refreshRouteQuote: async () => null, totalParcelWeight: 0,
       distanceKm: null, durationMin: null, distanceText: null, durationText: null,

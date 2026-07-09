@@ -6,7 +6,9 @@ import {
     validatePlaceIdQuery,
     validateRoutePreviewBody,
     validateQuotePreviewBody,
+    validateZoneDetectQuery,
 } from '../validators/maps.validator.js';
+import { detectPorterZoneForPoint } from '../orders/services/porter-zone-lookup.service.js';
 
 export const reverseGeocode = asyncHandler(async (req, res) => {
     const { lat, lng } = validateReverseGeocodeQuery(req.query);
@@ -30,4 +32,15 @@ export const getQuotePreview = asyncHandler(async (req, res) => {
     const payload = validateQuotePreviewBody(req.body);
     const data = await mapsService.getQuotePreview(payload);
     return sendResponse(res, 200, 'Quote preview fetched successfully', data);
+});
+
+export const detectPorterZone = asyncHandler(async (req, res) => {
+    const { lat, lng } = validateZoneDetectQuery(req.query);
+    const data = await detectPorterZoneForPoint(lat, lng);
+    return sendResponse(
+        res,
+        200,
+        data.status === 'IN_SERVICE' ? 'Zone detected' : 'Out of service',
+        data,
+    );
 });

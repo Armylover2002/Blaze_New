@@ -7,6 +7,7 @@ import {
     validateVerifyPaymentDto,
     validateCancelOrderDto,
     validateOrderStatusDto,
+    validateAdminOrderStatusDto,
     validateAssignDeliveryDto,
     validateDispatchSettingsDto,
     validateOrderRatingsDto
@@ -171,7 +172,12 @@ export async function updateOrderStatusRestaurantController(req, res, next) {
         const restaurantId = req.user?.userId;
         const orderId = req.params.orderId;
         const dto = validateOrderStatusDto(req.body);
-        const order = await orderService.updateOrderStatusRestaurant(orderId, restaurantId, dto.orderStatus);
+        const order = await orderService.updateOrderStatusRestaurant(
+            orderId,
+            restaurantId,
+            dto.orderStatus,
+            dto.reason || "",
+        );
         return sendResponse(res, 200, 'Order status updated', { order });
     } catch (err) {
         next(err);
@@ -337,6 +343,28 @@ export async function getOrderByIdAdminController(req, res, next) {
         const orderId = req.params.orderId;
         const order = await orderService.getOrderById(orderId, { admin: true });
         return sendResponse(res, 200, 'Order retrieved', { order });
+    } catch (err) {
+        next(err);
+    }
+}
+
+/**
+ * Admin Accept/Reject order (acts on behalf of restaurant).
+ * Used by Admin → Orders → Accept/Reject buttons.
+ */
+export async function updateOrderStatusAdminController(req, res, next) {
+    try {
+        const orderId = req.params.orderId;
+        const dto = validateAdminOrderStatusDto(req.body);
+        const adminId = req.user?.userId;
+
+        const updated = await orderService.updateOrderStatusAdmin(
+            orderId,
+            adminId,
+            dto.orderStatus,
+            dto.reason || "",
+        );
+        return sendResponse(res, 200, 'Order status updated', { order: updated });
     } catch (err) {
         next(err);
     }

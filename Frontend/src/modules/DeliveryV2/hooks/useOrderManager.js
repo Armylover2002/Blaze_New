@@ -23,7 +23,22 @@ export const useOrderManager = () => {
     if (isPorterParcelTrip(order)) {
       try {
         const result = await porterDriverApi.acceptOrder(orderId);
-        const fullOrder = enrichPorterDeliveryOrder(result?.order || order);
+        const apiOrder = result?.order || result;
+        const fullOrder = enrichPorterDeliveryOrder({
+          ...order,
+          ...(apiOrder || {}),
+          // Preserve offer-time rider→pickup km if accept payload omits it.
+          pickupDistanceKm:
+            apiOrder?.pickupDistanceKm ??
+            order?.pickupDistanceKm ??
+            apiOrder?.distanceKm ??
+            order?.distanceKm,
+          distanceKm:
+            apiOrder?.pickupDistanceKm ??
+            apiOrder?.distanceKm ??
+            order?.pickupDistanceKm ??
+            order?.distanceKm,
+        });
         setActiveOrder(fullOrder);
         updateTripStatus(mapPorterStatusToTripStatus(fullOrder.status));
       } catch (error) {

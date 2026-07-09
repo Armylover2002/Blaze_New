@@ -11,6 +11,7 @@ import FilterPanel from "@food/components/admin/orders/FilterPanel"
 import ViewOrderDialog from "@food/components/admin/orders/ViewOrderDialog"
 import SettingsDialog from "@food/components/admin/orders/SettingsDialog"
 import RefundModal from "@food/components/admin/orders/RefundModal"
+import RejectOrderModal from "@food/components/admin/orders/RejectOrderModal"
 import { useOrdersManagement } from "@food/components/admin/orders/useOrdersManagement"
 import { Loader2 } from "lucide-react"
 import { OrdersDashboardSkeleton } from "@food/components/ui/loading-skeletons"
@@ -32,7 +33,7 @@ const statusConfig = {
   "processing": { title: "Processing Orders", color: 'red', icon: Package },
   "food-on-the-way": { title: "Food On The Way Orders", color: "amber", icon: Package },
   "delivered": { title: "Delivered Orders", color: "emerald", icon: Package },
-  "canceled": { title: "Canceled Orders", color: "rose", icon: Package },
+  "canceled": { title: "Cancelled Orders", color: "rose", icon: Package },
   "restaurant-cancelled": { title: "Restaurant Cancelled Orders", color: "red", icon: Package },
   "payment-failed": { title: "Payment Failed Orders", color: "red", icon: Package },
   "refunded": { title: "Refunded Orders", color: "sky", icon: Package },
@@ -45,9 +46,12 @@ export default function OrdersPage({ statusKey = "all" }) {
   const [isLoading, setIsLoading] = useState(true)
   const [processingRefund, setProcessingRefund] = useState(null)
   const [processingActionOrderId, setProcessingActionOrderId] = useState(null)
+  const [processingActionType, setProcessingActionType] = useState(null)
   const [deletingOrderId, setDeletingOrderId] = useState(null)
   const [refundModalOpen, setRefundModalOpen] = useState(false)
   const [selectedOrderForRefund, setSelectedOrderForRefund] = useState(null)
+  const [rejectModalOpen, setRejectModalOpen] = useState(false)
+  const [selectedOrderForReject, setSelectedOrderForReject] = useState(null)
   const showLoadingSkeleton = useDelayedLoading(isLoading, { delay: 120, minDuration: 360 })
   const seenOrderIdsRef = useRef(new Set())
   const isFirstLoadRef = useRef(true)
@@ -461,8 +465,10 @@ export default function OrdersPage({ statusKey = "all" }) {
       const cancellationElapsedMs =
         createdAtMs !== null && cancelledAtMs !== null ? cancelledAtMs - createdAtMs : null
       let displayStatus = order.orderStatus
-      if (!backendStatus || backendStatus === "created" || backendStatus === "confirmed") {
+      if (!backendStatus || backendStatus === "created" || backendStatus === "placed") {
         displayStatus = "Pending"
+      } else if (backendStatus === "confirmed") {
+        displayStatus = "Accepted"
       } else if (backendStatus === "preparing" || backendStatus === "ready_for_pickup") {
         displayStatus = "Processing"
       } else if (backendStatus === "picked_up") {
@@ -474,7 +480,9 @@ export default function OrdersPage({ statusKey = "all" }) {
       } else if (backendStatus === "cancelled_by_user") {
         displayStatus = "Cancelled by User"
       } else if (backendStatus === "cancelled_by_admin") {
-        displayStatus = "Canceled"
+        displayStatus = "Cancelled by Admin"
+      } else if (backendStatus === "cancelled_by_system") {
+        displayStatus = "Cancelled"
       }
 
       const dp = order.dispatch?.deliveryPartnerId
@@ -712,7 +720,8 @@ export default function OrdersPage({ statusKey = "all" }) {
     }
 
     try {
-      setProcessingActionOrderId(order.id || order.orderId)
+      setProcessingActionOrderId(orderIdToUse)
+      setProcessingActionType('accept')
       const response = await adminAPI.acceptOrder(orderIdToUse)
       if (response.data?.success) {
         toast.success(response.data?.message || `Order ${order.orderId} accepted`)
@@ -725,25 +734,28 @@ export default function OrdersPage({ statusKey = "all" }) {
       toast.error(error.response?.data?.message || "Failed to accept order")
     } finally {
       setProcessingActionOrderId(null)
+      setProcessingActionType(null)
     }
   }
 
-  const handleRejectOrder = async (order) => {
+  const handleRejectOrder = (order) => {
+    setSelectedOrderForReject(order)
+    setRejectModalOpen(true)
+  }
+
+  const confirmRejectOrder = async (reason) => {
+    const order = selectedOrderForReject
+    if (!order) return
     const orderIdToUse = order.id || order._id || order.orderId
     if (!orderIdToUse) {
       toast.error("Order ID not found")
+      setRejectModalOpen(false)
       return
     }
 
-    const reason = prompt(
-      `Enter rejection reason for order ${order.orderId}:`,
-      "Order rejected by admin",
-    )
-
-    if (reason === null) return
-
     try {
       setProcessingActionOrderId(order.id || order.orderId)
+      setProcessingActionType('reject')
       const response = await adminAPI.rejectOrder(orderIdToUse, reason)
       if (response.data?.success) {
         toast.success(response.data?.message || `Order ${order.orderId} rejected`)
@@ -756,6 +768,9 @@ export default function OrdersPage({ statusKey = "all" }) {
       toast.error(error.response?.data?.message || "Failed to reject order")
     } finally {
       setProcessingActionOrderId(null)
+      setProcessingActionType(null)
+      setRejectModalOpen(false)
+      setSelectedOrderForReject(null)
     }
   }
 
@@ -982,6 +997,13 @@ export default function OrdersPage({ statusKey = "all" }) {
         onConfirm={handleRefundConfirm}
         isProcessing={processingRefund !== null}
       />
+      <RejectOrderModal
+        isOpen={rejectModalOpen}
+        onOpenChange={setRejectModalOpen}
+        order={selectedOrderForReject}
+        onConfirm={confirmRejectOrder}
+        isProcessing={processingActionOrderId !== null}
+      />
       <OrdersTable 
         orders={filteredOrders} 
         visibleColumns={visibleColumns}
@@ -992,6 +1014,7 @@ export default function OrdersPage({ statusKey = "all" }) {
         onAcceptOrder={statusKey === "all" || statusKey === "pending" ? handleAcceptOrder : undefined}
         onRejectOrder={statusKey === "all" || statusKey === "pending" ? handleRejectOrder : undefined}
         actionLoadingOrderId={processingActionOrderId}
+        actionLoadingType={processingActionType}
         deletingOrderId={deletingOrderId}
       />
     </div>

@@ -69,10 +69,13 @@ import {
     getPorterOrder,
     listPorterOrders,
     cancelPorterOrder,
+    reschedulePorterOrder,
     ratePorterOrder,
     verifyPayment,
     listPorterOrdersAdmin,
     getPorterOrderAdmin,
+    adminReschedulePorterOrder,
+    adminStartScheduledPorterDispatch,
 } from '../orders/controllers/porterOrder.controller.js';
 
 import {
@@ -115,6 +118,7 @@ import {
     getPlaceDetails,
     getRoutePreview,
     getQuotePreview,
+    detectPorterZone,
 } from '../controllers/maps.controller.js';
 
 const router = express.Router();
@@ -128,6 +132,7 @@ router.get('/health', (_req, res) => res.json({ success: true, module: 'porter',
 router.get('/home', getPublicHomeData);
 router.get('/maps/reverse-geocode', reverseGeocode);
 router.get('/maps/place-details', getPlaceDetails);
+router.get('/maps/zone-detect', detectPorterZone);
 router.post('/maps/route-preview', getRoutePreview);
 router.post('/maps/quote-preview', getQuotePreview);
 
@@ -139,6 +144,7 @@ router.get('/orders', ...userAuth, listPorterOrders);
 router.post('/orders/verify-payment', ...userAuth, verifyPayment);
 router.get('/orders/:id', ...userAuth, getPorterOrder);
 router.post('/orders/:id/cancel', ...userAuth, cancelPorterOrder);
+router.patch('/orders/:id/reschedule', ...userAuth, reschedulePorterOrder);
 router.post('/orders/:id/rate', ...userAuth, ratePorterOrder);
 
 // Driver parcel orders (isolated from Food/Quick dispatch)
@@ -218,6 +224,8 @@ router.get('/admin/orders/:id/logs', ...adminOrEmployee, checkPermission('porter
 router.get('/admin/orders/:id/assignable-drivers', ...adminOrEmployee, checkPermission('porter::orders', 'edit'), listAssignablePorterDrivers);
 router.post('/admin/orders/:id/assign', ...adminOrEmployee, checkPermission('porter::orders', 'edit'), adminAssignPorterDriver);
 router.post('/admin/orders/:id/reassign', ...adminOrEmployee, checkPermission('porter::orders', 'edit'), adminReassignPorterDriver);
+router.patch('/admin/orders/:id/reschedule', ...adminOrEmployee, checkPermission('porter::orders', 'edit'), adminReschedulePorterOrder);
+router.post('/admin/orders/:id/start-dispatch', ...adminOrEmployee, checkPermission('porter::orders', 'edit'), adminStartScheduledPorterDispatch);
 router.post('/admin/orders/:id/cancel', ...adminOrEmployee, checkPermission('porter::orders', 'edit'), adminCancelPorterOrder);
 router.post('/admin/orders/:id/force-close', authMiddleware, requireRoles('ADMIN'), checkPermission('porter::orders', 'edit'), adminForceClosePorterOrder);
 

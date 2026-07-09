@@ -16,6 +16,7 @@ export const getPorterPaymentPath = () => `${BASE}/payment`;
 export const getPorterRatePath = () => `${BASE}/rate`;
 export const getPorterCancelPath = () => `${BASE}/cancel`;
 export const getPorterSchedulePath = () => `${BASE}/schedule`;
+export const getPorterScheduledWaitingPath = () => `${BASE}/scheduled`;
 export const getPorterSosPath = () => `${BASE}/sos`;
 export const getPorterEmergencyPath = () => `${BASE}/emergency-contacts`;
 export const getPorterInvoicePath = (id = "current") => `${BASE}/invoice/${id}`;

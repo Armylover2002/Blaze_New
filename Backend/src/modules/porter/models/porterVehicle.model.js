@@ -19,7 +19,6 @@ const porterVehicleSchema = new mongoose.Schema(
             type: String,
             required: true,
             trim: true,
-            index: true,
             enum: ['bike', 'electric_bike', 'scooter', 'electric_scooter', 'bicycle', 'mini_truck', 'pickup', 'van', 'tempo', 'truck'],
         },
         iconUrl: {
@@ -50,7 +49,6 @@ const porterVehicleSchema = new mongoose.Schema(
             type: String,
             enum: ['active', 'inactive'],
             default: 'active',
-            index: true,
         },
         supportedServices: {
             type: [{ type: String, enum: ['food', 'quick', 'parcel'] }],
@@ -59,7 +57,6 @@ const porterVehicleSchema = new mongoose.Schema(
         displayOrder: {
             type: Number,
             default: 0,
-            index: true,
         },
         requiredDocuments: {
             type: [{ type: String, enum: ['rc', 'insurance', 'fitness', 'pollution', 'permit'] }],

@@ -7,6 +7,7 @@ import {
     cancelPorterOrderSchema,
     ratePorterOrderSchema,
     listPorterOrdersQuerySchema,
+    reschedulePorterOrderSchema,
 } from '../validators/porterOrder.validator.js';
 import { extractPerformer } from '../../../../core/utils/performer.js';
 
@@ -56,6 +57,19 @@ export const cancelPorterOrder = asyncHandler(async (req, res) => {
     return sendResponse(res, 200, 'Order cancelled', { order });
 });
 
+export const reschedulePorterOrder = asyncHandler(async (req, res) => {
+    const { scheduledAt, timezone } = reschedulePorterOrderSchema.parse(req.body);
+    const performer = extractPerformer(req.user);
+    const order = await porterOrderService.reschedulePorterOrder(
+        req.user.userId,
+        req.params.id,
+        scheduledAt,
+        performer,
+        timezone,
+    );
+    return sendResponse(res, 200, 'Order rescheduled', { order });
+});
+
 export const ratePorterOrder = asyncHandler(async (req, res) => {
     const dto = ratePorterOrderSchema.parse(req.body);
     const order = await porterOrderService.ratePorterOrder(req.user.userId, req.params.id, dto);
@@ -72,4 +86,22 @@ export const listPorterOrdersAdmin = asyncHandler(async (req, res) => {
 export const getPorterOrderAdmin = asyncHandler(async (req, res) => {
     const order = await porterOrderService.getPorterOrderAdmin(req.params.id);
     return sendResponse(res, 200, 'Order fetched', { order });
+});
+
+export const adminReschedulePorterOrder = asyncHandler(async (req, res) => {
+    const { scheduledAt, timezone } = reschedulePorterOrderSchema.parse(req.body);
+    const performer = extractPerformer(req.user);
+    const order = await porterOrderService.adminReschedulePorterOrder(
+        req.params.id,
+        scheduledAt,
+        performer,
+        timezone,
+    );
+    return sendResponse(res, 200, 'Order rescheduled', { order });
+});
+
+export const adminStartScheduledPorterDispatch = asyncHandler(async (req, res) => {
+    const performer = extractPerformer(req.user);
+    const order = await porterOrderService.adminStartScheduledPorterDispatch(req.params.id, performer);
+    return sendResponse(res, 200, 'Scheduled dispatch started', { order });
 });
