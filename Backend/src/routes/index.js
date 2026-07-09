@@ -22,6 +22,7 @@ import webhookRoutes from '../core/payments/routes/webhook.routes.js';
 import sellerRoutes from '../modules/quick-commerce/seller/routes/seller.routes.js';
 import searchRoutes from '../modules/food/search/routes/search.routes.js';
 import subscriptionRoutes from '../modules/food/subscriptions/routes/subscription.routes.js';
+import { requireEnabledModule } from '../middleware/moduleAccess.js';
 
 
 import commonSettingsRoutes from '../modules/common/routes/settings.routes.js';
@@ -42,15 +43,15 @@ router.use('/v1/food/auth', authRoutes);
 
 // Backward-compatible auth routes (legacy)
 router.use('/v1/auth', authRoutes);
-router.use('/v1/food/delivery', deliveryRoutes);
-router.use('/v1/food/restaurant', restaurantRoutes);
+router.use('/v1/food/delivery', requireEnabledModule('food'), deliveryRoutes);
+router.use('/v1/food/restaurant', requireEnabledModule('food'), restaurantRoutes);
 router.use('/v1/media', mediaRoutes);
-router.use('/v1/food/subscriptions', subscriptionRoutes);
+router.use('/v1/food/subscriptions', requireEnabledModule('food'), subscriptionRoutes);
 // Landing & hero-banners for Food user app (paths start with /food/hero-banners/...)
-router.use('/v1/food', landingRoutes);
-router.use('/v1/food/search', searchRoutes);
-router.get('/v1/food/dining/categories/public', getPublicDiningCategories);
-router.get('/v1/food/dining/restaurants/public', getPublicDiningRestaurants);
+router.use('/v1/food', requireEnabledModule('food'), landingRoutes);
+router.use('/v1/food/search', requireEnabledModule('food'), searchRoutes);
+router.get('/v1/food/dining/categories/public', requireEnabledModule('food'), getPublicDiningCategories);
+router.get('/v1/food/dining/restaurants/public', requireEnabledModule('food'), getPublicDiningRestaurants);
 router.use('/v1/uploads', uploadRoutes);
 
 // Mark business-settings/public as truly public (must be before protected admin block)
@@ -61,17 +62,17 @@ router.use('/v1/common/onboarding-fees', onboardingFeeRoutes);
 // Backward compatibility for public settings
 router.get('/v1/food/admin/business-settings/public', getPublicSettings);
 
-router.use('/v1/food/admin', authMiddleware, requireRoles('ADMIN', 'EMPLOYEE'), restaurantAdminRoutes);
-router.use('/v1/food/user', authMiddleware, requireRoles('USER'), userRoutes);
-router.use('/v1/food/notifications', authMiddleware, requireRoles('USER', 'RESTAURANT', 'DELIVERY_PARTNER'), notificationRoutes);
-router.use('/v1/food/orders', authMiddleware, requireRoles('USER'), orderUserRoutes);
-router.use('/v1/food/payments', authMiddleware, paymentRoutes);
+router.use('/v1/food/admin', requireEnabledModule('food'), authMiddleware, requireRoles('ADMIN', 'EMPLOYEE'), restaurantAdminRoutes);
+router.use('/v1/food/user', requireEnabledModule('food'), authMiddleware, requireRoles('USER'), userRoutes);
+router.use('/v1/food/notifications', requireEnabledModule('food'), authMiddleware, requireRoles('USER', 'RESTAURANT', 'DELIVERY_PARTNER'), notificationRoutes);
+router.use('/v1/food/orders', requireEnabledModule('food'), authMiddleware, requireRoles('USER'), orderUserRoutes);
+router.use('/v1/food/payments', requireEnabledModule('food'), authMiddleware, paymentRoutes);
 router.use('/v1/payments/webhook', webhookRoutes);
 router.use('/v1/fcm-tokens', fcmRoutes);
 router.use('/fcm-tokens', fcmRoutes);
-router.use('/v1/quick-commerce', quickCommerceRoutes);
-router.use('/v1/porter', porterRoutes);
-router.use('/v1/seller', sellerRoutes);
+router.use('/v1/quick-commerce', requireEnabledModule('quickCommerce'), quickCommerceRoutes);
+router.use('/v1/porter', requireEnabledModule('porter'), porterRoutes);
+router.use('/v1/seller', requireEnabledModule('quickCommerce'), sellerRoutes);
 
 
 // router.get('/v1/env/public', getPublicEnvController);

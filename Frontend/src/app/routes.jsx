@@ -7,6 +7,7 @@ import {
 } from '@food/components/ui/loading-skeletons'
 
 import ProtectedRoute from '@core/guards/ProtectedRoute'
+import ModuleEnabledRoute from '@core/guards/ModuleEnabledRoute'
 import FoodProtectedRoute from '../modules/Food/components/ProtectedRoute'
 import RoleGuard from '@core/guards/RoleGuard'
 import { AuthPageGuard } from '@core/guards/RouteGuard'
@@ -216,9 +217,11 @@ const AppRoutes = () => {
           <Route
             path="/quick/*"
             element={
-              <Suspense fallback={<PageLoader />}>
-                <QuickCommerceApp />
-              </Suspense>
+              <ModuleEnabledRoute moduleKey="quickCommerce">
+                <Suspense fallback={<PageLoader />}>
+                  <QuickCommerceApp />
+                </Suspense>
+              </ModuleEnabledRoute>
             }
           />
           <Route path="/quick-commerce/*" element={<RedirectLegacyQuickCommerce />} />
@@ -228,9 +231,11 @@ const AppRoutes = () => {
           <Route
             path="/porter/*"
             element={
-              <Suspense fallback={<PageLoader />}>
-                <PorterApp />
-              </Suspense>
+              <ModuleEnabledRoute moduleKey="porter">
+                <Suspense fallback={<PageLoader />}>
+                  <PorterApp />
+                </Suspense>
+              </ModuleEnabledRoute>
             }
           />
 
@@ -243,7 +248,14 @@ const AppRoutes = () => {
         </Route>
 
         {/* Seller Module */}
-        <Route path="/seller" element={<SellerAppWrapper />} />
+        <Route
+          path="/seller"
+          element={
+            <ModuleEnabledRoute moduleKey="quickCommerce">
+              <SellerAppWrapper />
+            </ModuleEnabledRoute>
+          }
+        />
         {/* Seller auth — redirect to /seller if already logged in */}
         <Route
           path="/seller/auth"
@@ -253,7 +265,14 @@ const AppRoutes = () => {
             </AuthPageGuard>
           }
         />
-        <Route path="/seller/*" element={<SellerAppWrapper />} />
+        <Route
+          path="/seller/*"
+          element={
+            <ModuleEnabledRoute moduleKey="quickCommerce">
+              <SellerAppWrapper />
+            </ModuleEnabledRoute>
+          }
+        />
 
         {/* Global Admin Portal - wrap lazy router in Suspense to avoid blank/crash on direct admin URLs */}
         <Route
