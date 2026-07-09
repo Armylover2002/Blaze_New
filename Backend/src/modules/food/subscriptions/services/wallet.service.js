@@ -110,14 +110,35 @@ export async function createTopupOrder(userId, userType, amount) {
 export async function verifyTopup(payload) {
     const { payment, order, notes } = payload;
     const rzPaymentId = payment.id;
-    const { ownerId, ownerType, amount } = notes;
+    const { ownerId, ownerType } = notes;
 
-    if (!ownerId || !ownerType || !amount) {
+    if (!ownerId || !ownerType) {
         logger.error('verifyTopup: Missing mandatory notes in Razorpay payload', { notes });
         return;
     }
 
-    const topupAmount = Number(amount);
+    const paymentStatus = String(payment?.status || '').toLowerCase();
+    const topupAmount = Number(payment?.amount || 0) / 100;
+    if (paymentStatus !== 'captured' || !Number.isFinite(topupAmount) || topupAmount <= 0) {
+        logger.error('verifyTopup: Invalid Razorpay payment payload', {
+            rzPaymentId,
+            status: payment?.status,
+            amount: payment?.amount,
+        });
+        return;
+    }
+
+    const paymentOrderId = String(payment?.order_id || '').trim();
+    const expectedOrderId = String(order?.id || '').trim();
+    if (expectedOrderId && paymentOrderId && paymentOrderId !== expectedOrderId) {
+        logger.error('verifyTopup: Payment order mismatch', {
+            rzPaymentId,
+            paymentOrderId,
+            expectedOrderId,
+        });
+        return;
+    }
+
     const session = await mongoose.startSession();
     session.startTransaction();
 

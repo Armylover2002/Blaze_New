@@ -99,20 +99,29 @@ export async function verifyTopupController(req, res, next) {
         }
 
         // Verify signature
-        const { verifyPaymentSignature } = await import('../../orders/helpers/razorpay.helper.js');
+        const { fetchRazorpayPayment, verifyPaymentSignature } = await import('../../orders/helpers/razorpay.helper.js');
         const isValid = verifyPaymentSignature(razorpayOrderId, razorpayPaymentId, razorpaySignature);
         if (!isValid) {
             return res.status(400).json({ success: false, message: 'Invalid payment signature' });
         }
 
+        const fetchedPayment = await fetchRazorpayPayment(razorpayPaymentId);
+        const fetchedOrderId = String(fetchedPayment?.order_id || '').trim();
+        const fetchedStatus = String(fetchedPayment?.status || '').toLowerCase();
+        if (fetchedOrderId !== String(razorpayOrderId).trim()) {
+            return res.status(400).json({ success: false, message: 'Payment order mismatch' });
+        }
+        if (fetchedStatus !== 'captured') {
+            return res.status(400).json({ success: false, message: 'Payment not captured' });
+        }
+
         // Credit wallet
         await walletService.verifyTopup({
-            payment: { id: razorpayPaymentId },
+            payment: fetchedPayment,
             order: { id: razorpayOrderId },
             notes: {
                 ownerId: String(userId),
-                ownerType: userType,
-                amount: req.body.amount ? String(req.body.amount) : null
+                ownerType: userType
             }
         });
 
