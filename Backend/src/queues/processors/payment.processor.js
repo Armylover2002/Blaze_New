@@ -26,6 +26,8 @@ export const processPaymentJob = async (job) => {
                 break;
 
             case 'order_cancelled':
+            case 'order_cancelled_by_user':
+            case 'order_cancelled_by_watchdog':
                 await handleOrderCancelled(job.data);
                 break;
 

@@ -18,7 +18,13 @@ export function enqueueOrderEvent(action, payload = {}) {
 
   // Synchronous fallback in development or when BullMQ is disabled
   if (process.env.BULLMQ_ENABLED !== 'true') {
-    if (['delivery_completed', 'order_cancelled', 'payment_verified'].includes(action)) {
+    if ([
+      'delivery_completed',
+      'order_cancelled',
+      'order_cancelled_by_user',
+      'order_cancelled_by_watchdog',
+      'payment_verified',
+    ].includes(action)) {
       import('../../../../queues/processors/payment.processor.js')
         .then(({ processPaymentJob }) => {
           logger.info(`[BullMQ:fallback] Running sync payment processor for action=${action}`);
