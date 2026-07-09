@@ -2055,6 +2055,43 @@ export async function processOrderPostPaymentFulfillment(orderInput, options = {
   return { success: true };
 }
 
+async function consumeOrderCouponUsage({ order, userId, fallbackRestaurantId = null } = {}) {
+  const couponCode = order?.pricing?.couponCode
+    ? String(order.pricing.couponCode).trim().toUpperCase()
+    : "";
+  if (!couponCode) return;
+
+  const orderType = String(order?.orderType || "").toLowerCase();
+  if (!["food", "mixed"].includes(orderType)) return;
+
+  const offer = await FoodOffer.findOne({ couponCode }).lean();
+  if (offer) {
+    await FoodOffer.updateOne({ _id: offer._id }, { $inc: { usedCount: 1 } });
+    if (userId) {
+      await FoodOfferUsage.updateOne(
+        { offerId: offer._id, userId: new mongoose.Types.ObjectId(userId) },
+        { $inc: { count: 1 }, $set: { lastUsedAt: new Date() } },
+        { upsert: true },
+      );
+    }
+    return;
+  }
+
+  let resolvedRestaurantId = fallbackRestaurantId || order?.restaurantId || null;
+  if (resolvedRestaurantId && !mongoose.Types.ObjectId.isValid(resolvedRestaurantId)) {
+    const { FoodRestaurant } = await import('../../restaurant/models/restaurant.model.js');
+    const rest = await FoodRestaurant.findOne({ restaurantId: resolvedRestaurantId }).select('_id').lean();
+    if (rest) resolvedRestaurantId = rest._id;
+  }
+  if (mongoose.Types.ObjectId.isValid(resolvedRestaurantId)) {
+    const { RestaurantCoupon } = await import('../../admin/models/restaurantCoupon.model.js');
+    await RestaurantCoupon.updateOne(
+      { couponCode, restaurantId: new mongoose.Types.ObjectId(resolvedRestaurantId) },
+      { $inc: { usedCount: 1 } }
+    );
+  }
+}
+
 // Stale getDispatchSettings and updateDispatchSettings removed (now imported from order-dispatch.service.js)
 
 // ----- Calculate (validation + return pricing from payload) -----
@@ -2866,37 +2903,12 @@ export async function createOrder(userId, dto) {
   } catch {
     // Don't block order placement on socket failures.
   }
-  const couponCode = normalizedPricing.couponCode
-    ? String(normalizedPricing.couponCode).trim().toUpperCase()
-    : "";
-  if ((orderType === "food" || orderType === "mixed") && couponCode) {
-    const offer = await FoodOffer.findOne({ couponCode }).lean();
-    if (offer) {
-      await FoodOffer.updateOne({ _id: offer._id }, { $inc: { usedCount: 1 } });
-      if (userId) {
-        await FoodOfferUsage.updateOne(
-          { offerId: offer._id, userId: new mongoose.Types.ObjectId(userId) },
-          { $inc: { count: 1 }, $set: { lastUsedAt: new Date() } },
-          { upsert: true },
-        );
-      }
-    } else {
-      let resolvedRestaurantId = primaryRestaurantId;
-      if (primaryRestaurantId && !mongoose.Types.ObjectId.isValid(primaryRestaurantId)) {
-        const { FoodRestaurant } = await import('../../restaurant/models/restaurant.model.js');
-        const rest = await FoodRestaurant.findOne({ restaurantId: primaryRestaurantId }).select('_id').lean();
-        if (rest) {
-          resolvedRestaurantId = rest._id;
-        }
-      }
-      if (mongoose.Types.ObjectId.isValid(resolvedRestaurantId)) {
-        const { RestaurantCoupon } = await import('../../admin/models/restaurantCoupon.model.js');
-        await RestaurantCoupon.updateOne(
-          { couponCode, restaurantId: new mongoose.Types.ObjectId(resolvedRestaurantId) },
-          { $inc: { usedCount: 1 } }
-        );
-      }
-    }
+  if (paymentMethod !== "razorpay") {
+    await consumeOrderCouponUsage({
+      order,
+      userId,
+      fallbackRestaurantId: primaryRestaurantId,
+    });
   }
 
   if (
@@ -2984,17 +2996,11 @@ export async function verifyPayment(userId, dto) {
     notifyCustomer: true,
     customerUserId: userId,
   });
-
-  const settings =
-    order.orderType === "food" ||
-    (order.orderType === "mixed" && order.dispatchPlan?.strategy === "single")
-      ? await getDispatchSettings()
-      : null;
-  if (settings?.dispatchMode === "auto") {
-    try {
-      await tryAutoAssign(order._id);
-    } catch {}
-  }
+  await consumeOrderCouponUsage({
+    order,
+    userId,
+    fallbackRestaurantId: order.restaurantId,
+  });
 
   return { order: order.toObject(), payment: order.payment };
 }

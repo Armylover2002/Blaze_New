@@ -10,6 +10,9 @@ import { ProcessedWebhookEvent } from '../models/processedWebhookEvent.model.js'
 import dayjs from 'dayjs';
 import { OnboardingPaymentLog } from '../../../modules/common/models/onboardingPaymentLog.model.js';
 import { processOrderPostPaymentFulfillment } from '../../../modules/food/orders/services/order.service.js';
+import { QuickOrder } from '../../../modules/quick-commerce/models/order.model.js';
+import { PorterOrder } from '../../../modules/porter/orders/models/porterOrder.model.js';
+import { fanOutQuickSellerOrdersForParent } from '../../../modules/quick-commerce/services/quickSellerOrderFanout.service.js';
 
 import * as walletService from '../../../modules/food/subscriptions/services/wallet.service.js';
 import { invalidateSubscriptionStatsCache } from '../../../modules/food/admin/utils/subscriptionStatsCache.js';
@@ -193,6 +196,58 @@ export const handleRazorpayWebhook = async (req, res) => {
 
             if (onboardingLog) {
                 logger.info(`Webhook [payment.captured]: Synced Onboarding Payment Log for Order ${rzOrderId} (Status=success)`);
+            }
+
+            // 📂 CASE D: Quick Commerce Order
+            const quickOrder = await QuickOrder.findOneAndUpdate(
+                {
+                    'payment.razorpay.orderId': rzOrderId,
+                    'payment.status': { $ne: 'paid' },
+                },
+                {
+                    $set: {
+                        'payment.status': 'paid',
+                        'payment.razorpay.paymentId': rzPaymentId,
+                    },
+                },
+                { new: true },
+            );
+            if (quickOrder) {
+                try {
+                    await foodTransactionService.updateTransactionStatus(quickOrder._id, 'captured', {
+                        status: 'captured',
+                        razorpayPaymentId: rzPaymentId,
+                        note: 'Quick payment synced via webhook',
+                    });
+                } catch (txnErr) {
+                    logger.error(`Webhook quick txn sync failed for ${quickOrder.orderId}: ${txnErr?.message || txnErr}`);
+                }
+                try {
+                    await fanOutQuickSellerOrdersForParent(quickOrder);
+                } catch (fanoutErr) {
+                    logger.error(`Webhook quick seller fanout failed for ${quickOrder.orderId}: ${fanoutErr?.message || fanoutErr}`);
+                }
+                logger.info(`Webhook [payment.captured]: Synced Quick Order ${quickOrder.orderId} (Status=paid)`);
+            }
+
+            // 📂 CASE E: Porter Order
+            const porterOrder = await PorterOrder.findOneAndUpdate(
+                {
+                    'payment.razorpay.orderId': rzOrderId,
+                    'payment.status': { $ne: 'paid' },
+                },
+                {
+                    $set: {
+                        'payment.status': 'paid',
+                        'payment.paidAt': new Date(),
+                        'payment.razorpay.paymentId': rzPaymentId,
+                        'payment.razorpayPaymentId': rzPaymentId,
+                    },
+                },
+                { new: true },
+            );
+            if (porterOrder) {
+                logger.info(`Webhook [payment.captured]: Synced Porter Order ${porterOrder.orderNumber} (Status=paid)`);
             }
         }
 

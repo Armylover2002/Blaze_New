@@ -9,6 +9,7 @@ import { getDeliveryCashLimitSettings } from "../../admin/services/admin.service
 import { ValidationError } from "../../../../core/auth/errors.js";
 import {
   createRazorpayOrder,
+  fetchRazorpayPayment,
   getRazorpayKeyId,
   isRazorpayConfigured,
   verifyPaymentSignature,
@@ -383,14 +384,11 @@ export const verifyDeliveryCashDepositPayment = async (
   const orderId = String(payload?.razorpayOrderId || "").trim();
   const paymentId = String(payload?.razorpayPaymentId || "").trim();
   const signature = String(payload?.razorpaySignature || "").trim();
-  const amount = Number(payload?.amount);
 
   if (!orderId) throw new ValidationError("razorpayOrderId is required");
   if (!paymentId) throw new ValidationError("razorpayPaymentId is required");
   if (!signature && isRazorpayConfigured())
     throw new ValidationError("razorpaySignature is required");
-  if (!Number.isFinite(amount) || amount < 1)
-    throw new ValidationError("amount is required");
 
   const existing = await FoodDeliveryCashDeposit.findOne({
     deliveryPartnerId,
@@ -404,11 +402,6 @@ export const verifyDeliveryCashDepositPayment = async (
     };
   }
 
-  const wallet = await getDeliveryPartnerWalletEnhanced(deliveryPartnerId);
-  if (amount > wallet.cashInHand) {
-    throw new ValidationError("Deposit amount cannot exceed cash in hand");
-  }
-
   const isValid = isRazorpayConfigured()
     ? verifyPaymentSignature(orderId, paymentId, signature)
     : true;
@@ -417,12 +410,38 @@ export const verifyDeliveryCashDepositPayment = async (
     throw new ValidationError("Payment verification failed");
   }
 
+  let resolvedAmount = Number(payload?.amount);
+  if (isRazorpayConfigured()) {
+    const fetchedPayment = await fetchRazorpayPayment(paymentId);
+    const fetchedOrderId = String(fetchedPayment?.order_id || "").trim();
+    const fetchedStatus = String(fetchedPayment?.status || "").toLowerCase();
+    const fetchedAmount = Number(fetchedPayment?.amount || 0) / 100;
+
+    if (fetchedOrderId !== orderId) {
+      throw new ValidationError("Payment order mismatch");
+    }
+    if (fetchedStatus !== "captured") {
+      throw new ValidationError("Payment not captured");
+    }
+    if (!Number.isFinite(fetchedAmount) || fetchedAmount < 1) {
+      throw new ValidationError("Invalid payment amount");
+    }
+    resolvedAmount = fetchedAmount;
+  } else if (!Number.isFinite(resolvedAmount) || resolvedAmount < 1) {
+    throw new ValidationError("amount is required");
+  }
+
+  const wallet = await getDeliveryPartnerWalletEnhanced(deliveryPartnerId);
+  if (resolvedAmount > wallet.cashInHand) {
+    throw new ValidationError("Deposit amount cannot exceed cash in hand");
+  }
+
   const deposit = existing
     ? await FoodDeliveryCashDeposit.findByIdAndUpdate(
         existing._id,
         {
           $set: {
-            amount,
+            amount: resolvedAmount,
             paymentMethod: isRazorpayConfigured() ? "razorpay" : "cash",
             status: "Completed",
             razorpayOrderId: orderId,
@@ -433,7 +452,7 @@ export const verifyDeliveryCashDepositPayment = async (
       )
     : await FoodDeliveryCashDeposit.create({
         deliveryPartnerId,
-        amount,
+        amount: resolvedAmount,
         paymentMethod: isRazorpayConfigured() ? "razorpay" : "cash",
         status: "Completed",
         razorpayOrderId: orderId,
