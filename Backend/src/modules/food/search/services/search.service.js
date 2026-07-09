@@ -68,7 +68,7 @@ export const searchUnified = async (query = {}, options = {}) => {
         isDeleted: { $ne: true }, 
         accountStatus: { $ne: 'deleted' },
         status: 'approved',
-        isListed: true 
+        isListed: { $ne: false }
     };
     
     console.log(`[Search-Service] Querying with term: "${term}", categoryId: "${categoryId}", zoneId: "${zoneId}"`);

@@ -233,6 +233,27 @@ export function validateOrderStatusDto(body) {
     return result.data;
 }
 
+/**
+ * Admin order action DTO for the admin Orders page Accept/Reject buttons.
+ * Admin accepts/rejects on behalf of restaurant, so we only allow:
+ * - preparing (accept)
+ * - cancelled_by_restaurant (reject)
+ */
+export function validateAdminOrderStatusDto(body) {
+    const schema = z.object({
+        orderStatus: z.enum([
+            'preparing',
+            'cancelled_by_restaurant',
+        ]),
+        reason: z.string().optional(),
+    });
+    const result = schema.safeParse(body);
+    if (!result.success) {
+        throw new ValidationError(result.error.errors?.[0]?.message || 'Validation failed');
+    }
+    return result.data;
+}
+
 export function validateAssignDeliveryDto(body) {
     const schema = z.object({
         deliveryPartnerId: z.string().min(1, 'Delivery partner id required')

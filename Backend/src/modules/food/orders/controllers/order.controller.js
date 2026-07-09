@@ -7,6 +7,7 @@ import {
     validateVerifyPaymentDto,
     validateCancelOrderDto,
     validateOrderStatusDto,
+    validateAdminOrderStatusDto,
     validateAssignDeliveryDto,
     validateDispatchSettingsDto,
     validateOrderRatingsDto
@@ -337,6 +338,34 @@ export async function getOrderByIdAdminController(req, res, next) {
         const orderId = req.params.orderId;
         const order = await orderService.getOrderById(orderId, { admin: true });
         return sendResponse(res, 200, 'Order retrieved', { order });
+    } catch (err) {
+        next(err);
+    }
+}
+
+/**
+ * Admin Accept/Reject order (acts on behalf of restaurant).
+ * Used by Admin → Orders → Accept/Reject buttons.
+ */
+export async function updateOrderStatusAdminController(req, res, next) {
+    try {
+        const orderId = req.params.orderId;
+        const dto = validateAdminOrderStatusDto(req.body);
+
+        // Resolve order (supports both mongo _id and orderId string).
+        const resolved = await orderService.getOrderById(orderId, { admin: true });
+        const order = resolved?.order || resolved;
+        const restaurantId = order?.restaurantId?._id || order?.restaurantId;
+        if (!order?._id || !restaurantId) {
+            return sendResponse(res, 404, 'Order not found', { order: null });
+        }
+
+        const updated = await orderService.updateOrderStatusRestaurant(
+            String(order._id),
+            String(restaurantId),
+            dto.orderStatus,
+        );
+        return sendResponse(res, 200, 'Order status updated', { order: updated });
     } catch (err) {
         next(err);
     }

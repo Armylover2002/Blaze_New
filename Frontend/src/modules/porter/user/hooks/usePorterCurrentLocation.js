@@ -20,7 +20,7 @@ function getAccuratePosition() {
     navigator.geolocation.getCurrentPosition(resolve, reject, {
       enableHighAccuracy: true,
       timeout: 10000,
-      maximumAge: 10000, // Allow recently cached position for speed
+      maximumAge: 0, // Force fresh position
     });
   });
 }

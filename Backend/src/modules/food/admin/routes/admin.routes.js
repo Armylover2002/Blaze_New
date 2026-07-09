@@ -231,6 +231,7 @@ router.patch('/dining/restaurants/:restaurantId', checkPermission('food::dining_
 // ----- Orders -----
 router.get('/orders', checkPermission('food::order_management::orders', 'view'), orderController.listOrdersAdminController);
 router.get('/orders/:orderId', checkPermission('food::order_management::orders', 'view'), orderController.getOrderByIdAdminController);
+router.patch('/orders/:orderId/status', checkPermission('food::order_management::orders', 'edit'), orderController.updateOrderStatusAdminController);
 router.post('/orders/:orderId/refund', checkPermission('food::order_management::orders::refunded', 'create'), adminController.processRefund);
 router.delete('/orders/:orderId', checkPermission('food::order_management::orders::cancelled', 'delete'), orderController.deleteOrderAdminController);
 
