@@ -2,7 +2,13 @@ import mongoose from 'mongoose';
 import { ValidationError } from '../../../../core/auth/errors.js';
 import { FoodUser } from '../../../../core/users/user.model.js';
 import { FoodUserWallet } from '../models/userWallet.model.js';
-import { createRazorpayOrder, getRazorpayKeyId, isRazorpayConfigured, verifyPaymentSignature } from '../../orders/helpers/razorpay.helper.js';
+import {
+    createRazorpayOrder,
+    fetchRazorpayPayment,
+    getRazorpayKeyId,
+    isRazorpayConfigured,
+    verifyPaymentSignature,
+} from '../../orders/helpers/razorpay.helper.js';
 
 const syncUserWalletBalance = async (userId, balance) => {
     const numericBalance = Math.max(0, Number(balance) || 0);
@@ -142,12 +148,10 @@ export const verifyWalletTopupPayment = async (userId, payload) => {
     const orderId = String(payload?.razorpayOrderId || '').trim();
     const paymentId = String(payload?.razorpayPaymentId || '').trim();
     const signature = String(payload?.razorpaySignature || '').trim();
-    const amount = Number(payload?.amount);
 
     if (!orderId) throw new ValidationError('razorpayOrderId is required');
     if (!paymentId) throw new ValidationError('razorpayPaymentId is required');
     if (!signature) throw new ValidationError('razorpaySignature is required');
-    if (!Number.isFinite(amount) || amount <= 0) throw new ValidationError('amount is required');
 
     const wallet = await ensureWallet(userId);
     const existing = wallet.transactions.find((t) => String(t.razorpayOrderId || '') === orderId);
@@ -163,10 +167,31 @@ export const verifyWalletTopupPayment = async (userId, payload) => {
         throw new ValidationError('Payment verification failed');
     }
 
+    let creditedAmount = Number(payload?.amount);
+    if (isRazorpayConfigured()) {
+        const fetchedPayment = await fetchRazorpayPayment(paymentId);
+        const fetchedOrderId = String(fetchedPayment?.order_id || '').trim();
+        const fetchedStatus = String(fetchedPayment?.status || '').toLowerCase();
+        const fetchedAmount = Number(fetchedPayment?.amount || 0) / 100;
+
+        if (fetchedOrderId !== orderId) {
+            throw new ValidationError('Payment order mismatch');
+        }
+        if (fetchedStatus !== 'captured') {
+            throw new ValidationError('Payment not captured');
+        }
+        if (!Number.isFinite(fetchedAmount) || fetchedAmount <= 0) {
+            throw new ValidationError('Invalid payment amount');
+        }
+        creditedAmount = fetchedAmount;
+    } else if (!Number.isFinite(creditedAmount) || creditedAmount <= 0) {
+        throw new ValidationError('amount is required');
+    }
+
     // Store ONLY after payment is verified.
     wallet.transactions.unshift({
         type: 'addition',
-        amount,
+        amount: creditedAmount,
         status: 'Completed',
         description: isRazorpayConfigured() ? 'Wallet top-up' : 'Wallet top-up (dev)',
         metadata: { source: 'wallet_topup', mode: isRazorpayConfigured() ? 'razorpay' : 'dev' },
@@ -175,7 +200,7 @@ export const verifyWalletTopupPayment = async (userId, payload) => {
         razorpaySignature: signature
     });
 
-    wallet.balance = Number(wallet.balance || 0) + amount;
+    wallet.balance = Number(wallet.balance || 0) + creditedAmount;
     await wallet.save();
     await syncUserWalletBalance(userId, wallet.balance);
 
