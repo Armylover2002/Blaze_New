@@ -35,6 +35,7 @@ import { fanOutQuickSellerOrdersForParent } from '../services/quickSellerOrderFa
 import { deductWalletBalance, refundWalletBalance } from '../../food/user/services/userWallet.service.js';
 import {
     createRazorpayOrder,
+    fetchRazorpayPayment,
     getRazorpayKeyId,
     isRazorpayConfigured,
     verifyPaymentSignature,
@@ -42,6 +43,12 @@ import {
 import * as orderService from '../../food/orders/services/order.service.js';
 import { z } from 'zod';
 import { ValidationError } from '../../../core/auth/errors.js';
+import { getQuickCoupons } from '../services/content.service.js';
+import {
+  isQuickCouponCurrentlyValid,
+  isQuickCouponExpired,
+  isQuickCouponNotStarted,
+} from '../utils/coupon.helpers.js';
 
 const approvedProductFilter = {
   $or: [
@@ -67,6 +74,68 @@ const resolveId = (req) => {
   const sessionId = getQuickSessionIdFromRequest(req);
   return sessionId ? { sessionId } : null;
 };
+
+async function resolveServerQuickDiscount({ couponCode, subtotal, items }) {
+  const code = String(couponCode || '').trim().toUpperCase();
+  if (!code) return { discount: 0, couponCode: null };
+
+  const adminCoupons = await getQuickCoupons();
+  let coupon = (Array.isArray(adminCoupons) ? adminCoupons : []).find(
+    (entry) => String(entry?.code || '').toUpperCase() === code,
+  );
+
+  if (!coupon) {
+    const sellerIdRaw = (Array.isArray(items) ? items : []).find((item) => item?.sellerId)?.sellerId;
+    const sellerId = String(sellerIdRaw || '').trim();
+    if (sellerId && mongoose.isValidObjectId(sellerId)) {
+      const { SellerCoupon } = await import('../models/sellerCoupon.model.js');
+      const sellerCoupon = await SellerCoupon.findOne({
+        sellerId: new mongoose.Types.ObjectId(sellerId),
+        couponCode: code,
+        status: 'Approved',
+        expiryDate: { $gt: new Date() },
+      }).lean();
+      if (sellerCoupon) {
+        coupon = {
+          ...sellerCoupon,
+          code: sellerCoupon.couponCode,
+          minOrderValue: sellerCoupon.minOrderAmount,
+        };
+      }
+    }
+  }
+
+  if (!coupon) {
+    throw new ValidationError('Coupon not found or expired');
+  }
+  if (!isQuickCouponCurrentlyValid(coupon)) {
+    if (isQuickCouponExpired(coupon)) throw new ValidationError('This coupon has expired');
+    if (isQuickCouponNotStarted(coupon)) throw new ValidationError('This coupon is not active yet');
+    throw new ValidationError('This coupon is not active');
+  }
+
+  const minOrder = Number(coupon.minOrderValue || coupon.minOrder || 0);
+  if (minOrder > 0 && Number(subtotal || 0) < minOrder) {
+    throw new ValidationError(`Minimum order value of ₹${minOrder} required for this coupon`);
+  }
+
+  const discountType = String(coupon.discountType || 'flat').toLowerCase();
+  const discountValue = Number(coupon.discountValue || coupon.discount || 0);
+  const maxDiscount = Number(coupon.maxDiscount || coupon.maxDiscountValue || 0);
+
+  let discount = 0;
+  if (discountType === 'percent' || discountType === 'percentage') {
+    discount = Math.round((Number(subtotal || 0) * discountValue) / 100);
+    if (maxDiscount > 0) discount = Math.min(discount, maxDiscount);
+  } else {
+    discount = discountValue;
+  }
+
+  return {
+    discount: Math.max(0, Math.min(discount, Number(subtotal || 0))),
+    couponCode: String(coupon.code || code).toUpperCase(),
+  };
+}
 
 /** Match orders owned by logged-in user and/or the active quick session. */
 const buildOrderAccessQuery = (req) => {
@@ -403,7 +472,11 @@ export const placeOrder = async (req, res) => {
     }
 
     const subtotal = items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-    const discount = Math.max(0, Number(req.body?.discountTotal || 0));
+    const { discount, couponCode } = await resolveServerQuickDiscount({
+      couponCode: req.body?.couponCode,
+      subtotal,
+      items,
+    });
     let deliveryAddress = normalizeDeliveryAddress(req.body?.address);
 
     if (idQuery.userId) {
@@ -519,6 +592,8 @@ export const placeOrder = async (req, res) => {
       pricing: {
         ...pricing,
         subtotal,
+        discount,
+        couponCode: couponCode || null,
         total,
       },
       deliveryAddress,
@@ -847,46 +922,91 @@ export const verifyPayment = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Invalid payment signature' });
     }
 
-    await decrementQuickOrderItemsStock(
-      Array.isArray(order.items)
-        ? order.items.map((item) => ({
-            productId: item.itemId || item.productId,
-            quantity: item.quantity,
-            variantName: item.variantName || item.notes || '',
-            variantKey: item.variantKey || '',
-            variantSku: item.variantSku || '',
-          }))
-        : [],
-    );
-
-    order.payment.status = 'paid';
-    if (order.payment.razorpay) {
-      order.payment.razorpay.paymentId = razorpayPaymentId;
-      order.payment.razorpay.signature = razorpaySignature;
+    if (isRazorpayConfigured()) {
+      const fetchedPayment = await fetchRazorpayPayment(razorpayPaymentId);
+      const fetchedOrderId = String(fetchedPayment?.order_id || '').trim();
+      const fetchedStatus = String(fetchedPayment?.status || '').toLowerCase();
+      const fetchedAmount = Number(fetchedPayment?.amount || 0);
+      const expectedAmount = Math.round(Number(order.payment?.amountDue || order.pricing?.total || 0) * 100);
+      if (fetchedOrderId !== expectedRazorpayOrderId) {
+        return res.status(400).json({ success: false, message: 'Payment order mismatch' });
+      }
+      if (fetchedStatus !== 'captured') {
+        return res.status(400).json({ success: false, message: 'Payment not captured' });
+      }
+      if (!Number.isFinite(expectedAmount) || expectedAmount < 100 || fetchedAmount !== expectedAmount) {
+        return res.status(400).json({ success: false, message: 'Payment amount mismatch' });
+      }
     }
 
-    await order.save();
+    const paidOrder = await QuickOrder.findOneAndUpdate(
+      {
+        _id: order._id,
+        'payment.status': { $ne: 'paid' },
+      },
+      {
+        $set: {
+          'payment.status': 'paid',
+          'payment.razorpay.paymentId': razorpayPaymentId,
+          'payment.razorpay.signature': razorpaySignature,
+        },
+      },
+      { new: true },
+    );
+    if (!paidOrder) {
+      const latest = await QuickOrder.findById(order._id).select('payment.status').lean();
+      if (String(latest?.payment?.status || '').toLowerCase() === 'paid') {
+        return res.json({ success: true, message: 'Payment already verified' });
+      }
+      return res.status(409).json({ success: false, message: 'Payment verification in progress. Retry once.' });
+    }
 
     try {
-      const existingTxn = await FoodTransaction.findOne({ orderId: order._id }).select('_id').lean();
+      await decrementQuickOrderItemsStock(
+        Array.isArray(paidOrder.items)
+          ? paidOrder.items.map((item) => ({
+              productId: item.itemId || item.productId,
+              quantity: item.quantity,
+              variantName: item.variantName || item.notes || '',
+              variantKey: item.variantKey || '',
+              variantSku: item.variantSku || '',
+            }))
+          : [],
+      );
+    } catch (stockErr) {
+      await QuickOrder.updateOne(
+        { _id: paidOrder._id, 'payment.razorpay.paymentId': razorpayPaymentId },
+        {
+          $set: {
+            'payment.status': 'created',
+            'payment.razorpay.paymentId': '',
+            'payment.razorpay.signature': '',
+          },
+        },
+      );
+      throw stockErr;
+    }
+
+    try {
+      const existingTxn = await FoodTransaction.findOne({ orderId: paidOrder._id }).select('_id').lean();
       if (!existingTxn) {
-        await foodTransactionService.createInitialTransaction(order);
+        await foodTransactionService.createInitialTransaction(paidOrder);
       }
-      await foodTransactionService.updateTransactionStatus(order._id, 'captured', {
+      await foodTransactionService.updateTransactionStatus(paidOrder._id, 'captured', {
         status: 'captured',
         razorpayPaymentId: razorpayPaymentId,
         razorpaySignature: razorpaySignature,
         note: 'Quick commerce payment verified',
         recordedByRole: 'USER',
-        recordedById: order.userId,
+        recordedById: paidOrder.userId,
       });
     } catch (txnErr) {
       logger.error(
-        `Quick verifyPayment transaction sync failed for ${order.orderId}: ${txnErr?.message || txnErr}`,
+        `Quick verifyPayment transaction sync failed for ${paidOrder.orderId}: ${txnErr?.message || txnErr}`,
       );
     }
 
-    await fanOutQuickSellerOrdersForParent(order);
+    await fanOutQuickSellerOrdersForParent(paidOrder);
 
     return res.json({ success: true, message: 'Payment verified successfully' });
   } catch (error) {

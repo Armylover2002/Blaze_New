@@ -12,6 +12,7 @@ import { ValidationError, ForbiddenError, NotFoundError } from '../../../../core
 import { buildPaginationOptions, buildPaginatedResult } from '../../../../utils/helpers.js';
 import { FoodOffer } from '../../admin/models/offer.model.js';
 import { FoodOfferUsage } from '../../admin/models/offerUsage.model.js';
+import { FoodItem } from '../../admin/models/food.model.js';
 import { FoodDeliveryCommissionRule } from '../../admin/models/deliveryCommissionRule.model.js';
 import {
   sendNotificationToOwner,
@@ -21,6 +22,7 @@ import { FoodTransaction } from '../models/foodTransaction.model.js';
 import { FoodSupportTicket } from '../../user/models/supportTicket.model.js';
 import { Seller } from '../../../quick-commerce/seller/models/seller.model.js';
 import { SellerOrder } from '../../../quick-commerce/seller/models/sellerOrder.model.js';
+import { PorterOrder } from '../../../porter/orders/models/porterOrder.model.js';
 import { getSellerCommissionSnapshot } from '../../../quick-commerce/admin/services/commission.service.js';
 import { QuickFeeSettings } from '../../../quick-commerce/admin/models/feeSettings.model.js';
 import { calculateQuickPricing, calculateDeliveryFeeFromSettings } from '../../../quick-commerce/admin/services/billing.service.js';
@@ -30,6 +32,7 @@ import {
     verifyPaymentSignature,
     getRazorpayKeyId,
     isRazorpayConfigured,
+    fetchRazorpayPayment,
     fetchRazorpayPaymentLink,
     initiateRazorpayRefund
 } from '../helpers/razorpay.helper.js';
@@ -49,7 +52,7 @@ import {
 import { resolveDeliveryDocumentType } from '../../../quick-commerce/services/dispatchDocument.service.js';
 import { DISPATCH_DOCUMENT_TYPES } from '../../../quick-commerce/utils/dispatchDocument.constants.js';
 import * as returnPickupDelivery from '../../../quick-commerce/services/returnPickupDelivery.service.js';
-import { refundWalletBalance } from '../../user/services/userWallet.service.js';
+import { deductWalletBalance, refundWalletBalance } from '../../user/services/userWallet.service.js';
 
 export {
   tryAutoAssign,
@@ -63,6 +66,33 @@ const ORDER_ID_PREFIX = "FOD-";
 const ORDER_ID_LENGTH = 6;
 const USER_CANCEL_FULL_REFUND_WINDOW_MS = 30 * 1000;
 const USER_CANCEL_EDIT_WINDOW_MS = 60 * 1000;
+
+async function ensureRazorpayPaymentNotConsumed(paymentId, { currentFoodOrderId = null, currentPorterOrderId = null } = {}) {
+  const rzPaymentId = String(paymentId || "").trim();
+  if (!rzPaymentId) throw new ValidationError("Razorpay payment id required");
+
+  const [foodExisting, porterExisting] = await Promise.all([
+    FoodOrder.findOne({
+      "payment.razorpay.paymentId": rzPaymentId,
+      ...(currentFoodOrderId ? { _id: { $ne: currentFoodOrderId } } : {}),
+    })
+      .select("_id orderId")
+      .lean(),
+    PorterOrder.findOne({
+      $or: [
+        { "payment.razorpay.paymentId": rzPaymentId },
+        { "payment.razorpayPaymentId": rzPaymentId },
+      ],
+      ...(currentPorterOrderId ? { _id: { $ne: currentPorterOrderId } } : {}),
+    })
+      .select("_id orderNumber")
+      .lean(),
+  ]);
+
+  if (foodExisting || porterExisting) {
+    throw new ValidationError("Razorpay payment already consumed");
+  }
+}
 
 /**
  * Fire-and-forget BullMQ enqueue for order lifecycle events.
@@ -394,6 +424,67 @@ function normalizeOrderItems(items = [], fallbackOrderType = "food") {
           : item?.restaurant || item?.restaurantName || ""),
     };
   });
+}
+
+async function applyServerFoodItemPricing(items = [], sourceMap = new Map()) {
+  const foodItems = (Array.isArray(items) ? items : []).filter((item) => item?.type === "food");
+  if (!foodItems.length) return;
+
+  const itemIds = [
+    ...new Set(
+      foodItems
+        .map((item) => String(item?.itemId || "").trim())
+        .filter((id) => mongoose.isValidObjectId(id)),
+    ),
+  ];
+  if (!itemIds.length) {
+    throw new ValidationError("Invalid food item selection");
+  }
+
+  const foodDocs = await FoodItem.find({
+    _id: { $in: itemIds.map((id) => new mongoose.Types.ObjectId(id)) },
+    approvalStatus: "approved",
+    isAvailable: true,
+  })
+    .select("restaurantId name price variants image images foodType")
+    .lean();
+  const foodById = new Map(foodDocs.map((doc) => [String(doc._id), doc]));
+
+  for (const item of foodItems) {
+    const itemId = String(item?.itemId || "").trim();
+    const foodDoc = foodById.get(itemId);
+    if (!foodDoc) {
+      throw new ValidationError("One or more food items are unavailable");
+    }
+
+    const source = sourceMap.get(String(item.sourceId));
+    const expectedRestaurantId = String(source?.sourceId || "").trim();
+    const docRestaurantId = String(foodDoc.restaurantId || "").trim();
+    if (!expectedRestaurantId || expectedRestaurantId !== docRestaurantId) {
+      throw new ValidationError("Food item does not belong to selected restaurant");
+    }
+
+    let unitPrice = Number(foodDoc.price || 0);
+    if (item?.variantId) {
+      const variantId = String(item.variantId).trim();
+      const variant = (Array.isArray(foodDoc.variants) ? foodDoc.variants : []).find(
+        (entry) => String(entry?._id || "") === variantId,
+      );
+      if (!variant) {
+        throw new ValidationError("Selected food variant is unavailable");
+      }
+      unitPrice = Number(variant.price || 0);
+      item.variantName = variant.name || item.variantName || "";
+      item.variantPrice = unitPrice;
+    }
+
+    item.price = unitPrice;
+    item.name = foodDoc.name || item.name;
+    item.image = item.image || foodDoc.image || foodDoc.images?.[0] || "";
+    item.isVeg = String(foodDoc.foodType || "").toLowerCase() === "veg";
+    item.sourceId = expectedRestaurantId;
+    item.sourceName = source?.sourceName || item.sourceName || "";
+  }
 }
 
 function getPointLatLng(locationLike) {
@@ -1905,6 +1996,102 @@ export async function processScheduledOrderNotification(orderMongoId) {
   return { success: true };
 }
 
+export async function processOrderPostPaymentFulfillment(orderInput, options = {}) {
+  const { notifyCustomer = false, customerUserId = null } = options;
+  const order =
+    orderInput instanceof FoodOrder
+      ? orderInput
+      : await FoodOrder.findById(orderInput);
+  if (!order) return { success: false, reason: "Order not found" };
+
+  if (order.orderType === "food" || order.orderType === "mixed") {
+    await notifyRestaurantNewOrder(order);
+  }
+  if (order.orderType === "quick" || order.orderType === "mixed") {
+    const sellerOrders = await upsertSellerOrdersForParent(order);
+    await notifySellerNewOrders(order, sellerOrders);
+  }
+
+  if (order.orderStatus === "scheduled" && order.scheduledAt) {
+    const now = Date.now();
+    const scheduledTime = new Date(order.scheduledAt).getTime();
+    const notificationTime = scheduledTime - 15 * 60 * 1000;
+    const delay = Math.max(0, notificationTime - now);
+
+    enqueueOrderEvent("NOTIFY_SCHEDULED_ORDER", {
+      orderId: order.orderId,
+      orderMongoId: order._id.toString(),
+    }, { delay });
+
+    logger.info(`Scheduled notification for verified order ${order.orderId} with delay of ${delay}ms`);
+  }
+
+  if (
+    (order.orderType === "food" || (order.orderType === "mixed" && order.dispatchPlan?.strategy === "single")) &&
+    String(order.dispatch?.modeAtCreation || "manual") === "auto" &&
+    String(order.payment?.status || "").toLowerCase() === "paid"
+  ) {
+    try {
+      await tryAutoAssign(order._id);
+    } catch {
+      // leave unassigned
+    }
+  }
+
+  if (notifyCustomer && customerUserId) {
+    const branding = await getGlobalBranding();
+    await notifyOwnersSafely([{ ownerType: "USER", ownerId: customerUserId }], {
+      title: "Payment Successful! ✅",
+      body: `We have received your payment of ₹${order.payment.amountDue} for Order #${order.orderId}.`,
+      image: branding.image,
+      data: {
+        type: "payment_success",
+        orderId: String(order.orderId),
+        orderMongoId: String(order._id),
+      },
+    });
+  }
+
+  return { success: true };
+}
+
+async function consumeOrderCouponUsage({ order, userId, fallbackRestaurantId = null } = {}) {
+  const couponCode = order?.pricing?.couponCode
+    ? String(order.pricing.couponCode).trim().toUpperCase()
+    : "";
+  if (!couponCode) return;
+
+  const orderType = String(order?.orderType || "").toLowerCase();
+  if (!["food", "mixed"].includes(orderType)) return;
+
+  const offer = await FoodOffer.findOne({ couponCode }).lean();
+  if (offer) {
+    await FoodOffer.updateOne({ _id: offer._id }, { $inc: { usedCount: 1 } });
+    if (userId) {
+      await FoodOfferUsage.updateOne(
+        { offerId: offer._id, userId: new mongoose.Types.ObjectId(userId) },
+        { $inc: { count: 1 }, $set: { lastUsedAt: new Date() } },
+        { upsert: true },
+      );
+    }
+    return;
+  }
+
+  let resolvedRestaurantId = fallbackRestaurantId || order?.restaurantId || null;
+  if (resolvedRestaurantId && !mongoose.Types.ObjectId.isValid(resolvedRestaurantId)) {
+    const { FoodRestaurant } = await import('../../restaurant/models/restaurant.model.js');
+    const rest = await FoodRestaurant.findOne({ restaurantId: resolvedRestaurantId }).select('_id').lean();
+    if (rest) resolvedRestaurantId = rest._id;
+  }
+  if (mongoose.Types.ObjectId.isValid(resolvedRestaurantId)) {
+    const { RestaurantCoupon } = await import('../../admin/models/restaurantCoupon.model.js');
+    await RestaurantCoupon.updateOne(
+      { couponCode, restaurantId: new mongoose.Types.ObjectId(resolvedRestaurantId) },
+      { $inc: { usedCount: 1 } }
+    );
+  }
+}
+
 // Stale getDispatchSettings and updateDispatchSettings removed (now imported from order-dispatch.service.js)
 
 // ----- Calculate (validation + return pricing from payload) -----
@@ -1918,6 +2105,8 @@ export async function calculateOrder(userId, dto) {
       : hasQuickItems
         ? "quick"
         : "food";
+  const sourceMap = await fetchPickupSourcesByType(items);
+  await applyServerFoodItemPricing(items, sourceMap);
   const subtotal = items.reduce(
     (sum, it) => sum + (Number(it.price) || 0) * (Number(it.quantity) || 1),
     0,
@@ -1929,7 +2118,6 @@ export async function calculateOrder(userId, dto) {
     .lean();
   const feeSettings = normalizeFoodFeeSettings(feeDoc);
 
-  const sourceMap = await fetchPickupSourcesByType(items);
   const pickupPoints = buildPickupPointsFromItems(items, sourceMap);
   const eligibility =
     orderType === "mixed"
@@ -2321,6 +2509,7 @@ export async function createOrder(userId, dto) {
       `${inactiveQuickSource.sourceName || "Quick store"} is not accepting orders`,
     );
   }
+  await applyServerFoodItemPricing(items, sourceMap);
 
   const orderId = await ensureUniqueOrderId();
   const settings =
@@ -2625,6 +2814,19 @@ export async function createOrder(userId, dto) {
     }
   }
 
+  if (isWallet) {
+    await deductWalletBalance(
+      userId,
+      Number(normalizedPricing.total || 0),
+      "Food order payment",
+      {
+        orderId,
+        source: "food_order_payment",
+        orderType,
+      },
+    );
+  }
+
   await order.save();
 
   await foodTransactionService.createInitialTransaction(order);
@@ -2701,37 +2903,12 @@ export async function createOrder(userId, dto) {
   } catch {
     // Don't block order placement on socket failures.
   }
-  const couponCode = normalizedPricing.couponCode
-    ? String(normalizedPricing.couponCode).trim().toUpperCase()
-    : "";
-  if ((orderType === "food" || orderType === "mixed") && couponCode) {
-    const offer = await FoodOffer.findOne({ couponCode }).lean();
-    if (offer) {
-      await FoodOffer.updateOne({ _id: offer._id }, { $inc: { usedCount: 1 } });
-      if (userId) {
-        await FoodOfferUsage.updateOne(
-          { offerId: offer._id, userId: new mongoose.Types.ObjectId(userId) },
-          { $inc: { count: 1 }, $set: { lastUsedAt: new Date() } },
-          { upsert: true },
-        );
-      }
-    } else {
-      let resolvedRestaurantId = primaryRestaurantId;
-      if (primaryRestaurantId && !mongoose.Types.ObjectId.isValid(primaryRestaurantId)) {
-        const { FoodRestaurant } = await import('../../restaurant/models/restaurant.model.js');
-        const rest = await FoodRestaurant.findOne({ restaurantId: primaryRestaurantId }).select('_id').lean();
-        if (rest) {
-          resolvedRestaurantId = rest._id;
-        }
-      }
-      if (mongoose.Types.ObjectId.isValid(resolvedRestaurantId)) {
-        const { RestaurantCoupon } = await import('../../admin/models/restaurantCoupon.model.js');
-        await RestaurantCoupon.updateOne(
-          { couponCode, restaurantId: new mongoose.Types.ObjectId(resolvedRestaurantId) },
-          { $inc: { usedCount: 1 } }
-        );
-      }
-    }
+  if (paymentMethod !== "razorpay") {
+    await consumeOrderCouponUsage({
+      order,
+      userId,
+      fallbackRestaurantId: primaryRestaurantId,
+    });
   }
 
   if (
@@ -2765,12 +2942,42 @@ export async function verifyPayment(userId, dto) {
   if (order.payment.status === "paid")
     return { order: order.toObject(), payment: order.payment };
 
+  const expectedRazorpayOrderId = String(order.payment?.razorpay?.orderId || "").trim();
+  const providedRazorpayOrderId = String(dto.razorpayOrderId || "").trim();
+  if (!expectedRazorpayOrderId || providedRazorpayOrderId !== expectedRazorpayOrderId) {
+    throw new ValidationError("Payment order mismatch");
+  }
+
   const valid = verifyPaymentSignature(
-    dto.razorpayOrderId,
+    expectedRazorpayOrderId,
     dto.razorpayPaymentId,
     dto.razorpaySignature,
   );
   if (!valid) throw new ValidationError("Payment verification failed");
+  await ensureRazorpayPaymentNotConsumed(dto.razorpayPaymentId, {
+    currentFoodOrderId: order._id,
+  });
+
+  if (isRazorpayConfigured()) {
+    const fetchedPayment = await fetchRazorpayPayment(dto.razorpayPaymentId);
+    const fetchedOrderId = String(fetchedPayment?.order_id || "").trim();
+    const fetchedStatus = String(fetchedPayment?.status || "").toLowerCase();
+    const fetchedAmountPaise = Number(fetchedPayment?.amount || 0);
+    const expectedAmountPaise = Math.round(Number(order.payment?.amountDue || 0) * 100);
+
+    if (fetchedOrderId !== expectedRazorpayOrderId) {
+      throw new ValidationError("Payment order mismatch");
+    }
+    if (fetchedStatus !== "captured") {
+      throw new ValidationError("Payment not captured");
+    }
+    if (!Number.isFinite(expectedAmountPaise) || expectedAmountPaise < 100) {
+      throw new ValidationError("Invalid order payment amount");
+    }
+    if (fetchedAmountPaise !== expectedAmountPaise) {
+      throw new ValidationError("Payment amount mismatch");
+    }
+  }
 
   order.payment.status = "paid";
   order.payment.razorpay.paymentId = dto.razorpayPaymentId;
@@ -2785,53 +2992,15 @@ export async function verifyPayment(userId, dto) {
     recordedById: new mongoose.Types.ObjectId(userId)
   });
 
-  // After online payment is verified, now notify restaurant about the new order.
-  if (order.orderType === "food" || order.orderType === "mixed") {
-    await notifyRestaurantNewOrder(order);
-  }
-  if (order.orderType === "quick" || order.orderType === "mixed") {
-    const sellerOrders = await upsertSellerOrdersForParent(order);
-    await notifySellerNewOrders(order, sellerOrders);
-  }
-
-  // Schedule delayed notification if it's a scheduled order and payment is now verified
-  if (order.orderStatus === "scheduled" && order.scheduledAt) {
-    const now = Date.now();
-    const scheduledTime = new Date(order.scheduledAt).getTime();
-    const notificationTime = scheduledTime - 15 * 60 * 1000;
-    const delay = Math.max(0, notificationTime - now);
-
-    enqueueOrderEvent("NOTIFY_SCHEDULED_ORDER", {
-      orderId: order.orderId,
-      orderMongoId: order._id.toString(),
-    }, { delay });
-    
-    logger.info(`Scheduled notification for verified order ${order.orderId} with delay of ${delay}ms`);
-  }
-
-  // Notify Customer about payment success
-  const branding = await getGlobalBranding();
-  await notifyOwnersSafely([{ ownerType: "USER", ownerId: userId }], {
-    title: "Payment Successful! ✅",
-    body: `We have received your payment of ₹${order.payment.amountDue} for Order #${order.orderId}.`,
-    image: branding.image,
-    data: {
-      type: "payment_success",
-      orderId: String(order.orderId),
-      orderMongoId: String(order._id),
-    },
+  await processOrderPostPaymentFulfillment(order, {
+    notifyCustomer: true,
+    customerUserId: userId,
   });
-
-  const settings =
-    order.orderType === "food" ||
-    (order.orderType === "mixed" && order.dispatchPlan?.strategy === "single")
-      ? await getDispatchSettings()
-      : null;
-  if (settings?.dispatchMode === "auto") {
-    try {
-      await tryAutoAssign(order._id);
-    } catch {}
-  }
+  await consumeOrderCouponUsage({
+    order,
+    userId,
+    fallbackRestaurantId: order.restaurantId,
+  });
 
   return { order: order.toObject(), payment: order.payment };
 }

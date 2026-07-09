@@ -89,6 +89,27 @@ export async function verifyAndConsumeOnboardingPayment({ role, paymentDetails =
         throw new ValidationError('Onboarding payment verification failed. Invalid signature.');
     }
 
+    const consumedByPaymentId = await OnboardingPaymentLog.findOne({
+        razorpayPaymentId,
+        status: 'success',
+        role,
+    }).lean();
+    if (consumedByPaymentId && String(consumedByPaymentId.razorpayOrderId || '') !== String(razorpayOrderId)) {
+        throw new ValidationError('This payment has already been consumed.');
+    }
+
+    const existingLog = await OnboardingPaymentLog.findOne({ razorpayOrderId }).lean();
+    if (existingLog?.status === 'success') {
+        const existingEntityId = existingLog?.entityId ? String(existingLog.entityId) : '';
+        const incomingEntityId = entityId ? String(entityId) : '';
+        if (existingEntityId && incomingEntityId && existingEntityId !== incomingEntityId) {
+            throw new ValidationError('This onboarding payment has already been consumed.');
+        }
+        if (existingEntityId && !incomingEntityId) {
+            return { success: true, bypassed: false };
+        }
+    }
+
     // 3. Mark payment log as successful and associate with created entity (Restaurant, Seller, Delivery Partner)
     await OnboardingPaymentLog.findOneAndUpdate(
         { razorpayOrderId },
