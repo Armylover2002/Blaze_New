@@ -67,6 +67,8 @@ const globalSettingsSchema = new mongoose.Schema(
             active: { type: Boolean, default: true }
         },
         themeColor: { type: String, default: '#0a0a0a' },
+        codEnabled: { type: Boolean, default: true },
+        onlineEnabled: { type: Boolean, default: true },
         socialLinks: {
             facebook: { type: String, default: '' },
             instagram: { type: String, default: '' },

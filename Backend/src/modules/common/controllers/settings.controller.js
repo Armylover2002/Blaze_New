@@ -77,7 +77,7 @@ export async function updateGlobalSettings(req, res, next) {
             adminLogoUrl, adminFaviconUrl, userLogoUrl, userFaviconUrl, deliveryLogoUrl, deliveryFaviconUrl, restaurantLogoUrl, restaurantFaviconUrl, sellerLogoUrl, sellerFaviconUrl, loginBannerUrl,
             sellerLoginBannerUrl, restaurantLoginBannerUrl,
             sellerLoginBannerActive, restaurantLoginBannerActive,
-            themeColor, modules,
+            themeColor, codEnabled, onlineEnabled, modules,
             facebook, instagram, twitter, linkedin, youtube,
             socialLinks
         } = data;
@@ -152,6 +152,12 @@ export async function updateGlobalSettings(req, res, next) {
 
         if (themeColor !== undefined) {
             settings.themeColor = themeColor;
+        }
+        if (codEnabled !== undefined) {
+            settings.codEnabled = !!codEnabled;
+        }
+        if (onlineEnabled !== undefined) {
+            settings.onlineEnabled = !!onlineEnabled;
         }
 
         const incomingSocial = socialLinks || {};

@@ -137,6 +137,28 @@ export const SettingsProvider = ({ children }) => {
     fetchSettings();
   }, [fetchSettings]);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+
+    const handleBusinessSettingsUpdated = (event) => {
+      const updatedSettings = event?.detail;
+      if (!updatedSettings || typeof updatedSettings !== "object") return;
+
+      const merged = {
+        ...DEFAULT_SETTINGS,
+        ...normalizeGlobalSettings(updatedSettings),
+      };
+
+      setSettings(merged);
+      applyThemeVariables(merged);
+    };
+
+    window.addEventListener("businessSettingsUpdated", handleBusinessSettingsUpdated);
+    return () => {
+      window.removeEventListener("businessSettingsUpdated", handleBusinessSettingsUpdated);
+    };
+  }, []);
+
   const value = {
     settings,
     loading,
