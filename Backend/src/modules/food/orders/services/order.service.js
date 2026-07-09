@@ -22,6 +22,7 @@ import { FoodTransaction } from '../models/foodTransaction.model.js';
 import { FoodSupportTicket } from '../../user/models/supportTicket.model.js';
 import { Seller } from '../../../quick-commerce/seller/models/seller.model.js';
 import { SellerOrder } from '../../../quick-commerce/seller/models/sellerOrder.model.js';
+import { PorterOrder } from '../../../porter/orders/models/porterOrder.model.js';
 import { getSellerCommissionSnapshot } from '../../../quick-commerce/admin/services/commission.service.js';
 import { QuickFeeSettings } from '../../../quick-commerce/admin/models/feeSettings.model.js';
 import { calculateQuickPricing, calculateDeliveryFeeFromSettings } from '../../../quick-commerce/admin/services/billing.service.js';
@@ -65,6 +66,33 @@ const ORDER_ID_PREFIX = "FOD-";
 const ORDER_ID_LENGTH = 6;
 const USER_CANCEL_FULL_REFUND_WINDOW_MS = 30 * 1000;
 const USER_CANCEL_EDIT_WINDOW_MS = 60 * 1000;
+
+async function ensureRazorpayPaymentNotConsumed(paymentId, { currentFoodOrderId = null, currentPorterOrderId = null } = {}) {
+  const rzPaymentId = String(paymentId || "").trim();
+  if (!rzPaymentId) throw new ValidationError("Razorpay payment id required");
+
+  const [foodExisting, porterExisting] = await Promise.all([
+    FoodOrder.findOne({
+      "payment.razorpay.paymentId": rzPaymentId,
+      ...(currentFoodOrderId ? { _id: { $ne: currentFoodOrderId } } : {}),
+    })
+      .select("_id orderId")
+      .lean(),
+    PorterOrder.findOne({
+      $or: [
+        { "payment.razorpay.paymentId": rzPaymentId },
+        { "payment.razorpayPaymentId": rzPaymentId },
+      ],
+      ...(currentPorterOrderId ? { _id: { $ne: currentPorterOrderId } } : {}),
+    })
+      .select("_id orderNumber")
+      .lean(),
+  ]);
+
+  if (foodExisting || porterExisting) {
+    throw new ValidationError("Razorpay payment already consumed");
+  }
+}
 
 /**
  * Fire-and-forget BullMQ enqueue for order lifecycle events.
@@ -2914,6 +2942,9 @@ export async function verifyPayment(userId, dto) {
     dto.razorpaySignature,
   );
   if (!valid) throw new ValidationError("Payment verification failed");
+  await ensureRazorpayPaymentNotConsumed(dto.razorpayPaymentId, {
+    currentFoodOrderId: order._id,
+  });
 
   if (isRazorpayConfigured()) {
     const fetchedPayment = await fetchRazorpayPayment(dto.razorpayPaymentId);

@@ -7,6 +7,7 @@ import {
     verifyPaymentSignature,
 } from '../../../food/orders/helpers/razorpay.helper.js';
 import { PorterOrder } from '../models/porterOrder.model.js';
+import { FoodOrder } from '../../../food/orders/models/order.model.js';
 import { PorterCoupon } from '../../models/porterCoupon.model.js';
 import { FoodDeliveryPartner } from '../../../food/delivery/models/deliveryPartner.model.js';
 import { NotFoundError, ValidationError, ConflictError } from '../../../../core/auth/errors.js';
@@ -575,6 +576,27 @@ export async function verifyPorterPayment(userId, dto) {
         dto.razorpaySignature,
     );
     if (!valid) throw new ValidationError('Payment verification failed');
+
+    const paymentId = String(dto.razorpayPaymentId || '').trim();
+    const [porterExisting, foodExisting] = await Promise.all([
+        PorterOrder.findOne({
+            $or: [
+                { 'payment.razorpay.paymentId': paymentId },
+                { 'payment.razorpayPaymentId': paymentId },
+            ],
+            _id: { $ne: order._id },
+        })
+            .select('_id orderNumber')
+            .lean(),
+        FoodOrder.findOne({
+            'payment.razorpay.paymentId': paymentId,
+        })
+            .select('_id orderId')
+            .lean(),
+    ]);
+    if (porterExisting || foodExisting) {
+        throw new ValidationError('Razorpay payment already consumed');
+    }
 
     if (isRazorpayConfigured()) {
         const fetchedPayment = await fetchRazorpayPayment(dto.razorpayPaymentId);
