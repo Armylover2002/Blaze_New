@@ -1,14 +1,45 @@
 import { GlobalSettings } from '../models/settings.model.js';
 import { sendResponse } from '../../../utils/response.js';
 import { uploadImageBufferDetailed } from '../../../services/cloudinary.service.js';
+import { config } from '../../../config/env.js';
+import { getRedisClient } from '../../../config/redis.js';
 import { getCache, setCache, deleteCache } from '../../../utils/cacheManager.js';
 import { clearGlobalBrandingCache } from '../services/globalBranding.service.js';
 
 const SETTINGS_CACHE_KEY = 'global_settings_public';
 const SETTINGS_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const SETTINGS_REDIS_KEY = 'common:global_settings:public';
 
-export const clearGlobalSettingsCache = () => {
+const getRedisCache = async (key) => {
+    if (!config.redisEnabled) return null;
+    const redis = getRedisClient();
+    if (!redis || !redis.isReady) return null;
+
+    const raw = await redis.get(key);
+    return raw ? JSON.parse(raw) : null;
+};
+
+const setRedisCache = async (key, value, ttlMs) => {
+    if (!config.redisEnabled) return;
+    const redis = getRedisClient();
+    if (!redis || !redis.isReady) return;
+
+    const ttlSeconds = Math.max(1, Math.ceil((ttlMs || SETTINGS_CACHE_TTL_MS) / 1000));
+    await redis.set(key, JSON.stringify(value), { EX: ttlSeconds });
+};
+
+const deleteRedisCache = async (key) => {
+    if (!config.redisEnabled) return;
+    const redis = getRedisClient();
+    if (!redis || !redis.isReady) return;
+    await redis.del(key);
+};
+
+export const clearGlobalSettingsCache = async () => {
     deleteCache(SETTINGS_CACHE_KEY);
+    try {
+        await deleteRedisCache(SETTINGS_REDIS_KEY);
+    } catch {}
     clearGlobalBrandingCache();
 };
 
@@ -32,7 +63,13 @@ export async function getGlobalSettings(req, res, next) {
     try {
         const isPublicRoute = req.path === '/public' || req.originalUrl?.includes('/public');
         if (isPublicRoute) {
-            const cached = getCache(SETTINGS_CACHE_KEY);
+            let cached = null;
+            try {
+                cached = await getRedisCache(SETTINGS_REDIS_KEY);
+            } catch {}
+            if (!cached) {
+                cached = getCache(SETTINGS_CACHE_KEY);
+            }
             if (cached) {
                 res.set('Cache-Control', 'public, max-age=300, stale-while-revalidate=60');
                 return sendResponse(res, 200, 'Global settings fetched successfully', cached);
@@ -51,6 +88,9 @@ export async function getGlobalSettings(req, res, next) {
 
         if (isPublicRoute) {
             setCache(SETTINGS_CACHE_KEY, payload, SETTINGS_CACHE_TTL_MS);
+            try {
+                await setRedisCache(SETTINGS_REDIS_KEY, payload, SETTINGS_CACHE_TTL_MS);
+            } catch {}
             res.set('Cache-Control', 'public, max-age=300, stale-while-revalidate=60');
         }
 
@@ -228,7 +268,7 @@ export async function updateGlobalSettings(req, res, next) {
         }
 
         await settings.save();
-        clearGlobalSettingsCache();
+        await clearGlobalSettingsCache();
         return sendResponse(res, 200, 'Global settings updated successfully', settings);
     } catch (error) {
         next(error);

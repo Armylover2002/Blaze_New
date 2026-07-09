@@ -1,5 +1,5 @@
 import express from 'express';
-import { authMiddleware } from '../../../core/auth/auth.middleware.js';
+import { authMiddleware, checkPermission } from '../../../core/auth/auth.middleware.js';
 import { requireRoles } from '../../../core/roles/role.middleware.js';
 import {
     getPublicOnboardingFees,
@@ -16,8 +16,8 @@ router.get('/public', getPublicOnboardingFees);
 router.post('/public/create-order', createOnboardingPaymentOrder);
 
 // Admin-only management routes
-router.get('/config', authMiddleware, requireRoles('ADMIN', 'EMPLOYEE'), getOnboardingFeesConfig);
-router.put('/config/:role', authMiddleware, requireRoles('ADMIN', 'EMPLOYEE'), updateOnboardingFeeConfig);
-router.get('/payments', authMiddleware, requireRoles('ADMIN', 'EMPLOYEE'), getOnboardingPayments);
+router.get('/config', authMiddleware, requireRoles('ADMIN', 'EMPLOYEE'), checkPermission('global::onboarding_fees', 'view'), getOnboardingFeesConfig);
+router.put('/config/:role', authMiddleware, requireRoles('ADMIN'), checkPermission('global::onboarding_fees', 'edit'), updateOnboardingFeeConfig);
+router.get('/payments', authMiddleware, requireRoles('ADMIN', 'EMPLOYEE'), checkPermission('global::onboarding_fees', 'view'), getOnboardingPayments);
 
 export default router;
