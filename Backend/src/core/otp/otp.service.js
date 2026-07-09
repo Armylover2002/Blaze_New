@@ -4,6 +4,7 @@ import { FoodOtp } from './otp.model.js';
 import { config } from '../../config/env.js';
 import { logger } from '../../utils/logger.js';
 import { ValidationError } from '../auth/errors.js';
+import { getGlobalBranding } from '../../modules/common/services/globalBranding.service.js';
 
 const generateOtpCode = () => {
     const code = crypto.randomInt(1000, 9999);
@@ -50,7 +51,8 @@ const sendSmsViaIndiaHub = async (phone, otp) => {
 
         // EXACT DLT TEMPLATE provided by user:
         // "Welcome to the ##var## powered by SMSINDIAHUB. Your OTP for registration is ##var##"
-        const message = `Welcome to the Appzeto powered by SMSINDIAHUB. Your OTP for registration is ${otp}`;
+        const branding = await getGlobalBranding();
+        const message = `Welcome to the ${branding.companyName} powered by SMSINDIAHUB. Your OTP for registration is ${otp}`;
 
         // SMS India Hub HTTP GET API — query param names are case-sensitive per SOP
         const url = new URL('http://cloud.smsindiahub.in/vendorsms/pushsms.aspx');

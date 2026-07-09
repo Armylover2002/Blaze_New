@@ -2,12 +2,14 @@ import { GlobalSettings } from '../models/settings.model.js';
 import { sendResponse } from '../../../utils/response.js';
 import { uploadImageBufferDetailed } from '../../../services/cloudinary.service.js';
 import { getCache, setCache, deleteCache } from '../../../utils/cacheManager.js';
+import { clearGlobalBrandingCache } from '../services/globalBranding.service.js';
 
 const SETTINGS_CACHE_KEY = 'global_settings_public';
 const SETTINGS_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 export const clearGlobalSettingsCache = () => {
     deleteCache(SETTINGS_CACHE_KEY);
+    clearGlobalBrandingCache();
 };
 
 const buildSettingsPayload = (settings) => {

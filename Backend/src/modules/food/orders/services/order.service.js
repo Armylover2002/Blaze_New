@@ -49,6 +49,7 @@ import {
 import { resolveDeliveryDocumentType } from '../../../quick-commerce/services/dispatchDocument.service.js';
 import { DISPATCH_DOCUMENT_TYPES } from '../../../quick-commerce/utils/dispatchDocument.constants.js';
 import * as returnPickupDelivery from '../../../quick-commerce/services/returnPickupDelivery.service.js';
+import { getGlobalBranding } from '../../../common/services/globalBranding.service.js';
 
 export {
   tryAutoAssign,
@@ -2492,6 +2493,7 @@ export async function createOrder(userId, dto) {
 
   // Realtime + push notifications.
   try {
+    const branding = await getGlobalBranding();
     // Notify customer. For online payments, order is created but awaits payment confirmation.
     const isAwaitingOnlinePayment =
       String(order.payment?.method || "").toLowerCase() === "razorpay" &&
@@ -2515,7 +2517,7 @@ export async function createOrder(userId, dto) {
           : orderType === "quick"
           ? `Your quick order #${orderId} has been placed successfully.`
           : `Your order #${orderId} from ${primaryRestaurant?.sourceName || "the restaurant"} has been placed successfully.`,
-      image: "https://i.ibb.co/3m2Yh7r/Appzeto-Brand-Image.png",
+      image: branding.image,
       data: {
         type: isAwaitingOnlinePayment
           ? "order_created_pending_payment"
@@ -2667,10 +2669,11 @@ export async function verifyPayment(userId, dto) {
   }
 
   // Notify Customer about payment success
+  const branding = await getGlobalBranding();
   await notifyOwnersSafely([{ ownerType: "USER", ownerId: userId }], {
     title: "Payment Successful! ✅",
     body: `We have received your payment of ₹${order.payment.amountDue} for Order #${order.orderId}.`,
-    image: "https://i.ibb.co/3m2Yh7r/Appzeto-Brand-Image.png",
+    image: branding.image,
     data: {
       type: "payment_success",
       orderId: String(order.orderId),
@@ -2950,6 +2953,7 @@ export async function cancelOrder(orderId, userId, reason, refundTo) {
       ? ` Refund review will follow the cancellation policy: full refund within ${USER_CANCEL_FULL_REFUND_WINDOW_MS / 1000} seconds, otherwise admin may process a partial refund. Requested destination: ${requestedRefundMethod === "wallet" ? "wallet" : "original payment method"}.`
       : "";
 
+  const branding = await getGlobalBranding();
   await notifyOwnersSafely(
     [
       { ownerType: "USER", ownerId: userId },
@@ -2958,7 +2962,7 @@ export async function cancelOrder(orderId, userId, reason, refundTo) {
     {
       title: "Order Cancelled ❌",
       body: `Order #${order.orderId} has been cancelled successfully.${refundPolicyDetail}`,
-      image: "https://i.ibb.co/3m2Yh7r/Appzeto-Brand-Image.png",
+      image: branding.image,
       data: {
         type: "order_cancelled",
         orderId: String(order.orderId),
@@ -3251,12 +3255,13 @@ export async function updateOrderStatusRestaurant(
       }
     }
 
+    const branding = await getGlobalBranding();
     await notifyOwnersSafely(
       notifyList,
       {
         title: title,
         body: body,
-        image: "https://i.ibb.co/3m2Yh7r/Appzeto-Brand-Image.png",
+        image: branding.image,
         data: {
           type: "order_status_update",
           orderId: order.orderId,
@@ -3973,12 +3978,13 @@ export async function confirmReachedPickupDelivery(orderId, deliveryPartnerId, b
     const partner = await FoodDeliveryPartner.findById(deliveryPartnerId).select("name").lean();
     
     const { notifyOwnersSafely } = await import("../../../../core/notifications/firebase.service.js");
+    const branding = await getGlobalBranding();
     await notifyOwnersSafely(
       [{ ownerType: "RESTAURANT", ownerId: order.restaurantId }],
       {
         title: "Rider Arrived! 🛵",
         body: `${partner?.name || "The delivery partner"} has arrived at your restaurant to pick up Order #${order.orderId}.`,
-        image: "https://i.ibb.co/3m2Yh7r/Appzeto-Brand-Image.png",
+        image: branding.image,
         data: {
           type: "rider_arrived",
           orderId: String(order.orderId),
