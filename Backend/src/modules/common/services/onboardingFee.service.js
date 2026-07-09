@@ -2,6 +2,7 @@ import { OnboardingFeeConfig } from '../models/onboardingFeeConfig.model.js';
 import { OnboardingPaymentLog } from '../models/onboardingPaymentLog.model.js';
 import { verifyPaymentSignature } from '../../food/orders/helpers/razorpay.helper.js';
 import { ValidationError } from '../../../core/auth/errors.js';
+import { config } from '../../../config/env.js';
 import mongoose from 'mongoose';
 
 /**
@@ -53,12 +54,17 @@ export async function verifyAndConsumeOnboardingPayment({ role, paymentDetails =
         throw new ValidationError('razorpaySignature is required for onboarding fee payment');
     }
 
+    const isProduction = String(config.nodeEnv).toLowerCase() === 'production';
+
     // 2. Check if this is a mock order ID
     const isMock = String(razorpayOrderId).startsWith('mock_ord_');
     let isValid = false;
 
     if (isMock) {
-        // Automatically validate mock order IDs for developer convenience
+        if (isProduction) {
+            throw new ValidationError('Mock onboarding payment IDs are not allowed in production.');
+        }
+        // Automatically validate mock order IDs only in non-production environments
         isValid = true;
     } else {
         // Validate signature using standard Razorpay helper

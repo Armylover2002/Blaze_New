@@ -3,6 +3,7 @@ import { OnboardingPaymentLog } from '../models/onboardingPaymentLog.model.js';
 import { createRazorpayOrder, getRazorpayKeyId, isRazorpayConfigured } from '../../food/orders/helpers/razorpay.helper.js';
 import { sendResponse } from '../../../utils/response.js';
 import { ValidationError } from '../../../core/auth/errors.js';
+import { config } from '../../../config/env.js';
 import mongoose from 'mongoose';
 
 // Fetch all active fee configs for frontend onboarding checks
@@ -36,6 +37,7 @@ export async function getPublicOnboardingFees(req, res, next) {
 export async function createOnboardingPaymentOrder(req, res, next) {
     try {
         const { role, name, phone, email } = req.body;
+        const isProduction = String(config.nodeEnv).toLowerCase() === 'production';
 
         if (!role || !['RESTAURANT', 'SELLER', 'DELIVERY_PARTNER'].includes(role)) {
             throw new ValidationError('Valid role (RESTAURANT, SELLER, DELIVERY_PARTNER) is required');
@@ -64,11 +66,11 @@ export async function createOnboardingPaymentOrder(req, res, next) {
 
             if (existingPayment) {
                 return sendResponse(res, 201, 'Onboarding fee already paid', {
-                    orderId: `mock_ord_bypassed_${Date.now()}`,
+                    orderId: `already_paid_${Date.now()}`,
                     amount: config.price,
                     currency: 'INR',
                     keyId: getRazorpayKeyId(),
-                    isMock: true,
+                    isMock: false,
                     alreadyPaid: true
                 });
             }
@@ -83,6 +85,9 @@ export async function createOnboardingPaymentOrder(req, res, next) {
             const order = await createRazorpayOrder(amountPaise, 'INR', receipt);
             orderId = order.id;
         } else {
+            if (isProduction) {
+                throw new ValidationError('Onboarding payment provider is unavailable. Please contact support.');
+            }
             // Mock order creation for development environments without Razorpay keys
             orderId = `mock_ord_${role.toLowerCase().slice(0, 3)}_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
         }
@@ -105,7 +110,7 @@ export async function createOnboardingPaymentOrder(req, res, next) {
             amount: price,
             currency: 'INR',
             keyId: getRazorpayKeyId(),
-            isMock: !isRazorpayConfigured()
+            isMock: !isRazorpayConfigured() && !isProduction
         });
     } catch (error) {
         next(error);
