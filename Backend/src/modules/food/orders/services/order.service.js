@@ -12,6 +12,7 @@ import { ValidationError, ForbiddenError, NotFoundError } from '../../../../core
 import { buildPaginationOptions, buildPaginatedResult } from '../../../../utils/helpers.js';
 import { FoodOffer } from '../../admin/models/offer.model.js';
 import { FoodOfferUsage } from '../../admin/models/offerUsage.model.js';
+import { FoodItem } from '../../admin/models/food.model.js';
 import { FoodDeliveryCommissionRule } from '../../admin/models/deliveryCommissionRule.model.js';
 import {
   sendNotificationToOwner,
@@ -395,6 +396,67 @@ function normalizeOrderItems(items = [], fallbackOrderType = "food") {
           : item?.restaurant || item?.restaurantName || ""),
     };
   });
+}
+
+async function applyServerFoodItemPricing(items = [], sourceMap = new Map()) {
+  const foodItems = (Array.isArray(items) ? items : []).filter((item) => item?.type === "food");
+  if (!foodItems.length) return;
+
+  const itemIds = [
+    ...new Set(
+      foodItems
+        .map((item) => String(item?.itemId || "").trim())
+        .filter((id) => mongoose.isValidObjectId(id)),
+    ),
+  ];
+  if (!itemIds.length) {
+    throw new ValidationError("Invalid food item selection");
+  }
+
+  const foodDocs = await FoodItem.find({
+    _id: { $in: itemIds.map((id) => new mongoose.Types.ObjectId(id)) },
+    approvalStatus: "approved",
+    isAvailable: true,
+  })
+    .select("restaurantId name price variants image images foodType")
+    .lean();
+  const foodById = new Map(foodDocs.map((doc) => [String(doc._id), doc]));
+
+  for (const item of foodItems) {
+    const itemId = String(item?.itemId || "").trim();
+    const foodDoc = foodById.get(itemId);
+    if (!foodDoc) {
+      throw new ValidationError("One or more food items are unavailable");
+    }
+
+    const source = sourceMap.get(String(item.sourceId));
+    const expectedRestaurantId = String(source?.sourceId || "").trim();
+    const docRestaurantId = String(foodDoc.restaurantId || "").trim();
+    if (!expectedRestaurantId || expectedRestaurantId !== docRestaurantId) {
+      throw new ValidationError("Food item does not belong to selected restaurant");
+    }
+
+    let unitPrice = Number(foodDoc.price || 0);
+    if (item?.variantId) {
+      const variantId = String(item.variantId).trim();
+      const variant = (Array.isArray(foodDoc.variants) ? foodDoc.variants : []).find(
+        (entry) => String(entry?._id || "") === variantId,
+      );
+      if (!variant) {
+        throw new ValidationError("Selected food variant is unavailable");
+      }
+      unitPrice = Number(variant.price || 0);
+      item.variantName = variant.name || item.variantName || "";
+      item.variantPrice = unitPrice;
+    }
+
+    item.price = unitPrice;
+    item.name = foodDoc.name || item.name;
+    item.image = item.image || foodDoc.image || foodDoc.images?.[0] || "";
+    item.isVeg = String(foodDoc.foodType || "").toLowerCase() === "veg";
+    item.sourceId = expectedRestaurantId;
+    item.sourceName = source?.sourceName || item.sourceName || "";
+  }
 }
 
 function getPointLatLng(locationLike) {
@@ -1919,6 +1981,8 @@ export async function calculateOrder(userId, dto) {
       : hasQuickItems
         ? "quick"
         : "food";
+  const sourceMap = await fetchPickupSourcesByType(items);
+  await applyServerFoodItemPricing(items, sourceMap);
   const subtotal = items.reduce(
     (sum, it) => sum + (Number(it.price) || 0) * (Number(it.quantity) || 1),
     0,
@@ -1930,7 +1994,6 @@ export async function calculateOrder(userId, dto) {
     .lean();
   const feeSettings = normalizeFoodFeeSettings(feeDoc);
 
-  const sourceMap = await fetchPickupSourcesByType(items);
   const pickupPoints = buildPickupPointsFromItems(items, sourceMap);
   const eligibility =
     orderType === "mixed"
@@ -2322,6 +2385,7 @@ export async function createOrder(userId, dto) {
       `${inactiveQuickSource.sourceName || "Quick store"} is not accepting orders`,
     );
   }
+  await applyServerFoodItemPricing(items, sourceMap);
 
   const orderId = await ensureUniqueOrderId();
   const settings =
