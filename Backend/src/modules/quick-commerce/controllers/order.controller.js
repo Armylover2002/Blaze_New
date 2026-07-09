@@ -42,6 +42,12 @@ import {
 import * as orderService from '../../food/orders/services/order.service.js';
 import { z } from 'zod';
 import { ValidationError } from '../../../core/auth/errors.js';
+import { getQuickCoupons } from '../services/content.service.js';
+import {
+  isQuickCouponCurrentlyValid,
+  isQuickCouponExpired,
+  isQuickCouponNotStarted,
+} from '../utils/coupon.helpers.js';
 
 const approvedProductFilter = {
   $or: [
@@ -67,6 +73,68 @@ const resolveId = (req) => {
   const sessionId = getQuickSessionIdFromRequest(req);
   return sessionId ? { sessionId } : null;
 };
+
+async function resolveServerQuickDiscount({ couponCode, subtotal, items }) {
+  const code = String(couponCode || '').trim().toUpperCase();
+  if (!code) return { discount: 0, couponCode: null };
+
+  const adminCoupons = await getQuickCoupons();
+  let coupon = (Array.isArray(adminCoupons) ? adminCoupons : []).find(
+    (entry) => String(entry?.code || '').toUpperCase() === code,
+  );
+
+  if (!coupon) {
+    const sellerIdRaw = (Array.isArray(items) ? items : []).find((item) => item?.sellerId)?.sellerId;
+    const sellerId = String(sellerIdRaw || '').trim();
+    if (sellerId && mongoose.isValidObjectId(sellerId)) {
+      const { SellerCoupon } = await import('../models/sellerCoupon.model.js');
+      const sellerCoupon = await SellerCoupon.findOne({
+        sellerId: new mongoose.Types.ObjectId(sellerId),
+        couponCode: code,
+        status: 'Approved',
+        expiryDate: { $gt: new Date() },
+      }).lean();
+      if (sellerCoupon) {
+        coupon = {
+          ...sellerCoupon,
+          code: sellerCoupon.couponCode,
+          minOrderValue: sellerCoupon.minOrderAmount,
+        };
+      }
+    }
+  }
+
+  if (!coupon) {
+    throw new ValidationError('Coupon not found or expired');
+  }
+  if (!isQuickCouponCurrentlyValid(coupon)) {
+    if (isQuickCouponExpired(coupon)) throw new ValidationError('This coupon has expired');
+    if (isQuickCouponNotStarted(coupon)) throw new ValidationError('This coupon is not active yet');
+    throw new ValidationError('This coupon is not active');
+  }
+
+  const minOrder = Number(coupon.minOrderValue || coupon.minOrder || 0);
+  if (minOrder > 0 && Number(subtotal || 0) < minOrder) {
+    throw new ValidationError(`Minimum order value of ₹${minOrder} required for this coupon`);
+  }
+
+  const discountType = String(coupon.discountType || 'flat').toLowerCase();
+  const discountValue = Number(coupon.discountValue || coupon.discount || 0);
+  const maxDiscount = Number(coupon.maxDiscount || coupon.maxDiscountValue || 0);
+
+  let discount = 0;
+  if (discountType === 'percent' || discountType === 'percentage') {
+    discount = Math.round((Number(subtotal || 0) * discountValue) / 100);
+    if (maxDiscount > 0) discount = Math.min(discount, maxDiscount);
+  } else {
+    discount = discountValue;
+  }
+
+  return {
+    discount: Math.max(0, Math.min(discount, Number(subtotal || 0))),
+    couponCode: String(coupon.code || code).toUpperCase(),
+  };
+}
 
 /** Match orders owned by logged-in user and/or the active quick session. */
 const buildOrderAccessQuery = (req) => {
@@ -403,7 +471,11 @@ export const placeOrder = async (req, res) => {
     }
 
     const subtotal = items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-    const discount = Math.max(0, Number(req.body?.discountTotal || 0));
+    const { discount, couponCode } = await resolveServerQuickDiscount({
+      couponCode: req.body?.couponCode,
+      subtotal,
+      items,
+    });
     let deliveryAddress = normalizeDeliveryAddress(req.body?.address);
 
     if (idQuery.userId) {
@@ -519,6 +591,8 @@ export const placeOrder = async (req, res) => {
       pricing: {
         ...pricing,
         subtotal,
+        discount,
+        couponCode: couponCode || null,
         total,
       },
       deliveryAddress,
