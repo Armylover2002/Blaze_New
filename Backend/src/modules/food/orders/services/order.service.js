@@ -50,7 +50,7 @@ import {
 import { resolveDeliveryDocumentType } from '../../../quick-commerce/services/dispatchDocument.service.js';
 import { DISPATCH_DOCUMENT_TYPES } from '../../../quick-commerce/utils/dispatchDocument.constants.js';
 import * as returnPickupDelivery from '../../../quick-commerce/services/returnPickupDelivery.service.js';
-import { refundWalletBalance } from '../../user/services/userWallet.service.js';
+import { deductWalletBalance, refundWalletBalance } from '../../user/services/userWallet.service.js';
 
 export {
   tryAutoAssign,
@@ -2624,6 +2624,19 @@ export async function createOrder(userId, dto) {
     } catch (err) {
       throw new ValidationError(err?.message || "Payment gateway error");
     }
+  }
+
+  if (isWallet) {
+    await deductWalletBalance(
+      userId,
+      Number(normalizedPricing.total || 0),
+      "Food order payment",
+      {
+        orderId,
+        source: "food_order_payment",
+        orderType,
+      },
+    );
   }
 
   await order.save();
