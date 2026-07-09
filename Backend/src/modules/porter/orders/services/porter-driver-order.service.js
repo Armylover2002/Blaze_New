@@ -8,6 +8,7 @@ import {
     PORTER_DELIVERY_PHASE,
     PORTER_PAYMENT_STATUS,
 } from '../constants/porterOrderStatus.constants.js';
+import { PORTER_DISPATCH_RADII_KM } from '../constants/porterDispatch.constants.js';
 import { PORTER_DISPATCH_DOCUMENT_TYPE } from '../constants/porterDispatch.constants.js';
 import {
     appendStatusHistory,
@@ -155,10 +156,67 @@ export async function acceptPorterOrder(partnerId, orderId, performer = null) {
 }
 
 export async function rejectPorterOrder(partnerId, orderId) {
-    await PorterOrder.updateOne(
-        { _id: orderId, status: PORTER_ORDER_STATUS.SEARCHING_PARTNER },
+    const [partner, order] = await Promise.all([
+        FoodDeliveryPartner.findById(partnerId)
+            .select({ status: 1, availabilityStatus: 1, lastLat: 1, lastLng: 1, driverVehicles: 1, activeVehicleId: 1 })
+            .lean(),
+        PorterOrder.findOne({
+            _id: orderId,
+            status: PORTER_ORDER_STATUS.SEARCHING_PARTNER,
+            'dispatch.status': PORTER_DISPATCH_STATUS.UNASSIGNED,
+            ...baseFilter,
+        }).select({ vehicleId: 1, pickup: 1, dispatch: 1 }),
+    ]);
+
+    if (!partner || partner.status !== 'approved') {
+        throw new ValidationError('Partner not approved');
+    }
+    if (partner.availabilityStatus !== 'online') {
+        throw new ValidationError('Go online to manage order decisions');
+    }
+    if (!order) {
+        throw new ConflictError('Order already taken or unavailable');
+    }
+
+    const support = partnerSupportsParcel(partner, order.vehicleId);
+    if (!support.ok) {
+        throw new ValidationError('Your active vehicle cannot reject this order');
+    }
+
+    const pickupLat = Number(order.pickup?.lat);
+    const pickupLng = Number(order.pickup?.lng);
+    const partnerLat = Number(partner.lastLat);
+    const partnerLng = Number(partner.lastLng);
+    if (!Number.isFinite(pickupLat) || !Number.isFinite(pickupLng) || !Number.isFinite(partnerLat) || !Number.isFinite(partnerLng)) {
+        throw new ValidationError('Partner is not eligible for this order');
+    }
+
+    const distanceKm = haversineKm(partnerLat, partnerLng, pickupLat, pickupLng);
+    const maxDispatchRadiusKm = Math.max(...PORTER_DISPATCH_RADII_KM);
+    if (!Number.isFinite(distanceKm) || distanceKm > maxDispatchRadiusKm) {
+        throw new ValidationError('Partner is not eligible for this order');
+    }
+
+    const alreadyRejected = (order.dispatch?.rejectedPartnerIds || [])
+        .some((id) => String(id) === String(partnerId));
+    if (alreadyRejected) {
+        return { rejected: true, alreadyRejected: true };
+    }
+
+    const result = await PorterOrder.updateOne(
+        {
+            _id: orderId,
+            status: PORTER_ORDER_STATUS.SEARCHING_PARTNER,
+            'dispatch.status': PORTER_DISPATCH_STATUS.UNASSIGNED,
+            'dispatch.rejectedPartnerIds': { $ne: new mongoose.Types.ObjectId(partnerId) },
+            ...baseFilter,
+        },
         { $addToSet: { 'dispatch.rejectedPartnerIds': new mongoose.Types.ObjectId(partnerId) } },
     );
+    if (!result.modifiedCount) {
+        throw new ConflictError('Order already taken or unavailable');
+    }
+
     return { rejected: true };
 }
 
