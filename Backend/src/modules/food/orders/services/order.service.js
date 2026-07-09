@@ -3243,22 +3243,6 @@ export async function updateOrderStatusRestaurant(
     if (String(orderStatus).includes("cancel")) {
       riderTitle = "Order Cancelled ❌";
       riderBody = `Order #${order.orderId} has been cancelled. Please stop your current task.`;
-      
-      // Sync transaction status
-      try {
-        const isOnlinePaid =
-          order.payment?.method === "razorpay" &&
-          (order.payment?.status === "paid" ||
-            order.payment?.status === "refunded");
-        await foodTransactionService.updateTransactionStatus(order._id, 'cancelled_by_restaurant', {
-            status: isOnlinePaid ? 'refunded' : 'failed',
-            note: `Order cancelled by restaurant/admin`,
-            recordedByRole: 'RESTAURANT',
-            recordedById: restaurantId
-        });
-      } catch (err) {
-        logger.warn(`updateOrderStatusRestaurant transaction sync failed: ${err?.message || err}`);
-      }
     }
 
     const branding = await getGlobalBranding();
@@ -3422,8 +3406,9 @@ export async function updateOrderStatusRestaurant(
 
     // ✅ NEW: Automated Razorpay Refund on Restaurant Cancel
     // Triggers if the restaurant sets status to a cancelled state (e.g., cancelled_by_restaurant)
+    const isCancellationStatus = String(orderStatus).includes("cancel");
     if (
-      String(orderStatus).includes("cancel") &&
+      isCancellationStatus &&
       order.payment?.status === "paid" &&
       order.payment?.method === "razorpay" &&
       order.payment?.razorpay?.paymentId &&
@@ -3462,6 +3447,35 @@ export async function updateOrderStatusRestaurant(
       }
       // Re-save order with updated payment status
       await order.save();
+    }
+
+    // Sync transaction status only after refund attempt result is known.
+    if (isCancellationStatus) {
+      try {
+        const paymentMethod = String(order.payment?.method || "").toLowerCase();
+        const paymentStatus = String(order.payment?.status || "").toLowerCase();
+        const refundStatus = String(order.payment?.refund?.status || "").toLowerCase();
+        const isOnlineMethod = paymentMethod === "razorpay";
+
+        const txnStatus = (isOnlineMethod && paymentStatus === "refunded" && refundStatus === "processed")
+          ? "refunded"
+          : (isOnlineMethod && paymentStatus === "paid")
+            ? "captured"
+            : "failed";
+
+        const txnNote = refundStatus === "failed"
+          ? "Order cancelled by restaurant/admin; refund attempt failed"
+          : "Order cancelled by restaurant/admin";
+
+        await foodTransactionService.updateTransactionStatus(order._id, "cancelled_by_restaurant", {
+          status: txnStatus,
+          note: txnNote,
+          recordedByRole: "RESTAURANT",
+          recordedById: restaurantId,
+        });
+      } catch (err) {
+        logger.warn(`updateOrderStatusRestaurant transaction sync failed: ${err?.message || err}`);
+      }
     }
 
     return order.toObject();

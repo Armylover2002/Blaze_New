@@ -1097,10 +1097,33 @@ export const cancelOrder = async (req, res) => {
     }
 
     const currentStatus = String(order.orderStatus || '').toLowerCase();
-    if (['delivered', 'cancelled_by_user', 'cancelled_by_restaurant', 'cancelled_by_admin'].includes(currentStatus)) {
+    const workflowStatus = String(order.workflowStatus || '').toUpperCase();
+    const deliveryPhase = String(order.deliveryState?.currentPhase || '').toLowerCase();
+    const terminalStatuses = new Set([
+      'picked_up',
+      'delivered',
+      'cancelled_by_user',
+      'cancelled_by_restaurant',
+      'cancelled_by_admin',
+    ]);
+    const nonCancellableWorkflowStatuses = new Set(['OUT_FOR_DELIVERY', 'DELIVERED', 'CANCELLED']);
+    const nonCancellableDeliveryPhases = new Set([
+      'en_route_to_delivery',
+      'at_drop',
+      'delivered',
+      'completed',
+    ]);
+
+    if (
+      terminalStatuses.has(currentStatus) ||
+      nonCancellableWorkflowStatuses.has(workflowStatus) ||
+      nonCancellableDeliveryPhases.has(deliveryPhase)
+    ) {
       return res.status(400).json({
         success: false,
-        message: currentStatus === 'delivered' ? 'Delivered orders cannot be cancelled' : 'Order is already cancelled',
+        message: currentStatus === 'delivered'
+          ? 'Delivered orders cannot be cancelled'
+          : 'Order can no longer be cancelled once delivery is in progress',
       });
     }
 
