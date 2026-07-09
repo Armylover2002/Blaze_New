@@ -9,6 +9,7 @@ import { logger } from '../../../utils/logger.js';
 import { ProcessedWebhookEvent } from '../models/processedWebhookEvent.model.js';
 import dayjs from 'dayjs';
 import { OnboardingPaymentLog } from '../../../modules/common/models/onboardingPaymentLog.model.js';
+import { processOrderPostPaymentFulfillment } from '../../../modules/food/orders/services/order.service.js';
 
 import * as walletService from '../../../modules/food/subscriptions/services/wallet.service.js';
 import { invalidateSubscriptionStatsCache } from '../../../modules/food/admin/utils/subscriptionStatsCache.js';
@@ -142,6 +143,7 @@ export const handleRazorpayWebhook = async (req, res) => {
                         razorpayPaymentId: rzPaymentId,
                         note: 'Payment status synced via Webhook (payment.captured)'
                     });
+                    await processOrderPostPaymentFulfillment(order, { notifyCustomer: false });
                 } catch (ledgerErr) {
                     logger.error(`Webhook Ledger Error (Order ${order.orderId}): ${ledgerErr.message}`);
                     return res.status(500).json({ message: 'Ledger sync failed; retrying webhook' });

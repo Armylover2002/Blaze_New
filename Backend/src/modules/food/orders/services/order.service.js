@@ -1968,6 +1968,65 @@ export async function processScheduledOrderNotification(orderMongoId) {
   return { success: true };
 }
 
+export async function processOrderPostPaymentFulfillment(orderInput, options = {}) {
+  const { notifyCustomer = false, customerUserId = null } = options;
+  const order =
+    orderInput instanceof FoodOrder
+      ? orderInput
+      : await FoodOrder.findById(orderInput);
+  if (!order) return { success: false, reason: "Order not found" };
+
+  if (order.orderType === "food" || order.orderType === "mixed") {
+    await notifyRestaurantNewOrder(order);
+  }
+  if (order.orderType === "quick" || order.orderType === "mixed") {
+    const sellerOrders = await upsertSellerOrdersForParent(order);
+    await notifySellerNewOrders(order, sellerOrders);
+  }
+
+  if (order.orderStatus === "scheduled" && order.scheduledAt) {
+    const now = Date.now();
+    const scheduledTime = new Date(order.scheduledAt).getTime();
+    const notificationTime = scheduledTime - 15 * 60 * 1000;
+    const delay = Math.max(0, notificationTime - now);
+
+    enqueueOrderEvent("NOTIFY_SCHEDULED_ORDER", {
+      orderId: order.orderId,
+      orderMongoId: order._id.toString(),
+    }, { delay });
+
+    logger.info(`Scheduled notification for verified order ${order.orderId} with delay of ${delay}ms`);
+  }
+
+  if (
+    (order.orderType === "food" || (order.orderType === "mixed" && order.dispatchPlan?.strategy === "single")) &&
+    String(order.dispatch?.modeAtCreation || "manual") === "auto" &&
+    String(order.payment?.status || "").toLowerCase() === "paid"
+  ) {
+    try {
+      await tryAutoAssign(order._id);
+    } catch {
+      // leave unassigned
+    }
+  }
+
+  if (notifyCustomer && customerUserId) {
+    const branding = await getGlobalBranding();
+    await notifyOwnersSafely([{ ownerType: "USER", ownerId: customerUserId }], {
+      title: "Payment Successful! ✅",
+      body: `We have received your payment of ₹${order.payment.amountDue} for Order #${order.orderId}.`,
+      image: branding.image,
+      data: {
+        type: "payment_success",
+        orderId: String(order.orderId),
+        orderMongoId: String(order._id),
+      },
+    });
+  }
+
+  return { success: true };
+}
+
 // Stale getDispatchSettings and updateDispatchSettings removed (now imported from order-dispatch.service.js)
 
 // ----- Calculate (validation + return pricing from payload) -----
@@ -2890,41 +2949,9 @@ export async function verifyPayment(userId, dto) {
     recordedById: new mongoose.Types.ObjectId(userId)
   });
 
-  // After online payment is verified, now notify restaurant about the new order.
-  if (order.orderType === "food" || order.orderType === "mixed") {
-    await notifyRestaurantNewOrder(order);
-  }
-  if (order.orderType === "quick" || order.orderType === "mixed") {
-    const sellerOrders = await upsertSellerOrdersForParent(order);
-    await notifySellerNewOrders(order, sellerOrders);
-  }
-
-  // Schedule delayed notification if it's a scheduled order and payment is now verified
-  if (order.orderStatus === "scheduled" && order.scheduledAt) {
-    const now = Date.now();
-    const scheduledTime = new Date(order.scheduledAt).getTime();
-    const notificationTime = scheduledTime - 15 * 60 * 1000;
-    const delay = Math.max(0, notificationTime - now);
-
-    enqueueOrderEvent("NOTIFY_SCHEDULED_ORDER", {
-      orderId: order.orderId,
-      orderMongoId: order._id.toString(),
-    }, { delay });
-    
-    logger.info(`Scheduled notification for verified order ${order.orderId} with delay of ${delay}ms`);
-  }
-
-  // Notify Customer about payment success
-  const branding = await getGlobalBranding();
-  await notifyOwnersSafely([{ ownerType: "USER", ownerId: userId }], {
-    title: "Payment Successful! ✅",
-    body: `We have received your payment of ₹${order.payment.amountDue} for Order #${order.orderId}.`,
-    image: branding.image,
-    data: {
-      type: "payment_success",
-      orderId: String(order.orderId),
-      orderMongoId: String(order._id),
-    },
+  await processOrderPostPaymentFulfillment(order, {
+    notifyCustomer: true,
+    customerUserId: userId,
   });
 
   const settings =
