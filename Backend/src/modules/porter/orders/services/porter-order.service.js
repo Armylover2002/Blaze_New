@@ -1,5 +1,11 @@
 import mongoose from 'mongoose';
-import { createRazorpayOrder, getRazorpayKeyId, verifyPaymentSignature } from '../../../food/orders/helpers/razorpay.helper.js';
+import {
+    createRazorpayOrder,
+    fetchRazorpayPayment,
+    getRazorpayKeyId,
+    isRazorpayConfigured,
+    verifyPaymentSignature,
+} from '../../../food/orders/helpers/razorpay.helper.js';
 import { PorterOrder } from '../models/porterOrder.model.js';
 import { PorterCoupon } from '../../models/porterCoupon.model.js';
 import { FoodDeliveryPartner } from '../../../food/delivery/models/deliveryPartner.model.js';
@@ -557,12 +563,39 @@ export async function verifyPorterPayment(userId, dto) {
     if (!order) throw new NotFoundError('Order not found');
     if (order.payment.status === PORTER_PAYMENT_STATUS.PAID) return { order };
 
+    const expectedRazorpayOrderId = String(order.payment?.razorpay?.orderId || '').trim();
+    const providedRazorpayOrderId = String(dto.razorpayOrderId || '').trim();
+    if (!expectedRazorpayOrderId || providedRazorpayOrderId !== expectedRazorpayOrderId) {
+        throw new ValidationError('Payment order mismatch');
+    }
+
     const valid = verifyPaymentSignature(
-        dto.razorpayOrderId,
+        expectedRazorpayOrderId,
         dto.razorpayPaymentId,
         dto.razorpaySignature,
     );
     if (!valid) throw new ValidationError('Payment verification failed');
+
+    if (isRazorpayConfigured()) {
+        const fetchedPayment = await fetchRazorpayPayment(dto.razorpayPaymentId);
+        const fetchedOrderId = String(fetchedPayment?.order_id || '').trim();
+        const fetchedStatus = String(fetchedPayment?.status || '').toLowerCase();
+        const fetchedAmountPaise = Number(fetchedPayment?.amount || 0);
+        const expectedAmountPaise = Math.round(Number(order.pricing?.total || 0) * 100);
+
+        if (fetchedOrderId !== expectedRazorpayOrderId) {
+            throw new ValidationError('Payment order mismatch');
+        }
+        if (fetchedStatus !== 'captured') {
+            throw new ValidationError('Payment not captured');
+        }
+        if (!Number.isFinite(expectedAmountPaise) || expectedAmountPaise < 100) {
+            throw new ValidationError('Invalid order payment amount');
+        }
+        if (fetchedAmountPaise !== expectedAmountPaise) {
+            throw new ValidationError('Payment amount mismatch');
+        }
+    }
 
     order.payment.status = PORTER_PAYMENT_STATUS.PAID;
     order.payment.paidAt = new Date();
