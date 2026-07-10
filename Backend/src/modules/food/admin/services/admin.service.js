@@ -30,6 +30,7 @@ import { FoodSupportTicket } from '../../user/models/supportTicket.model.js';
 import { FoodRestaurantSupportTicket } from '../../restaurant/models/supportTicket.model.js';
 import { FoodOrder } from '../../orders/models/order.model.js';
 import { FoodTransaction } from '../../orders/models/foodTransaction.model.js';
+import { buildOrderIdentityFilter } from '../../orders/services/order.helpers.js';
 import { FoodRestaurantWithdrawal } from '../../restaurant/models/foodRestaurantWithdrawal.model.js';
 import { applyPendingOpenDaysUpdate, discardPendingOpenDaysUpdate, syncOutletTimingsFromOpenDays } from '../../restaurant/services/outletTimings.service.js';
 // import { applyPendingOpenDaysUpdate, discardPendingOpenDaysUpdate } from '../../restaurant/services/outletTimings.service.js';
@@ -2738,6 +2739,157 @@ export async function getRestaurantAnalytics(restaurantId) {
     };
 
     return { restaurant, analytics, paymentSummary };
+}
+
+const FOOD_ORDER_ID_REGEX = /^FOD-[A-HJ-NP-Z2-9]{6}$/i;
+
+function isValidFoodOrderIdFormat(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return false;
+    if (FOOD_ORDER_ID_REGEX.test(raw)) return true;
+    return mongoose.Types.ObjectId.isValid(raw) && String(new mongoose.Types.ObjectId(raw)) === raw;
+}
+
+function looksLikeOrderIdSearch(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return false;
+    if (/^FOD-/i.test(raw)) return true;
+    if (/^[a-f0-9]{24}$/i.test(raw)) return true;
+    return false;
+}
+
+function buildSingleOrderPosAnalytics(order, restaurant, tx) {
+    const now = new Date();
+    const orderDate = new Date(order.createdAt || now);
+    const isCompleted = order.orderStatus === 'delivered';
+    const isCancelled = CANCELLED_ORDER_STATUSES.includes(order.orderStatus);
+    const restaurantEarning = Number(tx?.amounts?.restaurantShare || 0);
+    const totalRevenue = Number(
+        tx?.amounts?.totalCustomerPaid
+        ?? tx?.pricing?.total
+        ?? order.pricing?.total
+        ?? 0
+    );
+    const isCurrentMonth = orderDate.getMonth() === now.getMonth()
+        && orderDate.getFullYear() === now.getFullYear();
+    const isCurrentYear = orderDate.getFullYear() === now.getFullYear();
+    const completedProfit = isCompleted ? restaurantEarning : 0;
+
+    const analytics = {
+        totalOrders: 1,
+        cancelledOrders: isCancelled ? 1 : 0,
+        completedOrders: isCompleted ? 1 : 0,
+        averageRating: Number(restaurant?.rating || 0),
+        totalRatings: Number(restaurant?.totalRatings || 0),
+        monthlyProfit: isCurrentMonth ? completedProfit : 0,
+        yearlyProfit: isCurrentYear ? completedProfit : 0,
+        averageOrderValue: isCompleted ? totalRevenue : 0,
+        totalRevenue: isCompleted ? totalRevenue : 0,
+        restaurantEarning: isCompleted ? restaurantEarning : 0,
+        restaurantProfit: isCompleted ? restaurantEarning : 0,
+        monthlyOrders: isCurrentMonth ? 1 : 0,
+        yearlyOrders: isCurrentYear ? 1 : 0,
+        averageMonthlyProfit: isCurrentMonth ? completedProfit : 0,
+        averageYearlyProfit: isCurrentYear ? completedProfit : 0,
+        status: restaurant?.status === 'approved' ? 'active' : 'inactive',
+        joinDate: restaurant?.createdAt || orderDate,
+        totalCustomers: 1,
+        repeatCustomers: 0,
+        cancellationRate: isCancelled ? 100 : 0,
+        completionRate: isCompleted ? 100 : 0,
+        searchType: 'order',
+        orderId: order.orderId,
+        orderStatus: order.orderStatus,
+        orderCreatedAt: order.createdAt,
+    };
+
+    const paymentSummary = {
+        subtotal: Number(tx?.pricing?.subtotal ?? order.pricing?.subtotal ?? 0),
+        tax: Number(tx?.pricing?.tax ?? tx?.amounts?.taxAmount ?? order.pricing?.tax ?? 0),
+        packagingFee: Number(tx?.pricing?.packagingFee ?? order.pricing?.packagingFee ?? 0),
+        deliveryFee: Number(tx?.pricing?.deliveryFee ?? order.pricing?.deliveryFee ?? 0),
+        platformFee: Number(tx?.pricing?.platformFee ?? order.pricing?.platformFee ?? 0),
+        discount: Number(tx?.pricing?.discount ?? order.pricing?.discount ?? 0),
+        total: totalRevenue,
+        currency: 'INR',
+        restaurantShare: restaurantEarning,
+        riderShare: Number(tx?.amounts?.riderShare || 0),
+        platformNetProfit: Number(tx?.amounts?.platformNetProfit || 0),
+    };
+
+    return {
+        restaurant,
+        analytics,
+        paymentSummary,
+        order: {
+            _id: order._id,
+            orderId: order.orderId,
+            orderStatus: order.orderStatus,
+            createdAt: order.createdAt,
+        },
+    };
+}
+
+export async function searchPosOrders(query = '') {
+    const term = String(query || '').trim();
+    if (!term || !looksLikeOrderIdSearch(term)) return [];
+
+    const escaped = escapeRegex(term);
+    const filter = { orderType: 'food' };
+
+    if (/^[a-f0-9]{24}$/i.test(term)) {
+        filter.$or = [
+            { orderId: { $regex: escaped, $options: 'i' } },
+            { _id: new mongoose.Types.ObjectId(term) },
+        ];
+    } else {
+        filter.orderId = { $regex: escaped, $options: 'i' };
+    }
+
+    const orders = await FoodOrder.find(filter)
+        .select('orderId orderStatus createdAt restaurantId')
+        .populate('restaurantId', 'restaurantName restaurantId status')
+        .sort({ createdAt: -1 })
+        .limit(10)
+        .lean();
+
+    return orders.map((order) => ({
+        _id: order._id,
+        orderId: order.orderId,
+        orderStatus: order.orderStatus,
+        createdAt: order.createdAt,
+        restaurantId: order.restaurantId?._id || order.restaurantId || null,
+        restaurantName: order.restaurantId?.restaurantName || '',
+        restaurantCode: order.restaurantId?.restaurantId || '',
+    }));
+}
+
+export async function getOrderPosAnalytics(orderIdParam) {
+    const raw = String(orderIdParam || '').trim();
+    if (!raw) {
+        return { error: 'invalid', message: 'Order ID is required' };
+    }
+    if (!isValidFoodOrderIdFormat(raw)) {
+        return { error: 'invalid', message: 'Invalid order ID format' };
+    }
+
+    const identityFilter = buildOrderIdentityFilter(raw);
+    if (!identityFilter) {
+        return { error: 'invalid', message: 'Invalid order ID format' };
+    }
+
+    const order = await FoodOrder.findOne({ ...identityFilter, orderType: 'food' }).lean();
+    if (!order) {
+        return { error: 'not_found', message: 'Order not found' };
+    }
+
+    const restaurant = await FoodRestaurant.findById(order.restaurantId).lean();
+    if (!restaurant) {
+        return { error: 'not_found', message: 'Restaurant not found for this order' };
+    }
+
+    const tx = await FoodTransaction.findOne({ orderId: order._id }).lean();
+    return buildSingleOrderPosAnalytics(order, restaurant, tx);
 }
 
 export async function getRestaurantMenuById(id) {

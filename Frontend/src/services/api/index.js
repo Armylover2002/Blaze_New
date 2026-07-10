@@ -544,6 +544,17 @@ export const adminAPI = {
     apiClient.get(`/food/admin/restaurants/${id}/analytics`, {
       contextModule: "admin",
     }),
+  /** Search POS analytics targets (orders) by order ID. */
+  searchPosAnalytics: (q) =>
+    apiClient.get(`/food/admin/pos-analytics/search`, {
+      params: { q },
+      contextModule: "admin",
+    }),
+  /** Get single-order analytics for POS. */
+  getOrderPosAnalytics: (orderId) =>
+    apiClient.get(`/food/admin/orders/${encodeURIComponent(orderId)}/pos-analytics`, {
+      contextModule: "admin",
+    }),
   /** Update restaurant basic details (admin). */
   updateRestaurant: (id, body) =>
     apiClient.patch(`/food/admin/restaurants/${String(id)}`, body ?? {}, {

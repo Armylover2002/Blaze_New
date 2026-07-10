@@ -326,6 +326,47 @@ export async function getRestaurantAnalytics(req, res, next) {
     }
 }
 
+export async function searchPosAnalytics(req, res, next) {
+    try {
+        const query = String(req.query?.q || req.query?.search || '').trim();
+        if (!query) {
+            return res.status(200).json({
+                success: true,
+                message: 'POS analytics search completed',
+                data: { orders: [] },
+            });
+        }
+        const orders = await adminService.searchPosOrders(query);
+        res.status(200).json({
+            success: true,
+            message: 'POS analytics search completed',
+            data: { orders },
+        });
+    } catch (error) {
+        next(error);
+    }
+}
+
+export async function getOrderPosAnalytics(req, res, next) {
+    try {
+        const { orderId } = req.params;
+        const data = await adminService.getOrderPosAnalytics(orderId);
+        if (data?.error === 'invalid') {
+            return res.status(400).json({ success: false, message: data.message || 'Invalid order id' });
+        }
+        if (data?.error === 'not_found') {
+            return res.status(404).json({ success: false, message: data.message || 'Order not found' });
+        }
+        res.status(200).json({
+            success: true,
+            message: 'Order analytics fetched successfully',
+            data,
+        });
+    } catch (error) {
+        next(error);
+    }
+}
+
 export async function getRestaurantMenuById(req, res, next) {
     try {
         const { id } = req.params;
