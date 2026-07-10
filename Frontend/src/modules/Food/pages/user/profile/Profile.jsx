@@ -236,9 +236,6 @@ export default function Profile() {
 
   const handleDeleteRequest = async (request) => {
     try {
-      const confirmDelete = window.confirm("Are you sure you want to delete this role request?");
-      if (!confirmDelete) return;
-      
       const reqId = request._id || request.id;
       const res = await userAPI.deleteRoleRequest(reqId);
       if (res?.data?.success || res?.success) {

@@ -2206,8 +2206,19 @@ export const deliveryAPI = {
       return p;
     };
   })(),
-  /** GET /food/delivery/current - fallback for some UI hooks */
-  getCurrentDelivery: () => apiClient.get("/food/delivery/orders/current", { contextModule: "delivery" }),
+  /** GET /food/delivery/orders/current — in-flight dedupe for sync/recovery overlap. */
+  getCurrentDelivery: (() => {
+    let inFlight = null;
+    return () => {
+      if (inFlight) return inFlight;
+      inFlight = apiClient
+        .get("/food/delivery/orders/current", { contextModule: "delivery" })
+        .finally(() => {
+          inFlight = null;
+        });
+      return inFlight;
+    };
+  })(),
   acceptOrder: (orderId, body = {}) =>
     apiClient.patch(
       `/food/delivery/orders/${String(orderId)}/accept`,

@@ -24,9 +24,7 @@ import {
 } from '../controllers/diningBanner.controller.js';
 import {
     getAdminLandingSettingsController,
-    updateAdminLandingSettingsController,
-    uploadAdminLandingHeaderVideoController,
-    deleteAdminLandingHeaderVideoController
+    updateAdminLandingSettingsController
 } from '../controllers/landingSettings.controller.js';
 import {
     listExploreMoreController,
@@ -137,8 +135,6 @@ router.get('/fee-settings/public', cacheResponse(60, 'fee_settings'), getPublicF
 // Admin landing settings (old paths used by admin UI)
 router.get('/hero-banners/landing/settings', getAdminLandingSettingsController);
 router.patch('/hero-banners/landing/settings', updateAdminLandingSettingsController);
-router.post('/hero-banners/landing/settings/header-video', upload.single('video'), uploadAdminLandingHeaderVideoController);
-router.delete('/hero-banners/landing/settings/header-video', deleteAdminLandingHeaderVideoController);
 
 export default router;
 

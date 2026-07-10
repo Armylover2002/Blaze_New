@@ -6,12 +6,18 @@ export const listDiningBanners = async () => {
     return FoodDiningBanner.find().sort({ sortOrder: 1, createdAt: -1 }).lean();
 };
 
+const getNextSortOrder = async () => {
+    const last = await FoodDiningBanner.findOne().sort({ sortOrder: -1 }).select('sortOrder').lean();
+    return (last?.sortOrder ?? -1) + 1;
+};
+
 export const createDiningBannersFromFiles = async (files, meta = {}) => {
     if (!files || !files.length) {
         return [];
     }
 
     const results = [];
+    let currentSortOrder = typeof meta.sortOrder === 'number' ? meta.sortOrder : await getNextSortOrder();
 
     for (const file of files) {
         try {
@@ -24,7 +30,7 @@ export const createDiningBannersFromFiles = async (files, meta = {}) => {
                 ctaText: meta.ctaText,
                 ctaLink: meta.ctaLink,
                 diningType: meta.diningType,
-                sortOrder: meta.sortOrder ?? 0,
+                sortOrder: currentSortOrder++,
                 isActive: true,
             });
 
