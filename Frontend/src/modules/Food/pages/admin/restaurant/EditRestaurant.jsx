@@ -6,7 +6,27 @@ import { Button } from "@food/components/ui/button"
 import { Label } from "@food/components/ui/label"
 import { getGoogleMapsApiKey } from "@food/utils/googleMapsApiKey"
 import { ArrowLeft, Loader2 } from "lucide-react"
+import { toast } from "sonner"
 
+const PHONE_REGEX = /^\d{10}$/
+const OWNER_PHONE_DUPLICATE_MSG = "This phone number is already registered with another restaurant."
+const PRIMARY_CONTACT_DUPLICATE_MSG = "This contact number is already registered with another restaurant."
+const getRestaurantPhoneFieldError = (error) => {
+  const msg = error?.response?.data?.message || error?.response?.data?.error || ""
+  if (msg === PRIMARY_CONTACT_DUPLICATE_MSG) {
+    return { field: "primaryContactNumber", message: msg }
+  }
+  if (msg === OWNER_PHONE_DUPLICATE_MSG) {
+    return { field: "ownerPhone", message: msg }
+  }
+  if (/already registered|already exists|pending approval/i.test(msg)) {
+    if (/contact/i.test(msg)) {
+      return { field: "primaryContactNumber", message: msg }
+    }
+    return { field: "ownerPhone", message: msg }
+  }
+  return null
+}
 const debugError = (..._args) => {}
 
 const toNumberOrEmpty = (value) => {
@@ -137,6 +157,7 @@ export default function EditRestaurant() {
   const [zonesLoading, setZonesLoading] = useState(false)
 
   const [detailsForm, setDetailsForm] = useState(() => normalizeDetailsFormFromRestaurant(null))
+  const [fieldErrors, setFieldErrors] = useState({})
   const [locationForm, setLocationForm] = useState(() => normalizeLocationFormFromRestaurant(null))
   const [locationError, setLocationError] = useState("")
 
@@ -293,8 +314,28 @@ export default function EditRestaurant() {
 
   const handleSaveDetails = async () => {
     if (!restaurantId) return
+
+    const nextFieldErrors = {}
+    const ownerPhone = String(detailsForm.ownerPhone || "").trim()
+    const primaryContactNumber = String(detailsForm.primaryContactNumber || "").trim()
+
+    if (ownerPhone && !PHONE_REGEX.test(ownerPhone)) {
+      nextFieldErrors.ownerPhone = "Owner phone number must be 10 digits"
+    }
+    if (primaryContactNumber && !PHONE_REGEX.test(primaryContactNumber)) {
+      nextFieldErrors.primaryContactNumber = "Primary contact number must be 10 digits"
+    }
+
+    if (Object.keys(nextFieldErrors).length > 0) {
+      setFieldErrors(nextFieldErrors)
+      toast.error(Object.values(nextFieldErrors)[0])
+      document.getElementById(`restaurant-field-${Object.keys(nextFieldErrors)[0]}`)?.scrollIntoView?.({ behavior: "smooth", block: "center" })
+      return
+    }
+
     try {
       setSavingDetails(true)
+      setFieldErrors({})
 
       const cuisines = String(detailsForm.cuisinesText || "")
         .split(",")
@@ -331,6 +372,13 @@ export default function EditRestaurant() {
       }
       alert("Restaurant details updated successfully")
     } catch (e) {
+      const phoneError = getRestaurantPhoneFieldError(e)
+      if (phoneError) {
+        setFieldErrors({ [phoneError.field]: phoneError.message })
+        toast.error(phoneError.message)
+        document.getElementById(`restaurant-field-${phoneError.field}`)?.scrollIntoView?.({ behavior: "smooth", block: "center" })
+        return
+      }
       alert(e?.response?.data?.message || "Failed to update restaurant details")
     } finally {
       setSavingDetails(false)
@@ -478,11 +526,35 @@ export default function EditRestaurant() {
                 </div>
                 <div>
                   <Label>Owner Phone</Label>
-                  <Input value={detailsForm.ownerPhone} onChange={(e) => setDetailsForm((p) => ({ ...p, ownerPhone: e.target.value }))} />
+                  <Input
+                    id="restaurant-field-ownerPhone"
+                    data-restaurant-field="ownerPhone"
+                    value={detailsForm.ownerPhone}
+                    onChange={(e) => {
+                      setFieldErrors((prev) => ({ ...prev, ownerPhone: undefined }))
+                      setDetailsForm((p) => ({ ...p, ownerPhone: e.target.value.replace(/\D/g, "").slice(0, 10) }))
+                    }}
+                    className={fieldErrors.ownerPhone ? "border-red-500 ring-1 ring-red-300" : ""}
+                  />
+                  {fieldErrors.ownerPhone && (
+                    <p className="mt-1 text-xs text-red-600">{fieldErrors.ownerPhone}</p>
+                  )}
                 </div>
                 <div>
                   <Label>Primary Contact Number</Label>
-                  <Input value={detailsForm.primaryContactNumber} onChange={(e) => setDetailsForm((p) => ({ ...p, primaryContactNumber: e.target.value }))} />
+                  <Input
+                    id="restaurant-field-primaryContactNumber"
+                    data-restaurant-field="primaryContactNumber"
+                    value={detailsForm.primaryContactNumber}
+                    onChange={(e) => {
+                      setFieldErrors((prev) => ({ ...prev, primaryContactNumber: undefined }))
+                      setDetailsForm((p) => ({ ...p, primaryContactNumber: e.target.value.replace(/\D/g, "").slice(0, 10) }))
+                    }}
+                    className={fieldErrors.primaryContactNumber ? "border-red-500 ring-1 ring-red-300" : ""}
+                  />
+                  {fieldErrors.primaryContactNumber && (
+                    <p className="mt-1 text-xs text-red-600">{fieldErrors.primaryContactNumber}</p>
+                  )}
                 </div>
                 <div className="md:col-span-2">
                   <Label>Cuisines (comma separated)</Label>

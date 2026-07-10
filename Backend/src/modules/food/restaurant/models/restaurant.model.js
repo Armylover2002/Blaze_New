@@ -95,6 +95,14 @@ const restaurantSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
+    primaryContactNumberDigits: {
+      type: String,
+      trim: true,
+    },
+    primaryContactNumberLast10: {
+      type: String,
+      trim: true,
+    },
     pureVegRestaurant: {
       type: Boolean,
       required: true,
@@ -414,6 +422,15 @@ restaurantSchema.pre("validate", function normalizeDerivedFields(next) {
   this.ownerPhoneDigits = digits || undefined;
   this.ownerPhoneLast10 = digits ? digits.slice(-10) : undefined;
 
+  // Normalize primary contact number
+  const primaryContactRaw =
+    typeof this.primaryContactNumber === "string" || typeof this.primaryContactNumber === "number"
+      ? String(this.primaryContactNumber)
+      : "";
+  const primaryDigits = primaryContactRaw.replace(/\D/g, "").slice(-15);
+  this.primaryContactNumberDigits = primaryDigits || undefined;
+  this.primaryContactNumberLast10 = primaryDigits ? primaryDigits.slice(-10) : undefined;
+
   // Keep `location` in sync when flat address fields exist (backward-compatible migration).
   // Prefer explicit location.* fields if provided.
   const hasAnyFlatAddress =
@@ -535,6 +552,26 @@ restaurantSchema.index(
     partialFilterExpression: {
       restaurantNameNormalized: { $type: "string" },
       ownerPhoneLast10: { $type: "string" },
+    },
+  },
+);
+// Unique index for owner phone last 10 digits
+restaurantSchema.index(
+  { ownerPhoneLast10: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      ownerPhoneLast10: { $type: "string" },
+    },
+  },
+);
+// Unique index for primary contact number last 10 digits
+restaurantSchema.index(
+  { primaryContactNumberLast10: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      primaryContactNumberLast10: { $type: "string" },
     },
   },
 );

@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 import { ValidationError } from '../../../../core/auth/errors.js';
 import { assertNoZoneOverlap } from '../../../../utils/zoneOverlap.js';
 import { FoodRestaurant } from '../../restaurant/models/restaurant.model.js';
+import { validateRestaurantPhoneUniqueness, normalizeRestaurantPhone } from '../../restaurant/services/restaurant.service.js';
 import { FoodRestaurantWallet } from '../../restaurant/models/restaurantWallet.model.js';
 import { FoodDeliveryPartner } from '../../delivery/models/deliveryPartner.model.js';
 import { DeliverySupportTicket } from '../../delivery/models/supportTicket.model.js';
@@ -2789,6 +2790,15 @@ export async function updateRestaurantById(id, body = {}) {
         return Number.isFinite(n) ? n : undefined;
     };
 
+    if (body.ownerPhone !== undefined || body.primaryContactNumber !== undefined) {
+        await validateRestaurantPhoneUniqueness({
+            ownerPhone: body.ownerPhone,
+            primaryContactNumber: body.primaryContactNumber,
+            restaurantId: doc._id,
+            currentRestaurant: doc,
+        });
+    }
+
     if (body.name !== undefined || body.restaurantName !== undefined) {
         const name = toStr(body.name !== undefined ? body.name : body.restaurantName);
         if (!name) throw new ValidationError('Restaurant name cannot be empty');
@@ -2797,8 +2807,18 @@ export async function updateRestaurantById(id, body = {}) {
 
     if (body.ownerName !== undefined) doc.ownerName = toStr(body.ownerName);
     if (body.ownerEmail !== undefined) doc.ownerEmail = toStr(body.ownerEmail).toLowerCase();
-    if (body.ownerPhone !== undefined) doc.ownerPhone = toStr(body.ownerPhone);
-    if (body.primaryContactNumber !== undefined) doc.primaryContactNumber = toStr(body.primaryContactNumber);
+    if (body.ownerPhone !== undefined) {
+        const { digits, last10 } = normalizeRestaurantPhone(body.ownerPhone);
+        doc.ownerPhone = digits;
+        doc.ownerPhoneDigits = digits;
+        doc.ownerPhoneLast10 = last10 || undefined;
+    }
+    if (body.primaryContactNumber !== undefined) {
+        const { digits, last10 } = normalizeRestaurantPhone(body.primaryContactNumber);
+        doc.primaryContactNumber = digits;
+        doc.primaryContactNumberDigits = digits;
+        doc.primaryContactNumberLast10 = last10 || undefined;
+    }
 
     if (body.pureVegRestaurant !== undefined) {
         doc.pureVegRestaurant = parseBooleanLike(body.pureVegRestaurant, 'pureVegRestaurant');
@@ -3777,12 +3797,25 @@ export async function createRestaurantByAdmin(body, performer = null) {
     const normalizedClosingTime = normalizeRestaurantTime(body.closingTime) || '22:00';
     validateOpeningClosingTimes(normalizedOpeningTime, normalizedClosingTime);
 
+    // Normalize phone numbers and extract last 10 digits for duplicate check
+    await validateRestaurantPhoneUniqueness({
+        ownerPhone: body.ownerPhone,
+        primaryContactNumber: body.primaryContactNumber || body.ownerPhone,
+    });
+
+    const ownerNormalized = normalizeRestaurantPhone(body.ownerPhone);
+    const primaryNormalized = normalizeRestaurantPhone(body.primaryContactNumber || body.ownerPhone);
+
     const doc = {
         restaurantName: toStr(body.restaurantName) || toStr(body.name),
         ownerName: toStr(body.ownerName),
         ownerEmail: toStr(body.ownerEmail),
-        ownerPhone: toStr(body.ownerPhone),
-        primaryContactNumber: toStr(body.primaryContactNumber) || toStr(body.ownerPhone),
+        ownerPhone: ownerNormalized.digits,
+        ownerPhoneDigits: ownerNormalized.digits,
+        ownerPhoneLast10: ownerNormalized.last10 || undefined,
+        primaryContactNumber: primaryNormalized.digits,
+        primaryContactNumberDigits: primaryNormalized.digits,
+        primaryContactNumberLast10: primaryNormalized.last10 || undefined,
         pureVegRestaurant: body.pureVegRestaurant !== undefined
             ? parseBooleanLike(body.pureVegRestaurant, 'pureVegRestaurant')
             : false,

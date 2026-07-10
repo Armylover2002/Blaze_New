@@ -8,6 +8,25 @@ import { Label } from "@food/components/ui/label"
 import { Button } from "@food/components/ui/button"
 import { adminAPI, uploadAPI, zoneAPI } from "@food/api"
 import { toast } from "sonner"
+
+const OWNER_PHONE_DUPLICATE_MSG = "This phone number is already registered with another restaurant."
+const PRIMARY_CONTACT_DUPLICATE_MSG = "This contact number is already registered with another restaurant."
+const getRestaurantPhoneFieldError = (error) => {
+  const msg = error?.response?.data?.message || error?.response?.data?.error || ""
+  if (msg === PRIMARY_CONTACT_DUPLICATE_MSG) {
+    return { field: "primaryContactNumber", message: msg }
+  }
+  if (msg === OWNER_PHONE_DUPLICATE_MSG) {
+    return { field: "ownerPhone", message: msg }
+  }
+  if (/already registered|already exists|pending approval/i.test(msg)) {
+    if (/contact/i.test(msg)) {
+      return { field: "primaryContactNumber", message: msg }
+    }
+    return { field: "ownerPhone", message: msg }
+  }
+  return null
+}
 const debugLog = (...args) => {}
 const debugWarn = (...args) => { console.warn(...args) }
 const debugError = (...args) => { console.error(...args) }
@@ -618,6 +637,13 @@ export default function AddRestaurant() {
       }
     } catch (error) {
       debugError("Error creating restaurant:", error)
+      const phoneError = getRestaurantPhoneFieldError(error)
+      if (phoneError) {
+        setFormErrors((prev) => ({ ...prev, [phoneError.field]: phoneError.message }))
+        toast.error(phoneError.message)
+        document.getElementById(`restaurant-field-${phoneError.field}`)?.scrollIntoView?.({ behavior: "smooth", block: "center" })
+        return
+      }
       const errorMsg = error?.response?.data?.message || error?.message || "Failed to create restaurant. Please try again."
       toast.error(errorMsg)
       setFormErrors({ submit: errorMsg })
@@ -940,13 +966,21 @@ export default function AddRestaurant() {
           <div>
             <Label className="text-xs text-gray-700">Phone number*</Label>
             <Input
+              id="restaurant-field-ownerPhone"
+              data-restaurant-field="ownerPhone"
               value={step1.ownerPhone || ""}
-              onChange={(e) => setStep1({ ...step1, ownerPhone: sanitizeDigits(e.target.value).slice(0, 10) })}
-              className="mt-1 bg-white text-sm text-black placeholder-black"
+              onChange={(e) => {
+                setFormErrors((prev) => ({ ...prev, ownerPhone: undefined }))
+                setStep1({ ...step1, ownerPhone: sanitizeDigits(e.target.value).slice(0, 10) })
+              }}
+              className={`mt-1 bg-white text-sm text-black placeholder-black ${formErrors.ownerPhone ? "border-red-500 ring-1 ring-red-300" : ""}`}
               placeholder="10-digit mobile number"
               inputMode="numeric"
               maxLength={10}
             />
+            {formErrors.ownerPhone && (
+              <p className="mt-1 text-xs text-red-600">{formErrors.ownerPhone}</p>
+            )}
           </div>
         </div>
       </section>
@@ -1038,13 +1072,21 @@ export default function AddRestaurant() {
         <div>
           <Label className="text-xs text-gray-700">Primary contact number*</Label>
           <Input
+            id="restaurant-field-primaryContactNumber"
+            data-restaurant-field="primaryContactNumber"
             value={step1.primaryContactNumber || ""}
-            onChange={(e) => setStep1({ ...step1, primaryContactNumber: sanitizeDigits(e.target.value).slice(0, 10) })}
-            className="mt-1 bg-white text-sm text-black placeholder-black"
+            onChange={(e) => {
+              setFormErrors((prev) => ({ ...prev, primaryContactNumber: undefined }))
+              setStep1({ ...step1, primaryContactNumber: sanitizeDigits(e.target.value).slice(0, 10) })
+            }}
+            className={`mt-1 bg-white text-sm text-black placeholder-black ${formErrors.primaryContactNumber ? "border-red-500 ring-1 ring-red-300" : ""}`}
             placeholder="Restaurant's primary contact number"
             inputMode="numeric"
             maxLength={10}
           />
+          {formErrors.primaryContactNumber && (
+            <p className="mt-1 text-xs text-red-600">{formErrors.primaryContactNumber}</p>
+          )}
         </div>
         <div className="space-y-3">
           <Input

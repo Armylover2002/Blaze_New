@@ -13,6 +13,25 @@ import { getCurrentUser } from "@food/utils/auth"
 import { canPerformAdminPermissionAction, extractAdminPermissions, extractAdminRoleId, fetchAdminRolePermissions } from "@food/utils/adminPermissions"
 import { toast } from "sonner"
 
+const OWNER_PHONE_DUPLICATE_MSG = "This phone number is already registered with another restaurant."
+const PRIMARY_CONTACT_DUPLICATE_MSG = "This contact number is already registered with another restaurant."
+const getRestaurantPhoneFieldError = (error) => {
+  const msg = error?.response?.data?.message || error?.response?.data?.error || ""
+  if (msg === PRIMARY_CONTACT_DUPLICATE_MSG) {
+    return { field: "primaryContactNumber", message: msg }
+  }
+  if (msg === OWNER_PHONE_DUPLICATE_MSG) {
+    return { field: "ownerPhone", message: msg }
+  }
+  if (/already registered|already exists|pending approval/i.test(msg)) {
+    if (/contact/i.test(msg)) {
+      return { field: "primaryContactNumber", message: msg }
+    }
+    return { field: "ownerPhone", message: msg }
+  }
+  return null
+}
+
 // Import icons from Dashboard-icons
 import locationIcon from "@food/assets/Dashboard-icons/image1.png"
 import restaurantIcon from "@food/assets/Dashboard-icons/image2.png"
@@ -189,6 +208,7 @@ export default function RestaurantsList() {
     closingTime: "",
     isActive: true,
   })
+  const [detailsFieldErrors, setDetailsFieldErrors] = useState({})
   const [profileImageFile, setProfileImageFile] = useState(null)
   const [profileImagePreview, setProfileImagePreview] = useState("")
   const [isEditingLocation, setIsEditingLocation] = useState(false)
@@ -1192,6 +1212,24 @@ export default function RestaurantsList() {
 
     try {
       setSavingDetails(true)
+      setDetailsFieldErrors({})
+
+      const ownerPhone = detailsForm.ownerPhone.trim()
+      const primaryContactNumber = detailsForm.primaryContactNumber.trim()
+      const phoneRegex = /^\d{10}$/
+      const nextFieldErrors = {}
+      if (ownerPhone && !phoneRegex.test(ownerPhone)) {
+        nextFieldErrors.ownerPhone = "Owner phone number must be 10 digits"
+      }
+      if (primaryContactNumber && !phoneRegex.test(primaryContactNumber)) {
+        nextFieldErrors.primaryContactNumber = "Primary contact number must be 10 digits"
+      }
+      if (Object.keys(nextFieldErrors).length > 0) {
+        setDetailsFieldErrors(nextFieldErrors)
+        toast.error(Object.values(nextFieldErrors)[0])
+        document.getElementById(`restaurant-field-${Object.keys(nextFieldErrors)[0]}`)?.scrollIntoView?.({ behavior: "smooth", block: "center" })
+        return
+      }
 
       let profileImage = undefined
       if (profileImageFile) {
@@ -1268,6 +1306,13 @@ export default function RestaurantsList() {
       alert("Restaurant details updated successfully")
     } catch (err) {
       debugError("Error updating restaurant details:", err)
+      const phoneError = getRestaurantPhoneFieldError(err)
+      if (phoneError) {
+        setDetailsFieldErrors({ [phoneError.field]: phoneError.message })
+        toast.error(phoneError.message)
+        document.getElementById(`restaurant-field-${phoneError.field}`)?.scrollIntoView?.({ behavior: "smooth", block: "center" })
+        return
+      }
       alert(err?.response?.data?.message || "Failed to update restaurant details")
     } finally {
       setSavingDetails(false)
@@ -1901,11 +1946,13 @@ export default function RestaurantsList() {
                     </div>
                     <div>
                       <label className="block text-xs text-slate-500 mb-1">Owner Phone</label>
-                      <input type="text" value={detailsForm.ownerPhone} onChange={(e) => setDetailsForm((prev) => ({ ...prev, ownerPhone: e.target.value }))} className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm" />
+                      <input type="text" id="restaurant-field-ownerPhone" data-restaurant-field="ownerPhone" value={detailsForm.ownerPhone} onChange={(e) => { setDetailsFieldErrors((prev) => ({ ...prev, ownerPhone: undefined })); setDetailsForm((prev) => ({ ...prev, ownerPhone: e.target.value.replace(/\D/g, "").slice(0, 10) })) }} className={`w-full px-3 py-2 rounded-lg border text-sm ${detailsFieldErrors.ownerPhone ? "border-red-500 ring-1 ring-red-300" : "border-slate-300"}`} />
+                      {detailsFieldErrors.ownerPhone && <p className="mt-1 text-xs text-red-600">{detailsFieldErrors.ownerPhone}</p>}
                     </div>
                     <div>
                       <label className="block text-xs text-slate-500 mb-1">Primary Contact</label>
-                      <input type="text" value={detailsForm.primaryContactNumber} onChange={(e) => setDetailsForm((prev) => ({ ...prev, primaryContactNumber: e.target.value }))} className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm" />
+                      <input type="text" id="restaurant-field-primaryContactNumber" data-restaurant-field="primaryContactNumber" value={detailsForm.primaryContactNumber} onChange={(e) => { setDetailsFieldErrors((prev) => ({ ...prev, primaryContactNumber: undefined })); setDetailsForm((prev) => ({ ...prev, primaryContactNumber: e.target.value.replace(/\D/g, "").slice(0, 10) })) }} className={`w-full px-3 py-2 rounded-lg border text-sm ${detailsFieldErrors.primaryContactNumber ? "border-red-500 ring-1 ring-red-300" : "border-slate-300"}`} />
+                      {detailsFieldErrors.primaryContactNumber && <p className="mt-1 text-xs text-red-600">{detailsFieldErrors.primaryContactNumber}</p>}
                     </div>
                     <div>
                       <label className="block text-xs text-slate-500 mb-1">Opening Time</label>

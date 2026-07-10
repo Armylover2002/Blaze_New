@@ -27,6 +27,8 @@ import { Button } from "@food/components/ui/button"
 import { Input } from "@food/components/ui/input"
 import { restaurantAPI } from "@food/api"
 import { toast } from "sonner"
+
+const PRIMARY_CONTACT_DUPLICATE_MSG = "This contact number is already registered with another restaurant."
 import { ImageSourcePicker } from "@food/components/ImageSourcePicker"
 import { isFlutterBridgeAvailable, convertBase64ToFile } from "@food/utils/imageUploadUtils"
 
@@ -59,6 +61,7 @@ export default function OutletInfo() {
   const [editNameValue, setEditNameValue] = useState("")
   const [showEditPhoneDialog, setShowEditPhoneDialog] = useState(false)
   const [editPhoneValue, setEditPhoneValue] = useState("")
+  const [editPhoneError, setEditPhoneError] = useState("")
   const [restaurantId, setRestaurantId] = useState("")
   const [restaurantMongoId, setRestaurantMongoId] = useState("")
   const [uploadingImage, setUploadingImage] = useState(false)
@@ -380,6 +383,7 @@ export default function OutletInfo() {
   // Handle edit phone dialog
   const handleOpenPhoneDialog = () => {
     setEditPhoneValue(primaryPhone)
+    setEditPhoneError("")
     setShowEditPhoneDialog(true)
   }
 
@@ -389,17 +393,24 @@ export default function OutletInfo() {
     
     // Basic validation: Check if 10 digits
     if (!/^\d{10}$/.test(newPhone)) {
+      setEditPhoneError("Please enter a valid 10-digit phone number")
       toast.error("Please enter a valid 10-digit phone number")
       return
     }
 
     try {
+      setEditPhoneError("")
       await restaurantAPI.updateProfile({ primaryContactNumber: newPhone })
       setPrimaryPhone(newPhone)
       setShowEditPhoneDialog(false)
       toast.success("Phone number updated successfully")
     } catch (error) {
-      toast.error("Failed to update phone number")
+      const message =
+        error?.response?.data?.message === PRIMARY_CONTACT_DUPLICATE_MSG
+          ? PRIMARY_CONTACT_DUPLICATE_MSG
+          : error?.response?.data?.message || "Failed to update phone number"
+      setEditPhoneError(message)
+      toast.error(message)
     }
   }
 
@@ -720,13 +731,21 @@ export default function OutletInfo() {
           </DialogHeader>
           <div className="p-4">
             <Input 
+              id="restaurant-field-primaryContactNumber"
+              data-restaurant-field="primaryContactNumber"
               value={editPhoneValue} 
-              onChange={(e) => setEditPhoneValue(e.target.value.replace(/\D/g, '').slice(0, 10))} 
+              onChange={(e) => {
+                setEditPhoneError("")
+                setEditPhoneValue(e.target.value.replace(/\D/g, '').slice(0, 10))
+              }} 
               placeholder="Enter 10-digit phone number" 
-              className="w-full"
+              className={`w-full ${editPhoneError ? "border-red-500 ring-1 ring-red-300" : ""}`}
               type="tel"
               maxLength={10}
             />
+            {editPhoneError && (
+              <p className="mt-2 text-xs text-red-600">{editPhoneError}</p>
+            )}
           </div>
           <DialogFooter className="p-4 bg-gray-50 flex flex-row gap-3">
             <Button variant="outline" onClick={() => setShowEditPhoneDialog(false)}>Cancel</Button>

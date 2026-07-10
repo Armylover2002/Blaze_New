@@ -45,6 +45,25 @@ import {
 import { clearOnboardingDraft, clearOnboardingFileCache } from "@food/utils/onboardingDraftStorage"
 import OnboardingRestaurantCardPreview from "@food/components/restaurant/OnboardingRestaurantCardPreview"
 import { toast } from "sonner"
+
+const OWNER_PHONE_DUPLICATE_MSG = "This phone number is already registered with another restaurant."
+const PRIMARY_CONTACT_DUPLICATE_MSG = "This contact number is already registered with another restaurant."
+const getRestaurantPhoneFieldError = (error) => {
+  const msg = error?.response?.data?.message || error?.response?.data?.error || ""
+  if (msg === PRIMARY_CONTACT_DUPLICATE_MSG) {
+    return { field: "primaryContactNumber", message: msg }
+  }
+  if (msg === OWNER_PHONE_DUPLICATE_MSG) {
+    return { field: "ownerPhone", message: msg }
+  }
+  if (/already registered|already exists|pending approval/i.test(msg)) {
+    if (/contact/i.test(msg)) {
+      return { field: "primaryContactNumber", message: msg }
+    }
+    return { field: "ownerPhone", message: msg }
+  }
+  return null
+}
 import { useCompanyName } from "@food/hooks/useCompanyName"
 import { clearModuleAuth, clearAuthData, getRestaurantPendingPhone, setAuthData, setRestaurantPendingPhone } from "@food/utils/auth"
 import { persistRestaurantAuthFromPayload } from "@food/utils/restaurantApproval"
@@ -1320,6 +1339,14 @@ export default function RestaurantOnboarding() {
                     navigate,
                   );
                 } catch (err) {
+                  const phoneError = getRestaurantPhoneFieldError(err)
+                  if (phoneError) {
+                    setFieldErrors((prev) => ({ ...prev, [phoneError.field]: phoneError.message }))
+                    setError(phoneError.message)
+                    toast.error(phoneError.message)
+                    document.getElementById(`restaurant-field-${phoneError.field}`)?.scrollIntoView?.({ behavior: "smooth", block: "center" })
+                    return
+                  }
                   const msg =
                     err?.response?.data?.message ||
                     err?.response?.data?.error ||
@@ -1353,6 +1380,14 @@ export default function RestaurantOnboarding() {
         }
       }
     } catch (err) {
+      const phoneError = getRestaurantPhoneFieldError(err)
+      if (phoneError) {
+        setFieldErrors((prev) => ({ ...prev, [phoneError.field]: phoneError.message }))
+        setError(phoneError.message)
+        toast.error(phoneError.message)
+        document.getElementById(`restaurant-field-${phoneError.field}`)?.scrollIntoView?.({ behavior: "smooth", block: "center" })
+        return
+      }
       const msg =
         err?.response?.data?.message ||
         err?.response?.data?.error ||
@@ -1545,6 +1580,8 @@ export default function RestaurantOnboarding() {
           <div>
             <Label className={ONBOARDING_LABEL}>Phone number*</Label>
             <Input
+              id="restaurant-field-ownerPhone"
+              data-restaurant-field="ownerPhone"
               type="tel"
               value={
                 step1.ownerPhone ||
@@ -1581,8 +1618,9 @@ export default function RestaurantOnboarding() {
         <div>
           <Label className={ONBOARDING_LABEL}>Primary contact number*</Label>
           <Input
+            id="restaurant-field-primaryContactNumber"
+            data-restaurant-field="primaryContactNumber"
             type="tel"
-            value={step1.primaryContactNumber || ""}
             onChange={(e) => {
               clearFieldError("primaryContactNumber")
               const val = e.target.value.replace(/\D/g, "").slice(0, 10)
