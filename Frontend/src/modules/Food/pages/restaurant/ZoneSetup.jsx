@@ -518,7 +518,12 @@ export default function ZoneSetup() {
           longitude: lng,
           coordinates: [lng, lat], // GeoJSON format: [longitude, latitude]
           formattedAddress: address,
-          address: address // Some schemas use 'address' inside location
+          address: address,
+          addressLine1: addressParts.addressLine1 || address.split(',')[0] || "",
+          area: addressParts.area || "",
+          city: addressParts.city || "",
+          state: addressParts.state || "",
+          pincode: addressParts.pincode || "",
         },
         // Meta data for admin review
         reVerification: {
@@ -535,8 +540,8 @@ export default function ZoneSetup() {
             ? "Zone and Address Update" 
             : "Location Address Update"
         },
-        status: "pending",
-        // Keep outlet active while admin reviews the update
+        // Do not flip status to pending here — backend stages changes for approved
+        // restaurants and keeps the outlet live with previous details.
 
         // Update onboarding data as well, as admin panel/backend might prioritize it for pending requests
         onboarding: {
@@ -570,7 +575,11 @@ export default function ZoneSetup() {
         if (updatedRestaurant) {
           updateStoredModuleUser("restaurant", updatedRestaurant)
         }
-        toast.success("Location update submitted for admin review. You can keep using the restaurant panel.")
+        toast.success(
+          response?.data?.data?.restaurant?.pendingReviewSubmitted || response?.data?.data?.pendingReviewSubmitted
+            ? "Location submitted for admin review. Customers still see your previous location until approved."
+            : "Location update submitted for admin review. You can keep using the restaurant panel."
+        )
         navigate("/food/restaurant/explore", { replace: false })
       } else {
         throw new Error("Failed to submit location update")

@@ -345,6 +345,19 @@ const restaurantSchema = new mongoose.Schema(
       },
       requestedAt: { type: Date },
     },
+    /**
+     * Staged outlet/profile/bank/location/document changes for already-approved restaurants.
+     * Live fields stay unchanged (users keep seeing the old approved details) until admin
+     * applies `proposed`. Never demotes `status` away from approved during re-verification.
+     */
+    pendingProfileChanges: {
+      hasPendingUpdate: { type: Boolean, default: false, index: true },
+      proposed: { type: mongoose.Schema.Types.Mixed, default: undefined },
+      previous: { type: mongoose.Schema.Types.Mixed, default: undefined },
+      changeTypes: { type: [String], default: undefined },
+      reason: { type: String, trim: true, default: '' },
+      requestedAt: { type: Date },
+    },
     commissionPercentage: {
       type: Number,
       default: 0,

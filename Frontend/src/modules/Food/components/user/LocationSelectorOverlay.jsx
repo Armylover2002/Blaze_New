@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect, useRef } from "react"
+import { useMemo, useState, useEffect, useRef, useCallback } from "react"
 import { ChevronLeft, ChevronRight, Plus, MapPin, MoreHorizontal, Navigation, Home, Building2, Briefcase, Phone, X, Crosshair } from "lucide-react"
 import { Button } from "@food/components/ui/button"
 import { Input } from "@food/components/ui/input"
@@ -9,6 +9,13 @@ import { useProfile } from "@food/context/ProfileContext"
 import { toast } from "sonner"
 import { locationAPI, userAPI } from "@food/api"
 import { Loader } from '@googlemaps/js-api-loader'
+import {
+  fetchPlaceDetails,
+  fetchPlacePredictions,
+  initPlacesServices,
+  parsePlaceDetails,
+  PLACES_SEARCH_DEBOUNCE_MS,
+} from "@food/utils/googlePlacesAutocomplete"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -87,15 +94,18 @@ export default function LocationSelectorOverlay({ isOpen, onClose }) {
   const locationUpdateTimeoutRef = useRef(null) // Timeout for location updates
   const [currentAddress, setCurrentAddress] = useState("")
   const [addressAutocompleteValue, setAddressAutocompleteValue] = useState("")
-  const [keywordAddressSuggestions, setKeywordAddressSuggestions] = useState([])
+  const [placePredictions, setPlacePredictions] = useState([])
   const [isKeywordSearching, setIsKeywordSearching] = useState(false)
+  const [showPlacePredictions, setShowPlacePredictions] = useState(false)
   const [lockMapToAutocomplete, setLockMapToAutocomplete] = useState(true)
   const [GOOGLE_MAPS_API_KEY, setGOOGLE_MAPS_API_KEY] = useState(null)
+  const autocompleteServiceRef = useRef(null)
+  const placesServiceRef = useRef(null)
+  const sessionTokenRef = useRef(null)
+  const placesSearchTimerRef = useRef(null)
   // Backend reverse geocode (on by default unless explicitly disabled)
   const ENABLE_LOCATION_REVERSE_GEOCODE =
     import.meta.env.VITE_ENABLE_LOCATION_REVERSE_GEOCODE !== "false"
-  // Nominatim keyword search (on by default unless explicitly disabled)
-  const ENABLE_NOMINATIM_SEARCH = import.meta.env.VITE_ENABLE_NOMINATIM_SEARCH !== "false"
   const getAddressId = (address) => address?.id || address?._id || null
 
   const addressAutocompleteSuggestions = useMemo(() => {
@@ -123,69 +133,59 @@ export default function LocationSelectorOverlay({ isOpen, onClose }) {
   }, [addresses, addressAutocompleteValue])
 
   useEffect(() => {
-    if (!showAddressForm) return
+    if (!showAddressForm) return undefined
+
     const q = String(addressAutocompleteValue || "").trim()
-    if (!ENABLE_NOMINATIM_SEARCH) {
-      setKeywordAddressSuggestions([])
+    if (!q) {
+      setPlacePredictions([])
+      setShowPlacePredictions(false)
       setIsKeywordSearching(false)
-      return
-    }
-    if (q.length < 3) {
-      setKeywordAddressSuggestions([])
-      setIsKeywordSearching(false)
-      return
+      return undefined
     }
 
-    const t = setTimeout(async () => {
+    if (placesSearchTimerRef.current) {
+      clearTimeout(placesSearchTimerRef.current)
+    }
+
+    setIsKeywordSearching(true)
+    placesSearchTimerRef.current = setTimeout(async () => {
       try {
-        setIsKeywordSearching(true)
-        // Reference point for "nearest" sorting.
-        // Prefer currently selected map position, fallback to live location, then Indore default.
-        const refLat = Number.isFinite(mapPosition?.[0]) ? Number(mapPosition[0]) : (location?.latitude ?? 22.7196)
-        const refLng = Number.isFinite(mapPosition?.[1]) ? Number(mapPosition[1]) : (location?.longitude ?? 75.8577)
+        if (!autocompleteServiceRef.current) {
+          const services = initPlacesServices(googleMapRef.current)
+          if (services) {
+            autocompleteServiceRef.current = services.autocompleteService
+            placesServiceRef.current = services.placesService
+            sessionTokenRef.current = services.sessionToken
+          }
+        }
 
-        const url =
-          `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&limit=10&q=${encodeURIComponent(q)}`
-        const res = await fetch(url, {
-          headers: {
-            Accept: "application/json",
-          },
-        })
-        const json = await res.json()
-        const list = Array.isArray(json) ? json : []
-        const mapped = list.map((r) => ({
-          id: r.place_id || r.osm_id || `${r.lat},${r.lon}`,
-          display: r.display_name || "",
-          lat: Number(r.lat),
-          lng: Number(r.lon),
-          address: r.address || {},
-        }))
-        const withDistance = mapped
-          .filter((x) => Number.isFinite(x.lat) && Number.isFinite(x.lng))
-          .map((x) => ({
-            ...x,
-            distanceMeters: calculateDistance(refLat, refLng, x.lat, x.lng),
-          }))
-          .sort((a, b) => (a.distanceMeters ?? Infinity) - (b.distanceMeters ?? Infinity))
-          .slice(0, 4)
+        if (!autocompleteServiceRef.current) {
+          setPlacePredictions([])
+          setShowPlacePredictions(false)
+          return
+        }
 
-        setKeywordAddressSuggestions(withDistance)
-      } catch (e) {
-        setKeywordAddressSuggestions([])
+        const results = await fetchPlacePredictions(
+          autocompleteServiceRef.current,
+          sessionTokenRef.current,
+          q,
+        )
+        setPlacePredictions(results)
+        setShowPlacePredictions(results.length > 0)
+      } catch {
+        setPlacePredictions([])
+        setShowPlacePredictions(false)
       } finally {
         setIsKeywordSearching(false)
       }
-    }, 350)
+    }, PLACES_SEARCH_DEBOUNCE_MS)
 
-    return () => clearTimeout(t)
-  }, [
-    addressAutocompleteValue,
-    showAddressForm,
-    location?.latitude,
-    location?.longitude,
-    mapPosition,
-    ENABLE_NOMINATIM_SEARCH,
-  ])
+    return () => {
+      if (placesSearchTimerRef.current) {
+        clearTimeout(placesSearchTimerRef.current)
+      }
+    }
+  }, [addressAutocompleteValue, showAddressForm])
 
   // Load Google Maps API key from backend
   useEffect(() => {
@@ -470,7 +470,8 @@ export default function LocationSelectorOverlay({ isOpen, onClose }) {
       try {
         const loader = new Loader({
           apiKey: GOOGLE_MAPS_API_KEY,
-          version: "weekly"
+          version: "weekly",
+          libraries: ["places"],
         })
 
         const google = await loader.load()
@@ -508,6 +509,13 @@ export default function LocationSelectorOverlay({ isOpen, onClose }) {
         })
 
         googleMapRef.current = map
+
+        const placesServices = initPlacesServices(map)
+        if (placesServices) {
+          autocompleteServiceRef.current = placesServices.autocompleteService
+          placesServiceRef.current = placesServices.placesService
+          sessionTokenRef.current = placesServices.sessionToken
+        }
 
         // Create Green Marker (locked to autocomplete selection)
         const greenMarker = new google.maps.Marker({
@@ -2091,10 +2099,75 @@ export default function LocationSelectorOverlay({ isOpen, onClose }) {
     }
   }
 
+  const handlePlacePredictionSelect = useCallback(async (prediction) => {
+    if (!prediction?.place_id) return
+
+    try {
+      if (!placesServiceRef.current) {
+        const services = initPlacesServices(googleMapRef.current)
+        if (!services) {
+          toast.error("Location search is not ready yet. Please try again.")
+          return
+        }
+        autocompleteServiceRef.current = services.autocompleteService
+        placesServiceRef.current = services.placesService
+        sessionTokenRef.current = services.sessionToken
+      }
+
+      const { place, nextSessionToken } = await fetchPlaceDetails(
+        placesServiceRef.current,
+        sessionTokenRef.current,
+        prediction.place_id,
+      )
+      sessionTokenRef.current = nextSessionToken
+
+      const parsed = parsePlaceDetails(place)
+      if (!parsed.latitude || !parsed.longitude) {
+        toast.error("Invalid location. Please pick another address.")
+        return
+      }
+
+      const latitude = parsed.latitude
+      const longitude = parsed.longitude
+      const display = parsed.formattedAddress || prediction.description || ""
+
+      setAddressAutocompleteValue(display)
+      setPlacePredictions([])
+      setShowPlacePredictions(false)
+      setCurrentAddress(display)
+      setAddressFormData((prev) => ({
+        ...prev,
+        street: parsed.area || display.split(",")[0]?.trim() || prev.street,
+        city: parsed.city || prev.city,
+        state: parsed.state || prev.state,
+        zipCode: parsed.pincode || prev.zipCode,
+        additionalDetails: display || prev.additionalDetails,
+      }))
+
+      setMapPosition([latitude, longitude])
+      if (googleMapRef.current && window.google?.maps) {
+        try {
+          googleMapRef.current.panTo({ lat: latitude, lng: longitude })
+          googleMapRef.current.setZoom(17)
+          if (greenMarkerRef.current) {
+            greenMarkerRef.current.setPosition({ lat: latitude, lng: longitude })
+          }
+        } catch {}
+      }
+
+      try {
+        await handleMapMoveEnd(latitude, longitude)
+      } catch {}
+    } catch {
+      toast.error("Could not load location details. Please try again.")
+    }
+  }, [handleMapMoveEnd])
+
   const handleCancelAddressForm = () => {
     setShowAddressForm(false)
     setAddressAutocompleteValue("")
-    setKeywordAddressSuggestions([])
+    setPlacePredictions([])
+    setShowPlacePredictions(false)
     setIsKeywordSearching(false)
     setLockMapToAutocomplete(true)
     setAddressFormData({
@@ -2302,18 +2375,21 @@ export default function LocationSelectorOverlay({ isOpen, onClose }) {
             {/* Autocomplete address selection */}
             <div>
               <Label className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2 block">
-                Address (Autocomplete)
+                Search location
               </Label>
               <div className="relative">
                 <Input
                   value={addressAutocompleteValue}
                   onChange={(e) => setAddressAutocompleteValue(e.target.value)}
-                  placeholder="Type a keyword (area, street, landmark)..."
+                  onFocus={() => placePredictions.length > 0 && setShowPlacePredictions(true)}
+                  onBlur={() => window.setTimeout(() => setShowPlacePredictions(false), 200)}
+                  placeholder="Start typing your address..."
                   className="bg-white dark:bg-[#1a1a1a] border-gray-200 dark:border-gray-700"
                 />
 
                 {addressAutocompleteValue.trim().length > 0 &&
-                  (keywordAddressSuggestions.length > 0 || addressAutocompleteSuggestions.length > 0) && (
+                  ((showPlacePredictions && placePredictions.length > 0) ||
+                    addressAutocompleteSuggestions.length > 0) && (
                   <div className="absolute z-50 left-0 right-0 mt-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#1a1a1a] shadow-xl overflow-hidden">
                     {isKeywordSearching && (
                       <div className="px-4 py-3 text-xs text-gray-600 dark:text-gray-400">
@@ -2321,66 +2397,23 @@ export default function LocationSelectorOverlay({ isOpen, onClose }) {
                       </div>
                     )}
 
-                    {keywordAddressSuggestions.map((p) => (
+                    {showPlacePredictions &&
+                      placePredictions.map((p) => (
                       <button
-                        key={p.id}
+                        key={p.place_id}
                         type="button"
-                        onClick={async () => {
-                          const latitude = p.lat
-                          const longitude = p.lng
-
-                          setAddressAutocompleteValue(p.display || "")
-                          setKeywordAddressSuggestions([])
-
-                          // Pre-fill fields from keyword search response (best-effort)
-                          const a = p.address || {}
-                          const city = a.city || a.town || a.village || a.county || ""
-                          const state = a.state || ""
-                          const zipCode = a.postcode || ""
-                          const street =
-                            a.road ||
-                            a.neighbourhood ||
-                            a.suburb ||
-                            a.hamlet ||
-                            (String(p.display || "").split(",")[0] || "").trim()
-
-                          setCurrentAddress(p.display || "")
-                          setAddressFormData((prev) => ({
-                            ...prev,
-                            street: street || prev.street,
-                            city: city || prev.city,
-                            state: state || prev.state,
-                            zipCode: zipCode || prev.zipCode,
-                          }))
-
-                          // Move map + marker, then run reverse-geocode handler for consistency
-                          setMapPosition([latitude, longitude])
-                          if (googleMapRef.current && window.google && window.google.maps) {
-                            try {
-                              googleMapRef.current.panTo({ lat: latitude, lng: longitude })
-                              googleMapRef.current.setZoom(17)
-                              if (greenMarkerRef.current) {
-                                greenMarkerRef.current.setPosition({ lat: latitude, lng: longitude })
-                              }
-                            } catch {}
-                          }
-                          try {
-                            await handleMapMoveEnd(latitude, longitude)
-                          } catch {}
-                        }}
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => handlePlacePredictionSelect(p)}
                         className="w-full text-left px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors border-b border-gray-100 dark:border-gray-800 last:border-b-0"
                       >
                         <p className="text-sm font-semibold text-gray-900 dark:text-white truncate">
-                          {p.display}
-                        </p>
-                        <p className="text-xs text-gray-600 dark:text-gray-400 truncate">
-                          {p.address?.city || p.address?.town || p.address?.village || p.address?.state || " "}
+                          {p.description}
                         </p>
                       </button>
                     ))}
 
                     {/* Fallback: saved addresses matching the keyword */}
-                    {keywordAddressSuggestions.length === 0 &&
+                    {(!showPlacePredictions || placePredictions.length === 0) &&
                       addressAutocompleteSuggestions.map((addr) => {
                         const id = getAddressId(addr) || `${addr?.label}-${addr?.street}-${addr?.city}`
                         const title = addr?.label || "Saved address"
@@ -2416,7 +2449,7 @@ export default function LocationSelectorOverlay({ isOpen, onClose }) {
                 )}
               </div>
               <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                Search by keyword to get address suggestions; selecting one will pin it on the map.
+                Search an address to get exact suggestions; selecting one will pin it on the map.
               </p>
             </div>
 

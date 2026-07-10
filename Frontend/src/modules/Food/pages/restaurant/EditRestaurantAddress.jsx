@@ -421,7 +421,14 @@ export default function EditRestaurantAddress() {
                        response?.data?.data?.restaurant
       
       if (isSuccess) {
-        toast.success("Location updated successfully!")
+        const pending =
+          response?.data?.data?.restaurant?.pendingReviewSubmitted ||
+          response?.data?.data?.pendingReviewSubmitted
+        toast.success(
+          pending
+            ? "Address submitted for admin review. Customers still see your previous location until approved."
+            : "Location updated successfully!"
+        )
         
         // Dispatch event to notify other components
         window.dispatchEvent(new Event("addressUpdated"))

@@ -16,7 +16,10 @@ import {
 import { isPointInPolygon } from '../../../../utils/geo.js';
 import { ensureDailyPassEligibility, activateDailyPass, checkRestaurantEligibilityReadOnly } from '../../subscriptions/services/wallet.service.js';
 import { logger } from '../../../../utils/logger.js';
-
+import {
+    splitReviewableUpdate,
+    mergePendingProfileChanges,
+} from '../../shared/pendingProfileChanges.js';
 
 const normalizeName = (value) =>
     String(value || '')
@@ -218,6 +221,18 @@ const toRestaurantProfile = (doc) => {
         approvedAt: doc.approvedAt || null,
         rejectionReason: doc.rejectionReason || '',
         reVerification: doc.reVerification || null,
+        pendingProfileChanges: doc.pendingProfileChanges?.hasPendingUpdate
+            ? {
+                hasPendingUpdate: true,
+                proposed: doc.pendingProfileChanges.proposed || {},
+                previous: doc.pendingProfileChanges.previous || {},
+                changeTypes: Array.isArray(doc.pendingProfileChanges.changeTypes)
+                    ? doc.pendingProfileChanges.changeTypes
+                    : [],
+                reason: doc.pendingProfileChanges.reason || '',
+                requestedAt: doc.pendingProfileChanges.requestedAt || null,
+            }
+            : null,
         onboarding: doc.onboarding || null,
         createdAt: doc.createdAt,
         updatedAt: doc.updatedAt,
@@ -231,21 +246,74 @@ const restaurantHadPriorApproval = (restaurant) =>
     restaurant?.approvedAt != null ||
     String(restaurant?.status || '').toLowerCase() === 'approved';
 
-const buildPendingReviewMutation = (restaurant, setFields = {}) => {
+/**
+ * For first-time restaurants: write live fields + set status pending.
+ * For already-approved restaurants: stage reviewable fields in pendingProfileChanges
+ * and keep status approved so users still see the previous live details.
+ */
+const buildReviewAwareProfileMutation = (restaurant, setFields = {}) => {
     const hadPriorApproval = restaurantHadPriorApproval(restaurant);
+    // Never let client payloads demote an approved restaurant via status flips.
+    const sanitizedFields = { ...(setFields || {}) };
+    if (hadPriorApproval) {
+        delete sanitizedFields.status;
+        delete sanitizedFields.isActive;
+        delete sanitizedFields.wasEverApproved;
+        delete sanitizedFields.approvedAt;
+    }
+
+    const { liveUpdate, stagedFields, shouldStage } = splitReviewableUpdate(restaurant, sanitizedFields);
+
+    if (!hadPriorApproval) {
+        return {
+            mutation: {
+                $set: {
+                    ...sanitizedFields,
+                    status: 'pending',
+                },
+                $unset: {
+                    rejectedAt: 1,
+                    rejectionReason: 1,
+                    approvedAt: 1,
+                },
+            },
+            staged: false,
+            notifyAdmin: true,
+        };
+    }
+
+    const $set = {
+        ...liveUpdate,
+        wasEverApproved: true,
+        isActive: true,
+        // Keep restaurant visible to customers with previous live details.
+        status: 'approved',
+    };
+
+    if (shouldStage) {
+        $set.pendingProfileChanges = mergePendingProfileChanges(
+            restaurant.pendingProfileChanges,
+            stagedFields,
+            restaurant
+        );
+    }
+
     return {
-        $set: {
-            ...setFields,
-            status: 'pending',
-            ...(hadPriorApproval ? { wasEverApproved: true, isActive: true } : {}),
+        mutation: {
+            $set,
+            $unset: {
+                rejectedAt: 1,
+                rejectionReason: 1,
+            },
         },
-        $unset: {
-            rejectedAt: 1,
-            rejectionReason: 1,
-            ...(hadPriorApproval ? {} : { approvedAt: 1 }),
-        },
+        staged: shouldStage,
+        notifyAdmin: shouldStage || Object.keys(liveUpdate).length > 0,
     };
 };
+
+/** @deprecated use buildReviewAwareProfileMutation — kept name alias for older call sites during transition */
+const buildPendingReviewMutation = (restaurant, setFields = {}) =>
+    buildReviewAwareProfileMutation(restaurant, setFields).mutation;
 
 const toFiniteNumber = (value) => {
     const n = typeof value === 'number' ? value : parseFloat(String(value));
@@ -1351,6 +1419,7 @@ export const getCurrentRestaurantProfile = async (restaurantId) => {
                 'approvedAt',
                 'rejectionReason',
                 'reVerification',
+                'pendingProfileChanges',
                 'onboarding',
                 'onboardingStep',
                 'status',
@@ -1505,7 +1574,7 @@ export const updateRestaurantProfile = async (restaurantId, body = {}) => {
     }
 
     const currentRestaurant = await FoodRestaurant.findById(restaurantId)
-        .select('restaurantName restaurantNameNormalized ownerPhone ownerPhoneDigits ownerPhoneLast10 primaryContactNumber status fssaiNumber fssaiImage fssaiExpiry zoneId wasEverApproved approvedAt isActive reVerification')
+        .select('restaurantName restaurantNameNormalized ownerPhone ownerPhoneDigits ownerPhoneLast10 primaryContactNumber status fssaiNumber fssaiImage fssaiExpiry zoneId wasEverApproved approvedAt isActive reVerification pendingProfileChanges location addressLine1 addressLine2 area city state pincode landmark accountHolderName accountNumber ifscCode accountType upiId upiQrImage profileImage coverImages menuImages cuisines ownerName ownerEmail pureVegRestaurant panNumber nameOnPan panImage gstRegistered gstNumber gstLegalName gstAddress gstImage')
         .lean();
 
     if (!currentRestaurant) {
@@ -1801,7 +1870,7 @@ export const updateRestaurantProfile = async (restaurantId, body = {}) => {
         update.gstImage = toUrl(body.gstImage) || '';
     }
 
-    // FSSAI Re-verification Flow
+    // FSSAI change tracking (review reason only — staging handled below for prior-approved).
     let fssaiChanged = false;
     const incomingFssaiNumber = body.fssaiNumber !== undefined ? String(body.fssaiNumber || '').trim() : null;
     const incomingFssaiImage = body.fssaiImage !== undefined ? toUrl(body.fssaiImage) : null;
@@ -1816,7 +1885,6 @@ export const updateRestaurantProfile = async (restaurantId, body = {}) => {
         fssaiChanged = true;
     }
 
-    // Check for expiry date change
     if (body.fssaiExpiry !== undefined) {
         const incomingExpiry = String(body.fssaiExpiry || '').trim();
         const currentExpiry = currentRestaurant.fssaiExpiry ? new Date(currentRestaurant.fssaiExpiry).toISOString().split('T')[0] : '';
@@ -1826,10 +1894,10 @@ export const updateRestaurantProfile = async (restaurantId, body = {}) => {
     }
 
     if (fssaiChanged) {
-        update.status = 'pending';
         update.reVerification = {
             ...(currentRestaurant.reVerification || {}),
-            isZoneUpdate: false, // It's an FSSAI update, not a zone update
+            ...(update.reVerification || {}),
+            isZoneUpdate: false,
             reVerificationReason: 'FSSAI License Update'
         };
     }
@@ -1875,26 +1943,18 @@ export const updateRestaurantProfile = async (restaurantId, body = {}) => {
         return getCurrentRestaurantProfile(restaurantId);
     }
 
-    if (body.reVerification !== undefined) {
+    // First-time restaurants can still go pending; already-approved restaurants
+    // keep live details and stage reviewable fields for admin approval.
+    if (!hadPriorApproval && (fssaiChanged || body.reVerification !== undefined)) {
         update.status = 'pending';
     }
 
-    if (hadPriorApproval && (fssaiChanged || body.reVerification !== undefined)) {
-        update.wasEverApproved = true;
-        update.isActive = true;
-    }
+    const { mutation, staged, notifyAdmin } = buildReviewAwareProfileMutation(currentRestaurant, update);
 
     try {
         const doc = await FoodRestaurant.findByIdAndUpdate(
             restaurantId,
-            {
-                $set: update,
-                $unset: {
-                    rejectedAt: 1,
-                    rejectionReason: 1,
-                    ...(hadPriorApproval ? {} : { approvedAt: 1 }),
-                }
-            },
+            mutation,
             {
                 new: true,
                 runValidators: true,
@@ -1945,6 +2005,7 @@ export const updateRestaurantProfile = async (restaurantId, body = {}) => {
                     'estimatedDeliveryTimeMinutes',
                     'zoneId',
                     'reVerification',
+                    'pendingProfileChanges',
                     'wasEverApproved',
                     'isActive',
                     'onboarding',
@@ -1955,27 +2016,29 @@ export const updateRestaurantProfile = async (restaurantId, body = {}) => {
         ).lean();
 
         if (fssaiChanged) {
-            // Notify Admin
             void notifyAdminsSafely({
                 title: 'FSSAI License Update',
-                body: `Restaurant "${doc.restaurantName}" has updated their FSSAI license and is pending re-verification.`,
+                body: hadPriorApproval
+                    ? `Restaurant "${doc.restaurantName}" submitted an FSSAI update for review. Live outlet details remain unchanged until approved.`
+                    : `Restaurant "${doc.restaurantName}" has updated their FSSAI license and is pending re-verification.`,
                 data: {
                     type: 'RE_VERIFICATION',
                     subType: 'FSSAI_UPDATE',
                     restaurantId: String(restaurantId)
                 }
             });
-            // Notify Owner (Mobile/Web Push)
             void notifyOwnerSafely({
                 ownerType: 'RESTAURANT',
                 ownerId: String(restaurantId),
                 payload: {
                     title: 'FSSAI Updated',
-                    body: 'Your FSSAI license has been updated. Your account is now pending re-verification and you have been logged out for security.',
+                    body: hadPriorApproval
+                        ? 'Your FSSAI update was submitted for admin review. Customers will keep seeing your current approved details until it is approved.'
+                        : 'Your FSSAI license has been updated. Your account is now pending re-verification and you have been logged out for security.',
                     data: { type: 'FSSAI_UPDATE' }
                 }
             });
-        } else if (currentRestaurant.status !== 'pending') {
+        } else if (notifyAdmin && (staged || currentRestaurant.status !== 'pending')) {
             const restaurantNameForNotification =
                 update.restaurantName || currentRestaurant.restaurantName || doc?.restaurantName;
             void notifyAdminsAboutRestaurantProfileReview(restaurantId, restaurantNameForNotification);
@@ -1985,6 +2048,10 @@ export const updateRestaurantProfile = async (restaurantId, body = {}) => {
         if (fssaiChanged && !hadPriorApproval) {
             profile.requireLogout = true;
             profile.logoutReason = 'fssai_update';
+        }
+        if (staged) {
+            profile.pendingReviewSubmitted = true;
+            profile.message = 'Changes submitted for admin approval. Your outlet stays live with previous details until approved.';
         }
         return profile;
     } catch (err) {
@@ -2000,25 +2067,33 @@ export const uploadRestaurantProfileImage = async (restaurantId, file) => {
     if (!file?.buffer) throw new ValidationError('Image file is required');
 
     const currentRestaurant = await FoodRestaurant.findById(restaurantId)
-        .select('restaurantName status wasEverApproved approvedAt')
+        .select('restaurantName status wasEverApproved approvedAt pendingProfileChanges profileImage')
         .lean();
     if (!currentRestaurant) throw new ValidationError('Restaurant not found');
 
     const url = await uploadImageBuffer(file.buffer, 'food/restaurants/profile');
+    const { mutation, staged, notifyAdmin } = buildReviewAwareProfileMutation(currentRestaurant, { profileImage: url });
 
     const doc = await FoodRestaurant.findByIdAndUpdate(
         restaurantId,
-        buildPendingReviewMutation(currentRestaurant, { profileImage: url }),
-        { new: true, projection: 'restaurantId profileImage coverImages restaurantName cuisines location menuImages addressLine1 addressLine2 area city state pincode landmark ownerName ownerEmail ownerPhone primaryContactNumber pureVegRestaurant openingTime closingTime openDays status createdAt updatedAt' }
+        mutation,
+        { new: true, projection: 'restaurantId profileImage coverImages restaurantName cuisines location menuImages addressLine1 addressLine2 area city state pincode landmark ownerName ownerEmail ownerPhone primaryContactNumber pureVegRestaurant openingTime closingTime openDays status pendingProfileChanges createdAt updatedAt' }
     ).lean();
 
     if (!doc) throw new ValidationError('Restaurant not found');
 
-    if (currentRestaurant.status !== 'pending') {
+    if (notifyAdmin && (staged || currentRestaurant.status !== 'pending')) {
         void notifyAdminsAboutRestaurantProfileReview(restaurantId, currentRestaurant.restaurantName || doc.restaurantName);
     }
 
-    return { profileImage: { url } };
+    return {
+        profileImage: staged ? undefined : { url },
+        pendingReviewSubmitted: staged,
+        message: staged
+            ? 'Profile image submitted for admin approval. Customers still see your current image until approved.'
+            : undefined,
+        pendingProfileChanges: doc.pendingProfileChanges?.hasPendingUpdate ? doc.pendingProfileChanges : null,
+    };
 };
 
 export const uploadRestaurantMenuImage = async (file) => {
@@ -2039,7 +2114,7 @@ export const uploadRestaurantCoverImages = async (restaurantId, files = []) => {
     }
 
     const currentRestaurant = await FoodRestaurant.findById(restaurantId)
-        .select('restaurantName status profileImage coverImages wasEverApproved approvedAt')
+        .select('restaurantName status profileImage coverImages wasEverApproved approvedAt pendingProfileChanges')
         .lean();
     if (!currentRestaurant) throw new ValidationError('Restaurant not found');
 
@@ -2063,19 +2138,25 @@ export const uploadRestaurantCoverImages = async (restaurantId, files = []) => {
         update.profileImage = uploadedUrls[0];
     }
 
+    const { mutation, staged, notifyAdmin } = buildReviewAwareProfileMutation(currentRestaurant, update);
+
     await FoodRestaurant.findByIdAndUpdate(
         restaurantId,
-        buildPendingReviewMutation(currentRestaurant, update),
+        mutation,
         { new: true }
     ).lean();
 
-    if (currentRestaurant.status !== 'pending') {
+    if (notifyAdmin && (staged || currentRestaurant.status !== 'pending')) {
         void notifyAdminsAboutRestaurantProfileReview(restaurantId, currentRestaurant.restaurantName || '');
     }
 
     return {
-        coverImages: uploadedUrls.map((url) => ({ url, publicId: null })),
-        profileImage: update.profileImage ? { url: update.profileImage } : undefined
+        coverImages: staged ? undefined : uploadedUrls.map((url) => ({ url, publicId: null })),
+        profileImage: !staged && update.profileImage ? { url: update.profileImage } : undefined,
+        pendingReviewSubmitted: staged,
+        message: staged
+            ? 'Cover images submitted for admin approval. Customers still see your current images until approved.'
+            : undefined,
     };
 };
 
@@ -2091,7 +2172,7 @@ export const uploadRestaurantMenuImages = async (restaurantId, files = []) => {
     }
 
     const currentRestaurant = await FoodRestaurant.findById(restaurantId)
-        .select('restaurantName status menuImages wasEverApproved approvedAt')
+        .select('restaurantName status menuImages wasEverApproved approvedAt pendingProfileChanges')
         .lean();
     if (!currentRestaurant) throw new ValidationError('Restaurant not found');
 
@@ -2107,20 +2188,26 @@ export const uploadRestaurantMenuImages = async (restaurantId, files = []) => {
         if (!nextMenuImages.includes(url)) nextMenuImages.push(url);
     });
 
+    const { mutation, staged, notifyAdmin } = buildReviewAwareProfileMutation(currentRestaurant, {
+        menuImages: nextMenuImages.slice(0, 20),
+    });
+
     await FoodRestaurant.findByIdAndUpdate(
         restaurantId,
-        buildPendingReviewMutation(currentRestaurant, {
-            menuImages: nextMenuImages.slice(0, 20),
-        }),
+        mutation,
         { new: true }
     ).lean();
 
-    if (currentRestaurant.status !== 'pending') {
+    if (notifyAdmin && (staged || currentRestaurant.status !== 'pending')) {
         void notifyAdminsAboutRestaurantProfileReview(restaurantId, currentRestaurant.restaurantName || '');
     }
 
     return {
-        menuImages: uploadedUrls.map((url) => ({ url, publicId: null }))
+        menuImages: staged ? undefined : uploadedUrls.map((url) => ({ url, publicId: null })),
+        pendingReviewSubmitted: staged,
+        message: staged
+            ? 'Menu images submitted for admin approval. Customers still see your current images until approved.'
+            : undefined,
     };
 };
 

@@ -199,10 +199,20 @@ export default function JoiningRequest() {
         normalizeRequestRecord(request),
       )
       if (activeTab === "pending") {
-        // Include approved restaurants that have a staged opening-days change awaiting review.
-        setPendingRequests(list.filter((r) => r.status === "pending" || r.hasPendingOpenDaysUpdate))
+        // Include approved restaurants that have staged opening-days or profile changes awaiting review.
+        setPendingRequests(list.filter((r) =>
+          r.status === "pending" ||
+          r.hasPendingOpenDaysUpdate ||
+          r.hasPendingProfileUpdate ||
+          r?.pendingProfileChanges?.hasPendingUpdate
+        ))
       } else {
-        setRejectedRequests(list.filter((r) => r.status === "rejected" && !r.hasPendingOpenDaysUpdate))
+        setRejectedRequests(list.filter((r) =>
+          r.status === "rejected" &&
+          !r.hasPendingOpenDaysUpdate &&
+          !r.hasPendingProfileUpdate &&
+          !r?.pendingProfileChanges?.hasPendingUpdate
+        ))
       }
     } catch (err) {
       debugError("Error fetching restaurant requests:", err)
@@ -646,6 +656,10 @@ export default function JoiningRequest() {
                           <span className="px-3 py-1 rounded-full text-xs font-medium bg-teal-100 text-teal-700">
                             Opening Days
                           </span>
+                        ) : request?.hasPendingProfileUpdate || request?.pendingProfileChanges?.hasPendingUpdate ? (
+                          <span className="px-3 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-700">
+                            Profile Update
+                          </span>
                         ) : (
                           <span className={`px-3 py-1 rounded-full text-xs font-medium ${
                             request.status === "Pending" || request.status === "pending"
@@ -941,9 +955,9 @@ export default function JoiningRequest() {
                           <span className="text-sm">{formatRestaurantId(r)}</span>
                         </div>
                         <span className={`px-3 py-1 rounded-full text-xs font-medium ${
-                          r?.pendingOpenDays?.hasPendingUpdate ? "bg-teal-100 text-teal-700" : approvalStatus === "approved" ? "bg-green-100 text-green-700" : (approvalStatus === "rejected" || approvalStatus === "Rejected") ? "bg-red-100 text-red-700" : (r?.reVerification?.isZoneUpdate || r?.reVerification?.reVerificationReason === 'FSSAI License Update' ? "bg-purple-100 text-purple-700" : "bg-amber-100 text-amber-700")
+                          r?.pendingOpenDays?.hasPendingUpdate ? "bg-teal-100 text-teal-700" : r?.pendingProfileChanges?.hasPendingUpdate ? "bg-purple-100 text-purple-700" : approvalStatus === "approved" ? "bg-green-100 text-green-700" : (approvalStatus === "rejected" || approvalStatus === "Rejected") ? "bg-red-100 text-red-700" : (r?.reVerification?.isZoneUpdate || r?.reVerification?.reVerificationReason === 'FSSAI License Update' ? "bg-purple-100 text-purple-700" : "bg-amber-100 text-amber-700")
                         }`}>
-                          {r?.pendingOpenDays?.hasPendingUpdate ? "Opening Days Review" : approvalStatus === "approved" ? "Approved" : (approvalStatus === "rejected" || approvalStatus === "Rejected") ? "Rejected" : (r?.reVerification?.isZoneUpdate || r?.reVerification?.reVerificationReason === 'FSSAI License Update' ? "Re-verification" : "Pending Approval")}
+                          {r?.pendingOpenDays?.hasPendingUpdate ? "Opening Days Review" : r?.pendingProfileChanges?.hasPendingUpdate ? "Profile Update Review" : approvalStatus === "approved" ? "Approved" : (approvalStatus === "rejected" || approvalStatus === "Rejected") ? "Rejected" : (r?.reVerification?.isZoneUpdate || r?.reVerification?.reVerificationReason === 'FSSAI License Update' ? "Re-verification" : "Pending Approval")}
                         </span>
                       </div>
                     </div>
@@ -1055,6 +1069,67 @@ export default function JoiningRequest() {
                                 ) : (
                                   <span className="text-xs text-slate-500">—</span>
                                 )}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Profile / outlet update request (location, bank, docs, media, etc.) */}
+                    {r?.pendingProfileChanges?.hasPendingUpdate && (
+                      <div className="md:col-span-2">
+                        <div className="bg-purple-50 border border-purple-200 rounded-lg p-4 mb-2">
+                          <h4 className="text-sm font-bold text-purple-900 mb-1 flex items-center gap-2">
+                            <FileText className="w-4 h-4" />
+                            Outlet Update Request
+                          </h4>
+                          <p className="text-xs text-purple-800">
+                            Customers still see the current approved details. Approve to apply the
+                            requested changes, or reject to discard them.
+                          </p>
+                          {Array.isArray(r.pendingProfileChanges.changeTypes) && r.pendingProfileChanges.changeTypes.length > 0 && (
+                            <div className="flex flex-wrap gap-1.5 mt-2">
+                              {r.pendingProfileChanges.changeTypes.map((type) => (
+                                <span key={type} className="px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 text-[11px] font-semibold uppercase tracking-wide">
+                                  {String(type).replace(/_/g, " ")}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3 pt-3 border-t border-purple-200">
+                            <div>
+                              <p className="text-xs text-purple-700 font-bold uppercase tracking-wider mb-2">Requested Changes</p>
+                              <div className="space-y-2 text-xs text-slate-800">
+                                {Object.entries(r.pendingProfileChanges.proposed || {}).map(([key, value]) => (
+                                  <div key={key} className="rounded border border-purple-100 bg-white px-2 py-1.5">
+                                    <p className="font-semibold text-purple-900">{key}</p>
+                                    <p className="break-all text-slate-700">
+                                      {value == null
+                                        ? "—"
+                                        : typeof value === "object"
+                                          ? JSON.stringify(value)
+                                          : String(value)}
+                                    </p>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                            <div>
+                              <p className="text-xs text-slate-500 font-medium uppercase tracking-wider mb-2">Current Live Details</p>
+                              <div className="space-y-2 text-xs text-slate-600">
+                                {Object.entries(r.pendingProfileChanges.previous || {}).map(([key, value]) => (
+                                  <div key={key} className="rounded border border-slate-200 bg-slate-50 px-2 py-1.5">
+                                    <p className="font-semibold text-slate-700">{key}</p>
+                                    <p className="break-all line-through opacity-70">
+                                      {value == null
+                                        ? "—"
+                                        : typeof value === "object"
+                                          ? JSON.stringify(value)
+                                          : String(value)}
+                                    </p>
+                                  </div>
+                                ))}
                               </div>
                             </div>
                           </div>

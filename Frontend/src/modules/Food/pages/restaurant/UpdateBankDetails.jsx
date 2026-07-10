@@ -163,7 +163,7 @@ export default function UpdateBankDetails() {
       setSaving(true)
       await restaurantAPI.updateProfile(payload)
       setErrors({})
-      toast.success("Bank details updated successfully")
+      toast.success("Bank details submitted for admin approval. Customers still see previous details until approved.")
       goBack()
     } catch (error) {
       alert(error?.response?.data?.message || "Failed to update bank details")

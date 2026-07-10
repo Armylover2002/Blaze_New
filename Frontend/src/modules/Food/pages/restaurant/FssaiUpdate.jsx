@@ -129,7 +129,11 @@ export default function FssaiUpdate() {
         }
       }
 
-      toast.success("FSSAI details updated and sent for admin review")
+      toast.success(
+        result?.pendingReviewSubmitted || result?.restaurant?.pendingReviewSubmitted
+          ? "FSSAI update submitted for admin review. Customers still see your previous approved details until approved."
+          : "FSSAI details updated and sent for admin review"
+      )
       navigate("/food/restaurant/fssai")
     } catch (error) {
       console.error("Error updating FSSAI:", error)
