@@ -57,6 +57,8 @@ export const registerRestaurantController = async (req, res, next) => {
 
 export const saveOnboardingStepController = async (req, res, next) => {
     try {
+        console.log('CONTROLLER HIT');
+        console.log('REQUEST RECEIVED', req.body);
         const stepNum = req.params.step;
         const validated = validateOnboardingStepDto(stepNum, req.body);
         const restaurant = await saveOnboardingStep(stepNum, validated, req.files);

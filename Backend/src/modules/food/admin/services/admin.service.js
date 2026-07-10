@@ -3781,6 +3781,18 @@ export async function deleteFood(id) {
 
 /** Admin creates a restaurant (JSON body with image URLs already uploaded). Single API. */
 export async function createRestaurantByAdmin(body, performer = null) {
+    const validatePhonesOnly =
+        body.validatePhonesOnly === true ||
+        String(body.validatePhonesOnly || '').trim().toLowerCase() === 'true';
+
+    if (validatePhonesOnly) {
+        await validateRestaurantPhoneUniqueness({
+            ownerPhone: body.ownerPhone,
+            primaryContactNumber: body.primaryContactNumber || body.ownerPhone,
+        });
+        return { validated: true };
+    }
+
     const loc = body.location || {};
     const toStr = (v) => (v != null && v !== undefined ? String(v).trim() : '');
     const toUrl = (v) => (v && (typeof v === 'string' ? v : v.url)) ? (typeof v === 'string' ? v : v.url) : undefined;

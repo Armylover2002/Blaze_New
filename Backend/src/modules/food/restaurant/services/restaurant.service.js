@@ -78,7 +78,9 @@ const findRestaurantUsingPhoneLast10 = async (phoneLast10, excludeRestaurantId =
         query._id = { $ne: new mongoose.Types.ObjectId(String(excludeRestaurantId)) };
     }
 
-    return FoodRestaurant.findOne(query).select('_id').lean();
+    const duplicateRestaurant = await FoodRestaurant.findOne(query).select('_id').lean();
+    console.log('QUERY RESULT', duplicateRestaurant);
+    return duplicateRestaurant;
 };
 
 export const normalizeRestaurantPhone = (value) => normalizePhone(value);
@@ -89,6 +91,7 @@ export const validateRestaurantPhoneUniqueness = async ({
     restaurantId = null,
     currentRestaurant = null
 }) => {
+    console.log('VALIDATE PHONE', ownerPhone, primaryContactNumber);
     const currentOwnerLast10 =
         currentRestaurant?.ownerPhoneLast10 ||
         normalizePhone(currentRestaurant?.ownerPhone).last10 ||
@@ -916,6 +919,7 @@ const buildStep1Data = (payload) => {
 };
 
 export const saveOnboardingStep = async (stepNum, payload, files) => {
+    console.log('SERVICE HIT');
     const step = Number(stepNum);
     if (![1, 2, 3].includes(step)) {
         throw new ValidationError('Invalid onboarding step');

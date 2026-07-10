@@ -1149,6 +1149,7 @@ export default function RestaurantOnboarding() {
   }
 
   const handleNext = async () => {
+    console.log("NEXT CLICKED")
     setError("")
 
     let validationErrors = {}

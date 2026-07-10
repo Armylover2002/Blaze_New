@@ -514,7 +514,8 @@ export default function AddRestaurant() {
     return errors
   }
 
-  const handleNext = () => {
+  const handleNext = async () => {
+    console.log("NEXT CLICKED")
     setFormErrors({})
     let validationErrors = []
 
@@ -530,6 +531,32 @@ export default function AddRestaurant() {
       validationErrors.forEach((error) => {
         toast.error(error)
       })
+      return
+    }
+
+    if (step === 1) {
+      setIsSubmitting(true)
+      try {
+        await adminAPI.createRestaurant({
+          validatePhonesOnly: true,
+          ownerPhone: step1.ownerPhone,
+          primaryContactNumber: step1.primaryContactNumber,
+        })
+        setStep(2)
+      } catch (error) {
+        const phoneError = getRestaurantPhoneFieldError(error)
+        if (phoneError) {
+          setFormErrors((prev) => ({ ...prev, [phoneError.field]: phoneError.message }))
+          toast.error(phoneError.message)
+          document.getElementById(`restaurant-field-${phoneError.field}`)?.scrollIntoView?.({ behavior: "smooth", block: "center" })
+          return
+        }
+        const errorMsg = error?.response?.data?.message || error?.message || "Failed to validate phone numbers"
+        toast.error(errorMsg)
+        setFormErrors({ submit: errorMsg })
+      } finally {
+        setIsSubmitting(false)
+      }
       return
     }
 

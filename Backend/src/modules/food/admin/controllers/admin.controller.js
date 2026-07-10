@@ -1038,11 +1038,17 @@ export async function approveRestaurant(req, res, next) {
 export async function createRestaurant(req, res, next) {
     try {
         const performer = await resolveActionPerformerSnapshot(req.user);
-        const restaurant = await adminService.createRestaurantByAdmin(req.body || {}, performer);
+        const result = await adminService.createRestaurantByAdmin(req.body || {}, performer);
+        if (result?.validated) {
+            return res.status(200).json({
+                success: true,
+                message: 'Phone numbers are available',
+            });
+        }
         res.status(201).json({
             success: true,
             message: 'Restaurant created successfully',
-            data: restaurant
+            data: result
         });
     } catch (error) {
         next(error);
