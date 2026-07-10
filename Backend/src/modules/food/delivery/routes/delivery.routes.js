@@ -3,7 +3,7 @@ import { upload } from '../../../../middleware/upload.js';
 import { authMiddleware } from '../../../../core/auth/auth.middleware.js';
 import { requireRoles } from '../../../../core/roles/role.middleware.js';
 import * as orderController from '../../orders/controllers/order.controller.js';
-import { registerDeliveryPartnerController, updateDeliveryPartnerProfileController, updateDeliveryPartnerBankDetailsController, listSupportTicketsController, createSupportTicketController, getSupportTicketByIdController, updateDeliveryPartnerDetailsController, updateDeliveryPartnerProfilePhotoBase64Controller, updateAvailabilityController, getDeliveryPartnerVehiclesController, setDeliveryPartnerActiveVehicleController, getWalletController, createWithdrawalRequestController, createCashDepositOrderController, verifyCashDepositPaymentController, getEarningsController, getTripHistoryController, getPocketDetailsController, getEmergencyHelpController, getCashLimitController, getDeliveryReferralStatsController, getActiveEarningAddonsController, deleteDeliveryPartnerAccountController, submitDeliveryManualDepositController, getDepositZonesController, getDepositZoneHubsController, validateDocumentsController } from '../controllers/delivery.controller.js';
+import { registerDeliveryPartnerController, updateDeliveryPartnerProfileController, updateDeliveryPartnerBankDetailsController, listSupportTicketsController, createSupportTicketController, getSupportTicketByIdController, updateDeliveryPartnerDetailsController, updateDeliveryPartnerProfilePhotoBase64Controller, updateAvailabilityController, getDeliveryPartnerVehiclesController, setDeliveryPartnerActiveVehicleController, getWalletController, createWithdrawalRequestController, createCashDepositOrderController, verifyCashDepositPaymentController, getEarningsController, getTripHistoryController, getPocketDetailsController, getEmergencyHelpController, getCashLimitController, getDeliveryReferralStatsController, getActiveEarningAddonsController, deleteDeliveryPartnerAccountController, submitDeliveryManualDepositController, getDepositZonesController, getDepositZoneHubsController, validateDocumentsController, getSignupVehicleCatalogController } from '../controllers/delivery.controller.js';
 import { getDepositPaymentSettingsPublicController } from '../../admin/controllers/admin.controller.js';
 
 const router = express.Router();
@@ -27,6 +27,9 @@ router.post('/validate-documents', authMiddleware, validateDocumentsController);
 
 // Make an unauthenticated version for signup step 1
 router.post('/validate-documents-public', validateDocumentsController);
+
+// Public vehicle catalog for delivery partner signup (active + food-supported)
+router.get('/signup/vehicles', getSignupVehicleCatalogController);
 
 router.post('/register', dynamicUpload, registerDeliveryPartnerController);
 

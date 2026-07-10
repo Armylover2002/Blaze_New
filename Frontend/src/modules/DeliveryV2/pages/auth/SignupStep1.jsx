@@ -4,7 +4,6 @@ import { ArrowLeft, Upload, X, Check, Camera, Image as ImageIcon, Truck } from "
 import { toast } from "sonner"
 import { openCamera, openGallery } from "@food/utils/imageUploadUtils"
 import useDeliveryBackNavigation from "../../hooks/useDeliveryBackNavigation"
-import { usePorterHomeData } from "../../../porter/user/hooks/usePorterHomeData"
 import { deliveryAPI } from "@food/api"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
@@ -98,10 +97,32 @@ const removeFileFromDB = async (key) => {
 export default function SignupStep1() {
   const navigate = useNavigate()
   const goBack = useDeliveryBackNavigation()
-  const { vehicles: porterVehicles } = usePorterHomeData()
+  const [porterVehicles, setPorterVehicles] = useState([])
   const location = useLocation()
   const searchParams = new URLSearchParams(location.search)
   const queryRef = searchParams.get("ref") || ""
+
+  useEffect(() => {
+    let cancelled = false
+    const loadVehicles = async () => {
+      try {
+        const res = await deliveryAPI.getSignupVehicles()
+        const list =
+          res?.data?.data?.vehicles ||
+          res?.data?.vehicles ||
+          res?.data?.data ||
+          []
+        if (!cancelled) setPorterVehicles(Array.isArray(list) ? list : [])
+      } catch (err) {
+        debugError("Failed to load signup vehicles:", err)
+        if (!cancelled) setPorterVehicles([])
+      }
+    }
+    loadVehicles()
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const [formData, setFormData] = useState(() => {
     const saved = sessionStorage.getItem("deliverySignupDetails")
@@ -178,6 +199,9 @@ export default function SignupStep1() {
       vehicles: [...prev.vehicles, {
         id: Date.now().toString(),
         vehicleId: newVehicle.vehicleId,
+        name: selectedMaster.name || selectedMaster.category || "Vehicle",
+        category: selectedMaster.category || "",
+        iconUrl: selectedMaster.iconUrl || selectedMaster.image || "",
         registrationNumber: newVehicle.registrationNumber.trim().toUpperCase(),
         model: newVehicle.model.trim(),
         status: "Draft"
@@ -415,7 +439,7 @@ export default function SignupStep1() {
 
   const requiresDl = formData.vehicles.some(v => {
     const master = porterVehicles.find(p => p.id === v.vehicleId);
-    const cat = master?.category?.toLowerCase() || "";
+    const cat = (master?.category || v.category || "").toLowerCase();
     return cat !== "bicycle" && cat !== "electric bike" && cat !== "electric_bike";
   });
 
@@ -545,6 +569,9 @@ export default function SignupStep1() {
               <div className="space-y-4">
                 {formData.vehicles.map(v => {
                   const master = porterVehicles.find(p => p.id === v.vehicleId);
+                  const displayName = master?.name || master?.category || v.name || v.category || "Vehicle"
+                  const displayCategory = master?.category || v.category || ""
+                  const iconSrc = master?.iconUrl || master?.image || v.iconUrl || ""
                   return (
                     <div key={v.id} className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm relative">
                       <button 
@@ -556,15 +583,15 @@ export default function SignupStep1() {
                       </button>
                       <div className="flex items-start gap-4">
                         <div className="w-16 h-16 bg-gray-50 rounded-lg flex items-center justify-center p-2 border border-gray-100 shrink-0">
-                          {master?.image ? (
-                            <img src={master.image} alt={master.name} className="w-full h-full object-contain" />
+                          {iconSrc ? (
+                            <img src={iconSrc} alt={displayName} className="w-full h-full object-contain" />
                           ) : (
                             <Truck className="w-8 h-8 text-gray-400" />
                           )}
                         </div>
                         <div className="flex-1 min-w-0">
-                          <h4 className="font-bold text-gray-900 text-base truncate">{master?.name || "Unknown Vehicle"}</h4>
-                          <p className="text-xs text-gray-500 mt-0.5">{master?.category || ""}</p>
+                          <h4 className="font-bold text-gray-900 text-base truncate">{displayName}</h4>
+                          <p className="text-xs text-gray-500 mt-0.5">{displayCategory}</p>
                           
                           <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
                             <div>
@@ -626,7 +653,8 @@ export default function SignupStep1() {
                       <option value="">Choose from list...</option>
                       {porterVehicles.filter(pv => !formData.vehicles.some(v => v.vehicleId === pv.id)).map(pv => (
                         <option key={pv.id} value={pv.id}>
-                          {pv.name}{pv.category ? ` (${pv.category})` : ''}
+                          {pv.name || pv.category || "Vehicle"}
+                          {pv.category && pv.name && pv.name !== pv.category ? ` (${pv.category})` : ""}
                         </option>
                       ))}
                     </select>

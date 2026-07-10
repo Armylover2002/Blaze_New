@@ -34,6 +34,8 @@ import useDeliveryPartnerHydration from '@/modules/DeliveryV2/hooks/useDeliveryP
 import {
   getApprovedVehicles,
   extractAvailabilityPayload,
+  getVehicleDisplayName,
+  getVehicleIconUrl,
 } from '@/modules/DeliveryV2/utils/deliveryPartnerSync';
 import porterDriverApi from '@/modules/porter/driver/services/driverApi';
 
@@ -1096,12 +1098,12 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
                                 
                                 <div className="flex items-center gap-3">
                                   <div className="w-12 h-12 bg-white/5 rounded-lg flex items-center justify-center shrink-0 shadow-inner p-1">
-                                    <img src={(activeVehicle.master || activeVehicle).image || "https://i.ibb.co/68zRzVv/Auto.png"} alt="Vehicle" className="w-full h-full object-contain drop-shadow-md" />
+                                    <img src={getVehicleIconUrl(activeVehicle) || "https://i.ibb.co/68zRzVv/Auto.png"} alt={getVehicleDisplayName(activeVehicle)} className="w-full h-full object-contain drop-shadow-md" />
                                   </div>
                                   <div className="flex-1 min-w-0 pr-16">
-                                    <h3 className="text-white font-bold text-sm truncate">{(activeVehicle.master || activeVehicle).name || 'Vehicle'}</h3>
+                                    <h3 className="text-white font-bold text-sm truncate capitalize">{getVehicleDisplayName(activeVehicle)}</h3>
                                     <div className="text-[10px] text-gray-400 uppercase tracking-widest font-semibold flex items-center gap-1.5 mt-1 truncate">
-                                      <span className="text-gray-300">{activeVehicle.registrationNumber || 'No Reg'}</span>
+                                      <span className="text-gray-300">{activeVehicle.registrationNumber || activeVehicle.vehicleNumber || 'No Reg'}</span>
                                       <span>•</span>
                                       <span className={activeVehicle.isDispatchEligible || ['active', 'approved'].includes(String(activeVehicle.status || '').toLowerCase()) ? 'text-green-400' : 'text-orange-400'}>
                                         {activeVehicle.verificationStatus || activeVehicle.status || 'Unknown'}
@@ -1110,9 +1112,9 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
                                   </div>
                                 </div>
                                 
-                                {((activeVehicle.master || activeVehicle).supportedServices || []).length > 0 && (
+                                {((activeVehicle.master || activeVehicle).supportedServices || activeVehicle.supportedServices || []).length > 0 && (
                                   <div className="flex items-center gap-1.5 mt-3 pt-3 border-t border-white/5 flex-wrap">
-                                    {((activeVehicle.master || activeVehicle).supportedServices || []).map(s => (
+                                    {((activeVehicle.master || activeVehicle).supportedServices || activeVehicle.supportedServices || []).map(s => (
                                       <span key={s} className="text-[9px] bg-white/10 text-white px-2 py-0.5 rounded font-black uppercase tracking-wider">{s}</span>
                                     ))}
                                   </div>

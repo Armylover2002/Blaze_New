@@ -566,6 +566,12 @@ export const getDeliveryPartnerVehicles = async (userId) => {
     return getDeliveryPartnerVehiclePayload(partner);
 };
 
+/** Public catalog for delivery signup — active Porter vehicles that support food. */
+export const getSignupVehicleCatalog = async () => {
+    const { listPublicFoodVehicles } = await import('../../../porter/services/vehicle.service.js');
+    return listPublicFoodVehicles();
+};
+
 export const setDeliveryPartnerActiveVehicle = async (userId, vehicleId) => {
     const partner = await FoodDeliveryPartner.findById(userId);
     if (!partner) throw new ValidationError('Delivery partner not found');

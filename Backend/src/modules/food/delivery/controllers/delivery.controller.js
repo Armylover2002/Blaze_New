@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 import { FoodDeliveryCashDeposit } from '../models/foodDeliveryCashDeposit.model.js';
-import { registerDeliveryPartner, updateDeliveryPartnerProfile, updateDeliveryPartnerBankDetails, listSupportTicketsByPartner, createSupportTicket, getSupportTicketByIdAndPartner, updateDeliveryPartnerDetails, updateDeliveryPartnerProfilePhotoBase64, updateDeliveryAvailability, getDeliveryPartnerWallet, getDeliveryPartnerEarnings, getDeliveryPartnerTripHistory, getDeliveryPocketDetails, getActiveEarningAddonsForPartner, deleteDeliveryPartnerAccount, getDeliveryPartnerVehicles, setDeliveryPartnerActiveVehicle, validateUniqueDocuments } from '../services/delivery.service.js';
+import { registerDeliveryPartner, updateDeliveryPartnerProfile, updateDeliveryPartnerBankDetails, listSupportTicketsByPartner, createSupportTicket, getSupportTicketByIdAndPartner, updateDeliveryPartnerDetails, updateDeliveryPartnerProfilePhotoBase64, updateDeliveryAvailability, getDeliveryPartnerWallet, getDeliveryPartnerEarnings, getDeliveryPartnerTripHistory, getDeliveryPocketDetails, getActiveEarningAddonsForPartner, deleteDeliveryPartnerAccount, getDeliveryPartnerVehicles, setDeliveryPartnerActiveVehicle, validateUniqueDocuments, getSignupVehicleCatalog } from '../services/delivery.service.js';
 import { createDeliveryCashDepositOrder, getDeliveryPartnerWalletEnhanced, requestDeliveryWithdrawal, verifyDeliveryCashDepositPayment, submitDeliveryManualDeposit } from '../services/deliveryFinance.service.js';
 import { getDeliveryCashLimitSettings, getDeliveryEmergencyHelp } from '../../admin/services/admin.service.js';
 import { DeliveryBonusTransaction } from '../../admin/models/deliveryBonusTransaction.model.js';
@@ -25,6 +25,15 @@ export const validateDocumentsController = async (req, res, next) => {
                 errors: error.errors
             });
         }
+        next(error);
+    }
+};
+
+export const getSignupVehicleCatalogController = async (req, res, next) => {
+    try {
+        const vehicles = await getSignupVehicleCatalog();
+        return sendResponse(res, 200, 'Signup vehicles fetched', { vehicles });
+    } catch (error) {
         next(error);
     }
 };

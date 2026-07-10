@@ -15,6 +15,10 @@ export default function VehicleCard({
   const maxWeight = vehicle.maxWeight ?? vehicle.maxWeightKg;
   const iconUrl = vehicle.iconUrl;
   const eta = estimatedTime ?? vehicle.estimatedTime ?? vehicle.etaMins;
+  // Convert category to display name (e.g., "mini_truck" → "Mini Truck")
+  const displayCategory = vehicle.category
+    ? vehicle.category.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
+    : "";
 
   return (
     <motion.button
@@ -31,14 +35,14 @@ export default function VehicleCard({
     >
       <div className={`flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-xl ${selected ? "bg-white" : "bg-gray-50"}`}>
         {iconUrl ? (
-          <img src={iconUrl} alt={vehicle.name} className="h-full w-full object-contain p-1" />
+          <img src={iconUrl} alt={displayCategory} className="h-full w-full object-contain p-1" />
         ) : (
           <span className="text-2xl">{vehicle.icon || "🚚"}</span>
         )}
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <h3 className="text-[15px] font-bold text-gray-900">{vehicle.name}</h3>
+          <h3 className="text-[15px] font-bold text-gray-900">{displayCategory}</h3>
           {badge && !disabled && (
             <span className="rounded-full bg-[#FF0000] px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white">
               {badge}

@@ -35,7 +35,6 @@ const SERVICES_MAP = {
 };
 
 const EMPTY_FORM = {
-  name: "", 
   category: "", 
   iconUrl: "",
   description: "", 
@@ -139,9 +138,10 @@ const Vehicles = () => {
   };
 
   const handleCategorySelect = (catValue) => {
-    let suggestedServices = ["parcel"];
-    if (["bike", "electric_bike", "scooter"].includes(catValue)) {
-       suggestedServices = ["food", "quick", "parcel"];
+    // Default all categories to include food so delivery signup sees new vehicles.
+    let suggestedServices = ["food", "quick", "parcel"];
+    if (["mini_truck", "pickup", "van", "tempo", "truck"].includes(catValue)) {
+      suggestedServices = ["food", "parcel"];
     }
 
     setFormData(prev => ({
@@ -155,7 +155,6 @@ const Vehicles = () => {
 
   const validate = () => {
     const newErrors = {};
-    if (!formData.name.trim()) newErrors.name = "Vehicle Name is required";
     if (!formData.category.trim()) newErrors.category = "Vehicle Category is required";
     if (!iconFile && !formData.iconUrl && !editingVehicle?.iconUrl) newErrors.iconUrl = "Vehicle Icon is required";
     if (formData.minWeight === "" || Number(formData.minWeight) < 0) newErrors.minWeight = "Min weight must be >= 0";
@@ -177,7 +176,6 @@ const Vehicles = () => {
     const { iconUrl, ...restFormData } = formData;
     const payload = {
         ...restFormData,
-        name: formData.name.trim(),
         minWeight: Number(formData.minWeight),
         maxWeight: Number(formData.maxWeight),
         supportedServices: formData.supportedServices || [],
@@ -224,7 +222,7 @@ const Vehicles = () => {
         return (
           <div className="w-12 h-12 bg-gray-50 border border-gray-100 rounded-lg flex items-center justify-center p-1 drop-shadow-sm overflow-hidden">
             {isSvgData ? (
-               <img src={iconSrc} alt={row.name} className="w-full h-full object-contain" />
+               <img src={iconSrc} alt={getCategoryLabel(row.category)} className="w-full h-full object-contain" />
             ) : (
                <IconComp className="w-full h-full text-gray-500" />
             )}
@@ -232,7 +230,6 @@ const Vehicles = () => {
         );
       },
     },
-    { header: "Vehicle Name", key: "name", className: "font-semibold text-gray-900" },
     { header: "Category", key: "category", cell: (row) => <span className="font-medium text-gray-700">{getCategoryLabel(row.category)}</span> },
     { header: "Min Weight", key: "minWeight", cell: (row) => <span>{row.minWeight} kg</span> },
     { header: "Max Weight", key: "maxWeight", cell: (row) => <span>{row.maxWeight} kg</span> },
@@ -372,11 +369,7 @@ const Vehicles = () => {
               <FormSection title="Basic Information" description="Core details of the vehicle">
 
 
-                <FormRow cols={2}>
-                  <FormField label="Vehicle Name" required error={errors.name}>
-                    <Input placeholder="e.g. Tata Ace" value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} />
-                  </FormField>
-                  
+                <FormRow cols={1}>
                   <FormField label="Vehicle Category" required error={errors.category}>
                     <div className="relative" ref={categoryRef}>
                       <div 

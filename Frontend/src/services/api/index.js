@@ -2077,6 +2077,23 @@ export const deliveryAPI = {
       return inFlight;
     };
   })(),
+  /** Public catalog of active vehicles for delivery signup. */
+  getSignupVehicles: (() => {
+    let inFlight = null;
+    return () => {
+      // Dedupe concurrent calls only — always hit network so admin adds appear immediately.
+      if (inFlight) return inFlight;
+      inFlight = apiClient
+        .get("/food/delivery/signup/vehicles", {
+          contextModule: "delivery",
+          params: { _ts: Date.now() },
+        })
+        .finally(() => {
+          inFlight = null;
+        });
+      return inFlight;
+    };
+  })(),
   setActiveVehicle: (vehicleId) => {
     deliveryMeCached = null;
     deliveryMeCacheTime = 0;

@@ -6,7 +6,6 @@ import { toast } from "sonner"
 import { initRazorpayPayment } from "@food/utils/razorpay"
 import { openCamera, openGallery } from "@food/utils/imageUploadUtils"
 import useDeliveryBackNavigation from "../../hooks/useDeliveryBackNavigation"
-import { usePorterHomeData } from "../../../porter/user/hooks/usePorterHomeData"
 
 const debugLog = (...args) => { }
 const debugWarn = (...args) => { }
@@ -371,7 +370,7 @@ const submitRegistration = async ({ isCompleteProfile, formData, navigate }) => 
 export default function SignupStep2() {
   const navigate = useNavigate()
   const goBack = useDeliveryBackNavigation()
-  const { vehicles: porterVehicles } = usePorterHomeData()
+  const [porterVehicles, setPorterVehicles] = useState([])
   const signupDetailsRaw = sessionStorage.getItem("deliverySignupDetails")
 
   let signupDetails = {}
@@ -380,6 +379,28 @@ export default function SignupStep2() {
       signupDetails = JSON.parse(signupDetailsRaw)
     }
   } catch (e) { }
+
+  useEffect(() => {
+    let cancelled = false
+    const loadVehicles = async () => {
+      try {
+        const res = await deliveryAPI.getSignupVehicles()
+        const list =
+          res?.data?.data?.vehicles ||
+          res?.data?.vehicles ||
+          res?.data?.data ||
+          []
+        if (!cancelled) setPorterVehicles(Array.isArray(list) ? list : [])
+      } catch (err) {
+        debugError("Failed to load signup vehicles:", err)
+        if (!cancelled) setPorterVehicles([])
+      }
+    }
+    loadVehicles()
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
 
 
@@ -584,7 +605,17 @@ export default function SignupStep2() {
 
     let hasAllVehicleDocs = true;
     (signupDetails.vehicles || []).forEach(v => {
-      const master = porterVehicles.find(p => p.id === v.vehicleId);
+      const master =
+        porterVehicles.find((p) => p.id === v.vehicleId) ||
+        (v.vehicleId
+          ? {
+              id: v.vehicleId,
+              name: v.name || v.category || "Vehicle",
+              category: v.category || "",
+              iconUrl: v.iconUrl || "",
+              requiredDocuments: v.requiredDocuments || [],
+            }
+          : null)
       if (!master) return;
       if (!hasDocumentValue(documents[`vehiclePhoto_${v.id}`], uploadedDocs[`vehiclePhoto_${v.id}`])) hasAllVehicleDocs = false;
       if (!hasDocumentValue(documents[`rc_${v.id}`], uploadedDocs[`rc_${v.id}`])) hasAllVehicleDocs = false;
@@ -856,23 +887,35 @@ export default function SignupStep2() {
                 <p className="text-sm text-gray-600 mb-4">Please upload documents for each of your selected vehicles.</p>
                 <div className="space-y-6">
                   {signupDetails.vehicles.map(v => {
-                    const master = porterVehicles.find(p => p.id === v.vehicleId);
+                    const master =
+                      porterVehicles.find((p) => p.id === v.vehicleId) ||
+                      (v.vehicleId
+                        ? {
+                            id: v.vehicleId,
+                            name: v.name || v.category || "Vehicle",
+                            category: v.category || "",
+                            iconUrl: v.iconUrl || "",
+                            requiredDocuments: v.requiredDocuments || [],
+                          }
+                        : null)
                     if (!master) return null;
+                    const displayName = master.name || master.category || v.name || "Vehicle"
+                    const iconSrc = master.iconUrl || master.image || v.iconUrl || ""
                     const reqDocs = master.requiredDocuments || [];
                     
                     return (
                       <div key={v.id} className="bg-gray-50 rounded-xl p-4 border border-gray-200 space-y-4">
                         <div className="flex items-center gap-3 mb-2">
                           <div className="w-10 h-10 bg-white rounded-lg p-1.5 border border-gray-200 shadow-sm flex items-center justify-center">
-                            {master.image ? <img src={master.image} alt={master.name} className="w-full h-full object-contain" /> : <Truck className="w-6 h-6 text-gray-400" />}
+                            {iconSrc ? <img src={iconSrc} alt={displayName} className="w-full h-full object-contain" /> : <Truck className="w-6 h-6 text-gray-400" />}
                           </div>
                           <div>
-                            <h4 className="font-bold text-gray-900 text-sm">{master.name}</h4>
+                            <h4 className="font-bold text-gray-900 text-sm">{displayName}</h4>
                             <p className="text-xs text-gray-500">{v.registrationNumber || "No Reg No"}</p>
                           </div>
                         </div>
                         
-                        <DocumentUpload docType={`vehiclePhoto_${v.id}`} label={`${master.name} Photo`} required={true} />
+                        <DocumentUpload docType={`vehiclePhoto_${v.id}`} label={`${displayName} Photo`} required={true} />
                         <DocumentUpload docType={`rc_${v.id}`} label="RC (Registration Certificate)" required={true} />
                         <DocumentUpload docType={`insurance_${v.id}`} label="Vehicle Insurance" required={true} />
                         {reqDocs.includes('fitness') && (
