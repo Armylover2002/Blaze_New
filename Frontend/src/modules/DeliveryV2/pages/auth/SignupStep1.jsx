@@ -625,7 +625,9 @@ export default function SignupStep1() {
                     >
                       <option value="">Choose from list...</option>
                       {porterVehicles.filter(pv => !formData.vehicles.some(v => v.vehicleId === pv.id)).map(pv => (
-                        <option key={pv.id} value={pv.id}>{pv.name} ({pv.category})</option>
+                        <option key={pv.id} value={pv.id}>
+                          {pv.name}{pv.category ? ` (${pv.category})` : ''}
+                        </option>
                       ))}
                     </select>
                   </div>
