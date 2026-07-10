@@ -5,6 +5,7 @@ import { FoodOrder, FoodSettings } from '../models/order.model.js';
 import { logger } from '../../../../utils/logger.js';
 import { FoodUser } from '../../../../core/users/user.model.js';
 import { FoodRestaurant } from '../../restaurant/models/restaurant.model.js';
+import { resolveRestaurantCommissionPercentage } from '../../constants/commission.constants.js';
 import { FoodDeliveryPartner } from '../../delivery/models/deliveryPartner.model.js';
 import { FoodZone } from '../../admin/models/zone.model.js';
 import { FoodFeeSettings } from '../../admin/models/feeSettings.model.js';
@@ -769,7 +770,9 @@ async function fetchPickupSourcesByType(items = []) {
       status: restaurant.status,
       location: restaurant.location,
       zoneId: restaurant.zoneId || null,
-      commissionPercentage: restaurant.commissionPercentage || 0,
+      commissionPercentage: resolveRestaurantCommissionPercentage(
+        restaurant.commissionPercentage,
+      ),
       address:
         restaurant.location?.address ||
         restaurant.location?.formattedAddress ||
@@ -2576,7 +2579,7 @@ export async function createOrder(userId, dto) {
   }
 
   const commissionPercentage = primaryRestaurant
-    ? Number(primaryRestaurant.commissionPercentage || 0)
+    ? resolveRestaurantCommissionPercentage(primaryRestaurant.commissionPercentage)
     : 0;
   const commissionBase = Math.max(0, Number(serverPricing.subtotal || 0));
   const restaurantCommission =

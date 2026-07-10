@@ -3,6 +3,11 @@ import { Search, Plus, Pencil, Trash2, ArrowUpDown, Loader2, UtensilsCrossed, Pe
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@food/components/ui/dialog"
 import { adminAPI } from "@food/api"
 import { toast } from "sonner"
+import {
+  DEFAULT_RESTAURANT_COMMISSION_PERCENTAGE,
+  resolveRestaurantCommissionPercentage,
+  isCustomRestaurantCommission,
+} from "@food/constants/commission"
 
 const debugLog = (...args) => {}
 const debugError = (...args) => {}
@@ -63,7 +68,7 @@ export default function RestaurantCommission() {
         _id: res._id,
         restaurantId: res.restaurantId || `REST${String(index + 1).padStart(5, "0")}`,
         name: res.name || res.restaurantName || "N/A",
-        commissionPercentage: typeof res.commissionPercentage === "number" ? res.commissionPercentage : 0,
+        commissionPercentage: resolveRestaurantCommissionPercentage(res.commissionPercentage),
         isActive: res.isActive !== false,
       }))
       
@@ -90,7 +95,7 @@ export default function RestaurantCommission() {
     let result = [...restaurants]
 
     if (filterMode === "configured") {
-      result = result.filter(res => res.commissionPercentage > 0)
+      result = result.filter(res => isCustomRestaurantCommission(res.commissionPercentage))
     }
 
     if (searchQuery.trim()) {
@@ -121,12 +126,12 @@ export default function RestaurantCommission() {
 
   // Count of configured commissions
   const configuredCount = useMemo(() => {
-    return restaurants.filter(res => res.commissionPercentage > 0).length
+    return restaurants.filter(res => isCustomRestaurantCommission(res.commissionPercentage)).length
   }, [restaurants])
 
-  // Dropdown list of restaurants that do NOT have a commission set yet
+  // Dropdown list of restaurants still on the platform default commission
   const unconfiguredRestaurantsList = useMemo(() => {
-    return restaurants.filter(res => res.commissionPercentage === 0)
+    return restaurants.filter(res => !isCustomRestaurantCommission(res.commissionPercentage))
   }, [restaurants])
 
   // ----- Multi-select helpers -----
@@ -265,21 +270,21 @@ export default function RestaurantCommission() {
     setIsDeleteConfirmOpen(true)
   }
 
-  // Handle Reset to 0% (Delete action)
+  // Handle Reset to default commission (Delete action)
   const handleDeleteCommission = async () => {
     if (!selectedRestaurant) return
 
     try {
       setIsSaving(true)
       await adminAPI.updateRestaurant(selectedRestaurant._id || selectedRestaurant.id, {
-        commissionPercentage: 0
+        commissionPercentage: DEFAULT_RESTAURANT_COMMISSION_PERCENTAGE
       })
 
       setRestaurants(prev =>
-        prev.map(r => r.id === selectedRestaurant.id ? { ...r, commissionPercentage: 0 } : r)
+        prev.map(r => r.id === selectedRestaurant.id ? { ...r, commissionPercentage: DEFAULT_RESTAURANT_COMMISSION_PERCENTAGE } : r)
       )
 
-      toast.success(`Commission reset to 0% for ${selectedRestaurant.name}`)
+      toast.success(`Commission reset to ${DEFAULT_RESTAURANT_COMMISSION_PERCENTAGE}% for ${selectedRestaurant.name}`)
       setIsDeleteConfirmOpen(false)
       setSelectedRestaurant(null)
     } catch (err) {
@@ -581,8 +586,8 @@ export default function RestaurantCommission() {
                             </button>
                             <button
                               onClick={() => openDeleteConfirm(res)}
-                              title="Reset Commission to 0%"
-                              disabled={res.commissionPercentage === 0}
+                              title={`Reset Commission to ${DEFAULT_RESTAURANT_COMMISSION_PERCENTAGE}%`}
+                              disabled={!isCustomRestaurantCommission(res.commissionPercentage)}
                               className="p-1.5 text-rose-600 hover:bg-rose-50 rounded disabled:text-slate-300 disabled:hover:bg-transparent transition-colors"
                             >
                               <Trash2 className="w-4 h-4" />
@@ -635,7 +640,7 @@ export default function RestaurantCommission() {
                   ))}
                 </select>
                 {unconfiguredRestaurantsList.length === 0 && (
-                  <p className="text-xs text-amber-600 mt-1">All approved restaurants already have a custom commission set.</p>
+                  <p className="text-xs text-amber-600 mt-1">All approved restaurants already use the default {DEFAULT_RESTAURANT_COMMISSION_PERCENTAGE}% commission.</p>
                 )}
               </div>
 
@@ -649,7 +654,7 @@ export default function RestaurantCommission() {
                     min="0"
                     max="100"
                     step="0.1"
-                    placeholder="e.g. 10"
+                    placeholder={`e.g. ${DEFAULT_RESTAURANT_COMMISSION_PERCENTAGE + 5}`}
                     value={newCommissionForm.commissionPercentage}
                     onChange={(e) => setNewCommissionForm(prev => ({ ...prev, commissionPercentage: e.target.value }))}
                     className="w-full pl-3 pr-10 py-2.5 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
@@ -723,7 +728,7 @@ export default function RestaurantCommission() {
                       min="0"
                       max="100"
                       step="0.1"
-                      placeholder="e.g. 10"
+                      placeholder={`e.g. ${DEFAULT_RESTAURANT_COMMISSION_PERCENTAGE + 5}`}
                       value={commissionInput}
                       onChange={(e) => setCommissionInput(e.target.value)}
                       className="w-full pl-3 pr-10 py-2.5 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
@@ -778,10 +783,10 @@ export default function RestaurantCommission() {
               <p className="text-sm text-slate-600 leading-relaxed">
                 Are you sure you want to reset the custom commission percentage for{" "}
                 <span className="font-bold text-slate-900">{selectedRestaurant.name}</span> back to{" "}
-                <span className="font-bold text-slate-900">0%</span>?
+                <span className="font-bold text-slate-900">{DEFAULT_RESTAURANT_COMMISSION_PERCENTAGE}%</span>?
               </p>
               <p className="text-xs text-slate-500 mt-2 italic bg-slate-50 p-2.5 rounded-lg border border-slate-100">
-                Note: Resetting means no automatic commission earnings will be deducted for this restaurant on future orders.
+                Note: Resetting restores the platform default commission for this restaurant.
               </p>
             </div>
           )}
@@ -801,7 +806,7 @@ export default function RestaurantCommission() {
               className="px-5 py-2 text-sm font-semibold rounded-lg bg-red-600 text-white hover:bg-red-700 transition-all flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
             >
               {isSaving && <Loader2 className="w-4 h-4 animate-spin" />}
-              Reset to 0%
+              Reset to {DEFAULT_RESTAURANT_COMMISSION_PERCENTAGE}%
             </button>
           </DialogFooter>
         </DialogContent>
@@ -853,7 +858,7 @@ export default function RestaurantCommission() {
                     min="0"
                     max="100"
                     step="0.1"
-                    placeholder="e.g. 10"
+                    placeholder={`e.g. ${DEFAULT_RESTAURANT_COMMISSION_PERCENTAGE + 5}`}
                     value={bulkCommissionInput}
                     onChange={(e) => setBulkCommissionInput(e.target.value)}
                     className="w-full pl-3 pr-10 py-2.5 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-red-500 text-sm"

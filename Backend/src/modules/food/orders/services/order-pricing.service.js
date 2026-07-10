@@ -5,6 +5,7 @@ import { FoodFeeSettings } from '../../admin/models/feeSettings.model.js';
 import { FoodOffer } from '../../admin/models/offer.model.js';
 import { FoodOfferUsage } from '../../admin/models/offerUsage.model.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
+import { resolveRestaurantCommissionPercentage } from '../../constants/commission.constants.js';
 
 function roundCurrency(value) {
   const num = Number(value);
@@ -322,7 +323,9 @@ export async function calculateOrderPricing(userId, dto) {
     subtotal + packagingFee + deliveryFee + platformFee + tax - discount,
   );
 
-  const commissionPercentage = Number(restaurant?.commissionPercentage || 0);
+  const commissionPercentage = resolveRestaurantCommissionPercentage(
+    restaurant?.commissionPercentage,
+  );
   const restaurantCommission = roundCurrency(subtotal * (commissionPercentage / 100));
 
   return {

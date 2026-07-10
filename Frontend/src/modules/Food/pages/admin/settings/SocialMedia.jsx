@@ -71,11 +71,23 @@ export default function SocialMedia() {
   return (
     <div className="h-full overflow-y-auto bg-slate-50 p-4 lg:p-6">
       <div className="max-w-3xl mx-auto">
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold text-slate-900">Social Media</h1>
-          <p className="text-sm text-slate-600 mt-1">
-            Manage social links shown on restaurant login and other public surfaces.
-          </p>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+          <div>
+            <h1 className="text-2xl font-bold text-slate-900">Social Media</h1>
+            <p className="text-sm text-slate-600 mt-1">
+              Manage social links shown on restaurant login and other public surfaces.
+            </p>
+          </div>
+          {!loading && (
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={saving}
+              className="px-8 py-3 bg-slate-900 text-white rounded-xl hover:bg-black transition-all font-bold disabled:opacity-50 shrink-0"
+            >
+              {saving ? "Saving..." : "Save Changes"}
+            </button>
+          )}
         </div>
 
         {loading ? (
@@ -97,16 +109,6 @@ export default function SocialMedia() {
               </div>
             ))}
 
-            <div className="flex justify-end pt-2">
-              <button
-                type="button"
-                onClick={handleSave}
-                disabled={saving}
-                className="px-8 py-3 bg-slate-900 text-white rounded-xl hover:bg-black transition-all font-bold disabled:opacity-50"
-              >
-                {saving ? "Saving..." : "Save Changes"}
-              </button>
-            </div>
           </div>
         )}
       </div>

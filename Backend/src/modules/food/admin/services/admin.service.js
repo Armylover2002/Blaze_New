@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 import { ValidationError } from '../../../../core/auth/errors.js';
 import { assertNoZoneOverlap } from '../../../../utils/zoneOverlap.js';
 import { FoodRestaurant } from '../../restaurant/models/restaurant.model.js';
+import { DEFAULT_RESTAURANT_COMMISSION_RATE } from '../../constants/commission.constants.js';
 import { validateRestaurantPhoneUniqueness, normalizeRestaurantPhone } from '../../restaurant/services/restaurant.service.js';
 import { FoodRestaurantWallet } from '../../restaurant/models/restaurantWallet.model.js';
 import { FoodDeliveryPartner } from '../../delivery/models/deliveryPartner.model.js';
@@ -428,7 +429,6 @@ const PENDING_ORDER_STATUSES = ['placed', 'created'];
 const PROCESSING_ORDER_STATUSES = ['confirmed', 'preparing', 'ready_for_pickup', 'picked_up'];
 // Fallback commission rate applied to a delivered order's subtotal when the order
 // has no stored restaurantCommission (e.g. legacy orders created before commission tracking).
-const DEFAULT_RESTAURANT_COMMISSION_RATE = 0.15;
 
 const getDateRangeByPeriod = (periodRaw) => {
     const period = String(periodRaw || 'overall').trim().toLowerCase();
