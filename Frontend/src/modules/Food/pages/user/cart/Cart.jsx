@@ -914,20 +914,26 @@ export default function Cart() {
 
         if (response?.data?.success && response?.data?.data?.coupons) {
           const coupons = response.data.data.coupons.map((coupon) => {
+            const isPct = coupon.discountType === "percentage"
+            const discountValue = Number(coupon.discountValue) || 0
             const estimatedDiscount = Number(coupon.estimatedDiscount) || 0
+            const displayDiscount = Number(coupon.displayDiscount) || (isPct ? estimatedDiscount : discountValue)
             const meetsMinOrder = coupon.meetsMinOrder !== false
             const amountToUnlock = Number(coupon.amountToUnlock || 0)
             return {
               code: coupon.couponCode,
               discount: estimatedDiscount,
+              discountType: coupon.discountType,
+              discountValue,
+              displayDiscount,
               discountPercentage: coupon.discountPercentage,
-              discountDisplay: coupon.discountType === "percentage"
+              discountDisplay: isPct
                 ? `${coupon.discountPercentage}% OFF`
-                : `${RUPEE_SYMBOL}${estimatedDiscount} OFF`,
+                : `${RUPEE_SYMBOL}${displayDiscount} OFF`,
               minOrder: coupon.minOrderValue || 0,
-              description: coupon.discountType === "percentage"
+              description: isPct
                 ? `${coupon.discountPercentage}% OFF on item total with '${coupon.couponCode}'`
-                : `Save ${RUPEE_SYMBOL}${estimatedDiscount} on item total with '${coupon.couponCode}'`,
+                : `Save ${RUPEE_SYMBOL}${displayDiscount} on item total with '${coupon.couponCode}'`,
               customerGroup: coupon.customerGroup || coupon.customerScope || "all",
               customerScope: coupon.customerScope || coupon.customerGroup || "all",
               isFirstOrderOnly: Boolean(coupon.isFirstOrderOnly),
@@ -2605,9 +2611,10 @@ export default function Cart() {
                                       </span>
                                       {coupon.discountDisplay || `Save ${RUPEE_SYMBOL}${coupon.discount}`}
                                     </p>
-                                    {isFirstTimeOnlyCoupon(coupon) ? (
+                                    {isFirstTimeOnlyCoupon(coupon) && (
                                       <p className="text-[11px] text-[#FF0000] mb-1 font-medium">First-time users only</p>
-                                    ) : coupon.meetsMinOrder === false ? (
+                                    )}
+                                    {coupon.meetsMinOrder === false ? (
                                       <p className="text-xs text-blue-600 font-semibold mb-1">
                                         Add items worth {RUPEE_SYMBOL}{Number(coupon.amountToUnlock || 0)} to apply this coupon
                                       </p>

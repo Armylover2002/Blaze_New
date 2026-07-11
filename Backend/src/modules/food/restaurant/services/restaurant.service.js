@@ -2638,7 +2638,7 @@ export const listPublicOffers = async (query = {}) => {
     for (const o of list) {
         if (!isCouponWithinDateWindow(o, now) || !isCouponUsageAvailable(o)) continue;
 
-        const { minOrderValue, meetsMinOrder, amountToUnlock, estimatedDiscount } =
+        const { minOrderValue, meetsMinOrder, amountToUnlock, estimatedDiscount, displayDiscount } =
             getCouponCartEligibility(o, numericSubtotal);
 
         if (userId) {
@@ -2688,6 +2688,7 @@ export const listPublicOffers = async (query = {}) => {
             meetsMinOrder,
             amountToUnlock,
             estimatedDiscount: estimatedDiscount || null,
+            displayDiscount: displayDiscount || null,
         });
     }
 
@@ -2712,7 +2713,7 @@ export const listPublicOffers = async (query = {}) => {
             if (c.showInCart === false) continue;
             if (!isCouponWithinDateWindow(c, now) || !isCouponUsageAvailable(c)) continue;
 
-            const { minOrderValue, meetsMinOrder, amountToUnlock, estimatedDiscount } =
+            const { minOrderValue, meetsMinOrder, amountToUnlock, estimatedDiscount, displayDiscount } =
                 getCouponCartEligibility(c, numericSubtotal);
 
             if (userId) {
@@ -2755,6 +2756,7 @@ export const listPublicOffers = async (query = {}) => {
                 meetsMinOrder,
                 amountToUnlock,
                 estimatedDiscount: estimatedDiscount || null,
+                displayDiscount: displayDiscount || null,
             });
         }
     } catch (err) {

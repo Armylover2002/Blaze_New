@@ -1257,13 +1257,16 @@ export const restaurantAPI = {
         const isPct = o.discountType === "percentage";
         const discountValue = Number(o.discountValue) || 0;
         const estimatedDiscount = Number(o.estimatedDiscount) || 0;
+        const displayDiscount = Number(o.displayDiscount) || (isPct ? estimatedDiscount : discountValue);
         const customerScope = o.customerScope || "all";
         const isFirstTime =
           customerScope === "first-time" || o.isFirstOrderOnly === true;
         return {
           couponCode: o.couponCode,
           discountType: o.discountType,
+          discountValue,
           discountPercentage: isPct ? discountValue : 0,
+          displayDiscount,
           originalPrice: Number(subtotal) || 0,
           discountedPrice: Math.max(0, (Number(subtotal) || 0) - estimatedDiscount),
           minOrderValue: Number(o.minOrderValue || 0),

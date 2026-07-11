@@ -331,7 +331,11 @@ export function getCouponCartEligibility(coupon, numericSubtotal) {
     const estimatedDiscount = meetsMinOrder && hasSubtotal
         ? calculateDiscountFromCoupon(coupon, numericSubtotal)
         : 0;
-    return { minOrderValue, meetsMinOrder, amountToUnlock, estimatedDiscount };
+    const isFlatDiscount = normalizeDiscountType(coupon?.discountType) === 'flat-price';
+    const displayDiscount = isFlatDiscount
+        ? Math.max(0, Math.floor(Number(coupon?.discountValue) || 0))
+        : estimatedDiscount;
+    return { minOrderValue, meetsMinOrder, amountToUnlock, estimatedDiscount, displayDiscount };
 }
 
 /** Increment coupon usage only when an order is delivered (not on place/cancel). */
