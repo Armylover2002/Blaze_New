@@ -54,7 +54,7 @@ router.get('/public', settingsController.getGlobalSettings);
 
 // Protected admin endpoints
 router.get('/', authMiddleware, requireRoles('ADMIN', 'EMPLOYEE'), checkPermission('global::settings', 'view'), settingsController.getGlobalSettings);
-router.patch('/', authMiddleware, requireRoles('ADMIN'), upload.fields([
+router.patch('/', authMiddleware, requireRoles('ADMIN', 'EMPLOYEE'), upload.fields([
     { name: 'adminLogo', maxCount: 1 },
     { name: 'adminFavicon', maxCount: 1 },
     { name: 'userLogo', maxCount: 1 },
