@@ -5,6 +5,8 @@ export default function RestaurantDetailsMenuToolbar({
   activeFilterCount,
   filters,
   vegMode,
+  isPureVeg,
+  hasNonVegItems,
   menuCategories,
   selectedMenuCategory,
   onOpenFilters,
@@ -47,7 +49,7 @@ export default function RestaurantDetailsMenuToolbar({
             {filters.vegNonVeg === "veg" && <X className="h-3 w-3 ml-1" />}
           </Button>
 
-          {(vegMode !== "pure" && vegMode !== "all" && vegMode !== true) && (
+          {(vegMode !== "pure" && vegMode !== "all" && vegMode !== true && !isPureVeg && hasNonVegItems !== false) && (
             <Button
               variant="outline"
               size="sm"

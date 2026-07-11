@@ -5,6 +5,36 @@ const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
 
+const formatLimit = (value) => {
+  const num = Number(value)
+  return Number.isFinite(num) && num > 0 ? String(num) : "∞"
+}
+
+const formatUsage = (used, limit) => `${Number(used || 0)} / ${formatLimit(limit)}`
+
+const formatCurrency = (value) => {
+  const num = Number(value)
+  return Number.isFinite(num) && num > 0 ? `₹${num}` : "—"
+}
+
+const formatDateCell = (value) => {
+  if (!value) return "—"
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return "—"
+  const dd = String(d.getDate()).padStart(2, "0")
+  const month = d.toLocaleString("en-US", { month: "short" })
+  return `${dd} ${month} ${d.getFullYear()}`
+}
+
+const formatDiscount = (offer) => {
+  if (offer.discountType === "flat-price") {
+    return `₹${Number(offer.discountValue || offer.originalPrice || 0)} OFF`
+  }
+  const pct = Number(offer.discountPercentage ?? offer.discountValue ?? 0)
+  const maxCap = Number(offer.maxDiscount)
+  return `${pct}% OFF${Number.isFinite(maxCap) && maxCap > 0 ? ` (max ₹${maxCap})` : ""}`
+}
+
 
 export default function Coupons() {
   const [searchQuery, setSearchQuery] = useState("")
@@ -548,81 +578,76 @@ export default function Coupons() {
               <table className="w-full">
                 <thead className="bg-slate-50 border-b border-slate-200">
                   <tr>
-                    <th className="px-6 py-4 text-left text-xs font-bold text-slate-700 uppercase tracking-wider whitespace-nowrap">SI</th>
-                    <th className="px-6 py-4 text-left text-xs font-bold text-slate-700 uppercase tracking-wider whitespace-nowrap">Restaurant</th>
-                    <th className="px-6 py-4 text-left text-xs font-bold text-slate-700 uppercase tracking-wider whitespace-nowrap">Dish</th>
-                    <th className="px-6 py-4 text-left text-xs font-bold text-slate-700 uppercase tracking-wider whitespace-nowrap">Coupon Code</th>
-                    <th className="px-6 py-4 text-left text-xs font-bold text-slate-700 uppercase tracking-wider whitespace-nowrap">Customer Scope</th>
-                    <th className="px-6 py-4 text-left text-xs font-bold text-slate-700 uppercase tracking-wider whitespace-nowrap">Discount</th>
-                    <th className="px-6 py-4 text-left text-xs font-bold text-slate-700 uppercase tracking-wider whitespace-nowrap">Price</th>
-                    <th className="px-6 py-4 text-left text-xs font-bold text-slate-700 uppercase tracking-wider whitespace-nowrap">Min Order</th>
-                    <th className="px-6 py-4 text-left text-xs font-bold text-slate-700 uppercase tracking-wider whitespace-nowrap">Usage</th>
-                    <th className="px-6 py-4 text-left text-xs font-bold text-slate-700 uppercase tracking-wider whitespace-nowrap">Status</th>
-                    <th className="px-6 py-4 text-left text-xs font-bold text-slate-700 uppercase tracking-wider whitespace-nowrap">Show In Cart</th>
-                    <th className="px-6 py-4 text-left text-xs font-bold text-slate-700 uppercase tracking-wider whitespace-nowrap">Valid Until</th>
-                    <th className="px-6 py-4 text-left text-xs font-bold text-slate-700 uppercase tracking-wider whitespace-nowrap">Actions</th>
+                    <th className="px-4 py-3 text-left text-xs font-bold text-slate-700 uppercase tracking-wider whitespace-nowrap">SI</th>
+                    <th className="px-4 py-3 text-left text-xs font-bold text-slate-700 uppercase tracking-wider whitespace-nowrap">Restaurant</th>
+                    <th className="px-4 py-3 text-left text-xs font-bold text-slate-700 uppercase tracking-wider whitespace-nowrap">Coupon Code</th>
+                    <th className="px-4 py-3 text-left text-xs font-bold text-slate-700 uppercase tracking-wider whitespace-nowrap">Customer</th>
+                    <th className="px-4 py-3 text-left text-xs font-bold text-slate-700 uppercase tracking-wider whitespace-nowrap">Discount</th>
+                    <th className="px-4 py-3 text-left text-xs font-bold text-slate-700 uppercase tracking-wider whitespace-nowrap">Min Order</th>
+                    <th className="px-4 py-3 text-left text-xs font-bold text-slate-700 uppercase tracking-wider whitespace-nowrap">Max Discount</th>
+                    <th className="px-4 py-3 text-left text-xs font-bold text-slate-700 uppercase tracking-wider whitespace-nowrap">Per User Limit</th>
+                    <th className="px-4 py-3 text-left text-xs font-bold text-slate-700 uppercase tracking-wider whitespace-nowrap">Global Usage</th>
+                    <th className="px-4 py-3 text-left text-xs font-bold text-slate-700 uppercase tracking-wider whitespace-nowrap">Start Date</th>
+                    <th className="px-4 py-3 text-left text-xs font-bold text-slate-700 uppercase tracking-wider whitespace-nowrap">End Date</th>
+                    <th className="px-4 py-3 text-left text-xs font-bold text-slate-700 uppercase tracking-wider whitespace-nowrap">Status</th>
+                    <th className="px-4 py-3 text-left text-xs font-bold text-slate-700 uppercase tracking-wider whitespace-nowrap">Cart</th>
+                    <th className="px-4 py-3 text-left text-xs font-bold text-slate-700 uppercase tracking-wider whitespace-nowrap">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-slate-100">
                   {filteredOffers.map((offer) => (
                     <tr key={`${offer.offerId}-${offer.dishId}`} className="hover:bg-slate-50 transition-colors">
-                      <td className="px-6 py-4 whitespace-nowrap">
+                      <td className="px-4 py-3 whitespace-nowrap">
                         <span className="text-sm font-medium text-slate-700">{offer.sl}</span>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
+                      <td className="px-4 py-3 whitespace-nowrap">
                         <span className="text-sm font-medium text-slate-900">
                           {offer.restaurantScope === "all" || offer.restaurantName === "All Restaurants" ? "All Restaurants" : offer.restaurantName}
                         </span>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-700">
-                          {offer.dishName}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
+                      <td className="px-4 py-3 whitespace-nowrap">
                         <span className="text-sm font-mono font-semibold text-blue-600 bg-blue-50 px-2 py-1 rounded whitespace-nowrap">
                           {offer.couponCode}
                         </span>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                          offer.customerGroup === "new"
-                            ? "bg-purple-100 text-purple-700"
-                            : "bg-slate-100 text-slate-700"
-                        }`}>
-                          {offer.customerGroup === "new" ? "First-time Users" : "All Users"}
-                        </span>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <div className="flex flex-col gap-1">
+                          <span className={`inline-flex w-fit px-2 py-0.5 rounded-full text-xs font-medium ${
+                            offer.customerGroup === "new"
+                              ? "bg-purple-100 text-purple-700"
+                              : "bg-slate-100 text-slate-700"
+                          }`}>
+                            {offer.customerGroup === "new" ? "First-time" : "All Users"}
+                          </span>
+                          {offer.isFirstOrderOnly ? (
+                            <span className="text-[10px] font-semibold text-amber-700">First order only</span>
+                          ) : null}
+                        </div>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className="text-sm text-slate-700 whitespace-nowrap">
-                          {offer.discountType === 'flat-price'
-                            ? `\u20B9${offer.originalPrice - offer.discountedPrice} OFF`
-                            : `${offer.discountPercentage}% OFF${Number(offer.maxDiscount) ? ` (up to \u20B9${Number(offer.maxDiscount)})` : ""}`}
-                        </span>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <span className="text-sm text-slate-700 whitespace-nowrap">{formatDiscount(offer)}</span>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <span className="text-sm text-slate-700">{formatCurrency(offer.minOrderValue)}</span>
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap">
                         <span className="text-sm text-slate-700">
-                          {offer.dishId === "all"
-                            ? (Number(offer.minOrderValue) ? `Min \u20B9${Number(offer.minOrderValue)}` : "All Items")
-                            : (
-                              <div className="flex items-center gap-2">
-                                <span className="text-xs text-slate-400 line-through">{"\u20B9"}{offer.originalPrice}</span>
-                                <span className="text-sm font-semibold text-green-600">{"\u20B9"}{offer.discountedPrice}</span>
-                              </div>
-                            )}
+                          {offer.discountType === "percentage" ? formatCurrency(offer.maxDiscount) : "N/A"}
                         </span>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className="text-sm text-slate-700">
-                          {Number(offer.minOrderValue) ? `\u20B9${Number(offer.minOrderValue)}` : "—"}
-                        </span>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <span className="text-sm text-slate-700">{formatLimit(offer.perUserLimit)}</span>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className="text-sm text-slate-700">
-                          {`${Number(offer.usedCount || 0)} / ${Number(offer.usageLimit || 0) > 0 ? Number(offer.usageLimit) : "∞"}`}
-                        </span>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <span className="text-sm font-medium text-slate-800">{formatUsage(offer.usedCount, offer.usageLimit)}</span>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <span className="text-sm text-slate-700">{formatDateCell(offer.startDate)}</span>
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <span className="text-sm text-slate-700">{offer.endDate ? formatDateCell(offer.endDate) : "No expiry"}</span>
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap">
                         {(() => {
                           const status = offer.status || 'inactive'
                           const cls =
@@ -642,7 +667,7 @@ export default function Coupons() {
                           )
                         })()}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
+                      <td className="px-4 py-3 whitespace-nowrap">
                         <button
                           type="button"
                           onClick={() => handleToggleShowInCart(offer.offerId, offer.dishId, offer.showInCart !== false)}
@@ -658,20 +683,7 @@ export default function Coupons() {
                           />
                         </button>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className="text-sm text-slate-700 whitespace-nowrap">
-                          {offer.endDate
-                            ? (() => {
-                                const d = new Date(offer.endDate)
-                                const dd = String(d.getDate()).padStart(2, '0')
-                                const month = d.toLocaleString('en-US', { month: 'short' })
-                                const yyyy = d.getFullYear()
-                                return `${dd} ${month} ${yyyy}`
-                              })()
-                            : 'No expiry'}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
+                      <td className="px-4 py-3 whitespace-nowrap">
                         <button
                           type="button"
                           onClick={() => handleDeleteOffer(offer.offerId)}

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useLocation, useNavigate } from "react-router-dom"
 import {
   CheckCircle2,
@@ -8,6 +8,8 @@ import {
   ShieldCheck,
   Sparkles,
   Store,
+  XCircle,
+  RotateCcw,
 } from "lucide-react"
 import { Button } from "@food/components/ui/button"
 import RestaurantAuthFooter from "@food/components/restaurant/RestaurantAuthFooter"
@@ -57,6 +59,9 @@ export default function VerificationPending() {
   const [checkingStatus, setCheckingStatus] = useState(true)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [restaurantName, setRestaurantName] = useState("")
+  const [isRejected, setIsRejected] = useState(false)
+  const [rejectionReason, setRejectionReason] = useState("")
+  const hasMounted = useRef(false)
 
   const pendingPhone = useMemo(() => {
     const cachedUser = getCurrentUser("restaurant")
@@ -71,8 +76,10 @@ export default function VerificationPending() {
 
   const checkApprovalStatus = useCallback(
     async ({ silent = false } = {}) => {
-      if (!silent) setCheckingStatus(true)
-      setIsRefreshing(true)
+      if (!silent) {
+        setCheckingStatus(true)
+        setIsRefreshing(true)
+      }
 
       const token = getModuleToken("restaurant")
       if (!token) {
@@ -89,6 +96,17 @@ export default function VerificationPending() {
           setRestaurantName(restaurant.restaurantName || restaurant.name)
         }
 
+        if (restaurant) {
+          updateStoredModuleUser("restaurant", restaurant)
+          const status = String(restaurant?.status || "").toLowerCase()
+          if (status === "rejected") {
+            setIsRejected(true)
+            setRejectionReason(restaurant.rejectionReason || "Your application did not meet our requirements.")
+          } else {
+            setIsRejected(false)
+          }
+        }
+
         if (restaurant && isRestaurantApproved(restaurant)) {
           syncRestaurantStoredUser(restaurant)
           clearRestaurantPendingPhone()
@@ -97,19 +115,18 @@ export default function VerificationPending() {
           return
         }
 
-        if (restaurant && !isRestaurantInitialPendingApproval(restaurant)) {
+        const currentStatus = String(restaurant?.status || "").toLowerCase()
+        if (restaurant && !isRestaurantInitialPendingApproval(restaurant) && currentStatus !== "rejected") {
           navigate("/food/restaurant", { replace: true })
           return
-        }
-
-        if (restaurant) {
-          updateStoredModuleUser("restaurant", restaurant)
         }
       } catch {
         // Keep pending screen visible if status check fails.
       } finally {
-        setCheckingStatus(false)
-        setIsRefreshing(false)
+        if (!silent) {
+          setCheckingStatus(false)
+          setIsRefreshing(false)
+        }
       }
     },
     [navigate],
@@ -126,7 +143,10 @@ export default function VerificationPending() {
       setRestaurantName(cachedUser.restaurantName || cachedUser.name)
     }
 
-    checkApprovalStatus()
+    if (!hasMounted.current) {
+      hasMounted.current = true
+      checkApprovalStatus()
+    }
 
     const intervalId = window.setInterval(() => {
       checkApprovalStatus({ silent: true })
@@ -200,28 +220,35 @@ export default function VerificationPending() {
 
         {/* Hero card — verification-only visual */}
         <div className="overflow-hidden rounded-[28px] border border-white/80 bg-white shadow-[0_24px_80px_rgba(15,23,42,0.08)]">
-          <div className="border-b border-slate-100 bg-gradient-to-r from-[#FF0000]/10 via-white to-amber-50 px-6 py-8 sm:px-8 sm:py-10">
+          <div className={`border-b border-slate-100 bg-gradient-to-r px-6 py-8 sm:px-8 sm:py-10 ${
+            isRejected 
+              ? "from-red-500/10 via-white to-red-50" 
+              : "from-[#FF0000]/10 via-white to-amber-50"
+          }`}>
             <div className="flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
               <div className="max-w-xl">
-                <p className="text-[11px] font-black uppercase tracking-[0.32em] text-[#FF0000]">
-                  Verification in progress
+                <p className={`text-[11px] font-black uppercase tracking-[0.32em] ${
+                  isRejected ? "text-red-600" : "text-[#FF0000]"
+                }`}>
+                  {isRejected ? "Application Rejected" : "Verification in progress"}
                 </p>
                 <h1 className="mt-2 text-2xl font-black tracking-tight text-slate-900 sm:text-3xl">
-                  Your restaurant is under review
+                  {isRejected ? "Your application was rejected" : "Your restaurant is under review"}
                 </h1>
                 <p className="mt-3 text-sm leading-6 text-slate-600 sm:text-base">
-                  We received your application for {companyName}. Our team is verifying your
-                  details before activating your partner dashboard.
+                  {isRejected
+                    ? `We reviewed your application for ${companyName}. Unfortunately, it did not meet our criteria. Please review the feedback and try again.`
+                    : `We received your application for ${companyName}. Our team is verifying your details before activating your partner dashboard.`}
                 </p>
               </div>
 
               <div className="relative mx-auto flex h-28 w-28 shrink-0 items-center justify-center sm:mx-0">
-                <div className="absolute inset-0 rounded-full bg-[#FF0000]/10" />
-                <div className="absolute inset-2 rounded-full border-2 border-dashed border-[#FF0000]/25" />
-                <div className="relative flex h-20 w-20 items-center justify-center rounded-full bg-[#FF0000] shadow-lg shadow-[#FF0000]/25">
-                  <Clock3 className="h-9 w-9 text-white" />
+                <div className={`absolute inset-0 rounded-full ${isRejected ? 'bg-red-500/10' : 'bg-[#FF0000]/10'}`} />
+                <div className={`absolute inset-2 rounded-full border-2 border-dashed ${isRejected ? 'border-red-500/25' : 'border-[#FF0000]/25'}`} />
+                <div className={`relative flex h-20 w-20 items-center justify-center rounded-full shadow-lg ${isRejected ? 'bg-red-500 shadow-red-500/25' : 'bg-[#FF0000] shadow-[#FF0000]/25'}`}>
+                  {isRejected ? <XCircle className="h-9 w-9 text-white" /> : <Clock3 className="h-9 w-9 text-white" />}
                 </div>
-                <Sparkles className="absolute -right-1 top-2 h-5 w-5 text-amber-500" />
+                {!isRejected && <Sparkles className="absolute -right-1 top-2 h-5 w-5 text-amber-500" />}
               </div>
             </div>
           </div>
@@ -230,14 +257,22 @@ export default function VerificationPending() {
             {/* Status */}
             <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-5">
               <div className="flex items-start gap-4">
-                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
-                  <ShieldCheck className="h-6 w-6 text-[#FF0000]" />
+                <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-white shadow-sm ring-1 ring-slate-200`}>
+                  {isRejected ? <XCircle className="h-6 w-6 text-red-500" /> : <ShieldCheck className="h-6 w-6 text-[#FF0000]" />}
                 </div>
                 <div className="min-w-0 flex-1">
                   <p className="text-xs font-bold uppercase tracking-wider text-slate-500">
                     Current status
                   </p>
-                  <p className="mt-1 text-xl font-black text-slate-900">Awaiting admin approval</p>
+                  <p className="mt-1 text-xl font-black text-slate-900">
+                    {isRejected ? "Rejected" : "Awaiting admin approval"}
+                  </p>
+                  {isRejected && rejectionReason && (
+                    <div className="mt-3 rounded-lg bg-red-50 p-3 text-sm text-red-800 border border-red-100">
+                      <span className="font-semibold block mb-1">Reason:</span>
+                      {rejectionReason}
+                    </div>
+                  )}
                   {restaurantName ? (
                     <p className="mt-1 truncate text-sm font-semibold text-slate-700">
                       {restaurantName}
@@ -259,89 +294,115 @@ export default function VerificationPending() {
               </div>
             </div>
 
-            {/* Timeline */}
-            <div>
-              <h2 className="mb-4 text-sm font-black uppercase tracking-wider text-slate-800">
-                What happens next
-              </h2>
-              <div className="space-y-0">
-                {TIMELINE_STEPS.map((step, index) => (
-                  <div key={step.title} className="flex gap-4">
-                    <div className="flex flex-col items-center">
-                      <div
-                        className={`flex h-9 w-9 items-center justify-center rounded-full text-xs font-black ${
-                          step.done
-                            ? "bg-[#FF0000] text-white shadow-md shadow-[#FF0000]/20"
-                            : step.active
-                              ? "border-2 border-[#FF0000] bg-[#FF0000]/10 text-[#FF0000]"
-                              : "border border-slate-200 bg-white text-slate-400"
-                        }`}
-                      >
-                        {step.done ? (
-                          <CheckCircle2 className="h-4 w-4" />
-                        ) : step.active ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          index + 1
-                        )}
+            {!isRejected && (
+              <>
+                {/* Timeline */}
+                <div>
+                  <h2 className="mb-4 text-sm font-black uppercase tracking-wider text-slate-800">
+                    What happens next
+                  </h2>
+                  <div className="space-y-0">
+                    {TIMELINE_STEPS.map((step, index) => (
+                      <div key={step.title} className="flex gap-4">
+                        <div className="flex flex-col items-center">
+                          <div
+                            className={`flex h-9 w-9 items-center justify-center rounded-full text-xs font-black ${
+                              step.done
+                                ? "bg-[#FF0000] text-white shadow-md shadow-[#FF0000]/20"
+                                : step.active
+                                  ? "border-2 border-[#FF0000] bg-[#FF0000]/10 text-[#FF0000]"
+                                  : "border border-slate-200 bg-white text-slate-400"
+                            }`}
+                          >
+                            {step.done ? (
+                              <CheckCircle2 className="h-4 w-4" />
+                            ) : step.active ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              index + 1
+                            )}
+                          </div>
+                          {index < TIMELINE_STEPS.length - 1 ? (
+                            <div
+                              className={`my-1 w-0.5 flex-1 min-h-[28px] ${
+                                step.done ? "bg-[#FF0000]/30" : "bg-slate-200"
+                              }`}
+                            />
+                          ) : null}
+                        </div>
+                        <div className={`pb-5 ${index === TIMELINE_STEPS.length - 1 ? "pb-0" : ""}`}>
+                          <p
+                            className={`text-sm font-bold ${
+                              step.active ? "text-[#FF0000]" : "text-slate-900"
+                            }`}
+                          >
+                            {step.title}
+                          </p>
+                          <p className="mt-1 text-sm leading-6 text-slate-600">{step.description}</p>
+                        </div>
                       </div>
-                      {index < TIMELINE_STEPS.length - 1 ? (
-                        <div
-                          className={`my-1 w-0.5 flex-1 min-h-[28px] ${
-                            step.done ? "bg-[#FF0000]/30" : "bg-slate-200"
-                          }`}
-                        />
-                      ) : null}
-                    </div>
-                    <div className={`pb-5 ${index === TIMELINE_STEPS.length - 1 ? "pb-0" : ""}`}>
-                      <p
-                        className={`text-sm font-bold ${
-                          step.active ? "text-[#FF0000]" : "text-slate-900"
-                        }`}
-                      >
-                        {step.title}
-                      </p>
-                      <p className="mt-1 text-sm leading-6 text-slate-600">{step.description}</p>
-                    </div>
+                    ))}
                   </div>
-                ))}
+                </div>
+
+                <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3.5 text-sm leading-6 text-emerald-900">
+                  Once approved, refresh this page or tap <strong>Check status</strong> — you&apos;ll be
+                  taken to your dashboard automatically. No need to log in again.
+                </div>
+              </>
+            )}
+
+            {isRejected ? (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Button
+                  type="button"
+                  onClick={() => navigate("/restaurant/onboarding?step=1", { replace: true })}
+                  className="h-12 rounded-2xl bg-[#FF0000] text-base font-bold hover:bg-[#E00000]"
+                >
+                  <RotateCcw className="mr-2 h-4 w-4" />
+                  Resubmit Application
+                </Button>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleLogout}
+                  className="h-12 rounded-2xl border-slate-200 bg-white text-base font-semibold text-slate-700"
+                >
+                  Start Over (Logout)
+                </Button>
               </div>
-            </div>
+            ) : (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Button
+                  type="button"
+                  disabled={isRefreshing}
+                  onClick={() => checkApprovalStatus()}
+                  className="h-12 rounded-2xl bg-[#FF0000] text-base font-bold hover:bg-[#E00000]"
+                >
+                  {isRefreshing ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Checking...
+                    </>
+                  ) : (
+                    <>
+                      <RefreshCw className="mr-2 h-4 w-4" />
+                      Check status
+                    </>
+                  )}
+                </Button>
 
-            <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3.5 text-sm leading-6 text-emerald-900">
-              Once approved, refresh this page or tap <strong>Check status</strong> — you&apos;ll be
-              taken to your dashboard automatically. No need to log in again.
-            </div>
-
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Button
-                type="button"
-                disabled={isRefreshing}
-                onClick={() => checkApprovalStatus()}
-                className="h-12 rounded-2xl bg-[#FF0000] text-base font-bold hover:bg-[#E00000]"
-              >
-                {isRefreshing ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Checking...
-                  </>
-                ) : (
-                  <>
-                    <RefreshCw className="mr-2 h-4 w-4" />
-                    Check status
-                  </>
-                )}
-              </Button>
-
-              <Button
-                type="button"
-                variant="outline"
-                onClick={handleLogout}
-                className="h-12 rounded-2xl border-slate-200 bg-white text-base font-semibold text-slate-700"
-              >
-                Sign out
-              </Button>
-            </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleLogout}
+                  className="h-12 rounded-2xl border-slate-200 bg-white text-base font-semibold text-slate-700"
+                >
+                  Sign out
+                </Button>
+              </div>
+            )}
           </div>
         </div>
 

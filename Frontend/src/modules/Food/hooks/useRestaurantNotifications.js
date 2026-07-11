@@ -215,8 +215,11 @@ export const useRestaurantNotifications = () => {
   };
 
   // Get restaurant ID from API
+  const hasFetchedId = useRef(false);
   useEffect(() => {
     const fetchRestaurantId = async () => {
+      if (hasFetchedId.current) return;
+      hasFetchedId.current = true;
       try {
         const response = await restaurantAPI.getCurrentRestaurant();
         if (response.data?.success && response.data.data?.restaurant) {
@@ -240,6 +243,7 @@ export const useRestaurantNotifications = () => {
 
     const ALERT_POLL_MS = 8000;
     let isCancelled = false;
+    let initialPollDone = false;
 
     const pollOrders = async () => {
       if (isCancelled) return;
@@ -271,8 +275,11 @@ export const useRestaurantNotifications = () => {
       }
     };
 
-    // Initial poll immediately.
-    pollOrders();
+    // Initial poll immediately if not already done.
+    if (!initialPollDone) {
+      initialPollDone = true;
+      pollOrders();
+    }
     const intervalId = setInterval(pollOrders, ALERT_POLL_MS);
 
     return () => {

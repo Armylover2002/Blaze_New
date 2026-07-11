@@ -14,6 +14,26 @@ const statusBadgeClass = (status) => {
   return "bg-amber-50 text-amber-700 border-amber-200"
 }
 
+const formatLimit = (value) => {
+  const num = Number(value)
+  return Number.isFinite(num) && num > 0 ? String(num) : "∞"
+}
+
+const formatUsage = (used, limit) => `${Number(used || 0)} / ${formatLimit(limit)}`
+
+const formatCurrency = (value) => {
+  const num = Number(value)
+  return Number.isFinite(num) && num > 0 ? `₹${num}` : "—"
+}
+
+const formatDiscountLabel = (request) => {
+  if (request.discountType === "flat-price" || request.discountType === "fixed") {
+    return `₹${Number(request.discountValue || 0)} FLAT OFF`
+  }
+  const maxCap = Number(request.maxDiscount)
+  return `${Number(request.discountValue || 0)}% OFF${Number.isFinite(maxCap) && maxCap > 0 ? ` (max ₹${maxCap})` : ""}`
+}
+
 export default function CouponsRequest() {
   const [searchQuery, setSearchQuery] = useState("");
   const [requests, setRequests] = useState([]);
@@ -164,24 +184,52 @@ export default function CouponsRequest() {
               </p>
             </div>
             <div>
-              <p className="text-xs text-slate-400 font-medium">Discount Value</p>
+              <p className="text-xs text-slate-400 font-medium">Discount</p>
+              <p className="text-sm font-semibold text-slate-800 mt-1">{formatDiscountLabel(selectedRequest)}</p>
+            </div>
+            <div>
+              <p className="text-xs text-slate-400 font-medium">Customer Eligibility</p>
               <p className="text-sm font-semibold text-slate-800 mt-1">
-                {selectedRequest.discountType === "percentage" ? `${selectedRequest.discountValue}% OFF` : `₹${selectedRequest.discountValue} FLAT OFF`}
+                {selectedRequest.customerScope === "first-time" ? "First-time users only" : "All users"}
               </p>
             </div>
             <div>
-              <p className="text-xs text-slate-400 font-medium">Minimum Order Amount</p>
-              <p className="text-sm font-semibold text-slate-800 mt-1">₹{selectedRequest.minOrderAmount || 0}</p>
-            </div>
-            <div>
-              <p className="text-xs text-slate-400 font-medium">Expiry Date</p>
-              <p className="text-sm font-semibold text-slate-800 mt-1">{formatDate(selectedRequest.expiryDate)}</p>
-            </div>
-            <div>
-              <p className="text-xs text-slate-400 font-medium">Usage Limit</p>
+              <p className="text-xs text-slate-400 font-medium">Min Order Value</p>
               <p className="text-sm font-semibold text-slate-800 mt-1">
-                {selectedRequest.usageLimit ? `${selectedRequest.usageLimit} total uses` : "Unlimited"}
+                {formatCurrency(selectedRequest.minOrderValue ?? selectedRequest.minOrderAmount)}
               </p>
+            </div>
+            <div>
+              <p className="text-xs text-slate-400 font-medium">Max Discount</p>
+              <p className="text-sm font-semibold text-slate-800 mt-1">
+                {selectedRequest.discountType === "percentage"
+                  ? formatCurrency(selectedRequest.maxDiscount)
+                  : "N/A"}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-slate-400 font-medium">Per User Limit</p>
+              <p className="text-sm font-semibold text-slate-800 mt-1">{formatLimit(selectedRequest.perUserLimit)}</p>
+            </div>
+            <div>
+              <p className="text-xs text-slate-400 font-medium">Global Usage</p>
+              <p className="text-sm font-semibold text-slate-800 mt-1">
+                {formatUsage(selectedRequest.usedCount, selectedRequest.usageLimit)}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-slate-400 font-medium">Start Date</p>
+              <p className="text-sm font-semibold text-slate-800 mt-1">{formatDate(selectedRequest.startDate)}</p>
+            </div>
+            <div>
+              <p className="text-xs text-slate-400 font-medium">End Date</p>
+              <p className="text-sm font-semibold text-slate-800 mt-1">
+                {formatDate(selectedRequest.endDate || selectedRequest.expiryDate)}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-slate-400 font-medium">Submission Date</p>
+              <p className="text-sm font-semibold text-slate-800 mt-1">{formatDate(selectedRequest.createdAt)}</p>
             </div>
             {selectedRequest.description && (
               <div className="md:col-span-2">
@@ -330,32 +378,38 @@ export default function CouponsRequest() {
         {/* Requests Table Block */}
         <div className="bg-white rounded-xl shadow-sm border border-slate-200/80 overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[900px]">
+            <table className="w-full min-w-[1400px]">
               <thead className="bg-slate-50 border-b border-slate-200/80">
                 <tr>
-                  <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-500 uppercase tracking-wider w-16">Sl</th>
-                  <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-500 uppercase tracking-wider">Restaurant / Seller Details</th>
-                  <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-500 uppercase tracking-wider">Coupon Code</th>
-                  <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-500 uppercase tracking-wider">Discount Value</th>
-                  <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-500 uppercase tracking-wider">Min. Order Amount</th>
+                  <th className="px-4 py-3 text-left text-[10px] font-bold text-slate-500 uppercase tracking-wider w-12">Sl</th>
+                  <th className="px-4 py-3 text-left text-[10px] font-bold text-slate-500 uppercase tracking-wider">Restaurant</th>
+                  <th className="px-4 py-3 text-left text-[10px] font-bold text-slate-500 uppercase tracking-wider">Coupon Code</th>
+                  <th className="px-4 py-3 text-left text-[10px] font-bold text-slate-500 uppercase tracking-wider">Customer</th>
+                  <th className="px-4 py-3 text-left text-[10px] font-bold text-slate-500 uppercase tracking-wider">Discount</th>
+                  <th className="px-4 py-3 text-left text-[10px] font-bold text-slate-500 uppercase tracking-wider">Min Order</th>
+                  <th className="px-4 py-3 text-left text-[10px] font-bold text-slate-500 uppercase tracking-wider">Max Discount</th>
+                  <th className="px-4 py-3 text-left text-[10px] font-bold text-slate-500 uppercase tracking-wider">Per User</th>
+                  <th className="px-4 py-3 text-left text-[10px] font-bold text-slate-500 uppercase tracking-wider">Global Usage</th>
+                  <th className="px-4 py-3 text-left text-[10px] font-bold text-slate-500 uppercase tracking-wider">Start</th>
+                  <th className="px-4 py-3 text-left text-[10px] font-bold text-slate-500 uppercase tracking-wider">End</th>
                   <th 
-                    className="px-6 py-4 text-left text-[10px] font-bold text-slate-500 uppercase tracking-wider cursor-pointer hover:bg-slate-100 transition-colors"
+                    className="px-4 py-3 text-left text-[10px] font-bold text-slate-500 uppercase tracking-wider cursor-pointer hover:bg-slate-100 transition-colors"
                     onClick={() => handleSort("createdAt")}
                   >
                     <div className="flex items-center gap-1">
-                      <span>Submission Date</span>
+                      <span>Submitted</span>
                       <ArrowUpDown className={`w-3 h-3 ${sortConfig.key === "createdAt" ? "text-red-600" : "text-slate-400"}`} />
                     </div>
                   </th>
-                  <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-500 uppercase tracking-wider">Status</th>
-                  <th className="px-6 py-4 text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider w-28">Actions</th>
+                  <th className="px-4 py-3 text-left text-[10px] font-bold text-slate-500 uppercase tracking-wider">Status</th>
+                  <th className="px-4 py-3 text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider w-24">Actions</th>
                 </tr>
               </thead>
               
               <tbody className="bg-white divide-y divide-slate-100">
                 {loading ? (
                   <tr>
-                    <td colSpan={8} className="px-6 py-20 text-center">
+                    <td colSpan={14} className="px-6 py-20 text-center">
                       <div className="flex flex-col items-center justify-center">
                         <Loader2 className="w-8 h-8 animate-spin text-red-600 mb-3" />
                         <p className="text-base font-semibold text-slate-700">Loading requests...</p>
@@ -364,7 +418,7 @@ export default function CouponsRequest() {
                   </tr>
                 ) : processedRequests.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="px-6 py-20 text-center">
+                    <td colSpan={14} className="px-6 py-20 text-center">
                       <div className="flex flex-col items-center justify-center max-w-sm mx-auto">
                         <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center text-slate-400 mb-3">
                           <FileText className="w-6 h-6" />
@@ -381,43 +435,52 @@ export default function CouponsRequest() {
 
                     return (
                       <tr key={reqId} className="hover:bg-slate-50/50 transition-colors">
-                        <td className="px-6 py-4 whitespace-nowrap">
+                        <td className="px-4 py-3 whitespace-nowrap">
                           <span className="text-sm font-semibold text-slate-500">{index + 1}</span>
                         </td>
-                        <td className="px-6 py-4">
-                          <p className="text-sm font-bold text-slate-900">
-                            {request.type === 'seller' ? request.sellerName : request.restaurantName}
-                          </p>
-                          <p className="text-xs text-slate-400 mt-0.5">
-                            ID: {request.type === 'seller' ? request.sellerId : request.restaurantId}
-                          </p>
-                          {request.type === 'seller' && (
-                            <span className="inline-block bg-blue-50 text-blue-700 border border-blue-200 text-[10px] font-bold px-1.5 py-0.2 rounded mt-1 shadow-sm">
-                              Quick Commerce
-                            </span>
-                          )}
+                        <td className="px-4 py-3">
+                          <p className="text-sm font-bold text-slate-900">{request.restaurantName}</p>
+                          <p className="text-xs text-slate-400 mt-0.5">ID: {request.restaurantId}</p>
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
+                        <td className="px-4 py-3 whitespace-nowrap">
                           <span className="text-sm font-extrabold text-slate-900 tracking-wider bg-slate-100 px-2.5 py-0.5 rounded border border-slate-300">
                             {request.couponCode}
                           </span>
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-slate-800">
-                          {request.discountType === "percentage" ? `${request.discountValue}% OFF` : `₹${request.discountValue} FLAT OFF`}
+                        <td className="px-4 py-3 whitespace-nowrap text-xs font-semibold text-slate-700">
+                          {request.customerScope === "first-time" ? "First-time" : "All users"}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-700">
-                          ₹{request.minOrderAmount || 0}
+                        <td className="px-4 py-3 whitespace-nowrap text-sm font-bold text-slate-800">
+                          {formatDiscountLabel(request)}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-600 font-medium">
+                        <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-slate-700">
+                          {formatCurrency(request.minOrderValue ?? request.minOrderAmount)}
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-slate-700">
+                          {request.discountType === "percentage" ? formatCurrency(request.maxDiscount) : "N/A"}
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-slate-700">
+                          {formatLimit(request.perUserLimit)}
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap text-sm font-semibold text-slate-800">
+                          {formatUsage(request.usedCount, request.usageLimit)}
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap text-sm text-slate-600 font-medium">
+                          {formatDate(request.startDate)}
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap text-sm text-slate-600 font-medium">
+                          {formatDate(request.endDate || request.expiryDate)}
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap text-sm text-slate-600 font-medium">
                           {formatDate(request.createdAt)}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
+                        <td className="px-4 py-3 whitespace-nowrap">
                           <span className={`inline-flex items-center gap-1 text-xs font-bold px-2.5 py-0.5 rounded-full border ${statusBadgeClass(status)}`}>
                             {status === "Approved" ? <BadgeCheck className="w-3.5 h-3.5" /> : <Clock className="w-3.5 h-3.5" />}
                             {status}
                           </span>
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-center">
+                        <td className="px-4 py-3 whitespace-nowrap text-center">
                           <div className="flex items-center justify-center gap-2">
                             <button
                               onClick={() => {

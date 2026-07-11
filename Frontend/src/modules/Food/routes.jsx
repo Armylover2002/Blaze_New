@@ -57,6 +57,7 @@ function RestaurantGlobalNotificationListener() {
     location.pathname === "/food/restaurant/forgot-password" ||
     location.pathname === "/food/restaurant/otp" ||
     location.pathname === "/food/restaurant/welcome" ||
+    location.pathname === "/food/restaurant/pending-verification" ||
     location.pathname === "/food/restaurant/auth/google-callback"
   const isOrderManagedRoute =
     location.pathname === "/food/restaurant" ||

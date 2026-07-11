@@ -50,7 +50,8 @@ const pricingSchema = z.object({
     platformFee: z.number().min(0).optional(),
     discount: z.number().min(0).optional(),
     total: z.number().min(0),
-    currency: z.string().optional()
+    currency: z.string().optional(),
+    couponCode: z.string().nullable().optional()
 });
 
 export function validateCalculateOrderDto(body) {
@@ -125,6 +126,7 @@ export function validateCreateOrderDto(body) {
         customerName: z.string().optional(),
         customerPhone: z.string().optional(),
         pricing: pricingSchema,
+        couponCode: z.string().nullable().optional(),
         deliveryFleet: z.string().optional(),
         note: z.string().optional(),
         sendCutlery: z.boolean().optional(),

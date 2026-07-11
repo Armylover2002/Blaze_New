@@ -60,6 +60,24 @@ export const authMiddleware = (req, res, next) => {
     }
 };
 
+/** Sets req.user when a valid Bearer token is present; continues without error when absent. */
+export const optionalAuthMiddleware = (req, res, next) => {
+    const authHeader = req.headers.authorization || '';
+    const token = authHeader.startsWith('Bearer ') ? authHeader.substring(7) : null;
+    if (!token) return next();
+
+    try {
+        const decoded = verifyAccessToken(token);
+        req.user = {
+            userId: decoded.userId,
+            role: decoded.role,
+        };
+    } catch {
+        // Ignore invalid tokens for public endpoints
+    }
+    return next();
+};
+
 // --- RBAC CACHE SYSTEM ---
 const rolePermissionsCache = new Map();
 

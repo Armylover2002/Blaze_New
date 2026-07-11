@@ -1,6 +1,14 @@
 import { z } from 'zod';
 import { ValidationError } from '../../../../core/auth/errors.js';
 
+const rangeSchema = z.object({
+    min: z.number().min(0),
+    max: z.number().min(0),
+    fee: z.number().min(0),
+    deliveryBoyPerKm: z.number().min(0).optional().default(0),
+    deliveryBoyBasePay: z.number().min(0).optional().default(0)
+});
+
 const sponsorRuleSchema = z.object({
     minOrderAmount: z.number().min(0),
     maxOrderAmount: z.number().min(0).nullable().optional(),
@@ -16,9 +24,11 @@ const deliveryDistanceSlabSchema = z.object({
 });
 
 const feeSettingsUpsertSchema = z.object({
+    deliveryFee: z.number().min(0).nullable().optional(),
     baseDistanceKm: z.number().min(0).nullable().optional(),
     baseDeliveryFee: z.number().min(0).nullable().optional(),
     perKmCharge: z.number().min(0).nullable().optional(),
+    deliveryFeeRanges: z.array(rangeSchema).optional(),
     sponsorRules: z.array(sponsorRuleSchema).optional(),
     deliveryDistanceSlabs: z.array(deliveryDistanceSlabSchema).optional(),
     platformFee: z.number().min(0).nullable().optional(),
@@ -30,6 +40,12 @@ const feeSettingsUpsertSchema = z.object({
 
 export const validateFeeSettingsUpsertDto = (body) => {
     const normalized = {
+        deliveryFee:
+            body?.deliveryFee === null
+                ? null
+                : body?.deliveryFee !== undefined
+                    ? Number(body.deliveryFee)
+                    : undefined,
         baseDistanceKm:
             body?.baseDistanceKm === null
                 ? null
@@ -48,6 +64,15 @@ export const validateFeeSettingsUpsertDto = (body) => {
                 : body?.perKmCharge !== undefined
                     ? Number(body.perKmCharge)
                     : undefined,
+        deliveryFeeRanges: Array.isArray(body?.deliveryFeeRanges)
+            ? body.deliveryFeeRanges.map((r) => ({
+                min: Number(r?.min),
+                max: Number(r?.max),
+                fee: Number(r?.fee),
+                deliveryBoyPerKm: Number(r?.deliveryBoyPerKm || 0),
+                deliveryBoyBasePay: Number(r?.deliveryBoyBasePay || 0)
+            }))
+            : undefined,
         sponsorRules: Array.isArray(body?.sponsorRules)
             ? body.sponsorRules.map((rule) => ({
                 minOrderAmount: Number(rule?.minOrderAmount),
@@ -86,7 +111,24 @@ export const validateFeeSettingsUpsertDto = (body) => {
         throw new ValidationError(result.error.errors[0].message);
     }
 
-    const sponsorRules = Array.isArray(result.data.sponsorRules) ? result.data.sponsorRules : undefined;
+    const ranges = Array.isArray(result.data.deliveryFeeRanges) ? result.data.deliveryFeeRanges : undefined;
+    if (ranges) {
+        const sorted = [...ranges].sort((a, b) => a.min - b.min);
+        for (const r of sorted) {
+            if (r.min >= r.max) {
+                throw new ValidationError('Each range must have min less than max');
+            }
+        }
+        for (let i = 1; i < sorted.length; i++) {
+            const prev = sorted[i - 1];
+            const cur = sorted[i];
+            if (cur.min < prev.max) {
+                throw new ValidationError('Delivery fee ranges must not overlap');
+            }
+        }
+        result.data.deliveryFeeRanges = sorted;
+    }
+
     const slabs = Array.isArray(result.data.deliveryDistanceSlabs) ? result.data.deliveryDistanceSlabs : undefined;
     if (slabs) {
         for (const slab of slabs) {
@@ -95,6 +137,8 @@ export const validateFeeSettingsUpsertDto = (body) => {
             }
         }
     }
+
+    const sponsorRules = Array.isArray(result.data.sponsorRules) ? result.data.sponsorRules : undefined;
     if (sponsorRules) {
         for (const rule of sponsorRules) {
             if (
@@ -118,4 +162,3 @@ export const validateFeeSettingsUpsertDto = (body) => {
 
     return result.data;
 };
-

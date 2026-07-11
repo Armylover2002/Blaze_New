@@ -273,6 +273,10 @@ const restaurantSchema = new mongoose.Schema(
       default: false,
       index: true,
     },
+    showWithoutMenu: {
+      type: Boolean,
+      default: false,
+    },
     productCount: {
       type: Number,
       default: 0,

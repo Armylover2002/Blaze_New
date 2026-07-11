@@ -155,7 +155,8 @@ export function updateStoredModuleUser(module, user) {
 }
 
 export function isRestaurantPendingApproval(user) {
-  return isRestaurantInitialPendingApproval(user)
+  const status = String(user?.status || "").toLowerCase()
+  return isRestaurantInitialPendingApproval(user) || status === "rejected"
 }
 
 /**

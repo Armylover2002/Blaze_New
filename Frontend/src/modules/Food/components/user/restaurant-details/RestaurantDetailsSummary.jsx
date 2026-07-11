@@ -10,7 +10,10 @@ export default function RestaurantDetailsSummary({
     ? restaurant.cuisines.slice(0, 3).join(" · ")
     : restaurant?.topCategory || restaurant?.cuisine || "Multi-cuisine";
 
-  const isPureVeg = restaurant?.pureVegRestaurant === true;
+  const isPureVeg = restaurant?.pureVegRestaurant === true || 
+                    String(restaurant?.pureVegRestaurant).toLowerCase() === "true" ||
+                    restaurant?.details?.pureVegRestaurant === true ||
+                    String(restaurant?.details?.pureVegRestaurant).toLowerCase() === "true";
 
   return (
     <section className="px-4 sm:px-6 -mt-8 relative z-10">

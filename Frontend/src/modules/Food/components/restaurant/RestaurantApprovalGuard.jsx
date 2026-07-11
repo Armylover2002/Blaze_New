@@ -46,7 +46,8 @@ export default function RestaurantApprovalGuard({ children }) {
         if (restaurant) {
           updateStoredModuleUser("restaurant", restaurant)
 
-          if (!isRestaurantApproved(restaurant) && isRestaurantInitialPendingApproval(restaurant)) {
+          const status = String(restaurant?.status || "").toLowerCase()
+          if (!isRestaurantApproved(restaurant) && (isRestaurantInitialPendingApproval(restaurant) || status === "rejected")) {
             setRedirectToPending(true)
           }
         }

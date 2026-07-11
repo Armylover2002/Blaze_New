@@ -3,12 +3,15 @@ import * as adminService from '../../admin/services/admin.service.js';
 function toPublicFeeSettings(settings) {
   if (!settings || typeof settings !== 'object') return null;
   return {
+    deliveryFee: settings.deliveryFee ?? settings.baseDeliveryFee ?? null,
     baseDistanceKm: settings.baseDistanceKm ?? null,
     baseDeliveryFee: settings.baseDeliveryFee ?? settings.deliveryFee ?? null,
-    deliveryFee: settings.deliveryFee ?? settings.baseDeliveryFee ?? null,
     perKmCharge: settings.perKmCharge ?? null,
     platformFee: settings.platformFee ?? null,
     gstRate: settings.gstRate ?? null,
+    deliveryFeeRanges: Array.isArray(settings.deliveryFeeRanges)
+      ? settings.deliveryFeeRanges
+      : [],
     deliveryDistanceSlabs: Array.isArray(settings.deliveryDistanceSlabs)
       ? settings.deliveryDistanceSlabs
       : [],

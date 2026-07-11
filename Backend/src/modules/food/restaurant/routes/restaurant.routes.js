@@ -58,7 +58,7 @@ import {
     deleteAddonController
 } from '../controllers/restaurantAddon.controller.js';
 import * as orderController from '../../orders/controllers/order.controller.js';
-import { authMiddleware } from '../../../../core/auth/auth.middleware.js';
+import { authMiddleware, optionalAuthMiddleware } from '../../../../core/auth/auth.middleware.js';
 import { sendError } from '../../../../utils/response.js';
 import { getRestaurantFinanceController, getRestaurantSubscriptionWalletController } from '../controllers/restaurantFinance.controller.js';
 import { createTopupOrderController, verifyTopupController } from '../../subscriptions/controllers/subscription.controller.js';
@@ -114,7 +114,7 @@ router.get('/debug-counts', async (req, res) => {
         res.json({ error: e.message });
     }
 });
-router.get('/offers', cacheResponse(300, 'offers'), listPublicOffersController);
+router.get('/offers', optionalAuthMiddleware, listPublicOffersController);
 // Public: categories list (zone-aware; returns zone categories + global)
 router.get('/categories/public', cacheResponse(600, 'categories'), listCategoriesController);
 

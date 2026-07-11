@@ -563,6 +563,12 @@ export const adminAPI = {
       { isListed: Boolean(isListed) },
       { contextModule: "admin" },
     ),
+  toggleShowWithoutMenu: (id, showWithoutMenu) =>
+    apiClient.patch(
+      `/food/admin/restaurants/${String(id)}/show-without-menu`,
+      { showWithoutMenu: Boolean(showWithoutMenu) },
+      { contextModule: "admin" },
+    ),
   /** Update restaurant location (admin). Body includes lat/lng + address fields. */
   updateRestaurantLocation: (id, body) =>
     apiClient.patch(
@@ -1239,39 +1245,52 @@ export const restaurantAPI = {
       contextModule: "restaurant",
     }),
   /** Public Offers for users (global/selected restaurant) */
-  getPublicOffers: () => apiClient.get("/food/restaurant/offers"),
+  getPublicOffers: () =>
+    apiClient.get("/food/restaurant/offers", {
+      contextModule: "user",
+    }),
   /** Backward-compat helper used by Cart: returns coupons array for an item by adapting public offers */
-  getCouponsByItemIdPublic: (restaurantId, _itemId) =>
-    apiClient.get("/food/restaurant/offers", { params: { restaurantId } }).then((res) => {
+  getCouponsByItemIdPublic: (restaurantId, _itemId, subtotal) =>
+    apiClient.get("/food/restaurant/offers", {
+      contextModule: "user",
+      params: {
+        restaurantId,
+        ...(subtotal != null && subtotal !== "" ? { subtotal: Number(subtotal) || 0 } : {}),
+      },
+    }).then((res) => {
       const list = res?.data?.data?.allOffers || res?.data?.allOffers || [];
-      const now = Date.now();
-      const coupons = list
-        .filter((o) => {
-          // Guard: respect selected restaurant scope
-          if (String(o?.restaurantScope) === "selected") {
-            if (!restaurantId) return false;
-            return String(o.restaurantId || "") === String(restaurantId || "");
-          }
-          return true;
-        })
-        .map((o) => {
-          const isPct = o.discountType === "percentage";
-          return {
-            couponCode: o.couponCode,
-            discountType: o.discountType,
-            discountPercentage: isPct ? Number(o.discountValue) || 0 : 0,
-            originalPrice: isPct ? 0 : Number(o.discountValue) || 0,
-            discountedPrice: 0,
-            minOrderValue: Number(o.minOrderValue || 0),
-            minOrder: Number(o.minOrderValue || 0),
-            maxDiscount: o.maxDiscount != null ? Number(o.maxDiscount) : null,
-            customerGroup: o.customerScope || "all",
-            isGlobalCoupon: true,
-            endDate: o.endDate || null,
-            showInCart: o.showInCart !== false,
-            _ts: now,
-          };
-        });
+      const coupons = list.map((o) => {
+        const isPct = o.discountType === "percentage";
+        const discountValue = Number(o.discountValue) || 0;
+        const estimatedDiscount = Number(o.estimatedDiscount) || 0;
+        const displayDiscount = Number(o.displayDiscount) || (isPct ? estimatedDiscount : discountValue);
+        const customerScope = o.customerScope || "all";
+        const isFirstTime =
+          customerScope === "first-time" || o.isFirstOrderOnly === true;
+        return {
+          couponCode: o.couponCode,
+          discountType: o.discountType,
+          discountValue,
+          discountPercentage: isPct ? discountValue : 0,
+          displayDiscount,
+          originalPrice: Number(subtotal) || 0,
+          discountedPrice: Math.max(0, (Number(subtotal) || 0) - estimatedDiscount),
+          minOrderValue: Number(o.minOrderValue || 0),
+          minOrder: Number(o.minOrderValue || 0),
+          maxDiscount: o.maxDiscount != null ? Number(o.maxDiscount) : null,
+          customerGroup: isFirstTime ? "first-time" : "all",
+          customerScope: isFirstTime ? "first-time" : "all",
+          isFirstOrderOnly: Boolean(o.isFirstOrderOnly),
+          isGlobalCoupon: o.restaurantScope !== "selected",
+          restaurantScope: o.restaurantScope || "all",
+          endDate: o.endDate || null,
+          showInCart: o.showInCart !== false,
+          estimatedDiscount,
+          couponSource: o.couponSource || "admin",
+          meetsMinOrder: o.meetsMinOrder !== false,
+          amountToUnlock: Number(o.amountToUnlock || 0),
+        };
+      });
       return { data: { success: true, data: { coupons } } };
     }),
   /** Categories (restaurant dashboard) */
