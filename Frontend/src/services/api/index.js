@@ -563,6 +563,12 @@ export const adminAPI = {
       { isListed: Boolean(isListed) },
       { contextModule: "admin" },
     ),
+  toggleShowWithoutMenu: (id, showWithoutMenu) =>
+    apiClient.patch(
+      `/food/admin/restaurants/${String(id)}/show-without-menu`,
+      { showWithoutMenu: Boolean(showWithoutMenu) },
+      { contextModule: "admin" },
+    ),
   /** Update restaurant location (admin). Body includes lat/lng + address fields. */
   updateRestaurantLocation: (id, body) =>
     apiClient.patch(

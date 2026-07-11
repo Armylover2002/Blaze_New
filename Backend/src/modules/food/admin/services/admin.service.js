@@ -415,7 +415,7 @@ export async function getRestaurants(query) {
             .sort({ createdAt: -1 })
             .skip(skip)
             .limit(limit)
-            .select('restaurantId restaurantName location area city profileImage coverImages menuImages status ownerName ownerPhone zoneId commissionPercentage isListed productCount')
+            .select('restaurantId restaurantName location area city profileImage coverImages menuImages status ownerName ownerPhone zoneId commissionPercentage isListed productCount pureVegRestaurant createdAt updatedAt showWithoutMenu')
             .populate('zoneId', 'name zoneName')
             .lean(),
         FoodRestaurant.countDocuments(filter)
@@ -2927,13 +2927,39 @@ export async function toggleRestaurantListing(id, isListed) {
         throw new ValidationError('Restaurant not found');
     }
 
-    if (isListed) {
+    if (isListed && !restaurant.showWithoutMenu) {
         const itemCount = await FoodItem.countDocuments({ restaurantId: id });
         if (itemCount <= 0) {
-            throw new ValidationError('Cannot make visible. Restaurant has no menu items.');
+            throw new ValidationError('Cannot make visible. Restaurant has no menu items. Enable "Show w/o menu" first.');
         }
     }
+
     restaurant.isListed = Boolean(isListed);
+    await restaurant.save();
+    return restaurant.toObject();
+}
+
+export async function toggleShowWithoutMenu(id, showWithoutMenu) {
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+        throw new ValidationError('Invalid restaurant ID');
+    }
+    const { FoodRestaurant } = await import('../../restaurant/models/restaurant.model.js');
+    const restaurant = await FoodRestaurant.findById(id);
+    if (!restaurant) {
+        throw new ValidationError('Restaurant not found');
+    }
+
+    restaurant.showWithoutMenu = Boolean(showWithoutMenu);
+    
+    // Auto turn off visibility if turning off showWithoutMenu and productCount is 0
+    if (!restaurant.showWithoutMenu) {
+        const { FoodItem } = await import('../../admin/models/food.model.js');
+        const itemCount = await FoodItem.countDocuments({ restaurantId: id });
+        if (itemCount <= 0) {
+            restaurant.isListed = false;
+        }
+    }
+    
     await restaurant.save();
     return restaurant.toObject();
 }
