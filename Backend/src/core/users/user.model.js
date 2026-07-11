@@ -148,33 +148,12 @@ const userSchema = new mongoose.Schema(
         },
         role: {
             type: String,
-            default: 'USER'
+            // default: 'USER'
         },
         walletBalance: {
             type: Number,
             default: 0,
             min: 0
-        },
-        address: {
-            street: { type: String, trim: true },
-            city: { type: String, trim: true },
-            state: { type: String, trim: true },
-            zipCode: { type: String, trim: true },
-            country: { type: String, default: 'India', trim: true },
-            coordinates: {
-                lat: { type: Number },
-                lng: { type: Number }
-            }
-        },
-        aadhaarNumber: { type: String, trim: true },
-        aadhaarFront: { type: String },
-        aadhaarBack: { type: String },
-        panNumber: { type: String, trim: true },
-        panCardImage: { type: String },
-        termsAccepted: { type: Boolean, default: false },
-        registrationStep: {
-            type: Number,
-            default: 1
         },
         isContactSynced: {
             type: Boolean,
@@ -184,18 +163,6 @@ const userSchema = new mongoose.Schema(
             type: String,
             enum: ['PENDING', 'ALLOWED', 'DENIED', 'SKIPPED'],
             default: 'PENDING'
-        },
-        otp: {
-            type: String,
-            select: false
-        },
-        otpExpires: {
-            type: Date,
-            select: false
-        },
-        profileImagePublicId: {
-            type: String,
-            default: null
         },
         isBlocked: {
             type: Boolean,
@@ -213,28 +180,6 @@ const userSchema = new mongoose.Schema(
         addresses: {
             type: [userAddressSchema],
             default: []
-        },
-
-        deletionRequest: {
-            status: {
-                type: String,
-                enum: ['none', 'pending', 'approved', 'rejected'],
-                default: 'none',
-                index: true
-            },
-            reason: {
-                type: String,
-                default: '',
-                trim: true
-            },
-            requestedAt: {
-                type: Date,
-                default: null
-            },
-            reviewedAt: {
-                type: Date,
-                default: null
-            }
         }
     },
     {

@@ -1642,7 +1642,6 @@ export async function updateCustomerStatus(id, isActive) {
         updateFields.isDeleted = false;
         updateFields.isBlocked = false;
         updateFields.accountStatus = 'active';
-        updateFields['deletionRequest.status'] = 'none';
     }
 
     const updatedDoc = await FoodUser.findByIdAndUpdate(
