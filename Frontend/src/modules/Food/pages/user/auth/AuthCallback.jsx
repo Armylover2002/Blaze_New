@@ -5,6 +5,7 @@ import AnimatedPage from "@food/components/user/AnimatedPage"
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@food/components/ui/card"
 import { Button } from "@food/components/ui/button"
 import { setAuthData } from "@food/utils/auth"
+import { markLocationPromptAfterLogin } from "@food/utils/locationStorage"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -50,6 +51,7 @@ export default function AuthCallback() {
 
             // Save auth data
             setAuthData("user", token, user)
+            markLocationPromptAfterLogin()
 
             // Notify app of auth change
             window.dispatchEvent(new Event("userAuthChanged"))

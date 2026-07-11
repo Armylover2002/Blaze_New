@@ -57,14 +57,28 @@ const str = (v) => String(v ?? '').trim();
  *  - latitude/longitude OR location.coordinates OR location.{lat,lng} -> location
  */
 export const normalizeAddressInput = (dto = {}) => {
+    let address = str(dto.address || dto.formattedAddress);
+    const street = str(dto.street);
+    const additionalDetails = str(dto.additionalDetails);
+    const city = str(dto.city);
+    const state = str(dto.state);
+    const zipCode = str(dto.zipCode || dto.pincode);
+
+    // Backward-compatible fallback when legacy clients omit the formatted string.
+    if (!address) {
+        address = [additionalDetails, street, city, state, zipCode]
+            .filter(Boolean)
+            .join(', ');
+    }
+
     const normalized = {
         label: normalizeLabel(dto.label),
-        address: str(dto.address),
-        street: str(dto.street),
-        additionalDetails: str(dto.additionalDetails),
-        city: str(dto.city),
-        state: str(dto.state),
-        zipCode: str(dto.zipCode || dto.pincode),
+        address,
+        street,
+        additionalDetails,
+        city,
+        state,
+        zipCode,
         phone: str(dto.phone)
     };
     const location = resolveGeoPoint(dto);

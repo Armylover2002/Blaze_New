@@ -1,9 +1,19 @@
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, createContext, useContext } from "react"
 import { locationAPI, userAPI } from "@food/api"
+import {
+  hasValidCoordinates,
+  USER_LOCATION_STORAGE_KEY,
+} from "@food/utils/locationStorage"
 
-const debugLog = (...args) => {}
-const debugWarn = (...args) => {}
-const debugError = (...args) => {}
+const debugLog = (...args) => {
+  if (import.meta.env.DEV) console.log("[useLocation]", ...args)
+}
+const debugWarn = (...args) => {
+  if (import.meta.env.DEV) console.warn("[useLocation]", ...args)
+}
+const debugError = (...args) => {
+  if (import.meta.env.DEV) console.error("[useLocation]", ...args)
+}
 
 // BigDataCloud reverse-geocode is expensive/noisy if many components mount `useLocation()`.
 // This module-level guard dedupes concurrent calls + rate-limits starts across the whole app.
@@ -332,10 +342,38 @@ const reverseGeocodeDirect = async (latitude, longitude, forceFresh = false) => 
 }
 
 export function useLocation() {
+  const shared = useContext(LocationContext)
+  if (shared) return shared
+  return useLocationInternal()
+}
+
+export function LocationProvider({ children }) {
+  const value = useLocationInternal()
+  return (
+    <LocationContext.Provider value={value}>{children}</LocationContext.Provider>
+  )
+}
+
+const LocationContext = createContext(null)
+
+function useLocationInternal() {
   const [location, setLocation] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  const [permissionGranted, setPermissionGranted] = useState(false)
+  const [hasCoordinates, setHasCoordinates] = useState(false)
+  const [geolocationPermission, setGeolocationPermission] = useState("unknown")
+
+  const syncCoordinatesFromLocation = (nextLocation) => {
+    setHasCoordinates(hasValidCoordinates(nextLocation))
+  }
+
+  const markBrowserGeolocationGranted = () => {
+    setGeolocationPermission("granted")
+  }
+
+  const markBrowserGeolocationDenied = () => {
+    setGeolocationPermission("denied")
+  }
 
   const watchIdRef = useRef(null)
   const updateTimerRef = useRef(null)
@@ -412,15 +450,20 @@ export function useLocation() {
         return
       }
 
+      // Persist the full geocoder string in `address` (display may use a shorter label locally).
+      const completeAddress = String(
+        locationData.formattedAddress || locationData.address || "",
+      ).trim()
+
       // Prepare complete location data for database storage
       const locationPayload = {
         latitude: locationData.latitude,
         longitude: locationData.longitude,
-        address: locationData.address || "",
+        address: completeAddress,
         city: locationData.city || "",
         state: locationData.state || "",
         area: locationData.area || "",
-        formattedAddress: locationData.formattedAddress || locationData.address || "",
+        formattedAddress: completeAddress,
       }
 
       // Add optional fields if available
@@ -1121,7 +1164,8 @@ export function useLocation() {
                   formattedAddress: finalLoc.formattedAddress
                 }
                 setLocation(coordOnlyLoc)
-                setPermissionGranted(true)
+                markBrowserGeolocationGranted()
+                syncCoordinatesFromLocation(coordOnlyLoc)
                 if (showLoading) setLoading(false)
                 setError(null)
                 resolve(coordOnlyLoc)
@@ -1131,7 +1175,8 @@ export function useLocation() {
               debugLog("?? Saving location:", finalLoc)
               localStorage.setItem("userLocation", JSON.stringify(finalLoc))
               setLocation(finalLoc)
-              setPermissionGranted(true)
+              markBrowserGeolocationGranted()
+              syncCoordinatesFromLocation(finalLoc)
               if (showLoading) setLoading(false)
               setError(null)
 
@@ -1165,7 +1210,8 @@ export function useLocation() {
                   debugLog("? Last resort geocoding succeeded:", lastResortLoc)
                   localStorage.setItem("userLocation", JSON.stringify(lastResortLoc))
                   setLocation(lastResortLoc)
-                  setPermissionGranted(true)
+                  markBrowserGeolocationGranted()
+                  syncCoordinatesFromLocation(lastResortLoc)
                   if (showLoading) setLoading(false)
                   setError(null)
                   if (updateDB) await updateLocationInDB(lastResortLoc).catch(() => { })
@@ -1192,7 +1238,8 @@ export function useLocation() {
               // Only set in state for display
               debugWarn("?? Skipping save - all geocoding failed, using placeholder")
               setLocation(fallbackLoc)
-              setPermissionGranted(true)
+              markBrowserGeolocationGranted()
+              syncCoordinatesFromLocation(fallbackLoc)
               if (showLoading) setLoading(false)
               // Don't try to update DB with placeholder
               resolve(fallbackLoc)
@@ -1245,7 +1292,12 @@ export function useLocation() {
                 if (err.code !== 3) {
                   setError(err.message)
                 }
-                setPermissionGranted(true) // Still grant permission if we have location
+                syncCoordinatesFromLocation(fallback)
+                if (err.code === 1) {
+                  markBrowserGeolocationDenied()
+                } else {
+                  markBrowserGeolocationGranted()
+                }
                 if (showLoading) setLoading(false)
                 resolve(fallback)
               } else {
@@ -1258,7 +1310,9 @@ export function useLocation() {
                 }
                 setLocation(defaultLocation)
                 setError(err.code === 3 ? "Location request timed out. Please try again." : err.message)
-                setPermissionGranted(false)
+                if (err.code === 1) {
+                  markBrowserGeolocationDenied()
+                }
                 if (showLoading) setLoading(false)
                 resolve(defaultLocation) // Always resolve with something
               }
@@ -1266,7 +1320,9 @@ export function useLocation() {
               debugWarn("?? Fallback retrieval failed:", fallbackErr)
               setLocation(null)
               setError(err.code === 3 ? "Location request timed out. Please try again." : err.message)
-              setPermissionGranted(false)
+              if (err.code === 1) {
+                markBrowserGeolocationDenied()
+              }
               if (showLoading) setLoading(false)
               resolve(null)
             }
@@ -1474,7 +1530,8 @@ export function useLocation() {
               debugLog("?? Updating live location:", loc)
               localStorage.setItem("userLocation", JSON.stringify(persistedLocation))
               setLocation(persistedLocation)
-              setPermissionGranted(true)
+              markBrowserGeolocationGranted()
+              syncCoordinatesFromLocation(persistedLocation)
               setError(null)
             } else {
               // Coordinates haven't changed significantly, skip state update to prevent re-renders
@@ -1507,7 +1564,8 @@ export function useLocation() {
             // Only set in state for display
             debugWarn("?? Skipping localStorage save - fallback location contains placeholder values")
             setLocation(fallbackLoc)
-            setPermissionGranted(true)
+            markBrowserGeolocationGranted()
+            syncCoordinatesFromLocation(fallbackLoc)
           }
         },
         (err) => {
@@ -1547,7 +1605,9 @@ export function useLocation() {
           // Only set error for non-timeout errors that are critical
           if (err.code !== 3) {
             setError(err.message)
-            setPermissionGranted(false)
+            if (err.code === 1) {
+              markBrowserGeolocationDenied()
+            }
           }
 
           // Don't clear the watch - let it keep trying in background
@@ -1591,10 +1651,7 @@ export function useLocation() {
         if (!nextLocation || typeof nextLocation !== "object") return
 
         setLocation(nextLocation)
-        setPermissionGranted(
-          Number.isFinite(Number(nextLocation.latitude)) &&
-            Number.isFinite(Number(nextLocation.longitude))
-        )
+        syncCoordinatesFromLocation(nextLocation)
         setLoading(false)
         setError(null)
       } catch (err) {
@@ -1611,7 +1668,7 @@ export function useLocation() {
   /* ===================== INIT ===================== */
   useEffect(() => {
     // Load stored location first for IMMEDIATE display (no loading state)
-    const stored = localStorage.getItem("userLocation")
+    const stored = localStorage.getItem(USER_LOCATION_STORAGE_KEY)
     let shouldForceRefresh = false
     let hasInitialLocation = false
 
@@ -1619,26 +1676,25 @@ export function useLocation() {
       try {
         const parsedLocation = JSON.parse(stored)
 
-        // Show cached location immediately.
-        // Requirement: only geocode again on explicit manual change.
         const lat = Number(parsedLocation?.latitude)
         const lng = Number(parsedLocation?.longitude)
         const hasLatLng = Number.isFinite(lat) && Number.isFinite(lng)
 
         if (parsedLocation && hasLatLng) {
           setLocation(parsedLocation)
-          setPermissionGranted(true)
-          setLoading(false) // Set loading to false immediately
+          syncCoordinatesFromLocation(parsedLocation)
+          setLoading(false)
           hasInitialLocation = true
           shouldForceRefresh = false
           debugLog("?? Loaded stored location instantly (no auto-refresh):", parsedLocation)
         } else {
-          // If we don't have usable coordinates, we must fetch once on first open.
-          debugLog("?? Stored location missing coordinates; will fetch once")
+          localStorage.removeItem(USER_LOCATION_STORAGE_KEY)
+          debugLog("?? Stored location missing coordinates; cleared stale cache")
           shouldForceRefresh = true
         }
       } catch (err) {
         debugError("Failed to parse stored location:", err)
+        localStorage.removeItem(USER_LOCATION_STORAGE_KEY)
         shouldForceRefresh = true
       }
     }
@@ -1649,7 +1705,7 @@ export function useLocation() {
         .then((dbLoc) => {
           if (dbLoc && Number.isFinite(Number(dbLoc.latitude)) && Number.isFinite(Number(dbLoc.longitude))) {
             setLocation(dbLoc)
-            setPermissionGranted(true)
+            syncCoordinatesFromLocation(dbLoc)
             setLoading(false)
             hasInitialLocation = true
             debugLog("?? Loaded location from DB:", dbLoc)
@@ -1701,31 +1757,31 @@ export function useLocation() {
     // This prevents "Requests geolocation permission on page load" warning
     const checkPermissionAndStart = async () => {
       try {
-        let permissionGranted = false;
+        let browserGranted = false;
 
         if (navigator.permissions && navigator.permissions.query) {
           try {
             const result = await navigator.permissions.query({ name: 'geolocation' });
             permStatusObj = result;
+            setGeolocationPermission(result.state);
             permListener = () => {
+              setGeolocationPermission(result.state);
               if (result.state === 'granted') {
                 debugLog("?? Geolocation permission changed to granted! Fetching fresh location...");
                 getLocation(true, true).then((freshLoc) => {
                   if (freshLoc) {
                     setLocation(freshLoc);
-                    setPermissionGranted(true);
+                    syncCoordinatesFromLocation(freshLoc);
                     window.dispatchEvent(new CustomEvent("userLocationUpdated", { detail: { location: freshLoc } }));
                   }
                 }).catch(() => {});
-              } else {
-                setPermissionGranted(false);
               }
             };
             result.addEventListener('change', permListener);
             result.onchange = permListener;
 
             if (result.state === 'granted') {
-              permissionGranted = true;
+              browserGranted = true;
             } else {
               debugLog(`?? Geolocation permission is '${result.state}' - Waiting for user action (avoiding prompt on load)`);
             }
@@ -1734,14 +1790,11 @@ export function useLocation() {
           }
         } else {
           // Fallback for browsers without permissions API - assume not granted to be safe
+          setGeolocationPermission("prompt");
           debugLog("?? Permissions API not available - Skipping auto-start");
         }
 
-        // If permission NOT granted, and we don't have a specific user request (this is page load),
-        // we should SKIP automatic fetching/watching to allow the user to choose when to enable it.
-        // UNLESS we already have a valid initial location from localStorage/DB, in which case we might want to refresh?
-        // Actually, even then, we shouldn't prompt.
-        if (!permissionGranted) {
+        if (!browserGranted) {
           // If we have an initial location, we are fine (it's displayed).
           // If we don't, we show "Select Location".
           // In either case, we avoid the PROMPT.
@@ -1773,7 +1826,8 @@ export function useLocation() {
                 })
                 // CRITICAL: Update state with fresh location so PageNavbar displays it
                 setLocation(location)
-                setPermissionGranted(true)
+                syncCoordinatesFromLocation(location)
+                markBrowserGeolocationGranted()
                 if (AUTO_START_LIVE_WATCH) startWatchingLocation()
               } else {
                 // Placeholder result means reverse-geocode failed or was unavailable.
@@ -1886,7 +1940,9 @@ export function useLocation() {
     location,
     loading,
     error,
-    permissionGranted,
+    hasCoordinates,
+    geolocationPermission,
+    permissionGranted: geolocationPermission === "granted",
     requestLocation,
     startWatchingLocation,
     stopWatchingLocation,

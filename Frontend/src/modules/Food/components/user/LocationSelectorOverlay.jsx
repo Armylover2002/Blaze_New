@@ -1,3 +1,8 @@
+/**
+ * @deprecated Unused in the food user app. Location selection is handled by
+ * `AddressSelectorPage` via `UserLayout.openLocationSelector()`.
+ * Kept for reference only — do not mount without coordinating with LocationPrompt.
+ */
 import { useMemo, useState, useEffect, useRef, useCallback } from "react"
 import { ChevronLeft, ChevronRight, Plus, MapPin, MoreHorizontal, Navigation, Home, Building2, Briefcase, Phone, X, Crosshair } from "lucide-react"
 import { Button } from "@food/components/ui/button"
@@ -894,7 +899,7 @@ export default function LocationSelectorOverlay({ isOpen, onClose }) {
           await userAPI.updateLocation({
             latitude: locationData.latitude,
             longitude: locationData.longitude,
-            address: locationData.address || locationData.formattedAddress || "",
+            address: locationData.formattedAddress || locationData.address || "",
             city: locationData.city || "",
             state: locationData.state || "",
             area: locationData.area || "",
@@ -968,8 +973,8 @@ export default function LocationSelectorOverlay({ isOpen, onClose }) {
       syncSelectedLocation({
         ...locationData,
         address:
-          locationData?.address ||
           locationData?.formattedAddress ||
+          locationData?.address ||
           [locationData?.area, locationData?.city].filter(Boolean).join(", "),
         formattedAddress:
           locationData?.formattedAddress ||
@@ -1996,8 +2001,22 @@ export default function LocationSelectorOverlay({ isOpen, onClose }) {
         return
       }
 
+      const completeFormattedAddress = String(
+        currentAddress ||
+          addressFormData.additionalDetails ||
+          [
+            trimmedStreet,
+            trimmedCity,
+            trimmedState,
+            (addressFormData.zipCode || "").trim(),
+          ]
+            .filter(Boolean)
+            .join(", "),
+      ).trim()
+
       addressToSave = {
         label: normalizedLabel,
+        address: completeFormattedAddress,
         street: trimmedStreet,
         additionalDetails: (addressFormData.additionalDetails || "").trim(),
         city: trimmedCity,

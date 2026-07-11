@@ -5,6 +5,7 @@ import { Phone, Lock, ArrowRight, ArrowLeft, ShieldCheck, Loader2, UserRound, He
 import { toast } from "sonner"
 import { authAPI, userAPI } from "@food/api"
 import { isModuleAuthenticated, setAuthData, clearModuleAuth } from "@food/utils/auth"
+import { markLocationPromptAfterLogin } from "@food/utils/locationStorage"
 import { loadBusinessSettings, getCachedSettings, getAppLogo, getCompanyName, setAppType } from "@common/utils/businessSettings"
 
 export default function UnifiedOTPFastLogin() {
@@ -233,6 +234,7 @@ export default function UnifiedOTPFastLogin() {
       }
 
       setAuthData("user", accessToken, user, refreshToken)
+      markLocationPromptAfterLogin()
       window.dispatchEvent(new Event("userAuthChanged"))
       toast.success("Login successful!")
       navigate(redirectTo, { replace: true })
@@ -295,6 +297,7 @@ export default function UnifiedOTPFastLogin() {
       }
 
       setAuthData("user", storedToken, updatedUser, storedRefreshToken)
+      markLocationPromptAfterLogin()
       window.dispatchEvent(new Event("userAuthChanged"))
       clearNameFlow()
       toast.success("Profile saved successfully!")

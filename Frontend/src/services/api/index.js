@@ -2544,14 +2544,151 @@ export const userAPI = {
       contextModule: "user",
     }),
   /**
-   * @deprecated No backend persistence is currently wired for this call.
-   * Legacy compatibility only: resolves success so older flows do not break.
-   * Source of truth for user checkout location remains saved address + localStorage.
+   * Resolve the user's default saved address as a location payload.
+   * Used by the food user location hook when localStorage is empty.
    */
-  updateLocation: (_payload) =>
-    Promise.resolve({
-      data: { success: true, message: "Location saved (client-only)", data: null, persisted: false },
-    }),
+  getLocation: async () => {
+    const res = await userAPI.getAddresses()
+    const addresses =
+      res?.data?.data?.addresses || res?.data?.addresses || []
+    const defaultAddress =
+      addresses.find((address) => address?.isDefault === true) || addresses[0]
+
+    if (!defaultAddress) {
+      return { data: { success: true, data: { location: null } } }
+    }
+
+    const coords = Array.isArray(defaultAddress?.location?.coordinates)
+      ? defaultAddress.location.coordinates
+      : null
+    const latitude = Number(
+      coords?.[1] ?? defaultAddress.latitude ?? defaultAddress.lat ?? null,
+    )
+    const longitude = Number(
+      coords?.[0] ?? defaultAddress.longitude ?? defaultAddress.lng ?? null,
+    )
+
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+      return { data: { success: true, data: { location: null } } }
+    }
+
+    const formattedAddress =
+      defaultAddress.address ||
+      defaultAddress.formattedAddress ||
+      [
+        defaultAddress.street,
+        defaultAddress.additionalDetails,
+        defaultAddress.city,
+        defaultAddress.state,
+        defaultAddress.zipCode || defaultAddress.postalCode,
+      ]
+        .filter(Boolean)
+        .join(", ")
+
+    return {
+      data: {
+        success: true,
+        data: {
+          location: {
+            latitude,
+            longitude,
+            city: defaultAddress.city || "",
+            state: defaultAddress.state || "",
+            country: defaultAddress.country || "",
+            area:
+              defaultAddress.additionalDetails ||
+              defaultAddress.area ||
+              "",
+            address: formattedAddress || "Select location",
+            formattedAddress: formattedAddress || "Select location",
+          },
+        },
+      },
+    }
+  },
+  /**
+   * Persist live/reverse-geocoded location onto the user's default saved address.
+   * Keeps backward compatibility: resolves without throwing when no address exists.
+   */
+  updateLocation: async (payload = {}) => {
+    const latitude = Number(payload?.latitude);
+    const longitude = Number(payload?.longitude);
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+      return {
+        data: {
+          success: false,
+          message: "Invalid coordinates",
+          data: null,
+          persisted: false,
+        },
+      };
+    }
+
+    const completeAddress = String(
+      payload?.formattedAddress || payload?.address || "",
+    ).trim();
+
+    if (
+      !completeAddress ||
+      completeAddress === "Select location" ||
+      completeAddress === "Current Location" ||
+      /^-?\d+\.\d+,\s*-?\d+\.\d+$/.test(completeAddress)
+    ) {
+      return {
+        data: {
+          success: true,
+          message: "Location skipped (placeholder)",
+          data: null,
+          persisted: false,
+        },
+      };
+    }
+
+    const res = await userAPI.getAddresses();
+    const addresses =
+      res?.data?.data?.addresses || res?.data?.addresses || [];
+    const target =
+      addresses.find((entry) => entry?.isDefault === true) || addresses[0];
+    const targetId = target?._id || target?.id;
+
+    if (!targetId) {
+      return {
+        data: {
+          success: true,
+          message: "No saved address to update",
+          data: null,
+          persisted: false,
+        },
+      };
+    }
+
+    const body = {
+      latitude,
+      longitude,
+      address: completeAddress,
+      city: String(payload?.city || target?.city || "").trim(),
+      state: String(payload?.state || target?.state || "").trim(),
+      street:
+        String(payload?.street || target?.street || "").trim() ||
+        completeAddress.split(",")[0]?.trim() ||
+        "Current Location",
+      additionalDetails: String(
+        payload?.area || payload?.additionalDetails || target?.additionalDetails || "",
+      ).trim(),
+      zipCode: String(
+        payload?.postalCode || payload?.zipCode || target?.zipCode || "",
+      ).trim(),
+    };
+
+    const updated = await userAPI.updateAddress(String(targetId), body);
+    return {
+      ...(updated || {}),
+      data: {
+        ...(updated?.data || {}),
+        persisted: true,
+      },
+    };
+  },
   saveFcmToken: (token, options = {}) => {
     if (!token) return Promise.reject(new Error("FCM token is required"));
     const platform = options?.platform === "mobile" ? "mobile" : "web";
