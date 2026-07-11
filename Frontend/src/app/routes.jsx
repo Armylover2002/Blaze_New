@@ -7,7 +7,8 @@ import {
 } from '@food/components/ui/loading-skeletons'
 
 import ProtectedRoute from '@core/guards/ProtectedRoute'
-import ModuleEnabledRoute from '@core/guards/ModuleEnabledRoute'
+import ModuleEnabledRoute, { getFirstEnabledModulePath } from '@core/guards/ModuleEnabledRoute'
+import { useSettings } from '@core/context/SettingsContext'
 import FoodProtectedRoute from '../modules/Food/components/ProtectedRoute'
 import RoleGuard from '@core/guards/RoleGuard'
 import { AuthPageGuard } from '@core/guards/RouteGuard'
@@ -64,6 +65,22 @@ const RouteAwarePageLoader = () => {
  * path nikalne ke baad FoodApp render karte hain. FoodApp internally BrowserRouter
  * nahi use karta (sirf Routes use karta hai), isliye ye directly kaam karta hai.
  */
+const DefaultHomeRedirect = () => {
+  const location = useLocation()
+  const { settings, loading } = useSettings()
+
+  if (loading) {
+    return <RouteAwarePageLoader />
+  }
+
+  return (
+    <Navigate
+      to={`${getFirstEnabledModulePath(settings)}${location.search}`}
+      replace
+    />
+  )
+}
+
 const FoodAppWrapper = () => {
   return (
     <Suspense fallback={<PageLoader />}>
@@ -156,8 +173,8 @@ const AppRoutes = () => {
 
   return (
     <Routes>
-        {/* Root now lands on the food user home page */}
-        <Route path="/" element={<Navigate to={`/food/user${location.search}`} replace />} />
+        {/* Root lands on the first enabled customer module */}
+        <Route path="/" element={<DefaultHomeRedirect />} />
 
         {/* Auth Module */}
         <Route
@@ -168,11 +185,18 @@ const AppRoutes = () => {
             </AuthPageGuard>
           }
         />
-        <Route path="/portal" element={<Navigate to={`/food/user${location.search}`} replace />} />
+        <Route path="/portal" element={<DefaultHomeRedirect />} />
         <Route path="/login" element={<Navigate to={`/user/auth/login${location.search}`} replace />} />
 
         {/* Food Module */}
-        <Route path="/food/*" element={<FoodAppWrapper />} />
+        <Route
+          path="/food/*"
+          element={
+            <ModuleEnabledRoute moduleKey="food">
+              <FoodAppWrapper />
+            </ModuleEnabledRoute>
+          }
+        />
 
         {/* Public Customer Storefront Layout (Some routes inside are protected) */}
         <Route
@@ -181,7 +205,14 @@ const AppRoutes = () => {
           }
         >
           {/* Shared home entry so /food/user <-> /quick doesn't remount through different app trees */}
-          <Route path="/food/user" element={<SharedFoodHomeRoute />} />
+          <Route
+            path="/food/user"
+            element={
+              <ModuleEnabledRoute moduleKey="food">
+                <SharedFoodHomeRoute />
+              </ModuleEnabledRoute>
+            }
+          />
 
           {/* Quick storefront landing keeps the shared food layout */}
           <Route path="/quick" element={<SharedFoodHomeRoute />} />

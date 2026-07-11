@@ -4,11 +4,19 @@ import { useSettings } from '@core/context/SettingsContext';
 
 const VALID_MODULES = new Set(['food', 'quickCommerce', 'porter']);
 
-export default function ModuleEnabledRoute({ moduleKey, fallbackTo = '/food/user', children }) {
+export function getFirstEnabledModulePath(settings) {
+  const modules = settings?.modules || {};
+  if (modules.food !== false) return '/food/user';
+  if (modules.quickCommerce !== false) return '/quick';
+  if (modules.porter !== false) return '/porter';
+  return '/user/auth/login';
+}
+
+export default function ModuleEnabledRoute({ moduleKey, fallbackTo, children }) {
   const { settings, loading } = useSettings();
 
   if (!VALID_MODULES.has(moduleKey)) {
-    return <Navigate to={fallbackTo} replace />;
+    return <Navigate to={fallbackTo || getFirstEnabledModulePath(settings)} replace />;
   }
 
   if (loading) {
@@ -16,7 +24,7 @@ export default function ModuleEnabledRoute({ moduleKey, fallbackTo = '/food/user
   }
 
   if (settings?.modules?.[moduleKey] === false) {
-    return <Navigate to={fallbackTo} replace />;
+    return <Navigate to={fallbackTo || getFirstEnabledModulePath(settings)} replace />;
   }
 
   return children;

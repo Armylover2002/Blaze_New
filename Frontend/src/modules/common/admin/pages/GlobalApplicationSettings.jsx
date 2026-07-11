@@ -158,25 +158,8 @@ const GlobalApplicationSettings = () => {
           onlineEnabled: settings.onlineEnabled !== false,
         });
 
-        if (settings.adminLogo?.url) setAdminLogoPreview(settings.adminLogo.url);
-        if (settings.adminFavicon?.url) setAdminFaviconPreview(settings.adminFavicon.url);
-
-        if (settings.userLogo?.url) setUserLogoPreview(settings.userLogo.url);
-        if (settings.userFavicon?.url) setUserFaviconPreview(settings.userFavicon.url);
-
-        if (settings.deliveryLogo?.url) setDeliveryLogoPreview(settings.deliveryLogo.url);
-        if (settings.deliveryFavicon?.url) setDeliveryFaviconPreview(settings.deliveryFavicon.url);
-
-        if (settings.restaurantLogo?.url) setRestaurantLogoPreview(settings.restaurantLogo.url);
-        if (settings.restaurantFavicon?.url) setRestaurantFaviconPreview(settings.restaurantFavicon.url);
-
-        if (settings.sellerLogo?.url) setSellerLogoPreview(settings.sellerLogo.url);
-        if (settings.sellerFavicon?.url) setSellerFaviconPreview(settings.sellerFavicon.url);
-
-        if (settings.sellerLoginBanner?.url) setSellerLoginBannerPreview(settings.sellerLoginBanner.url);
+        syncMediaStateFromSettings(settings);
         setSellerLoginBannerActive(settings.sellerLoginBanner?.active !== false);
-
-        if (settings.restaurantLoginBanner?.url) setRestaurantLoginBannerPreview(settings.restaurantLoginBanner.url);
         setRestaurantLoginBannerActive(settings.restaurantLoginBanner?.active !== false);
       }
     } catch (err) {
@@ -198,6 +181,37 @@ const GlobalApplicationSettings = () => {
     }));
   };
 
+  const buildMediaUrlPayload = (preview, file) => (
+    (file || preview) ? undefined : ""
+  );
+
+  const syncMediaStateFromSettings = (settings) => {
+    setAdminLogoPreview(settings.adminLogo?.url || null);
+    setAdminLogoFile(null);
+    setAdminFaviconPreview(settings.adminFavicon?.url || null);
+    setAdminFaviconFile(null);
+    setUserLogoPreview(settings.userLogo?.url || null);
+    setUserLogoFile(null);
+    setUserFaviconPreview(settings.userFavicon?.url || null);
+    setUserFaviconFile(null);
+    setDeliveryLogoPreview(settings.deliveryLogo?.url || null);
+    setDeliveryLogoFile(null);
+    setDeliveryFaviconPreview(settings.deliveryFavicon?.url || null);
+    setDeliveryFaviconFile(null);
+    setRestaurantLogoPreview(settings.restaurantLogo?.url || null);
+    setRestaurantLogoFile(null);
+    setRestaurantFaviconPreview(settings.restaurantFavicon?.url || null);
+    setRestaurantFaviconFile(null);
+    setSellerLogoPreview(settings.sellerLogo?.url || null);
+    setSellerLogoFile(null);
+    setSellerFaviconPreview(settings.sellerFavicon?.url || null);
+    setSellerFaviconFile(null);
+    setSellerLoginBannerPreview(settings.sellerLoginBanner?.url || null);
+    setSellerLoginBannerFile(null);
+    setRestaurantLoginBannerPreview(settings.restaurantLoginBanner?.url || null);
+    setRestaurantLoginBannerFile(null);
+  };
+
   const handleUpdate = async () => {
     try {
       if (!formData.companyName.trim()) {
@@ -213,9 +227,19 @@ const GlobalApplicationSettings = () => {
         address: formData.address,
         codEnabled: formData.codEnabled,
         onlineEnabled: formData.onlineEnabled,
-        sellerLoginBannerUrl: sellerLoginBannerPreview ? undefined : "",
+        adminLogoUrl: buildMediaUrlPayload(adminLogoPreview, adminLogoFile),
+        adminFaviconUrl: buildMediaUrlPayload(adminFaviconPreview, adminFaviconFile),
+        userLogoUrl: buildMediaUrlPayload(userLogoPreview, userLogoFile),
+        userFaviconUrl: buildMediaUrlPayload(userFaviconPreview, userFaviconFile),
+        deliveryLogoUrl: buildMediaUrlPayload(deliveryLogoPreview, deliveryLogoFile),
+        deliveryFaviconUrl: buildMediaUrlPayload(deliveryFaviconPreview, deliveryFaviconFile),
+        restaurantLogoUrl: buildMediaUrlPayload(restaurantLogoPreview, restaurantLogoFile),
+        restaurantFaviconUrl: buildMediaUrlPayload(restaurantFaviconPreview, restaurantFaviconFile),
+        sellerLogoUrl: buildMediaUrlPayload(sellerLogoPreview, sellerLogoFile),
+        sellerFaviconUrl: buildMediaUrlPayload(sellerFaviconPreview, sellerFaviconFile),
+        sellerLoginBannerUrl: buildMediaUrlPayload(sellerLoginBannerPreview, sellerLoginBannerFile),
         sellerLoginBannerActive: sellerLoginBannerActive,
-        restaurantLoginBannerUrl: restaurantLoginBannerPreview ? undefined : "",
+        restaurantLoginBannerUrl: buildMediaUrlPayload(restaurantLoginBannerPreview, restaurantLoginBannerFile),
         restaurantLoginBannerActive: restaurantLoginBannerActive,
       };
 
@@ -244,6 +268,7 @@ const GlobalApplicationSettings = () => {
 
       if (updatedSettings) {
         setCachedSettings(updatedSettings);
+        syncMediaStateFromSettings(updatedSettings);
       }
       toast.success('Configuration saved successfully!');
     } catch (err) {
