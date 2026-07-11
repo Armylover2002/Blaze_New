@@ -157,12 +157,21 @@ export default function AddressSelectorPage() {
   const sessionTokenRef = useRef(null)
   const placesSearchTimerRef = useRef(null)
   const [mapUnavailable, setMapUnavailable] = useState(false)
-  const [formScrollTop, setFormScrollTop] = useState(0)
   const [keyboardInset, setKeyboardInset] = useState(0)
   const [baseMapHeight, setBaseMapHeight] = useState(320)
   const formBodyRef = useRef(null)
   const hasInitializedRef = useRef(false)
   const manualFieldRefs = useRef({})
+  const lastReverseGeocodeCoordsRef = useRef(null)
+  const reverseGeocodeTimeoutRef = useRef(null)
+  const reverseGeocodeInFlightRef = useRef(null)
+  const skipMapIdleRef = useRef(false)
+  const mapIdleLastCoordsRef = useRef({ lat: null, lng: null })
+  const mapIdleListenerRef = useRef(null)
+  const handleMapMoveEndRef = useRef(null)
+
+  const MAP_MOVE_DEBOUNCE_MS = 1000
+  const MAP_MOVE_MIN_PAN_METERS = 50
   
   // Sync currentAddress and mapPosition with the useLocation hook's location address on load/update
   useEffect(() => {
@@ -300,9 +309,24 @@ export default function AddressSelectorPage() {
     }
   }, [addressAutocompleteValue, showAddressForm])
 
+  const panMapTo = useCallback((lat, lng, zoom = 17) => {
+    if (!googleMapRef.current) return
+    skipMapIdleRef.current = true
+    googleMapRef.current.panTo({ lat, lng })
+    if (zoom) googleMapRef.current.setZoom(zoom)
+    window.setTimeout(() => {
+      skipMapIdleRef.current = false
+    }, MAP_MOVE_DEBOUNCE_MS + 200)
+  }, [])
+
   // Map Initialization logic
   useEffect(() => {
     if (!MAPS_ENABLED || mapUnavailable || !showAddressForm || !mapContainerRef.current || !GOOGLE_MAPS_API_KEY) return
+
+    if (googleMapRef.current) {
+      setMapLoading(false)
+      return undefined
+    }
 
     let isMounted = true
     setMapLoading(true)
@@ -314,9 +338,10 @@ export default function AddressSelectorPage() {
         if (!maps || !google?.maps?.Map) {
           throw new Error("Google Maps is unavailable")
         }
-        if (!isMounted || !mapContainerRef.current) return
+        if (!isMounted || !mapContainerRef.current || googleMapRef.current) return
 
         const initialPos = { lat: mapPosition[0], lng: mapPosition[1] }
+        mapIdleLastCoordsRef.current = { lat: initialPos.lat, lng: initialPos.lng }
         
         const map = new google.maps.Map(mapContainerRef.current, {
           center: initialPos,
@@ -338,27 +363,24 @@ export default function AddressSelectorPage() {
           sessionTokenRef.current = placesServices.sessionToken
         }
 
-        // Debounce handleMapMoveEnd to avoid excessive API calls
-        let idleTimeout = null
-        let lastLat = initialPos.lat
-        let lastLng = initialPos.lng
+        mapIdleListenerRef.current = map.addListener("idle", () => {
+          if (skipMapIdleRef.current) return
 
-        map.addListener("idle", () => {
-          clearTimeout(idleTimeout)
-          idleTimeout = setTimeout(() => {
-            const center = map.getCenter()
-            const lat = center.lat()
-            const lng = center.lng()
-            
-            // Only update if moved more than ~5 meters (roughly 0.00005 degrees)
-            const dist = Math.sqrt(Math.pow(lat - lastLat, 2) + Math.pow(lng - lastLng, 2))
-            if (dist > 0.00005) {
-              lastLat = lat
-              lastLng = lng
-              setMapPosition([lat, lng])
-              handleMapMoveEnd(lat, lng)
-            }
-          }, 500) // 500ms debounce for better stability
+          const center = googleMapRef.current?.getCenter()
+          if (!center) return
+
+          const lat = center.lat()
+          const lng = center.lng()
+          const last = mapIdleLastCoordsRef.current
+
+          if (last.lat != null && last.lng != null) {
+            const movedM = calculateDistance(last.lat, last.lng, lat, lng)
+            if (movedM < MAP_MOVE_MIN_PAN_METERS) return
+          }
+
+          mapIdleLastCoordsRef.current = { lat, lng }
+          setMapPosition([lat, lng])
+          handleMapMoveEndRef.current?.(lat, lng)
         })
 
         setMapLoading(false)
@@ -369,7 +391,13 @@ export default function AddressSelectorPage() {
       }
     }
     initializeGoogleMap()
-    return () => { isMounted = false }
+    return () => {
+      isMounted = false
+      if (mapIdleListenerRef.current && window.google?.maps?.event) {
+        window.google.maps.event.removeListener(mapIdleListenerRef.current)
+        mapIdleListenerRef.current = null
+      }
+    }
   }, [showAddressForm, GOOGLE_MAPS_API_KEY, mapUnavailable])
 
   const handleUseCurrentLocation = async () => {
@@ -388,10 +416,7 @@ export default function AddressSelectorPage() {
         try { localStorage.setItem("deliveryAddressMode", "current") } catch {}
         
         // Update map
-        if (googleMapRef.current) {
-          googleMapRef.current.panTo({ lat: loc.latitude, lng: loc.longitude })
-          googleMapRef.current.setZoom(17)
-        }
+        panMapTo(loc.latitude, loc.longitude, 17)
         
         // Update form data if form is open
         if (showAddressForm) {
@@ -440,6 +465,17 @@ export default function AddressSelectorPage() {
   }
 
   const handleCancelAddressForm = () => {
+    if (reverseGeocodeTimeoutRef.current) {
+      clearTimeout(reverseGeocodeTimeoutRef.current)
+      reverseGeocodeTimeoutRef.current = null
+    }
+    if (mapIdleListenerRef.current && window.google?.maps?.event) {
+      window.google.maps.event.removeListener(mapIdleListenerRef.current)
+      mapIdleListenerRef.current = null
+    }
+    googleMapRef.current = null
+    lastReverseGeocodeCoordsRef.current = null
+    mapIdleLastCoordsRef.current = { lat: null, lng: null }
     setShowAddressForm(false)
     setAddressAutocompleteValue("")
     setPlacePredictions([])
@@ -489,40 +525,86 @@ export default function AddressSelectorPage() {
     }, 120)
   }, [keyboardInset])
 
-  const clamp = (value, min, max) => Math.min(max, Math.max(min, value))
-
-  const handleMapMoveEnd = async (lat, lng) => {
+  const handleMapMoveEnd = useCallback(async (lat, lng) => {
     if (!ENABLE_LOCATION_REVERSE_GEOCODE) return
-    
-    // Prevent redundant calls for the same coordinates
-    const coordKey = `${lat.toFixed(5)},${lng.toFixed(5)}`
-    if (manualFieldRefs.current._lastCoords === coordKey) return
-    manualFieldRefs.current._lastCoords = coordKey
 
-    try {
-      const parsed = await reverseGeocode(lat, lng, { forceFresh: true })
-      if (parsed) {
-        const formatted = parsed.formattedAddress || parsed.address || ""
-        setCurrentAddress(prev => prev === formatted ? prev : formatted)
-        setSelectedFormattedAddress(formatted)
-        setSelectedPlaceId("")
-        setAddressFormData(prev => {
-          if (prev.street === parsed.street && prev.city === parsed.city && prev.state === parsed.state && prev.zipCode === parsed.postalCode) {
-            return prev
-          }
-          return {
-            ...prev,
-            street: parsed.street || parsed.area || prev.street,
-            city: parsed.city || prev.city,
-            state: parsed.state || prev.state,
-            zipCode: parsed.postalCode || prev.zipCode,
-          }
-        })
-      }
-    } catch (e) {
-      debugError("Reverse geocode error:", e)
+    const roundedLat = parseFloat(Number(lat).toFixed(6))
+    const roundedLng = parseFloat(Number(lng).toFixed(6))
+    const coordKey = `${roundedLat.toFixed(6)},${roundedLng.toFixed(6)}`
+
+    const last = lastReverseGeocodeCoordsRef.current
+    if (last) {
+      if (last.key === coordKey) return
+      const movedM = calculateDistance(last.lat, last.lng, roundedLat, roundedLng)
+      if (movedM < MAP_MOVE_MIN_PAN_METERS) return
     }
-  }
+
+    if (reverseGeocodeTimeoutRef.current) {
+      clearTimeout(reverseGeocodeTimeoutRef.current)
+    }
+
+    return new Promise((resolve) => {
+      reverseGeocodeTimeoutRef.current = setTimeout(async () => {
+        if (reverseGeocodeInFlightRef.current) {
+          try {
+            await reverseGeocodeInFlightRef.current
+          } catch {
+            // fall through to a fresh attempt
+          }
+          if (lastReverseGeocodeCoordsRef.current?.key === coordKey) {
+            resolve()
+            return
+          }
+        }
+
+        lastReverseGeocodeCoordsRef.current = { lat: roundedLat, lng: roundedLng, key: coordKey }
+        manualFieldRefs.current._lastCoords = coordKey
+
+        const run = (async () => {
+          try {
+            const parsed = await reverseGeocode(roundedLat, roundedLng)
+            if (!parsed) return
+
+            const formatted = parsed.formattedAddress || parsed.address || ""
+            setCurrentAddress((prev) => (prev === formatted ? prev : formatted))
+            setSelectedFormattedAddress(formatted)
+            setSelectedPlaceId("")
+            setAddressFormData((prev) => {
+              if (
+                prev.street === parsed.street &&
+                prev.city === parsed.city &&
+                prev.state === parsed.state &&
+                prev.zipCode === parsed.postalCode
+              ) {
+                return prev
+              }
+              return {
+                ...prev,
+                street: parsed.street || parsed.area || prev.street,
+                city: parsed.city || prev.city,
+                state: parsed.state || prev.state,
+                zipCode: parsed.postalCode || prev.zipCode,
+              }
+            })
+          } catch (e) {
+            debugError("Reverse geocode error:", e)
+          }
+        })()
+
+        reverseGeocodeInFlightRef.current = run
+        try {
+          await run
+        } finally {
+          if (reverseGeocodeInFlightRef.current === run) {
+            reverseGeocodeInFlightRef.current = null
+          }
+          resolve()
+        }
+      }, MAP_MOVE_DEBOUNCE_MS)
+    })
+  }, [reverseGeocode])
+
+  handleMapMoveEndRef.current = handleMapMoveEnd
 
   const handlePlacePredictionSelect = useCallback(async (prediction) => {
     if (!prediction?.place_id) return
@@ -557,10 +639,8 @@ export default function AddressSelectorPage() {
       const display = parsed.formattedAddress || prediction.description || ""
 
       setMapPosition([latitude, longitude])
-      if (googleMapRef.current) {
-        googleMapRef.current.panTo({ lat: latitude, lng: longitude })
-        googleMapRef.current.setZoom(17)
-      }
+      mapIdleLastCoordsRef.current = { lat: latitude, lng: longitude }
+      panMapTo(latitude, longitude, 17)
 
       setAddressAutocompleteValue(display)
       setPlacePredictions([])
@@ -609,10 +689,8 @@ export default function AddressSelectorPage() {
             manualFieldRefs.current._lastCoords = coordKey;
             
             setMapPosition([lat, lng]);
-            if (googleMapRef.current) {
-              googleMapRef.current.panTo(location);
-              googleMapRef.current.setZoom(17);
-            }
+            mapIdleLastCoordsRef.current = { lat, lng };
+            panMapTo(lat, lng, 17);
           }
         });
       } catch (err) {
@@ -621,7 +699,7 @@ export default function AddressSelectorPage() {
     }, 1200);
 
     return () => clearTimeout(timeout);
-  }, [addressFormData.street, addressFormData.city, showAddressForm]);
+  }, [addressFormData.street, addressFormData.city, showAddressForm, panMapTo]);
 
   const handleAddressFormSubmit = async (e) => {
     e.preventDefault()
@@ -684,11 +762,6 @@ export default function AddressSelectorPage() {
   }, [showAddressForm])
 
   useEffect(() => {
-    if (!showAddressForm) return
-    setFormScrollTop(0)
-  }, [showAddressForm])
-
-  useEffect(() => {
     if (!showAddressForm || typeof window === "undefined" || !window.visualViewport) return
     const viewport = window.visualViewport
     const updateKeyboardInset = () => {
@@ -719,20 +792,13 @@ export default function AddressSelectorPage() {
 
         <div
           ref={formBodyRef}
-          onScroll={(e) => {
-            setFormScrollTop(e.currentTarget.scrollTop)
-          }}
           className="flex-1 overflow-y-auto"
           style={{ paddingBottom: `${96 + keyboardInset}px` }}
         >
           {/* Map Section - Parallax enabled */}
           <div
             className="flex-shrink-0 relative z-0"
-            style={{ 
-              height: `${mapHeight}px`,
-              transform: `translateY(${formScrollTop * 0.4}px)`,
-              opacity: clamp(1 - (formScrollTop / 500), 0.4, 1)
-            }}
+            style={{ height: `${mapHeight}px` }}
           >
             <div className="absolute top-4 left-4 right-4 z-20">
               <div className="relative group shadow-2xl">
