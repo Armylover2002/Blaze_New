@@ -59,6 +59,8 @@ import { resolveDeliveryDocumentType } from '../../../quick-commerce/services/di
 import { DISPATCH_DOCUMENT_TYPES } from '../../../quick-commerce/utils/dispatchDocument.constants.js';
 import * as returnPickupDelivery from '../../../quick-commerce/services/returnPickupDelivery.service.js';
 import { deductWalletBalance, refundWalletBalance } from '../../user/services/userWallet.service.js';
+import { roadDistanceKm } from './order.helpers.js';
+import { scorePointsByRoadDistance } from '../../../../services/roadDistance.service.js';
 
 export {
   tryAutoAssign,
@@ -943,7 +945,12 @@ async function evaluateCombinedPickupEligibility(pickupPoints = [], deliveryAddr
   const distLimit = feeDoc?.mixedOrderDistanceLimit ?? 2;
   const angleLimit = feeDoc?.mixedOrderAngleLimit ?? 35;
 
-  const pickupDistanceKm = haversineKm(foodPoint.lat, foodPoint.lng, quickPoint.lat, quickPoint.lng);
+  const pickupDistanceKm = await roadDistanceKm(
+    foodPoint.lat,
+    foodPoint.lng,
+    quickPoint.lat,
+    quickPoint.lng,
+  );
   const angle = angleBetweenPickupVectors(userPoint, foodPoint, quickPoint);
   
   // If pickups are very close to each other (e.g. < 200m), they are definitely in the same direction for practical purposes
@@ -991,7 +998,7 @@ async function resolveDispatchPlanMeta(orderType, pickupPoints = [], deliveryAdd
     };
   }
 
-  const distanceKm = haversineKm(
+  const distanceKm = await roadDistanceKm(
     pickupPoint.lat,
     pickupPoint.lng,
     deliveryPoint.lat,
@@ -1055,14 +1062,19 @@ async function listNearbyPartnersForPoint(point, { maxKm = 15, limit = 5 } = {})
     .select("_id lastLat lastLng")
     .lean();
 
-  const nearbyPartners = partners
-    .map((partner) => ({
+  const scored = await scorePointsByRoadDistance(
+    latLng,
+    partners.map((partner) => ({
       partnerId: partner._id,
-      distanceKm: haversineKm(latLng.lat, latLng.lng, partner.lastLat, partner.lastLng),
-    }))
-    .filter((partner) => Number.isFinite(partner.distanceKm) && partner.distanceKm <= maxKm)
-    .sort((a, b) => a.distanceKm - b.distanceKm)
-    .slice(0, Math.max(1, limit));
+      lat: partner.lastLat,
+      lng: partner.lastLng,
+    })),
+    { maxKm },
+  );
+
+  const nearbyPartners = scored
+    .slice(0, Math.max(1, limit))
+    .map(({ partnerId, distanceKm }) => ({ partnerId, distanceKm }));
 
   if (nearbyPartners.length > 0) {
     return nearbyPartners;
@@ -2308,7 +2320,7 @@ export async function calculateOrder(userId, dto) {
     const restaurantPoint = getPointLatLng(primaryRestaurant?.location);
     const distanceKm =
       userPoint && restaurantPoint
-        ? haversineKm(
+        ? await roadDistanceKm(
             restaurantPoint.lat,
             restaurantPoint.lng,
             userPoint.lat,
@@ -2791,7 +2803,7 @@ export async function createOrder(userId, dto) {
   ) {
     const [rLng, rLat] = primaryRestaurant.location.coordinates;
     const [dLng, dLat] = dto.address.location.coordinates;
-    const d = haversineKm(rLat, rLng, dLat, dLng);
+    const d = await roadDistanceKm(rLat, rLng, dLat, dLng);
     distanceKm = Number.isFinite(d) ? d : null;
   } else {
     console.warn(
@@ -3130,19 +3142,6 @@ export async function verifyPayment(userId, dto) {
 }
 
 // ----- Auto-assign -----
-function haversineKm(lat1, lon1, lat2, lon2) {
-  const R = 6371;
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLon = ((lon2 - lon1) * Math.PI) / 180;
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLon / 2) *
-      Math.sin(dLon / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c;
-}
 
 // Stale tryAutoAssign and processDispatchTimeout removed (now imported from order-dispatch.service.js)
 

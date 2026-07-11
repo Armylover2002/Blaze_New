@@ -94,21 +94,7 @@ const TIME_SLOTS = [
 
 // ─── Pure helpers (unchanged) ─────────────────────────────────────────────────
 
-const calculateHaversineDistance = (lat1, lon1, lat2, lon2) => {
-  const R = 6371;
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLon = ((lon2 - lon1) * Math.PI) / 180;
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos((lat1 * Math.PI) / 180) *
-    Math.cos((lat2 * Math.PI) / 180) *
-    Math.sin(dLon / 2) *
-    Math.sin(dLon / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c;
-};
-
-const calculateFrontendRiderEarning = (distanceKm, rules = []) => {
+import { getRoadDistanceKm } from '@/shared/services/roadDistance'; = (distanceKm, rules = []) => {
   const d = Number(distanceKm);
   if (!Number.isFinite(d) || d < 0) return 0;
   if (!Array.isArray(rules) || !rules.length) return 0;
@@ -1139,11 +1125,20 @@ const CheckoutPage = () => {
       : currentAddress?.location;
     const lat2 = Number(deliveryLoc?.lat || deliveryLoc?.latitude);
     const lon2 = Number(deliveryLoc?.lng || deliveryLoc?.longitude);
-    if (Number.isFinite(lat1) && Number.isFinite(lon1) && Number.isFinite(lat2) && Number.isFinite(lon2)) {
-      setDistanceKm(calculateHaversineDistance(lat1, lon1, lat2, lon2));
-    } else {
-      setDistanceKm(0);
+
+    let cancelled = false
+
+    const loadDistance = async () => {
+      if (Number.isFinite(lat1) && Number.isFinite(lon1) && Number.isFinite(lat2) && Number.isFinite(lon2)) {
+        const km = await getRoadDistanceKm(lat1, lon1, lat2, lon2);
+        if (!cancelled) setDistanceKm(Number.isFinite(km) ? km : 0);
+      } else if (!cancelled) {
+        setDistanceKm(0);
+      }
     }
+
+    void loadDistance()
+    return () => { cancelled = true }
   }, [storeLocation, currentAddress?.location, savedRecipient, currentLocation?.latitude, currentLocation?.longitude]);
 
   useEffect(() => {

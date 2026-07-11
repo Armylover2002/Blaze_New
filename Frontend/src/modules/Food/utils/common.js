@@ -64,7 +64,8 @@ export const extractImages = (source, backendOrigin = "") => {
 };
 
 /**
- * Calculates distance between two coordinates in kilometers using Haversine formula
+ * Calculates straight-line distance between two coordinates in kilometers (Haversine).
+ * Prefer getRoadDistanceKm from @/shared/services/roadDistance for delivery/restaurant distances.
  */
 export const calculateDistance = (lat1, lng1, lat2, lng2) => {
   if (!lat1 || !lng1 || !lat2 || !lng2) return null;

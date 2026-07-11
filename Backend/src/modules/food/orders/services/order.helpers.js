@@ -55,6 +55,15 @@ export function haversineKm(lat1, lon1, lat2, lon2) {
   return R * c;
 }
 
+/** Road/travel distance in km (Google Distance Matrix with Haversine fallback). */
+export async function roadDistanceKm(lat1, lon1, lat2, lon2) {
+  const { getRoadDistanceKmValue } = await import('../../../../services/roadDistance.service.js');
+  return getRoadDistanceKmValue(
+    { lat: lat1, lng: lon1 },
+    { lat: lat2, lng: lon2 },
+  );
+}
+
 export function generateFourDigitDeliveryOtp() {
   return String(Math.floor(1000 + Math.random() * 9000));
 }

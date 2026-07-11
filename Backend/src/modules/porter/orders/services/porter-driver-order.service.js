@@ -14,8 +14,8 @@ import {
     appendStatusHistory,
     logPorterOrderAction,
     mapPorterOrderForDriver,
-    haversineKm,
 } from '../utils/porterOrder.helpers.js';
+import { roadDistanceKm } from '../../../food/orders/services/order.helpers.js';
 import {
     emitPorterOrderStatus,
     emitPorterOrderCancelled,
@@ -63,22 +63,26 @@ export async function listAvailablePorterOrdersForDriver(partnerId) {
     const lat = partner?.lastLat;
     const lng = partner?.lastLng;
 
-    return orders
-        .filter((o) => {
-            if (!o.vehicleId) return true;
-            const supportCheck = partnerSupportsParcel(partner, o.vehicleId);
-            return supportCheck.ok;
-        })
-        .map((o) => {
+    const filtered = orders.filter((o) => {
+        if (!o.vehicleId) return true;
+        const supportCheck = partnerSupportsParcel(partner, o.vehicleId);
+        return supportCheck.ok;
+    });
+
+    return Promise.all(
+        filtered.map(async (o) => {
             const mapped = mapPorterOrderForDriver(o);
             if (Number.isFinite(lat) && Number.isFinite(lng) && o.pickup?.lat != null && o.pickup?.lng != null) {
-                const pickupKm = Number(haversineKm(lat, lng, o.pickup.lat, o.pickup.lng).toFixed(2));
+                const pickupKm = Number(
+                    (await roadDistanceKm(lat, lng, o.pickup.lat, o.pickup.lng)).toFixed(2),
+                );
                 mapped.distanceKm = pickupKm;
                 mapped.pickupDistanceKm = pickupKm;
             }
             mapped.tripDistanceKm = o.route?.distanceKm ?? null;
             return mapped;
-        });
+        }),
+    );
 }
 
 export async function acceptPorterOrder(partnerId, orderId, performer = null) {
@@ -155,7 +159,9 @@ export async function acceptPorterOrder(partnerId, orderId, performer = null) {
         const pickLat = Number(order.pickup?.lat);
         const pickLng = Number(order.pickup?.lng);
         if (Number.isFinite(pLat) && Number.isFinite(pLng) && Number.isFinite(pickLat) && Number.isFinite(pickLng)) {
-            const pickupKm = Number(haversineKm(pLat, pLng, pickLat, pickLng).toFixed(2));
+            const pickupKm = Number(
+                (await roadDistanceKm(pLat, pLng, pickLat, pickLng)).toFixed(2),
+            );
             mapped.distanceKm = pickupKm;
             mapped.pickupDistanceKm = pickupKm;
         }
@@ -205,7 +211,7 @@ export async function rejectPorterOrder(partnerId, orderId) {
         throw new ValidationError('Partner is not eligible for this order');
     }
 
-    const distanceKm = haversineKm(partnerLat, partnerLng, pickupLat, pickupLng);
+    const distanceKm = await roadDistanceKm(partnerLat, partnerLng, pickupLat, pickupLng);
     const maxDispatchRadiusKm = Math.max(...PORTER_DISPATCH_RADII_KM);
     if (!Number.isFinite(distanceKm) || distanceKm > maxDispatchRadiusKm) {
         throw new ValidationError('Partner is not eligible for this order');

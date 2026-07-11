@@ -23,11 +23,12 @@ import { addOrderJob } from "../../../../queues/producers/order.producer.js";
 import {
   buildDeliverySocketPayload,
   buildOrderIdentityFilter,
-  haversineKm,
+  roadDistanceKm,
   isTerminalOrderStatus,
   notifyOwnerSafely,
   notifyOwnersSafely,
 } from "./order.helpers.js";
+import { scorePointsByRoadDistance } from "../../../../services/roadDistance.service.js";
 import { SellerReturn } from "../../../quick-commerce/seller/models/sellerReturn.model.js";
 import { DISPATCH_DOCUMENT_TYPES } from "../../../quick-commerce/utils/dispatchDocument.constants.js";
 import {
@@ -216,6 +217,8 @@ export async function listNearbyOnlineDeliveryPartners(
       : ["approved", "pending"];
   const STALE_GPS_MS = 10 * 60 * 1000;
 
+  const candidates = [];
+
   for (const p of allOnline) {
     if (!allowedStatuses.includes(p.status)) continue;
 
@@ -241,11 +244,26 @@ export async function listNearbyOnlineDeliveryPartners(
         if (sourceType === 'quick' && !services.includes('quick')) continue;
     }
 
-    const d = haversineKm(rLat, rLng, p.lastLat, p.lastLng);
-    if (Number.isFinite(d) && d <= maxKm) {
-      scored.push({ partnerId: p._id, distanceKm: d, status: p.status });
-    }
+    candidates.push({
+      partnerId: p._id,
+      lat: p.lastLat,
+      lng: p.lastLng,
+      status: p.status,
+    });
   }
+
+  const roadScored = await scorePointsByRoadDistance(
+    { lat: rLat, lng: rLng },
+    candidates,
+    { maxKm },
+  );
+  scored.push(
+    ...roadScored.map((entry) => ({
+      partnerId: entry.partnerId,
+      distanceKm: entry.distanceKm,
+      status: entry.status,
+    })),
+  );
 
   scored.sort((a, b) => a.distanceKm - b.distanceKm);
   const picked = scored.slice(0, Math.max(1, limit));
@@ -311,6 +329,8 @@ export async function listNearbyOnlineDeliveryPartnersByCoords(
     process.env.NODE_ENV === "production" ? ["approved"] : ["approved", "pending"];
   const STALE_GPS_MS = 10 * 60 * 1000;
 
+  const candidates = [];
+
   for (const p of allOnline) {
     if (!allowedStatuses.includes(p.status)) continue;
     const isStale =
@@ -334,11 +354,26 @@ export async function listNearbyOnlineDeliveryPartnersByCoords(
         if (!services.includes('quick')) continue; // listNearbyOnlineDeliveryPartnersByCoords is always quick
     }
 
-    const d = haversineKm(lat, lng, p.lastLat, p.lastLng);
-    if (Number.isFinite(d) && d <= maxKm) {
-      scored.push({ partnerId: p._id, distanceKm: d, status: p.status });
-    }
+    candidates.push({
+      partnerId: p._id,
+      lat: p.lastLat,
+      lng: p.lastLng,
+      status: p.status,
+    });
   }
+
+  const roadScored = await scorePointsByRoadDistance(
+    { lat, lng },
+    candidates,
+    { maxKm },
+  );
+  scored.push(
+    ...roadScored.map((entry) => ({
+      partnerId: entry.partnerId,
+      distanceKm: entry.distanceKm,
+      status: entry.status,
+    })),
+  );
 
   scored.sort((a, b) => a.distanceKm - b.distanceKm);
   const picked = scored.slice(0, Math.max(1, limit));
@@ -433,7 +468,7 @@ const auditPartnerElimination = async (partners, { label = "dispatch", maxKm = 1
     } else if (!p.lastLocationAt || Date.now() - new Date(p.lastLocationAt).getTime() > STALE_GPS_MS) {
       reason = "stale_gps";
     } else if (origin?.lat != null && origin?.lng != null) {
-      const d = haversineKm(origin.lat, origin.lng, p.lastLat, p.lastLng);
+      const d = await roadDistanceKm(origin.lat, origin.lng, p.lastLat, p.lastLng);
       row.distanceKm = Number.isFinite(d) ? Number(d.toFixed(2)) : null;
       row.radiusKm = maxKm;
       if (!Number.isFinite(d) || d > maxKm) {

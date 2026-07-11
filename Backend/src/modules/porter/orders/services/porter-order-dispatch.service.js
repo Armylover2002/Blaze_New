@@ -15,7 +15,8 @@ import {
     PORTER_ORDER_STATUS,
     PORTER_DISPATCH_STATUS,
 } from '../constants/porterOrderStatus.constants.js';
-import { haversineKm, mapPorterOrderForDriver } from '../utils/porterOrder.helpers.js';
+import { mapPorterOrderForDriver } from '../utils/porterOrder.helpers.js';
+import { scorePointsByRoadDistance } from '../../../../services/roadDistance.service.js';
 import { getBusyPorterPartnerIds } from '../utils/porter-order-transition.util.js';
 import { FoodAdmin } from '../../../../core/admin/admin.model.js';
 import { notifyPorterNewOrderToDriver } from './porter-notification.service.js';
@@ -66,7 +67,7 @@ async function listNearbyPorterPartners({ lat, lng, maxKm, orderVehicleId, rejec
         .select('_id status name lastLat lastLng lastLocationAt driverVehicles activeVehicleId vehicleType')
         .lean();
 
-    const scored = [];
+    const candidates = [];
     for (const p of allOnline) {
         if (rejected.has(String(p._id))) continue;
         if (busyIds.has(String(p._id))) continue;
@@ -77,18 +78,16 @@ async function listNearbyPorterPartners({ lat, lng, maxKm, orderVehicleId, rejec
         const isStale = !p.lastLocationAt || Date.now() - new Date(p.lastLocationAt).getTime() > STALE_GPS_MS;
         if (p.lastLat == null || p.lastLng == null || isStale) continue;
 
-        const d = haversineKm(lat, lng, p.lastLat, p.lastLng);
-        if (!Number.isFinite(d) || d > maxKm) continue;
-
-        scored.push({
+        candidates.push({
             partnerId: p._id,
-            distanceKm: d,
+            lat: p.lastLat,
+            lng: p.lastLng,
             status: p.status,
             activeVehicleId: support.activeVehicle?.id || support.activeVehicle?.porterVehicleId,
         });
     }
 
-    scored.sort((a, b) => a.distanceKm - b.distanceKm);
+    const scored = await scorePointsByRoadDistance({ lat, lng }, candidates, { maxKm });
     const eligible = await filterEligiblePartners(scored);
     return eligible;
 }

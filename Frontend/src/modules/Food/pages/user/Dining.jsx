@@ -12,6 +12,7 @@ import { useProfile } from "@food/context/ProfileContext"
 import { diningAPI } from "@food/api"
 import PageNavbar from "@food/components/user/PageNavbar"
 import OptimizedImage from "@food/components/OptimizedImage"
+import { getRoadDistancesFromOrigin } from "@/shared/services/roadDistance"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -38,30 +39,7 @@ const getCoordinates = (restaurant) => {
   return null
 }
 
-const getDistanceKm = (userLocation, restaurant) => {
-  const userLat = Number(userLocation?.latitude)
-  const userLng = Number(userLocation?.longitude)
-  const restaurantCoords = getCoordinates(restaurant)
-
-  if (!Number.isFinite(userLat) || !Number.isFinite(userLng) || !restaurantCoords) {
-    return Number.POSITIVE_INFINITY
-  }
-
-  const toRadians = (value) => (value * Math.PI) / 180
-  const earthRadiusKm = 6371
-  const dLat = toRadians(restaurantCoords.latitude - userLat)
-  const dLng = toRadians(restaurantCoords.longitude - userLng)
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(toRadians(userLat)) *
-      Math.cos(toRadians(restaurantCoords.latitude)) *
-      Math.sin(dLng / 2) *
-      Math.sin(dLng / 2)
-
-  return earthRadiusKm * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
-}
-
-const shimmerClassName =
+import { getRoadDistancesFromOrigin } from "@/shared/services/roadDistance"
   "before:absolute before:inset-0 before:-translate-x-full before:bg-gradient-to-r before:from-transparent before:via-white/30 before:to-transparent before:animate-[shimmer_2.2s_infinite]"
 
 const loadingCategoryCards = Array.from({ length: 6 }, (_, index) => `category-skeleton-${index}`)
@@ -214,50 +192,77 @@ export default function Dining() {
       }))
   }, [categories])
 
-  const normalizedRestaurantList = useMemo(() => {
-    return (Array.isArray(restaurantList) ? restaurantList : [])
-      .filter((restaurant) => {
-        const hasName = String(restaurant?.restaurantName || restaurant?.name || "").trim().length > 0
-        const isDiningEnabled = restaurant?.diningSettings?.isEnabled !== false
-        const isAcceptingOrders = restaurant?.isAcceptingOrders !== false
-        return hasName && isDiningEnabled && isAcceptingOrders
+  const [normalizedRestaurantList, setNormalizedRestaurantList] = useState([])
+
+  useEffect(() => {
+    let cancelled = false
+
+    const buildRestaurantList = async () => {
+      const filtered = (Array.isArray(restaurantList) ? restaurantList : [])
+        .filter((restaurant) => {
+          const hasName = String(restaurant?.restaurantName || restaurant?.name || "").trim().length > 0
+          const isDiningEnabled = restaurant?.diningSettings?.isEnabled !== false
+          const isAcceptingOrders = restaurant?.isAcceptingOrders !== false
+          return hasName && isDiningEnabled && isAcceptingOrders
+        })
+
+      const userLat = Number(location?.latitude)
+      const userLng = Number(location?.longitude)
+      const destinations = filtered.map((restaurant) => {
+        const coords = getCoordinates(restaurant)
+        return coords ? { lat: coords.latitude, lng: coords.longitude } : { lat: null, lng: null }
       })
-      .map((restaurant, index) => {
-        const distanceKm = getDistanceKm(location, restaurant)
-        const restaurantName = String(restaurant?.restaurantName || restaurant?.name || "").trim()
-        return {
-          ...restaurant,
-          id: restaurant?._id || restaurant?.id || `restaurant-${index}`,
-          name: restaurantName,
-          slug: String(restaurant?.restaurantNameNormalized || "").trim() || slugifyValue(restaurantName),
-          cuisine: Array.isArray(restaurant?.cuisines) && restaurant.cuisines.length > 0
-            ? restaurant.cuisines.join(", ")
-            : "Multi-cuisine",
-          image: String(
-            restaurant?.coverImages?.[0]?.url ||
-            restaurant?.coverImages?.[0] ||
-            restaurant?.coverImage ||
-            restaurant?.menuImages?.[0]?.url ||
-            restaurant?.menuImages?.[0] ||
-            restaurant?.profileImage?.url ||
-            restaurant?.profileImage ||
-            ""
-          ).trim(),
-          offer: String(restaurant?.offer || "Pre-book table").trim(),
-          featuredDish: String(restaurant?.featuredDish || "Chef's special").trim(),
-          featuredPrice: Number(restaurant?.featuredPrice || 0),
-          rating: Number(restaurant?.rating || restaurant?.avgRating || 0),
-          deliveryTime: String(
-            restaurant?.estimatedDeliveryTime ||
-            restaurant?.deliveryTime ||
-            (restaurant?.estimatedDeliveryTimeMinutes ? `${restaurant.estimatedDeliveryTimeMinutes} mins` : "30-40 mins")
-          ).trim(),
-          distanceValue: distanceKm,
-          distance: Number.isFinite(distanceKm) ? `${distanceKm.toFixed(1)} km` : "Distance unavailable",
-          diningType: restaurant?.diningSettings?.diningType || restaurant?.categories?.[0]?.slug || "dining",
-        }
-      })
-  }, [restaurantList, location])
+
+      const roadDistances = (Number.isFinite(userLat) && Number.isFinite(userLng))
+        ? await getRoadDistancesFromOrigin(userLat, userLng, destinations)
+        : []
+
+      if (cancelled) return
+
+      setNormalizedRestaurantList(
+        filtered.map((restaurant, index) => {
+          const distanceKm = Number.isFinite(restaurant.distanceInKm)
+            ? restaurant.distanceInKm
+            : (Number.isFinite(roadDistances[index]) ? roadDistances[index] : Number.POSITIVE_INFINITY)
+          const restaurantName = String(restaurant?.restaurantName || restaurant?.name || "").trim()
+          return {
+            ...restaurant,
+            id: restaurant?._id || restaurant?.id || `restaurant-${index}`,
+            name: restaurantName,
+            slug: String(restaurant?.restaurantNameNormalized || "").trim() || slugifyValue(restaurantName),
+            cuisine: Array.isArray(restaurant?.cuisines) && restaurant.cuisines.length > 0
+              ? restaurant.cuisines.join(", ")
+              : "Multi-cuisine",
+            image: String(
+              restaurant?.coverImages?.[0]?.url ||
+              restaurant?.coverImages?.[0] ||
+              restaurant?.coverImage ||
+              restaurant?.menuImages?.[0]?.url ||
+              restaurant?.menuImages?.[0] ||
+              restaurant?.profileImage?.url ||
+              restaurant?.profileImage ||
+              ""
+            ).trim(),
+            offer: String(restaurant?.offer || "Pre-book table").trim(),
+            featuredDish: String(restaurant?.featuredDish || "Chef's special").trim(),
+            featuredPrice: Number(restaurant?.featuredPrice || 0),
+            rating: Number(restaurant?.rating || restaurant?.avgRating || 0),
+            deliveryTime: String(
+              restaurant?.estimatedDeliveryTime ||
+              restaurant?.deliveryTime ||
+              (restaurant?.estimatedDeliveryTimeMinutes ? `${restaurant.estimatedDeliveryTimeMinutes} mins` : "30-40 mins")
+            ).trim(),
+            distanceValue: distanceKm,
+            distance: Number.isFinite(distanceKm) ? `${distanceKm.toFixed(1)} km` : "Distance unavailable",
+            diningType: restaurant?.diningSettings?.diningType || restaurant?.categories?.[0]?.slug || "dining",
+          }
+        }),
+      )
+    }
+
+    void buildRestaurantList()
+    return () => { cancelled = true }
+  }, [restaurantList, location?.latitude, location?.longitude])
 
   const categoryRestaurantKeys = useMemo(() => {
     const keySet = new Set()

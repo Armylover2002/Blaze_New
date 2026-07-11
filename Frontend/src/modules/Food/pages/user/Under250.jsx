@@ -18,28 +18,10 @@ import OptimizedImage from "@food/components/OptimizedImage"
 import api from "@food/api"
 import { restaurantAPI, adminAPI } from "@food/api"
 import { isModuleAuthenticated } from "@food/utils/auth"
-import { calculateDistance, formatDistance } from "@food/utils/common"
+import { formatDistance } from "@food/utils/common"
+import { getRoadDistancesFromOrigin } from "@/shared/services/roadDistance"
 
-const enrichRestaurantDistance = (restaurant, userLocation) => {
-  const userLat = Number(userLocation?.latitude)
-  const userLng = Number(userLocation?.longitude)
-  const restaurantLocation = restaurant?.location
-  const restaurantLat = Number(
-    restaurantLocation?.latitude ??
-    (Array.isArray(restaurantLocation?.coordinates) ? restaurantLocation.coordinates[1] : null)
-  )
-  const restaurantLng = Number(
-    restaurantLocation?.longitude ??
-    (Array.isArray(restaurantLocation?.coordinates) ? restaurantLocation.coordinates[0] : null)
-  )
-  const distanceInKm = (
-    Number.isFinite(userLat) &&
-    Number.isFinite(userLng) &&
-    Number.isFinite(restaurantLat) &&
-    Number.isFinite(restaurantLng)
-  )
-    ? calculateDistance(userLat, userLng, restaurantLat, restaurantLng)
-    : null
+const enrichRestaurantDistance = (restaurant, distanceInKm) => {
   const fallbackDistance =
     typeof restaurant?.distance === "number"
       ? formatDistance(restaurant.distance)
@@ -124,10 +106,52 @@ export default function Under250() {
   const [currentBannerIndex, setCurrentBannerIndex] = useState(0)
   const [under250Restaurants, setUnder250Restaurants] = useState([])
   const [loadingRestaurants, setLoadingRestaurants] = useState(true)
-  const under250RestaurantsWithDistance = useMemo(
-    () => under250Restaurants.map((restaurant) => enrichRestaurantDistance(restaurant, location)),
-    [under250Restaurants, location?.latitude, location?.longitude],
-  )
+  const [under250RestaurantsWithDistance, setUnder250RestaurantsWithDistance] = useState([])
+  useEffect(() => {
+    let cancelled = false
+
+    const enrichDistances = async () => {
+      if (!under250Restaurants.length) {
+        setUnder250RestaurantsWithDistance([])
+        return
+      }
+
+      const userLat = Number(location?.latitude)
+      const userLng = Number(location?.longitude)
+      const destinations = under250Restaurants.map((restaurant) => {
+        const restaurantLocation = restaurant?.location
+        return {
+          lat: Number(
+            restaurantLocation?.latitude ??
+            (Array.isArray(restaurantLocation?.coordinates) ? restaurantLocation.coordinates[1] : null),
+          ),
+          lng: Number(
+            restaurantLocation?.longitude ??
+            (Array.isArray(restaurantLocation?.coordinates) ? restaurantLocation.coordinates[0] : null),
+          ),
+        }
+      })
+
+      const roadDistances = (Number.isFinite(userLat) && Number.isFinite(userLng))
+        ? await getRoadDistancesFromOrigin(userLat, userLng, destinations)
+        : []
+
+      if (cancelled) return
+
+      setUnder250RestaurantsWithDistance(
+        under250Restaurants.map((restaurant, index) => {
+          const distanceInKm = Number.isFinite(restaurant.distanceInKm)
+            ? restaurant.distanceInKm
+            : (roadDistances[index] ?? null)
+          return enrichRestaurantDistance(restaurant, distanceInKm)
+        }),
+      )
+    }
+
+    void enrichDistances()
+    return () => { cancelled = true }
+  }, [under250Restaurants, location?.latitude, location?.longitude])
+
   const [hasScrolledPastBanner, setHasScrolledPastBanner] = useState(false)
   const bannerShellRef = useRef(null)
   const stickyHeaderRef = useRef(null)

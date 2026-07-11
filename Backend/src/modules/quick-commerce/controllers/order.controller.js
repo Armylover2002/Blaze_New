@@ -17,7 +17,7 @@ import * as foodTransactionService from '../../food/orders/services/foodTransact
 import { FoodTransaction } from '../../food/orders/models/foodTransaction.model.js';
 import { emitQuickCommerceStatusUpdate } from '../services/quickStatusRealtime.service.js';
 import { getSellerLocation, getOrderAddressPoint } from '../services/quickOrder.service.js';
-import { haversineKm } from '../../food/orders/services/order.helpers.js';
+import { roadDistanceKm } from '../../food/orders/services/order.helpers.js';
 import { buildReturnEligibilityMeta } from '../utils/return.helpers.js';
 import {
   buildCartLineKey,
@@ -507,7 +507,7 @@ export const placeOrder = async (req, res) => {
       const sellerCoords = getSellerLocation(seller);
       const deliveryCoords = getOrderAddressPoint({ deliveryAddress });
       if (sellerCoords && deliveryCoords) {
-        distanceKm = haversineKm(sellerCoords.lat, sellerCoords.lng, deliveryCoords.lat, deliveryCoords.lng);
+        distanceKm = await roadDistanceKm(sellerCoords.lat, sellerCoords.lng, deliveryCoords.lat, deliveryCoords.lng);
       }
     }
 
