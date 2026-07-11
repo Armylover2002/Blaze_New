@@ -230,9 +230,8 @@ const reverseGeocodeDirect = async (latitude, longitude, forceFresh = false) => 
     return globalReverseGeocodeLastSuccess
   }
 
-  // If another caller is already fetching, wait for it when it's "close enough".
-  // Even if forceFresh is true, if it's currently in flight, it's fresh enough.
-  if (globalReverseGeocodeInFlight) {
+  // If another caller is already fetching nearby coords, wait for it (skip when forceFresh).
+  if (!forceFresh && globalReverseGeocodeInFlight) {
     const inFlightMoved = geoDistanceMeters(
       globalReverseGeocodeLastCoords.latitude,
       globalReverseGeocodeLastCoords.longitude,
@@ -252,86 +251,88 @@ const reverseGeocodeDirect = async (latitude, longitude, forceFresh = false) => 
   globalReverseGeocodeLastCoords = { latitude, longitude }
 
   const run = (async () => {
-    // 1. Try Google Geocoding REST API if the API key is available
-    const googleApiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY
-    if (googleApiKey) {
+    try {
+      // 1. Try Google Geocoding REST API if the API key is available
+      const googleApiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY
+      if (googleApiKey) {
+        try {
+          const controller = new AbortController()
+          const abortTimeout = setTimeout(() => controller.abort(), 4000) // 4s timeout for Google
+
+          const url = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${latitude},${longitude}&key=${googleApiKey}&language=en`
+          const res = await fetch(url, { signal: controller.signal })
+          clearTimeout(abortTimeout)
+
+          if (res.ok) {
+            const data = await res.json()
+            if (data.status === "OK" && data.results && data.results[0]) {
+              const parsed = buildGoogleAddress(data, latitude, longitude)
+              if (parsed && parsed.address && parsed.address.trim() !== "") {
+                globalReverseGeocodeLastSuccess = parsed
+                return parsed
+              }
+            } else {
+              debugWarn("Google Geocoding API returned status:", data.status)
+            }
+          }
+        } catch (googleErr) {
+          debugWarn("Google Geocoding failed, falling back to Nominatim:", googleErr.message)
+        }
+      }
+
+      // 2. Try Nominatim as a fallback for detailed street-level data
       try {
         const controller = new AbortController()
-        const abortTimeout = setTimeout(() => controller.abort(), 4000) // 4s timeout for Google
+        const abortTimeout = setTimeout(() => controller.abort(), 4000) // 4s timeout for Nominatim
 
-        const url = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${latitude},${longitude}&key=${googleApiKey}&language=en`
-        const res = await fetch(url, { signal: controller.signal })
+        const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}`
+        const res = await fetch(url, {
+          signal: controller.signal,
+          headers: {
+            "Accept-Language": "en",
+            "User-Agent": "AppZeto-Food-App"
+          }
+        })
+
         clearTimeout(abortTimeout)
 
         if (res.ok) {
           const data = await res.json()
-          if (data.status === "OK" && data.results && data.results[0]) {
-            const parsed = buildGoogleAddress(data, latitude, longitude)
-            if (parsed && parsed.address && parsed.address.trim() !== "") {
-              globalReverseGeocodeLastSuccess = parsed
-              return parsed
-            }
-          } else {
-            debugWarn("Google Geocoding API returned status:", data.status)
+          const parsed = buildNominatimAddress(data, latitude, longitude)
+          if (parsed && parsed.address && parsed.address.trim() !== "") {
+            globalReverseGeocodeLastSuccess = parsed
+            return parsed
           }
         }
-      } catch (googleErr) {
-        debugWarn("Google Geocoding failed, falling back to Nominatim:", googleErr.message)
+      } catch (nominatimErr) {
+        debugWarn("Nominatim reverse geocode failed, falling back to BigDataCloud:", nominatimErr.message)
       }
-    }
 
-    // 2. Try Nominatim as a fallback for detailed street-level data
-    try {
-      const controller = new AbortController()
-      const abortTimeout = setTimeout(() => controller.abort(), 4000) // 4s timeout for Nominatim
+      // 3. Fallback to BigDataCloud (using new api-bdc.io endpoint)
+      try {
+        const controller = new AbortController()
+        const abortTimeout = setTimeout(() => controller.abort(), 3000) // Faster timeout for fallback
 
-      const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}`
-      const res = await fetch(url, {
-        signal: controller.signal,
-        headers: {
-          "Accept-Language": "en",
-          "User-Agent": "AppZeto-Food-App"
-        }
-      })
+        const res = await fetch(
+          `https://api-bdc.io/data/reverse-geocode-client?latitude=${latitude}&longitude=${longitude}&localityLanguage=en`,
+          { signal: controller.signal }
+        )
 
-      clearTimeout(abortTimeout)
+        clearTimeout(abortTimeout)
 
-      if (res.ok) {
         const data = await res.json()
-        const parsed = buildNominatimAddress(data, latitude, longitude)
-        if (parsed && parsed.address && parsed.address.trim() !== "") {
-          globalReverseGeocodeLastSuccess = parsed
-          return parsed
+        const value = buildBigDataCloudAddress(data, latitude, longitude)
+        globalReverseGeocodeLastSuccess = value
+        return value
+      } catch (bdcErr) {
+        debugError("Fallback BigDataCloud geocoding failed too:", bdcErr.message)
+        const fallback = {
+          city: "Current Location",
+          address: `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`,
+          formattedAddress: `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`,
         }
+        return fallback
       }
-    } catch (nominatimErr) {
-      debugWarn("Nominatim reverse geocode failed, falling back to BigDataCloud:", nominatimErr.message)
-    }
-
-    // 3. Fallback to BigDataCloud (using new api-bdc.io endpoint)
-    try {
-      const controller = new AbortController()
-      const abortTimeout = setTimeout(() => controller.abort(), 3000) // Faster timeout for fallback
-
-      const res = await fetch(
-        `https://api-bdc.io/data/reverse-geocode-client?latitude=${latitude}&longitude=${longitude}&localityLanguage=en`,
-        { signal: controller.signal }
-      )
-
-      clearTimeout(abortTimeout)
-
-      const data = await res.json()
-      const value = buildBigDataCloudAddress(data, latitude, longitude)
-      globalReverseGeocodeLastSuccess = value
-      return value
-    } catch (bdcErr) {
-      debugError("Fallback BigDataCloud geocoding failed too:", bdcErr.message)
-      const fallback = {
-        city: "Current Location",
-        address: `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`,
-        formattedAddress: `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`,
-      }
-      return fallback
     } finally {
       globalReverseGeocodeInFlight = null
     }
