@@ -507,6 +507,69 @@ function getPointLatLng(locationLike) {
   return { lat: Number(lat), lng: Number(lng) };
 }
 
+function validateDeliveryCoordinates(location) {
+  const coords = location?.coordinates;
+  if (!Array.isArray(coords) || coords.length !== 2) {
+    throw new ValidationError("Delivery location coordinates are required");
+  }
+  const [lng, lat] = coords.map(Number);
+  if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
+    throw new ValidationError("Delivery location coordinates must be valid numbers");
+  }
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+    throw new ValidationError("Delivery location coordinates are out of range");
+  }
+}
+
+async function loadSavedUserAddress(userId, addressId) {
+  if (!userId || !addressId || !mongoose.Types.ObjectId.isValid(String(addressId))) {
+    return null;
+  }
+  const user = await FoodUser.findById(userId).select("addresses").lean();
+  if (!user?.addresses?.length) return null;
+  const saved = user.addresses.find((entry) => String(entry?._id) === String(addressId));
+  if (!saved) return null;
+  return normalizeDeliveryAddress(saved);
+}
+
+/**
+ * Resolve delivery coordinates from a trusted saved address when possible.
+ * Client-supplied coordinates are only used for live/current-location orders.
+ */
+async function resolveTrustedDeliveryAddress(userId, dto = {}) {
+  const addressId =
+    dto.deliveryAddressId ||
+    dto.address?._id ||
+    dto.address?.id ||
+    null;
+
+  if (addressId && userId) {
+    const saved = await loadSavedUserAddress(userId, addressId);
+    if (!saved) {
+      throw new ValidationError("Delivery address not found");
+    }
+    const client = normalizeDeliveryAddress(dto.address) || {};
+    return {
+      ...saved,
+      label: client.label || saved.label,
+      street: client.street || saved.street,
+      additionalDetails: client.additionalDetails || saved.additionalDetails,
+      city: client.city || saved.city,
+      state: client.state || saved.state,
+      zipCode: client.zipCode || saved.zipCode,
+      phone: client.phone || saved.phone,
+      location: saved.location,
+    };
+  }
+
+  const normalized = normalizeDeliveryAddress(dto.address);
+  if (!normalized?.location?.coordinates) {
+    throw new ValidationError("Delivery location coordinates are required");
+  }
+  validateDeliveryCoordinates(normalized.location);
+  return normalized;
+}
+
 function roundCurrency(value) {
   const num = Number(value);
   if (!Number.isFinite(num)) return 0;
@@ -2126,9 +2189,13 @@ export async function calculateOrder(userId, dto) {
   const feeSettings = normalizeFoodFeeSettings(feeDoc);
 
   const pickupPoints = buildPickupPointsFromItems(items, sourceMap);
+  const trustedDeliveryAddress =
+    orderType === "food" || orderType === "mixed"
+      ? await resolveTrustedDeliveryAddress(userId, dto)
+      : normalizeDeliveryAddress(dto.address);
   const eligibility =
     orderType === "mixed"
-      ? await evaluateCombinedPickupEligibility(pickupPoints, dto.address)
+      ? await evaluateCombinedPickupEligibility(pickupPoints, trustedDeliveryAddress)
       : {
           eligible: false,
           pickupDistanceKm: null,
@@ -2205,7 +2272,7 @@ export async function calculateOrder(userId, dto) {
   let deliverySponsorType = "USER_FULL";
 
   if (orderType === "food") {
-    const userPoint = getPointLatLng(dto.address?.location);
+    const userPoint = getPointLatLng(trustedDeliveryAddress?.location);
     const restaurantPoint = getPointLatLng(primaryRestaurant?.location);
     const distanceKm =
       userPoint && restaurantPoint
@@ -2525,7 +2592,10 @@ export async function createOrder(userId, dto) {
       : null;
   const dispatchMode = settings?.dispatchMode || "manual";
 
-  const deliveryAddress = normalizeDeliveryAddress(dto.address);
+  const deliveryAddress =
+    orderType === "food" || orderType === "mixed"
+      ? await resolveTrustedDeliveryAddress(userId, dto)
+      : normalizeDeliveryAddress(dto.address);
 
   const paymentMethod =
     dto.paymentMethod === "card" ? "razorpay" : dto.paymentMethod;
@@ -2566,7 +2636,12 @@ export async function createOrder(userId, dto) {
   const { pricing: serverPricing } = await calculateOrder(userId, {
     orderType,
     items: dto.items,
-    address: dto.address,
+    address: deliveryAddress,
+    deliveryAddressId:
+      dto.deliveryAddressId ||
+      dto.address?._id ||
+      dto.address?.id ||
+      undefined,
     restaurantId: dto.restaurantId || primaryRestaurantId || undefined,
     zoneId: dto.zoneId,
     couponCode: couponCodeFromClient,

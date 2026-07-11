@@ -405,6 +405,11 @@ export default function Cart() {
       : selectedAddress || savedAddress || currentLocationAddress || null
   }, [deliveryAddressMode, currentLocationAddress, selectedAddress, savedAddress])
 
+  const resolvedDeliveryAddressId = useMemo(() => {
+    if (deliveryAddressMode === "current") return undefined
+    return getAddressId(defaultAddress) || undefined
+  }, [deliveryAddressMode, defaultAddress])
+
   const hasSavedAddress = Boolean(defaultAddress && formatFullAddress(defaultAddress))
   const recipientName = String(recipientDetails.name || "").trim() || userProfile?.name || "Your Name"
   const recipientPhone = sanitizeRecipientPhone(recipientDetails.phone || "") || userProfile?.phone || ""
@@ -926,6 +931,7 @@ export default function Cart() {
           items,
           restaurantId: resolvedRestaurantId,
           address: defaultAddress,
+          deliveryAddressId: resolvedDeliveryAddressId,
           couponCode: resolvedCouponCode
         })
 
@@ -1335,6 +1341,7 @@ export default function Cart() {
           items,
           restaurantId: restaurantData?.restaurantId || restaurantData?._id || restaurantId || null,
           address: defaultAddress,
+          deliveryAddressId: resolvedDeliveryAddressId,
           couponCode: coupon.code
         })
 
@@ -1385,6 +1392,7 @@ export default function Cart() {
         items,
         restaurantId: restaurantData?.restaurantId || restaurantData?._id || restaurantId || null,
         address: defaultAddress,
+        deliveryAddressId: resolvedDeliveryAddressId,
         couponCode: inputCode
       })
 
@@ -1433,6 +1441,7 @@ export default function Cart() {
           items,
           restaurantId: restaurantData?.restaurantId || restaurantData?._id || restaurantId || null,
           address: defaultAddress,
+          deliveryAddressId: resolvedDeliveryAddressId,
           couponCode: null
         })
 
@@ -1497,6 +1506,7 @@ export default function Cart() {
           items: cart.map(mapOrderItem),
           restaurantId: restaurantData?.restaurantId || restaurantData?._id || restaurantId || undefined,
           address: defaultAddress,
+          deliveryAddressId: resolvedDeliveryAddressId,
           couponCode: appliedCoupon?.code || couponCode || undefined,
         })
         resolvedPricing = pricingResponse?.data?.data?.pricing || null
@@ -1704,6 +1714,7 @@ export default function Cart() {
       const orderPayload = {
         items: orderItems,
         address: normalizedAddress,
+        deliveryAddressId: resolvedDeliveryAddressId,
         customerName: recipientName,
         customerPhone: normalizedAddress?.phone || "",
         restaurantId: finalRestaurantId,

@@ -30,9 +30,16 @@ const addressSchema = z.object({
     location: z
         .object({
             type: z.literal('Point').optional(),
-            coordinates: z.tuple([z.number(), z.number()]).optional()
+            coordinates: z
+                .tuple([
+                    z.number().finite().min(-180).max(180),
+                    z.number().finite().min(-90).max(90),
+                ])
+                .optional()
         })
-        .optional()
+        .optional(),
+    _id: z.string().optional(),
+    id: z.string().optional()
 });
 
 const pricingSchema = z.object({
@@ -125,6 +132,7 @@ export function validateCreateOrderDto(body) {
         customerName: z.string().optional(),
         customerPhone: z.string().optional(),
         pricing: pricingSchema,
+        deliveryAddressId: z.string().optional(),
         deliveryFleet: z.string().optional(),
         note: z.string().optional(),
         sendCutlery: z.boolean().optional(),
