@@ -5,6 +5,7 @@ import { config } from '../../../config/env.js';
 import { getRedisClient } from '../../../config/redis.js';
 import { getCache, setCache, deleteCache } from '../../../utils/cacheManager.js';
 import { clearGlobalBrandingCache } from '../services/globalBranding.service.js';
+import { clearGlobalPaymentSettingsCache } from '../services/globalPaymentSettings.service.js';
 
 const SETTINGS_CACHE_KEY = 'global_settings_public';
 const SETTINGS_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
@@ -41,6 +42,7 @@ export const clearGlobalSettingsCache = async () => {
         await deleteRedisCache(SETTINGS_REDIS_KEY);
     } catch {}
     clearGlobalBrandingCache();
+    clearGlobalPaymentSettingsCache();
 };
 
 const buildSettingsPayload = (settings) => {

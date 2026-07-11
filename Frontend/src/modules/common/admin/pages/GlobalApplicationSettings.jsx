@@ -137,6 +137,8 @@ const GlobalApplicationSettings = () => {
     email: "",
     phoneNumber: "",
     address: "",
+    codEnabled: true,
+    onlineEnabled: true,
   });
 
   const fetchSettings = async () => {
@@ -152,6 +154,8 @@ const GlobalApplicationSettings = () => {
           email: settings.email || "",
           phoneNumber: settings.phone?.number || "",
           address: settings.address || "",
+          codEnabled: settings.codEnabled !== false,
+          onlineEnabled: settings.onlineEnabled !== false,
         });
 
         if (settings.adminLogo?.url) setAdminLogoPreview(settings.adminLogo.url);
@@ -207,6 +211,8 @@ const GlobalApplicationSettings = () => {
         email: formData.email,
         phoneNumber: formData.phoneNumber,
         address: formData.address,
+        codEnabled: formData.codEnabled,
+        onlineEnabled: formData.onlineEnabled,
         sellerLoginBannerUrl: sellerLoginBannerPreview ? undefined : "",
         sellerLoginBannerActive: sellerLoginBannerActive,
         restaurantLoginBannerUrl: restaurantLoginBannerPreview ? undefined : "",
@@ -286,6 +292,38 @@ const GlobalApplicationSettings = () => {
             <InputField label="Support Email" name="email" value={formData.email} onChange={handleChange} placeholder="[EMAIL_ADDRESS]" />
             <InputField label="Support Phone" name="phoneNumber" value={formData.phoneNumber} onChange={handleChange} placeholder="0000000000" />
             <InputField label="Office Address" name="address" value={formData.address} onChange={handleChange} placeholder="Main Street, NY" />
+          </div>
+        </SectionCard>
+
+        <SectionCard title="Payment Options">
+          <p className="text-sm text-gray-500 mb-6">
+            Control which payment methods are available to customers in Food and Quick Commerce checkout.
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <label className="flex items-center gap-3 p-4 rounded-xl border border-gray-200 bg-gray-50/50 cursor-pointer hover:border-indigo-200 transition-colors">
+              <input
+                type="checkbox"
+                checked={formData.codEnabled}
+                onChange={(e) => handleChange('codEnabled', e.target.checked)}
+                className="w-4 h-4 text-indigo-600 border-gray-200 rounded focus:ring-indigo-500 cursor-pointer"
+              />
+              <div>
+                <span className="text-sm font-semibold text-gray-800">Cash on Delivery (COD)</span>
+                <p className="text-xs text-gray-500 mt-0.5">Allow customers to pay with cash at delivery</p>
+              </div>
+            </label>
+            <label className="flex items-center gap-3 p-4 rounded-xl border border-gray-200 bg-gray-50/50 cursor-pointer hover:border-indigo-200 transition-colors">
+              <input
+                type="checkbox"
+                checked={formData.onlineEnabled}
+                onChange={(e) => handleChange('onlineEnabled', e.target.checked)}
+                className="w-4 h-4 text-indigo-600 border-gray-200 rounded focus:ring-indigo-500 cursor-pointer"
+              />
+              <div>
+                <span className="text-sm font-semibold text-gray-800">Online Payment</span>
+                <p className="text-xs text-gray-500 mt-0.5">Allow customers to pay online via Razorpay</p>
+              </div>
+            </label>
           </div>
         </SectionCard>
 

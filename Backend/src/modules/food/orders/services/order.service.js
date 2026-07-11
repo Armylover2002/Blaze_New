@@ -44,6 +44,10 @@ import { getFirebaseDB } from '../../../../config/firebase.js';
 import * as foodTransactionService from './foodTransaction.service.js';
 import { ensureDailyPassEligibility } from "../../subscriptions/services/wallet.service.js";
 import {
+  getGlobalPaymentSettings,
+  assertPaymentMethodAllowed,
+} from '../../../common/services/globalPaymentSettings.service.js';
+import {
   tryAutoAssign,
   processDispatchTimeout,
   listNearbyOnlineDeliveryPartners,
@@ -2527,6 +2531,13 @@ export async function createOrder(userId, dto) {
     dto.paymentMethod === "card" ? "razorpay" : dto.paymentMethod;
   const isCash = paymentMethod === "cash";
   const isWallet = paymentMethod === "wallet";
+
+  const paymentSettings = await getGlobalPaymentSettings();
+  const paymentCheck = assertPaymentMethodAllowed(paymentMethod, paymentSettings);
+  if (!paymentCheck.allowed) {
+    throw new ValidationError(paymentCheck.message);
+  }
+
   const pickupPoints = buildPickupPointsFromItems(items, sourceMap);
   const combinedPickup = await resolveDispatchPlanMeta(
     orderType,

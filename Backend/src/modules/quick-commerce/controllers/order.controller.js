@@ -34,6 +34,10 @@ import { processQuickOrderRefund } from '../services/quickRefund.service.js';
 import { fanOutQuickSellerOrdersForParent } from '../services/quickSellerOrderFanout.service.js';
 import { deductWalletBalance, refundWalletBalance } from '../../food/user/services/userWallet.service.js';
 import {
+    getGlobalPaymentSettings,
+    assertPaymentMethodAllowed,
+} from '../../common/services/globalPaymentSettings.service.js';
+import {
     createRazorpayOrder,
     fetchRazorpayPayment,
     getRazorpayKeyId,
@@ -535,6 +539,15 @@ export const placeOrder = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: 'Please log in to pay with wallet',
+      });
+    }
+
+    const paymentSettings = await getGlobalPaymentSettings();
+    const paymentCheck = assertPaymentMethodAllowed(paymentMode, paymentSettings);
+    if (!paymentCheck.allowed) {
+      return res.status(400).json({
+        success: false,
+        message: paymentCheck.message,
       });
     }
 
