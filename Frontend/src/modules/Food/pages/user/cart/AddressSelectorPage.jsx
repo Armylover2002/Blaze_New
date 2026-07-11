@@ -79,7 +79,7 @@ const buildLocationPayloadFromAddress = (address) => {
   const state = String(address.state || "").trim()
   const zipCode = String(address.zipCode || address.postalCode || "").trim()
   const formattedAddress =
-    String(address.formattedAddress || "").trim() ||
+    String(address.formattedAddress || address.address || "").trim() ||
     [area, street, city, state, zipCode].filter(Boolean).join(", ") ||
     [street, city, state].filter(Boolean).join(", ")
 
@@ -93,7 +93,8 @@ const buildLocationPayloadFromAddress = (address) => {
     state,
     zipCode,
     postalCode: zipCode,
-    address: [street, city].filter(Boolean).join(", ") || formattedAddress,
+    placeId: address.placeId || address.place_id || undefined,
+    address: formattedAddress,
     formattedAddress,
   }
 }
@@ -143,6 +144,8 @@ export default function AddressSelectorPage() {
   const userLocationMarkerRef = useRef(null) // Blue dot marker for user location
   const blueDotCircleRef = useRef(null) // Accuracy circle for Google Maps
   const [currentAddress, setCurrentAddress] = useState("")
+  const [selectedPlaceId, setSelectedPlaceId] = useState("")
+  const [selectedFormattedAddress, setSelectedFormattedAddress] = useState("")
   const [addressAutocompleteValue, setAddressAutocompleteValue] = useState("")
   const [placePredictions, setPlacePredictions] = useState([])
   const [isKeywordSearching, setIsKeywordSearching] = useState(false)
@@ -442,6 +445,8 @@ export default function AddressSelectorPage() {
     setPlacePredictions([])
     setShowPlacePredictions(false)
     setIsKeywordSearching(false)
+    setSelectedPlaceId("")
+    setSelectedFormattedAddress("")
   }
 
   const scrollFieldIntoView = useCallback((fieldName) => {
@@ -499,6 +504,8 @@ export default function AddressSelectorPage() {
       if (parsed) {
         const formatted = parsed.formattedAddress || parsed.address || ""
         setCurrentAddress(prev => prev === formatted ? prev : formatted)
+        setSelectedFormattedAddress(formatted)
+        setSelectedPlaceId("")
         setAddressFormData(prev => {
           if (prev.street === parsed.street && prev.city === parsed.city && prev.state === parsed.state && prev.zipCode === parsed.postalCode) {
             return prev
@@ -559,6 +566,8 @@ export default function AddressSelectorPage() {
       setPlacePredictions([])
       setShowPlacePredictions(false)
       setCurrentAddress(display)
+      setSelectedFormattedAddress(display)
+      setSelectedPlaceId(parsed.placeId || prediction.place_id || "")
       setAddressFormData((prev) => ({
         ...prev,
         street: parsed.area || display.split(",")[0]?.trim() || prev.street,
@@ -622,9 +631,17 @@ export default function AddressSelectorPage() {
     }
     setLoadingAddress(true)
     try {
+      const completeAddress =
+        String(selectedFormattedAddress || currentAddress || "").trim() ||
+        [addressFormData.street, addressFormData.city, addressFormData.state, addressFormData.zipCode]
+          .filter(Boolean)
+          .join(", ")
       const payload = {
         ...addressFormData,
         label: addressFormData.label === "Work" ? "Office" : addressFormData.label,
+        address: completeAddress,
+        formattedAddress: completeAddress,
+        ...(selectedPlaceId ? { placeId: selectedPlaceId } : {}),
         location: { type: "Point", coordinates: [mapPosition[1], mapPosition[0]] },
         latitude: mapPosition[0],
         longitude: mapPosition[1]

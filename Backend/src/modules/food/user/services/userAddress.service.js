@@ -79,7 +79,8 @@ export const normalizeAddressInput = (dto = {}) => {
         city,
         state,
         zipCode,
-        phone: str(dto.phone)
+        phone: str(dto.phone),
+        placeId: str(dto.placeId || dto.place_id)
     };
     const location = resolveGeoPoint(dto);
     if (location) normalized.location = location;
@@ -112,6 +113,7 @@ export const addAddress = async (userId, dto) => {
         existing.state = address.state;
         existing.zipCode = address.zipCode;
         existing.phone = address.phone;
+        if (address.placeId) existing.placeId = address.placeId;
         if (address.location) existing.location = address.location;
         await user.save();
         return { address: existing.toObject() };
@@ -148,6 +150,9 @@ export const updateAddress = async (userId, addressId, dto) => {
         address.zipCode = str(dto.zipCode ?? dto.pincode);
     }
     if (dto.phone !== undefined) address.phone = str(dto.phone);
+    if (dto.placeId !== undefined || dto.place_id !== undefined) {
+        address.placeId = str(dto.placeId ?? dto.place_id);
+    }
     const location = resolveGeoPoint(dto);
     if (location) address.location = location;
 

@@ -2601,6 +2601,7 @@ export const userAPI = {
               "",
             address: formattedAddress || "Select location",
             formattedAddress: formattedAddress || "Select location",
+            placeId: defaultAddress.placeId || defaultAddress.place_id || "",
           },
         },
       },

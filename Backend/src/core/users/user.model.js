@@ -14,6 +14,12 @@ const userAddressSchema = new mongoose.Schema(
             default: '',
             trim: true
         },
+        /** Google Places place_id when address was selected via Places API */
+        placeId: {
+            type: String,
+            default: '',
+            trim: true
+        },
         street: {
             type: String,
             required: true,
