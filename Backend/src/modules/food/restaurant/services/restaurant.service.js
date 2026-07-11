@@ -20,6 +20,16 @@ import {
     splitReviewableUpdate,
     mergePendingProfileChanges,
 } from '../../shared/pendingProfileChanges.js';
+import {
+    buildActivePublicOfferFilter,
+    buildActiveRestaurantCouponFilter,
+    isCouponFirstTimeEligible,
+    isCouponPerUserAvailable,
+    isCouponWithinDateWindow,
+    isCouponUsageAvailable,
+    resolveRestaurantObjectId,
+    getCouponCartEligibility,
+} from '../../shared/coupon.util.js';
 
 const DUPLICATE_OWNER_PHONE_MESSAGE =
     'This phone number is already registered with another restaurant.';
@@ -2591,21 +2601,53 @@ export const getApprovedRestaurantByIdOrSlug = async (idOrSlug) => {
 };
 
 export const listPublicOffers = async (query = {}) => {
+    const { subtotal, restaurantId, userId } = query;
     const now = new Date();
-    const filter = {
-        status: 'active',
-        $and: [
-            { $or: [{ startDate: { $exists: false } }, { startDate: null }, { startDate: { $lte: now } }] },
-            { $or: [{ endDate: { $exists: false } }, { endDate: null }, { endDate: { $gt: now } }] }
-        ]
-    };
+    const numericSubtotal = subtotal !== undefined && subtotal !== null && subtotal !== ''
+        ? Number(subtotal)
+        : null;
+
+    const resolvedRestaurantObjectId = restaurantId
+        ? await resolveRestaurantObjectId(restaurantId)
+        : null;
+
+    const filter = buildActivePublicOfferFilter(now);
+
+    if (resolvedRestaurantObjectId) {
+        filter.$and.push({
+            $or: [
+                { restaurantScope: 'all' },
+                {
+                    $and: [
+                        { restaurantScope: 'selected' },
+                        { restaurantId: resolvedRestaurantObjectId },
+                    ],
+                },
+            ],
+        });
+    }
 
     const list = await FoodOffer.find(filter)
         .sort({ createdAt: -1 })
-        .populate({ path: 'restaurantId', select: 'restaurantName restaurantNameNormalized profileImage estimatedDeliveryTime rating' })
+        .populate({ path: 'restaurantId', select: 'restaurantName restaurantNameNormalized profileImage estimatedDeliveryTime rating restaurantId' })
         .lean();
 
-    const allOffers = list.map((o) => {
+    const { FoodOfferUsage } = await import('../../admin/models/offerUsage.model.js');
+
+    const adminOffers = [];
+    for (const o of list) {
+        if (!isCouponWithinDateWindow(o, now) || !isCouponUsageAvailable(o)) continue;
+
+        const { minOrderValue, meetsMinOrder, amountToUnlock, estimatedDiscount } =
+            getCouponCartEligibility(o, numericSubtotal);
+
+        if (userId) {
+            const firstOk = await isCouponFirstTimeEligible(o, userId, resolvedRestaurantObjectId);
+            if (!firstOk) continue;
+            const perUserOk = await isCouponPerUserAvailable(o, userId, FoodOfferUsage, 'offerId');
+            if (!perUserOk) continue;
+        }
+
         const restaurant = o.restaurantId && typeof o.restaurantId === 'object' ? o.restaurantId : null;
         const restaurantSlug = restaurant?.restaurantNameNormalized || undefined;
         const restaurantName =
@@ -2618,7 +2660,7 @@ export const listPublicOffers = async (query = {}) => {
                 ? `${Number(o.discountValue) || 0}% OFF`
                 : `Flat ₹${Number(o.discountValue) || 0} OFF`;
 
-        return {
+        adminOffers.push({
             id: String(o._id),
             offerId: String(o._id),
             couponCode: o.couponCode,
@@ -2626,83 +2668,100 @@ export const listPublicOffers = async (query = {}) => {
             discountType: o.discountType,
             discountValue: o.discountValue,
             maxDiscount: o.maxDiscount ?? null,
-            customerScope: o.customerScope,
+            customerScope: o.customerScope || 'all',
             restaurantScope: o.restaurantScope,
-            restaurantId: restaurant?._id ? String(restaurant._id) : (o.restaurantScope === 'selected' ? String(o.restaurantId) : null),
+            restaurantId: restaurant?.restaurantId || (restaurant?._id ? String(restaurant._id) : (o.restaurantScope === 'selected' ? String(o.restaurantId) : null)),
             restaurantName,
             restaurantSlug,
             restaurantImage: restaurant?.profileImage || null,
             deliveryTime: restaurant?.estimatedDeliveryTime || null,
             restaurantRating: typeof restaurant?.rating === 'number' ? restaurant.rating : 0,
+            startDate: o.startDate || null,
             endDate: o.endDate || null,
             showInCart: o.showInCart !== false,
-            minOrderValue: o.minOrderValue ?? 0
-        };
-    });
+            minOrderValue,
+            perUserLimit: o.perUserLimit ?? null,
+            usageLimit: o.usageLimit ?? null,
+            usedCount: o.usedCount ?? 0,
+            isFirstOrderOnly: Boolean(o.isFirstOrderOnly),
+            couponSource: 'admin',
+            meetsMinOrder,
+            amountToUnlock,
+            estimatedDiscount: estimatedDiscount || null,
+        });
+    }
 
-    // Also fetch approved, active, and non-expired restaurant-specific coupons
     let restaurantCouponsMapped = [];
     try {
         const { RestaurantCoupon } = await import('../../admin/models/restaurantCoupon.model.js');
-        const couponFilter = {
-            status: 'Approved',
-            expiryDate: { $gt: now }
-        };
+        const { RestaurantCouponUsage } = await import('../../admin/models/restaurantCouponUsage.model.js');
+        const couponFilter = buildActiveRestaurantCouponFilter(now);
 
-        if (query?.restaurantId) {
-            const rIdStr = String(query.restaurantId).trim();
-            if (mongoose.Types.ObjectId.isValid(rIdStr)) {
-                couponFilter.restaurantId = new mongoose.Types.ObjectId(rIdStr);
-            } else {
-                const rest = await FoodRestaurant.findOne({ restaurantId: rIdStr }).select('_id').lean();
-                if (rest) {
-                    couponFilter.restaurantId = rest._id;
-                } else {
-                    couponFilter.restaurantId = new mongoose.Types.ObjectId(); // force empty results
-                }
-            }
+        if (resolvedRestaurantObjectId) {
+            couponFilter.restaurantId = resolvedRestaurantObjectId;
+        } else if (query?.restaurantId) {
+            couponFilter.restaurantId = new mongoose.Types.ObjectId();
         }
 
         const dbCoupons = await RestaurantCoupon.find(couponFilter).sort({ createdAt: -1 }).lean();
+        const restIds = [...new Set(dbCoupons.map((c) => String(c.restaurantId)))];
+        const restDocs = await FoodRestaurant.find({ _id: { $in: restIds } }).select('_id restaurantId restaurantNameNormalized profileImage estimatedDeliveryTime rating').lean();
+        const restMap = new Map(restDocs.map((r) => [String(r._id), r]));
 
-        // Resolve custom restaurantIds for mapped objects so frontend comparisons match
-        const restIds = [...new Set(dbCoupons.map(c => String(c.restaurantId)))];
-        const restDocs = await FoodRestaurant.find({ _id: { $in: restIds } }).select('_id restaurantId').lean();
-        const customIdMap = new Map(restDocs.map(r => [String(r._id), r.restaurantId]));
+        for (const c of dbCoupons) {
+            if (c.showInCart === false) continue;
+            if (!isCouponWithinDateWindow(c, now) || !isCouponUsageAvailable(c)) continue;
 
-        restaurantCouponsMapped = dbCoupons.map((c) => {
+            const { minOrderValue, meetsMinOrder, amountToUnlock, estimatedDiscount } =
+                getCouponCartEligibility(c, numericSubtotal);
+
+            if (userId) {
+                const firstOk = await isCouponFirstTimeEligible(c, userId, resolvedRestaurantObjectId);
+                if (!firstOk) continue;
+                const perUserOk = await isCouponPerUserAvailable(c, userId, RestaurantCouponUsage, 'couponId');
+                if (!perUserOk) continue;
+            }
+
+            const rest = restMap.get(String(c.restaurantId));
             const title = c.discountType === 'percentage'
                 ? `${Number(c.discountValue) || 0}% OFF`
                 : `Flat ₹${Number(c.discountValue) || 0} OFF`;
 
-            return {
+            restaurantCouponsMapped.push({
                 id: String(c._id),
                 offerId: String(c._id),
                 couponCode: c.couponCode,
                 title,
-                discountType: c.discountType,
+                discountType: c.discountType === 'fixed' ? 'flat-price' : c.discountType,
                 discountValue: c.discountValue,
-                maxDiscount: null,
-                customerScope: 'all',
+                maxDiscount: c.maxDiscount ?? null,
+                customerScope: c.customerScope || 'all',
                 restaurantScope: 'selected',
-                restaurantId: customIdMap.get(String(c.restaurantId)) || String(c.restaurantId),
-                restaurantName: c.restaurantName || 'Selected Restaurant',
-                restaurantSlug: undefined,
-                restaurantImage: null,
-                deliveryTime: null,
-                restaurantRating: 0,
-                endDate: c.expiryDate || null,
-                showInCart: true,
-                minOrderValue: c.minOrderAmount ?? 0,
+                restaurantId: rest?.restaurantId || String(c.restaurantId),
+                restaurantName: c.restaurantName || rest?.restaurantName || 'Selected Restaurant',
+                restaurantSlug: rest?.restaurantNameNormalized || undefined,
+                restaurantImage: rest?.profileImage || null,
+                deliveryTime: rest?.estimatedDeliveryTime || null,
+                restaurantRating: typeof rest?.rating === 'number' ? rest.rating : 0,
+                startDate: c.startDate || null,
+                endDate: c.endDate || c.expiryDate || null,
+                showInCart: c.showInCart !== false,
+                minOrderValue,
+                perUserLimit: c.perUserLimit ?? null,
                 usageLimit: c.usageLimit ?? null,
-                usedCount: c.usedCount ?? 0
-            };
-        });
+                usedCount: c.usedCount ?? 0,
+                isFirstOrderOnly: Boolean(c.isFirstOrderOnly),
+                couponSource: 'restaurant',
+                meetsMinOrder,
+                amountToUnlock,
+                estimatedDiscount: estimatedDiscount || null,
+            });
+        }
     } catch (err) {
-        console.error("Error fetching restaurant coupons in listPublicOffers:", err);
+        console.error('Error fetching restaurant coupons in listPublicOffers:', err);
     }
 
-    return { allOffers: [...allOffers, ...restaurantCouponsMapped], groupedByOffer: {} };
+    return { allOffers: [...adminOffers, ...restaurantCouponsMapped], groupedByOffer: {} };
 };
 
 /**

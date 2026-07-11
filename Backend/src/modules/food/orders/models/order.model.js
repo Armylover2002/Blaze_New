@@ -109,8 +109,10 @@ const pricingSchema = new mongoose.Schema(
         couponCode: { type: String, default: null, trim: true },
         appliedCoupon: {
             code: { type: String, default: null, trim: true },
-            discount: { type: Number, default: 0, min: 0 }
+            discount: { type: Number, default: 0, min: 0 },
+            source: { type: String, enum: ['admin', 'restaurant'], default: null }
         },
+        couponUsageConsumed: { type: Boolean, default: false },
         referralDiscount: { type: Number, default: 0, min: 0 },
         restaurantCommissionPercentage: { type: Number, default: 0, min: 0 },
         restaurantCommission: { type: Number, default: 0, min: 0 },

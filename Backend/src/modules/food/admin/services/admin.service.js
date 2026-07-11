@@ -2033,34 +2033,24 @@ export async function toggleDeliveryCommissionRuleStatus(id, status) {
 }
 
 // ----- Fee Settings (admin) -----
-function stripLegacyFoodFeeSettingsFields(doc) {
-    if (!doc || typeof doc !== 'object') return doc || null;
-    const next = { ...doc };
-    delete next.deliveryFeeRanges;
-    delete next.freeDeliveryThreshold;
-    return next;
-}
-
 export async function getFeeSettings() {
     const doc = await FoodFeeSettings.findOne({ isActive: true }).sort({ createdAt: -1 }).lean();
-    if (doc?._id && ('deliveryFeeRanges' in doc || 'freeDeliveryThreshold' in doc)) {
-        await FoodFeeSettings.findByIdAndUpdate(doc._id, {
-            $unset: {
-                deliveryFeeRanges: 1,
-                freeDeliveryThreshold: 1
-            }
-        });
-    }
-    // If not configured yet, return null so UI does not show defaults automatically.
-    return { feeSettings: stripLegacyFoodFeeSettingsFields(doc) || null };
+    return { feeSettings: doc || null };
 }
 
 export async function upsertFeeSettings(body) {
-    // Single active doc pattern: keep only one active record.
     const existing = await FoodFeeSettings.findOne({ isActive: true }).sort({ createdAt: -1 });
     if (existing) {
         const $set = {};
         const $unset = {};
+
+        if (body.deliveryFee === null) {
+            $unset.deliveryFee = 1;
+            $unset.baseDeliveryFee = 1;
+        } else if (body.deliveryFee !== undefined) {
+            $set.deliveryFee = body.deliveryFee;
+            $set.baseDeliveryFee = body.deliveryFee;
+        }
 
         if (body.baseDistanceKm === null) $unset.baseDistanceKm = 1;
         else if (body.baseDistanceKm !== undefined) $set.baseDistanceKm = body.baseDistanceKm;
@@ -2076,11 +2066,10 @@ export async function upsertFeeSettings(body) {
         if (body.perKmCharge === null) $unset.perKmCharge = 1;
         else if (body.perKmCharge !== undefined) $set.perKmCharge = body.perKmCharge;
 
+        if (body.deliveryFeeRanges !== undefined) $set.deliveryFeeRanges = body.deliveryFeeRanges;
+
         if (body.sponsorRules !== undefined) $set.sponsorRules = body.sponsorRules;
-        if (body.deliveryDistanceSlabs !== undefined) {
-            $set.deliveryDistanceSlabs = body.deliveryDistanceSlabs;
-            $set.sponsorRules = []; // Clear sponsorRules to ensure distance-based slabs are authoritative
-        }
+        if (body.deliveryDistanceSlabs !== undefined) $set.deliveryDistanceSlabs = body.deliveryDistanceSlabs;
 
         if (body.platformFee === null) $unset.platformFee = 1;
         else if (body.platformFee !== undefined) $set.platformFee = body.platformFee;
@@ -2092,31 +2081,23 @@ export async function upsertFeeSettings(body) {
 
         if (body.isActive !== undefined) $set.isActive = body.isActive;
 
-        // Remove legacy subtotal-range fields when the new delivery model is saved.
-        if (
-            body.baseDistanceKm !== undefined ||
-            body.baseDeliveryFee !== undefined ||
-            body.perKmCharge !== undefined ||
-            body.sponsorRules !== undefined
-        ) {
-            $unset.deliveryFeeRanges = 1;
-            $unset.freeDeliveryThreshold = 1;
-        }
-
         const update = {};
         if (Object.keys($set).length) update.$set = $set;
         if (Object.keys($unset).length) update.$unset = $unset;
-        if (!Object.keys(update).length) {
-            return stripLegacyFoodFeeSettingsFields(existing.toObject());
-        }
+        if (!Object.keys(update).length) return existing.toObject();
 
         const updated = await FoodFeeSettings.findByIdAndUpdate(existing._id, update, { new: true }).lean();
-        return stripLegacyFoodFeeSettingsFields(updated);
+        return updated;
     }
 
     const payload = {
+        deliveryFeeRanges: body.deliveryFeeRanges ?? [],
         isActive: body.isActive !== false
     };
+    if (body.deliveryFee !== undefined && body.deliveryFee !== null) {
+        payload.deliveryFee = body.deliveryFee;
+        payload.baseDeliveryFee = body.deliveryFee;
+    }
     if (body.baseDistanceKm !== undefined && body.baseDistanceKm !== null) payload.baseDistanceKm = body.baseDistanceKm;
     if (body.baseDeliveryFee !== undefined && body.baseDeliveryFee !== null) {
         payload.baseDeliveryFee = body.baseDeliveryFee;
@@ -2124,17 +2105,14 @@ export async function upsertFeeSettings(body) {
     }
     if (body.perKmCharge !== undefined && body.perKmCharge !== null) payload.perKmCharge = body.perKmCharge;
     if (body.sponsorRules !== undefined) payload.sponsorRules = body.sponsorRules ?? [];
-    if (body.deliveryDistanceSlabs !== undefined) {
-        payload.deliveryDistanceSlabs = body.deliveryDistanceSlabs ?? [];
-        payload.sponsorRules = []; // Clear sponsorRules on new doc creation
-    }
+    if (body.deliveryDistanceSlabs !== undefined) payload.deliveryDistanceSlabs = body.deliveryDistanceSlabs ?? [];
     if (body.platformFee !== undefined && body.platformFee !== null) payload.platformFee = body.platformFee;
     if (body.gstRate !== undefined && body.gstRate !== null) payload.gstRate = body.gstRate;
     if (body.mixedOrderDistanceLimit !== undefined) payload.mixedOrderDistanceLimit = body.mixedOrderDistanceLimit;
     if (body.mixedOrderAngleLimit !== undefined) payload.mixedOrderAngleLimit = body.mixedOrderAngleLimit;
 
     const created = await FoodFeeSettings.create(payload);
-    return stripLegacyFoodFeeSettingsFields(created.toObject());
+    return created.toObject();
 }
 
 // ----- Referral Settings (admin) -----
@@ -4226,19 +4204,24 @@ export async function getAllOffers(_query = {}) {
             dishName: 'All Items',
             couponCode: o.couponCode,
             customerGroup: o.customerScope === 'first-time' ? 'new' : 'all',
+            customerScope: o.customerScope || 'all',
             discountType: o.discountType,
+            discountValue: Number(o.discountValue) || 0,
             discountPercentage,
             originalPrice,
             discountedPrice,
             status,
             showInCart: o.showInCart !== false,
+            startDate: o.startDate || null,
             endDate: o.endDate || null,
-            // Additional info for admin UI (backward compatible)
             minOrderValue: o.minOrderValue ?? 0,
             maxDiscount: o.maxDiscount ?? null,
             usageLimit: o.usageLimit ?? null,
+            perUserLimit: o.perUserLimit ?? null,
             usedCount: o.usedCount ?? 0,
-            restaurantScope: o.restaurantScope
+            isFirstOrderOnly: Boolean(o.isFirstOrderOnly),
+            restaurantScope: o.restaurantScope,
+            createdByRole: o.createdByRole || 'ADMIN',
         };
     });
 
@@ -4266,7 +4249,10 @@ export async function createAdminOffer(body) {
         isFirstOrderOnly: body.isFirstOrderOnly ?? false,
         endDate: body.endDate,
         status: body.endDate && new Date(body.endDate).getTime() <= Date.now() ? 'inactive' : 'active',
-        showInCart: true
+        showInCart: true,
+        createdByRole: 'ADMIN',
+        adminBearPercentage: 100,
+        restaurantBearPercentage: 0
     });
 
     if (doc.restaurantScope === 'selected' && doc.restaurantId) {
@@ -6090,7 +6076,21 @@ export async function getRestaurantCoupons() {
         SellerCoupon.find({}).lean()
     ]);
 
-    const mappedRestaurants = restaurantCoupons.map(c => ({ ...c, type: 'restaurant' }));
+    const mappedRestaurants = restaurantCoupons.map((c) => ({
+        ...c,
+        type: 'restaurant',
+        minOrderValue: c.minOrderValue ?? c.minOrderAmount ?? 0,
+        minOrderAmount: c.minOrderValue ?? c.minOrderAmount ?? 0,
+        endDate: c.endDate ?? c.expiryDate ?? null,
+        expiryDate: c.endDate ?? c.expiryDate ?? null,
+        discountType: c.discountType === 'fixed' ? 'flat-price' : c.discountType,
+        customerScope: c.customerScope || 'all',
+        usedCount: c.usedCount ?? 0,
+        usageLimit: c.usageLimit ?? null,
+        perUserLimit: c.perUserLimit ?? null,
+        maxDiscount: c.maxDiscount ?? null,
+        startDate: c.startDate ?? null,
+    }));
     const mappedSellers = sellerCoupons.map(c => ({ ...c, type: 'seller' }));
 
     return [...mappedRestaurants, ...mappedSellers].sort((a, b) => {

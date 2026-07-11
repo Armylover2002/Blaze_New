@@ -24,6 +24,17 @@ const deliveryDistanceSlabSchema = new mongoose.Schema(
     { _id: false }
 );
 
+const deliveryFeeRangeSchema = new mongoose.Schema(
+    {
+        min: { type: Number, required: true, min: 0 },
+        max: { type: Number, required: true, min: 0 },
+        fee: { type: Number, required: true, min: 0 },
+        deliveryBoyPerKm: { type: Number, min: 0, default: 0 },
+        deliveryBoyBasePay: { type: Number, min: 0, default: 0 }
+    },
+    { _id: false }
+);
+
 const feeSettingsSchema = new mongoose.Schema(
     {
         // Legacy alias kept so quick/mixed flows that still read `deliveryFee`
@@ -34,6 +45,7 @@ const feeSettingsSchema = new mongoose.Schema(
         perKmCharge: { type: Number, min: 0 },
         sponsorRules: { type: [deliverySponsorRuleSchema], default: [] },
         deliveryDistanceSlabs: { type: [deliveryDistanceSlabSchema], default: [] },
+        deliveryFeeRanges: { type: [deliveryFeeRangeSchema], default: [] },
         platformFee: { type: Number, min: 0 },
         gstRate: { type: Number, min: 0, max: 100 },
         mixedOrderDistanceLimit: { type: Number, min: 0, default: 2 },
