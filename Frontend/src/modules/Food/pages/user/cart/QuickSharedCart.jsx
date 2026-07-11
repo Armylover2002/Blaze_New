@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useLocation } from "react-router-dom";
 import { ArrowLeft, CreditCard, MapPin, Minus, Plus, ShoppingBag, Wallet } from "lucide-react";
 import { toast } from "sonner";
 
@@ -92,6 +92,15 @@ const mapCartItemsToPayload = (cart) =>
 
 export default function QuickSharedCart({ initialAddress = null, addressMode = "saved" }) {
   const navigate = useNavigate();
+  const routerLocation = useLocation();
+  const addressSelectorState = {
+    from:
+      `${routerLocation.pathname || ""}${routerLocation.search || ""}${routerLocation.hash || ""}` ||
+      "/cart",
+    backTo:
+      `${routerLocation.pathname || ""}${routerLocation.search || ""}${routerLocation.hash || ""}` ||
+      "/cart",
+  };
   const { cart, updateQuantity, clearCart } = useCart();
   const { addresses = [], getDefaultAddress, userProfile } = useProfile();
   const companyName = useCompanyName();
@@ -201,7 +210,7 @@ export default function QuickSharedCart({ initialAddress = null, addressMode = "
 
     if (!selectedAddress) {
       toast.error("Please select a delivery address first");
-      navigate("/food/user/cart/address-selector");
+      navigate("/cart/address-selector", { state: addressSelectorState });
       return;
     }
 
@@ -454,7 +463,7 @@ export default function QuickSharedCart({ initialAddress = null, addressMode = "
               </div>
               <button
                 type="button"
-                onClick={() => navigate("/food/user/cart/address-selector")}
+                onClick={() => navigate("/cart/address-selector", { state: addressSelectorState })}
                 className="mt-4 text-sm font-bold text-emerald-700"
               >
                 {selectedAddress ? "Change address" : "Select address"}

@@ -85,7 +85,7 @@ function LocationSelectorProvider({ children }) {
 
   const openLocationSelector = () => {
     const currentPath = `${location.pathname || ""}${location.search || ""}${location.hash || ""}` || "/food/user"
-    navigate("/food/user/address-selector", {
+    navigate("/cart/address-selector", {
       state: {
         from: currentPath,
         backTo: currentPath,

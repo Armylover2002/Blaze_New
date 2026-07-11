@@ -116,7 +116,7 @@ const resolveBackPath = ({ pathname, search, state }) => {
     normalizedPath === "/user/cart/select-address" ||
     normalizedPath === "/user/cart/address-selector"
   ) {
-    return "/cart"
+    return explicitBackPath || state?.from || state?.backTo || "/cart"
   }
 
   if (normalizedPath === "/user/address-selector") {

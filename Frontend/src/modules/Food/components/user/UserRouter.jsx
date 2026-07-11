@@ -4,6 +4,11 @@ import { Suspense, lazy } from "react"
 import Loader from "@food/components/Loader"
 import ProtectedRoute from "@food/components/ProtectedRoute"
 
+function RedirectWithState({ to }) {
+  const location = useLocation()
+  return <Navigate to={to} replace state={location.state} />
+}
+
 // Lazy Loading Pages
 
 // Home & Discovery
@@ -124,8 +129,8 @@ export default function UserRouter() {
           <Route path="cart" element={<Navigate to="/cart" replace />} />
           <Route path="cart/checkout" element={<Navigate to="/cart/checkout" replace />} />
           <Route path="cart/select-address" element={<Navigate to="/cart/select-address" replace />} />
-          <Route path="address-selector" element={<Navigate to="/cart/address-selector" replace />} />
-          <Route path="cart/address-selector" element={<Navigate to="/cart/address-selector" replace />} />
+          <Route path="address-selector" element={<RedirectWithState to="/cart/address-selector" />} />
+          <Route path="cart/address-selector" element={<RedirectWithState to="/cart/address-selector" />} />
 
           {/* Orders - Protected (require user auth) */}
           <Route

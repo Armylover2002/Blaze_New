@@ -1,5 +1,5 @@
 import { useMemo, useState, useEffect, useRef, useCallback } from "react"
-import { useNavigate } from "react-router-dom"
+import { useNavigate, useLocation as useRouterLocation } from "react-router-dom"
 import { ChevronLeft, ChevronRight, Plus, MapPin, MoreHorizontal, Navigation, Home, Building2, Briefcase, Phone, X, Crosshair, Search, Trash2 } from "lucide-react"
 import { Button } from "@food/components/ui/button"
 import { Input } from "@food/components/ui/input"
@@ -114,8 +114,13 @@ const persistSelectedLocation = (locationData) => {
 
 export default function AddressSelectorPage() {
   const navigate = useNavigate()
+  const routerLocation = useRouterLocation()
+  const returnPath =
+    routerLocation?.state?.from ||
+    routerLocation?.state?.backTo ||
+    "/food/user"
   const goBack = useAppBackNavigation()
-  const { location, loading, requestLocation, reverseGeocode } = useGeoLocation()
+  const { location: geoLocation, loading, requestLocation, reverseGeocode } = useGeoLocation()
   const { addresses = [], addAddress, updateAddress, setDefaultAddress, deleteAddress, userProfile } = useProfile()
   const [addressToDelete, setAddressToDelete] = useState(null)
   const [isDeleting, setIsDeleting] = useState(false)
@@ -158,28 +163,28 @@ export default function AddressSelectorPage() {
   
   // Sync currentAddress and mapPosition with the useLocation hook's location address on load/update
   useEffect(() => {
-    if (location && (location.formattedAddress || location.address)) {
-      const addrText = location.formattedAddress || location.address || ""
+    if (geoLocation && (geoLocation.formattedAddress || geoLocation.address)) {
+      const addrText = geoLocation.formattedAddress || geoLocation.address || ""
       setCurrentAddress(addrText)
-      
-      if (!hasInitializedRef.current && location.latitude && location.longitude) {
+
+      if (!hasInitializedRef.current && geoLocation.latitude && geoLocation.longitude) {
         hasInitializedRef.current = true
-        setMapPosition([location.latitude, location.longitude])
+        setMapPosition([geoLocation.latitude, geoLocation.longitude])
         
         // Sync addressFormData on initial load/first set if form values are empty
         setAddressFormData(prev => {
           if (prev.street || prev.city) return prev
           return {
             ...prev,
-            street: location.street || location.area || "",
-            city: location.city || "",
-            state: location.state || "",
-            zipCode: location.postalCode || location.zipCode || "",
+            street: geoLocation.street || geoLocation.area || "",
+            city: geoLocation.city || "",
+            state: geoLocation.state || "",
+            zipCode: geoLocation.postalCode || geoLocation.zipCode || "",
           }
         })
       }
     }
-  }, [location])
+  }, [geoLocation])
 
   const ENABLE_LOCATION_REVERSE_GEOCODE = import.meta.env.VITE_ENABLE_LOCATION_REVERSE_GEOCODE !== "false"
   const getAddressId = (address) => address?.id || address?._id || null
@@ -400,7 +405,7 @@ export default function AddressSelectorPage() {
           toast.success("Location updated", { id: "geo" })
           // Redirect if they are on the main selection page
           setTimeout(() => {
-            navigate("/food/user")
+            navigate(returnPath, { replace: true })
           }, 800)
         }
       } else {
@@ -420,7 +425,7 @@ export default function AddressSelectorPage() {
       toast.success("Address selected")
       
       // Use "from" state if available, otherwise default to home page
-      const from = location?.state?.from || "/food/user"
+      const from = returnPath
       setTimeout(() => {
         navigate(from, { replace: true })
       }, 500)
@@ -637,7 +642,7 @@ export default function AddressSelectorPage() {
         setShowPlacePredictions(false)
         
         // Use "from" state if available, otherwise default to home page
-        const from = location?.state?.from || "/food/user"
+        const from = returnPath
         setTimeout(() => {
           navigate(from, { replace: true })
         }, 500)
