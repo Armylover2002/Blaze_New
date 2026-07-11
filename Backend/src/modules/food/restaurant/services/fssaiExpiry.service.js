@@ -1,6 +1,9 @@
+import mongoose from 'mongoose';
 import { FoodRestaurant } from '../models/restaurant.model.js';
 import { FoodNotification } from '../../../../core/notifications/models/notification.model.js';
 import { notifyOwnerSafely, notifyAdminsSafely } from '../../../../core/notifications/firebase.service.js';
+import { computeNotificationExpiresAt } from '../../../../core/notifications/utils/notificationTtl.js';
+import { bulkWriteInChunks } from '../../../../core/notifications/utils/bulkWriteChunks.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -83,43 +86,82 @@ export const listExpiredFssaiRestaurants = async () => {
 
 export const syncExpiredFssaiNotifications = async () => {
     const restaurants = await listExpiredFssaiRestaurants();
-    let createdCount = 0;
 
+    const candidates = [];
     for (const summary of restaurants) {
         const expiryIso = summary.fssaiExpiry;
         const restaurantId = summary.restaurantId;
-        if (!restaurantId || !expiryIso) continue;
+        if (!restaurantId || !expiryIso || !mongoose.Types.ObjectId.isValid(restaurantId)) {
+            continue;
+        }
 
-        const payload = buildRestaurantNotificationPayload({
-            _id: restaurantId,
-            restaurantName: summary.restaurantName,
-            ownerName: summary.ownerName,
-            ownerPhone: summary.ownerPhone,
-            fssaiNumber: summary.fssaiNumber,
-            fssaiExpiry: expiryIso
+        candidates.push({
+            summary,
+            restaurantId,
+            expiryIso,
+            payload: buildRestaurantNotificationPayload({
+                _id: restaurantId,
+                restaurantName: summary.restaurantName,
+                ownerName: summary.ownerName,
+                ownerPhone: summary.ownerPhone,
+                fssaiNumber: summary.fssaiNumber,
+                fssaiExpiry: expiryIso
+            })
         });
+    }
 
-        const existing = await FoodNotification.findOne({
-            ownerType: 'RESTAURANT',
-            ownerId: restaurantId,
-            source: 'FSSAI_EXPIRY',
-            'metadata.expiryDate': expiryIso
-        })
-            .select('_id')
-            .lean();
+    if (!candidates.length) {
+        return {
+            totalExpired: restaurants.length,
+            createdCount: 0
+        };
+    }
 
-        if (existing) continue;
+    const now = new Date();
+    const expiresAt = computeNotificationExpiresAt(now);
 
-        await FoodNotification.create({
-            ownerType: 'RESTAURANT',
-            ownerId: restaurantId,
-            title: payload.title,
-            message: payload.message,
-            link: payload.link,
-            category: payload.category,
-            source: payload.source,
-            metadata: payload.metadata
-        });
+    // Atomic upsert: create once per restaurant + expiryDate (same dedupe as former findOne + create).
+    const operations = candidates.map(({ restaurantId, expiryIso, payload }) => ({
+        updateOne: {
+            filter: {
+                ownerType: 'RESTAURANT',
+                ownerId: new mongoose.Types.ObjectId(restaurantId),
+                source: 'FSSAI_EXPIRY',
+                'metadata.expiryDate': expiryIso
+            },
+            update: {
+                $setOnInsert: {
+                    ownerType: 'RESTAURANT',
+                    ownerId: new mongoose.Types.ObjectId(restaurantId),
+                    title: payload.title,
+                    message: payload.message,
+                    link: payload.link,
+                    category: payload.category,
+                    source: payload.source,
+                    metadata: payload.metadata,
+                    isRead: false,
+                    readAt: null,
+                    dismissedAt: null,
+                    createdAt: now,
+                    updatedAt: now,
+                    expiresAt
+                }
+            },
+            upsert: true
+        }
+    }));
+
+    const writeResult = await bulkWriteInChunks(FoodNotification.collection, operations, {
+        ordered: false
+    });
+    const upsertedIds = writeResult?.upsertedIds || {};
+    const newlyCreated = Object.keys(upsertedIds)
+        .map((index) => candidates[Number(index)])
+        .filter(Boolean);
+
+    // Push/admin alerts only for newly inserted inbox rows (unchanged business behavior).
+    for (const item of newlyCreated) {
+        const { summary, restaurantId, expiryIso, payload } = item;
 
         await notifyOwnerSafely(
             { ownerType: 'RESTAURANT', ownerId: restaurantId },
@@ -145,12 +187,10 @@ export const syncExpiredFssaiNotifications = async () => {
                 fssaiNumber: summary.fssaiNumber || ''
             }
         });
-
-        createdCount += 1;
     }
 
     return {
         totalExpired: restaurants.length,
-        createdCount
+        createdCount: newlyCreated.length
     };
 };

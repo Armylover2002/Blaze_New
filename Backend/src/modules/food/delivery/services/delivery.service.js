@@ -28,6 +28,14 @@ import {
     uploadSignupVehicleDocuments,
     mergeVehicleDocumentUploads,
 } from '../utils/deliveryPartnerUpload.helper.js';
+import {
+    createOnboardingSubmission,
+    ensureLegacySubmission,
+    getLatestSubmissionForPartner,
+    getLastRejectedSubmission,
+    syncLegacyVehicleFieldsFromDriverVehicles,
+} from './deliveryPartnerSubmission.service.js';
+import { FoodDeliveryPartnerSubmission } from '../models/deliveryPartnerSubmission.model.js';
 
 export const validateUniqueDocuments = async (payload, excludeUserId = null) => {
     const { drivingLicenseNumber, panNumber, aadharNumber } = payload;
@@ -44,8 +52,8 @@ export const validateUniqueDocuments = async (payload, excludeUserId = null) => 
     if (orConditions.length === 0) return { isValid: true, errors: {} };
 
     const query = { $or: orConditions };
-    if (excludeUserId) {
-        query._id = { $ne: excludeUserId };
+    if (excludeUserId && mongoose.Types.ObjectId.isValid(String(excludeUserId))) {
+        query._id = { $ne: new mongoose.Types.ObjectId(String(excludeUserId)) };
     }
 
     const duplicates = await FoodDeliveryPartner.find(query).lean();
@@ -75,6 +83,54 @@ export const validateUniqueDocuments = async (payload, excludeUserId = null) => 
     return { isValid: true, errors: {} };
 };
 
+/**
+ * For public document validation during rejected reapply (Edit Existing / Create New),
+ * exclude the current partner so they can reuse their own PAN/Aadhaar/DL.
+ * Never excludes approved partners via the public path (auth path uses req.user).
+ */
+export const resolveDocumentValidationExcludePartnerId = async (body = {}) => {
+    const phoneDigits = String(body?.phone || '')
+        .replace(/\D/g, '')
+        .slice(-10);
+    const rawPartnerId = body?.partnerId || body?.excludePartnerId || null;
+
+    let partner = null;
+    if (rawPartnerId && mongoose.Types.ObjectId.isValid(String(rawPartnerId))) {
+        partner = await FoodDeliveryPartner.findById(rawPartnerId)
+            .select('_id phone status')
+            .lean();
+        if (partner && phoneDigits) {
+            const partnerPhone = String(partner.phone || '')
+                .replace(/\D/g, '')
+                .slice(-10);
+            if (partnerPhone && partnerPhone !== phoneDigits) {
+                // Prevent excluding an unrelated partner by forging partnerId.
+                partner = null;
+            }
+        }
+    }
+
+    if (!partner && phoneDigits) {
+        partner = await FoodDeliveryPartner.findOne({
+            $or: [
+                { phone: phoneDigits },
+                { phone: { $regex: `${phoneDigits}$` } }
+            ]
+        })
+            .select('_id phone status')
+            .lean();
+    }
+
+    if (!partner) return null;
+
+    const status = String(partner.status || '').toLowerCase();
+    // Reapply / in-flight onboarding only — not approved accounts via public API.
+    if (status === 'rejected' || status === 'pending') {
+        return partner._id;
+    }
+    return null;
+};
+
 export const registerDeliveryPartner = async (payload, files) => {
     const {
         name, phone, email, countryCode, address, city, state,
@@ -82,17 +138,90 @@ export const registerDeliveryPartner = async (payload, files) => {
         fcmToken, platform, razorpayOrderId, razorpayPaymentId, razorpaySignature
     } = payload;
     const refRaw = typeof payload?.ref === 'string' ? String(payload.ref).trim() : '';
+    const requestedType = String(payload?.submissionType || '').trim().toLowerCase();
 
     let partner;
+    let claimedReapply = false;
+    let claimSnapshot = null;
+    let createdSubmissionId = null;
     const signupVehicles = parseSignupVehiclesPayload(payload);
 
     const existing = await FoodDeliveryPartner.findOne({ phone });
     if (existing) {
+        if (existing.status === 'approved') {
+            throw new ValidationError('Approved delivery partners cannot re-submit onboarding');
+        }
+        if (existing.status === 'pending') {
+            throw new ValidationError('Delivery partner with this phone already exists and is pending approval');
+        }
         if (existing.status !== 'rejected') {
             throw new ValidationError('Delivery partner with this phone already exists');
         }
-        partner = existing;
+
+        claimSnapshot = {
+            rejectionReason: existing.rejectionReason,
+            rejectedAt: existing.rejectedAt,
+            rejectedBy: existing.rejectedBy
+        };
+
+        // Atomic claim: only one concurrent reapply may transition rejected → pending.
+        const claimed = await FoodDeliveryPartner.findOneAndUpdate(
+            { _id: existing._id, status: 'rejected' },
+            {
+                $set: {
+                    status: 'pending',
+                    isActive: false,
+                    availabilityStatus: 'offline'
+                }
+            },
+            { new: true }
+        );
+        if (!claimed) {
+            throw new ValidationError(
+                'This application is already being resubmitted or is no longer rejected. Please try again.'
+            );
+        }
+        partner = claimed;
+        claimedReapply = true;
+        await ensureLegacySubmission(partner);
     }
+
+    const releaseReapplyClaim = async () => {
+        if (!claimedReapply || !partner?._id) return;
+        await FoodDeliveryPartner.updateOne(
+            { _id: partner._id, status: 'pending' },
+            {
+                $set: {
+                    status: 'rejected',
+                    isActive: false,
+                    rejectionReason: claimSnapshot?.rejectionReason,
+                    rejectedAt: claimSnapshot?.rejectedAt,
+                    rejectedBy: claimSnapshot?.rejectedBy
+                }
+            }
+        ).catch(() => {});
+    };
+
+    try {
+    let submissionType = 'initial';
+    if (partner) {
+        if (requestedType === 'edit_existing' || requestedType === 'new_onboarding') {
+            submissionType = requestedType;
+        } else {
+            submissionType = 'new_onboarding';
+        }
+    } else if (requestedType === 'edit_existing' || requestedType === 'new_onboarding') {
+        throw new ValidationError('Cannot use edit/new onboarding without an existing rejected application');
+    }
+
+    const previousSubmission = partner
+        ? await getLatestSubmissionForPartner(partner._id)
+        : null;
+    // Prefer last REJECTED submission snapshot for edit_existing (immutable history source).
+    const rejectedSubmissionForEdit =
+        partner && submissionType === 'edit_existing'
+            ? (await getLastRejectedSubmission(partner._id)) || previousSubmission
+            : null;
 
     const excludeUserId = partner?._id;
     const vNumbers = [
@@ -115,18 +244,22 @@ export const registerDeliveryPartner = async (payload, files) => {
         ? FoodDeliveryPartner.findOne({ $or: duplicateOrConditions }).select('_id email').lean()
         : Promise.resolve(null);
 
+    // Skip paid onboarding fee for rejected reapply (edit or new).
+    const skipFee = Boolean(partner);
     const [, duplicate, images, enrichedVehicles, vehicleUploadMap] = await Promise.all([
         validateUniqueDocuments({ drivingLicenseNumber, panNumber, aadharNumber }, excludeUserId),
         duplicateCheckPromise,
         uploadPartnerDocumentImages(files),
         enrichDriverVehiclesFromSignupPayload(payload),
         uploadSignupVehicleDocuments(files, signupVehicles),
-        verifyAndConsumeOnboardingPayment({
-            role: 'DELIVERY_PARTNER',
-            paymentDetails: { razorpayOrderId, razorpayPaymentId, razorpaySignature },
-            userDetails: { name, phone, email },
-            entityId: partner?._id,
-        }),
+        skipFee
+            ? Promise.resolve(null)
+            : verifyAndConsumeOnboardingPayment({
+                role: 'DELIVERY_PARTNER',
+                paymentDetails: { razorpayOrderId, razorpayPaymentId, razorpaySignature },
+                userDetails: { name, phone, email },
+                entityId: partner?._id,
+            }),
     ]);
 
     if (duplicate && String(duplicate._id) !== String(partner?._id)) {
@@ -134,6 +267,31 @@ export const registerDeliveryPartner = async (payload, files) => {
             throw new ValidationError('Delivery partner with this email already exists');
         }
         throw new ValidationError('Delivery partner with this Vehicle Number already exists');
+    }
+
+    // For edit_existing, reuse prior document URLs from the last rejected submission.
+    const priorSnap =
+        submissionType === 'edit_existing'
+            ? rejectedSubmissionForEdit?.snapshot || previousSubmission?.snapshot || {}
+            : {};
+    const mergedImages = {
+        profilePhoto: images.profilePhoto || priorSnap.profilePhoto || partner?.profilePhoto,
+        aadharPhoto: images.aadharPhoto || priorSnap.aadharPhoto || partner?.aadharPhoto,
+        panPhoto: images.panPhoto || priorSnap.panPhoto || partner?.panPhoto,
+        drivingLicensePhoto:
+            images.drivingLicensePhoto || priorSnap.drivingLicensePhoto || partner?.drivingLicensePhoto,
+        vehicleImage: images.vehicleImage || priorSnap.vehicleImage || partner?.vehicleImage
+    };
+
+    if (
+        !mergedImages.profilePhoto ||
+        !mergedImages.aadharPhoto ||
+        !mergedImages.panPhoto ||
+        !mergedImages.drivingLicensePhoto
+    ) {
+        throw new ValidationError(
+            'Missing required document photos: profilePhoto, aadharPhoto, panPhoto, drivingLicensePhoto'
+        );
     }
 
     const partnerData = {
@@ -151,14 +309,23 @@ export const registerDeliveryPartner = async (payload, files) => {
         panNumber,
         aadharNumber,
         status: 'pending',
-        ...images
+        isActive: false,
+        rejectionReason: undefined,
+        rejectedAt: undefined,
+        rejectedBy: undefined,
+        approvedAt: undefined,
+        approvedBy: undefined,
+        ...mergedImages
     };
 
     if (partner) {
         Object.assign(partner, partnerData);
-        partner.rejectionReason = null;
+        partner.rejectionReason = undefined;
+        partner.rejectedAt = undefined;
+        partner.rejectedBy = undefined;
+        partner.approvedAt = undefined;
+        partner.approvedBy = undefined;
         partner.isActive = false;
-        partner.isVerified = false;
     } else {
         partner = await FoodDeliveryPartner.create(partnerData);
     }
@@ -179,7 +346,7 @@ export const registerDeliveryPartner = async (payload, files) => {
 
     if ((enrichedVehicles || []).length) {
         try {
-            const vehicles = mergeVehicleDocumentUploads(enrichedVehicles, vehicleUploadMap).map((vehicle) => {
+            let vehicles = mergeVehicleDocumentUploads(enrichedVehicles, vehicleUploadMap).map((vehicle) => {
                 const stableId = new mongoose.Types.ObjectId().toString();
                 return {
                     ...vehicle,
@@ -187,6 +354,29 @@ export const registerDeliveryPartner = async (payload, files) => {
                     id: stableId,
                 };
             });
+
+            // edit_existing: preserve prior vehicle document URLs when not re-uploaded.
+            if (submissionType === 'edit_existing' && Array.isArray(priorSnap.driverVehicles)) {
+                const priorByNumber = new Map(
+                    priorSnap.driverVehicles
+                        .map((v) => [String(v?.vehicleNumber || '').toUpperCase(), v])
+                        .filter(([num]) => Boolean(num))
+                );
+                vehicles = vehicles.map((vehicle) => {
+                    const prior = priorByNumber.get(String(vehicle.vehicleNumber || '').toUpperCase());
+                    if (!prior) return vehicle;
+                    return {
+                        ...vehicle,
+                        vehiclePhoto: vehicle.vehiclePhoto || prior.vehiclePhoto || '',
+                        rcPhoto: vehicle.rcPhoto || prior.rcPhoto || '',
+                        insurancePhoto: vehicle.insurancePhoto || prior.insurancePhoto || '',
+                        fitnessPhoto: vehicle.fitnessPhoto || prior.fitnessPhoto || '',
+                        pollutionPhoto: vehicle.pollutionPhoto || prior.pollutionPhoto || '',
+                        permitPhoto: vehicle.permitPhoto || prior.permitPhoto || ''
+                    };
+                });
+            }
+
             partner.driverVehicles = vehicles;
             const defaultVeh = vehicles.find((v) => v.isDefault) || vehicles[0];
             partner.activeVehicleId = defaultVeh?.id || null;
@@ -194,11 +384,17 @@ export const registerDeliveryPartner = async (payload, files) => {
             // eslint-disable-next-line no-console
             console.warn('Failed to persist driver vehicles on signup:', vehErr.message);
         }
+    } else if (submissionType === 'edit_existing' && Array.isArray(priorSnap.driverVehicles) && priorSnap.driverVehicles.length) {
+        // Keep prior vehicles when edit did not send a new vehicle payload.
+        partner.driverVehicles = priorSnap.driverVehicles;
+        partner.activeVehicleId = priorSnap.activeVehicleId || partner.activeVehicleId;
     }
+
+    // Keep legacy top-level vehicle fields aligned with driverVehicles (source of truth).
+    syncLegacyVehicleFieldsFromDriverVehicles(partner);
 
     // Store referredBy (no credit here; credit happens on admin approval).
     if (refRaw && String(refRaw) !== String(partner._id)) {
-        // Search by ID if it's a valid ObjectId, otherwise search by referralCode field
         let referrer = null;
         if (mongoose.Types.ObjectId.isValid(refRaw)) {
             referrer = await FoodDeliveryPartner.findById(refRaw).select('_id').lean();
@@ -218,6 +414,13 @@ export const registerDeliveryPartner = async (payload, files) => {
         }
     }
 
+    // Immutable history: always create a NEW submission document.
+    const createdSubmission = await createOnboardingSubmission({
+        partner,
+        submissionType,
+        previousSubmissionId: previousSubmission?._id || null
+    });
+    createdSubmissionId = createdSubmission?._id || null;
     await partner.save();
 
     if (razorpayOrderId) {
@@ -228,16 +431,32 @@ export const registerDeliveryPartner = async (payload, files) => {
     }
 
     void notifyAdminsSafely({
-        title: 'New Delivery Partner Registration 🚲',
-        body: `A new delivery partner "${partner.name}" has signed up and is pending approval.`,
+        title: partner && previousSubmission
+            ? 'Delivery Partner Reapplied 🚲'
+            : 'New Delivery Partner Registration 🚲',
+        body: partner && previousSubmission
+            ? `"${partner.name}" resubmitted onboarding (${submissionType}) and is pending approval.`
+            : `A new delivery partner "${partner.name}" has signed up and is pending approval.`,
         data: {
             type: 'new_registration',
             subType: 'delivery_partner',
             id: String(partner._id),
+            submissionType,
         },
     });
 
     return partner;
+    } catch (err) {
+        await releaseReapplyClaim();
+        // If partner.save failed after insert, remove the orphan pending submission.
+        if (createdSubmissionId) {
+            await FoodDeliveryPartnerSubmission.deleteOne({
+                _id: createdSubmissionId,
+                status: 'pending'
+            }).catch(() => {});
+        }
+        throw err;
+    }
 };
 
 export const updateDeliveryPartnerProfile = async (userId, payload, files) => {

@@ -43,6 +43,9 @@ const notificationChannelSchema = new mongoose.Schema(
     }
 );
 
+// Explicit unique index name for Atlas / autoIndex:false environments.
+notificationChannelSchema.index({ role: 1 }, { unique: true, name: 'role_1' });
+
 export const NotificationChannelSettings = mongoose.model(
     'NotificationChannelSettings',
     notificationChannelSchema

@@ -279,6 +279,13 @@ const buildFormData = async (details, documents) => {
     formData.append("vehicles", JSON.stringify(details.vehicles))
   }
 
+  const submissionType =
+    sessionStorage.getItem("deliverySubmissionType") ||
+    (sessionStorage.getItem("deliveryIsRejected") === "true"
+      ? "new_onboarding"
+      : "initial")
+  formData.append("submissionType", submissionType)
+
   if (details.drivingLicenseNumber) {
     formData.append("drivingLicenseNumber", details.drivingLicenseNumber)
     formData.append("documents[drivingLicense][number]", details.drivingLicenseNumber)
@@ -340,6 +347,8 @@ const submitRegistration = async ({ isCompleteProfile, formData, navigate }) => 
     sessionStorage.removeItem("deliverySignupDetails")
     sessionStorage.removeItem("deliverySignupDocs")
     sessionStorage.removeItem("deliveryIsRejected")
+    sessionStorage.removeItem("deliverySubmissionType")
+    sessionStorage.removeItem("deliveryRejectionContext")
     sessionStorage.removeItem("deliveryPaymentSuccessData")
     clearDB()
 

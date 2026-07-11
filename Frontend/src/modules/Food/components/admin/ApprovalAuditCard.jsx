@@ -89,7 +89,9 @@ export default function ApprovalAuditCard({
       <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <div className="mb-4">
           <h4 className="text-lg font-semibold text-slate-900">Approval Information</h4>
-          <p className="text-sm text-slate-500">Permanent admin or employee snapshot captured at approval time.</p>
+          <p className="text-sm text-slate-500">
+            Admin snapshot captured when this application was approved or rejected.
+          </p>
         </div>
         <div className="space-y-4">
           <AuditBlock

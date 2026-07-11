@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { computeNotificationExpiresAt } from '../utils/notificationTtl.js';
 
 const broadcastTargetSchema = new mongoose.Schema(
     {
@@ -10,17 +11,8 @@ const broadcastTargetSchema = new mongoose.Schema(
         ownerId: {
             type: mongoose.Schema.Types.ObjectId,
             required: true
-        },
-        label: {
-            type: String,
-            default: '',
-            trim: true
-        },
-        subLabel: {
-            type: String,
-            default: '',
-            trim: true
         }
+        // Intentionally no label / subLabel — resolve profile data at read time.
     },
     { _id: false }
 );
@@ -43,6 +35,14 @@ const notificationBroadcastSchema = new mongoose.Schema(
             required: true,
             index: true
         },
+        selectionMode: {
+            type: String,
+            enum: ['ALL', 'SELECTED'],
+            required: true,
+            default: 'SELECTED'
+            // Backend metadata only (audience resolution mode). Safe for history responses;
+            // not used for recipient expansion at send time beyond how targets were stored.
+        },
         targetIds: {
             type: [mongoose.Schema.Types.ObjectId],
             default: []
@@ -53,8 +53,8 @@ const notificationBroadcastSchema = new mongoose.Schema(
         },
         link: {
             type: String,
-            default: '',
             trim: true
+            // No default — omit field when empty (APIs treat missing as '').
         },
         createdBy: {
             type: mongoose.Schema.Types.ObjectId,
@@ -65,6 +65,12 @@ const notificationBroadcastSchema = new mongoose.Schema(
         targetCount: {
             type: Number,
             default: 0
+        },
+        /** Mongo TTL field — documents removed when expiresAt <= now (expireAfterSeconds: 0). */
+        expiresAt: {
+            type: Date,
+            required: true,
+            index: true
         }
     },
     {
@@ -73,6 +79,17 @@ const notificationBroadcastSchema = new mongoose.Schema(
     }
 );
 
-notificationBroadcastSchema.index({ createdAt: -1 });
+notificationBroadcastSchema.pre('validate', function setExpiresAt(next) {
+    if (!this.expiresAt) {
+        this.expiresAt = computeNotificationExpiresAt(this.createdAt || new Date());
+    }
+    next();
+});
 
-export const BroadcastNotification = mongoose.model('BroadcastNotification', notificationBroadcastSchema);
+notificationBroadcastSchema.index({ createdAt: -1 });
+notificationBroadcastSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0, name: 'expiresAt_1' });
+
+export const BroadcastNotification = mongoose.model(
+    'BroadcastNotification',
+    notificationBroadcastSchema
+);

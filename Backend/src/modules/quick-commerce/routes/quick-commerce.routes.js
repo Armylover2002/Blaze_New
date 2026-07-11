@@ -139,19 +139,41 @@ import {
 import { authMiddleware, checkPermission } from "../../../core/auth/auth.middleware.js";
 import { requireRoles } from "../../../core/roles/role.middleware.js";
 import { verifyAccessToken } from "../../../core/auth/token.util.js";
+import { FoodUser } from "../../../core/users/user.model.js";
 
 const optionalAuth = (req, res, next) => {
   const authHeader = req.headers.authorization || "";
   const token = authHeader.startsWith("Bearer ")
     ? authHeader.substring(7)
     : null;
-  if (token) {
-    try {
-      const decoded = verifyAccessToken(token);
-      req.user = { userId: decoded.userId, role: decoded.role };
-    } catch (e) {
-      // ignore guest
+  if (!token) {
+    return next();
+  }
+  try {
+    const decoded = verifyAccessToken(token);
+    // Deactivated customers must not use QC authenticated-optional routes with a live access token.
+    if (decoded.role === "USER") {
+      FoodUser.findById(decoded.userId)
+        .select("isActive")
+        .lean()
+        .then((doc) => {
+          if (!doc || doc.isActive === false) {
+            return res.status(401).json({
+              success: false,
+              message: "User account is deactivated",
+            });
+          }
+          req.user = { userId: decoded.userId, role: decoded.role };
+          next();
+        })
+        .catch(() =>
+          res.status(401).json({ success: false, message: "Authentication failed" }),
+        );
+      return;
     }
+    req.user = { userId: decoded.userId, role: decoded.role };
+  } catch (e) {
+    // ignore guest
   }
   next();
 };

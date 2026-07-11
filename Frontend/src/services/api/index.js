@@ -101,11 +101,33 @@ export const api = {
 let userMeInFlight = null;
 let userMeCached = null;
 let userMeCacheTime = 0;
+let userMeCacheToken = null;
 const USER_ME_CACHE_MS = 60 * 1000;
+
+const getUserAccessToken = () =>
+  (typeof localStorage !== "undefined" &&
+    (localStorage.getItem("user_accessToken") ||
+      localStorage.getItem("auth_customer") ||
+      localStorage.getItem("accessToken"))) ||
+  null;
+
+/** Clear /me cache on logout or account switch so COD / profile flags cannot leak across sessions. */
+export const invalidateUserMeCache = () => {
+  userMeCached = null;
+  userMeCacheTime = 0;
+  userMeCacheToken = null;
+  userMeInFlight = null;
+};
 
 const getUserMeOnce = () => {
   const now = Date.now();
-  if (userMeCached && now - userMeCacheTime < USER_ME_CACHE_MS) {
+  const token = getUserAccessToken();
+  if (
+    userMeCached &&
+    userMeCacheToken === token &&
+    token &&
+    now - userMeCacheTime < USER_ME_CACHE_MS
+  ) {
     return Promise.resolve(userMeCached);
   }
   if (!userMeInFlight) {
@@ -114,6 +136,7 @@ const getUserMeOnce = () => {
       .then((res) => {
         userMeCached = res;
         userMeCacheTime = Date.now();
+        userMeCacheToken = getUserAccessToken();
         return res;
       })
       .finally(() => {
@@ -317,6 +340,10 @@ export const adminAPI = {
   getDeliveryPartnerJoinRequests: (params) =>
     apiClient.get("/food/admin/delivery/join-requests", {
       params,
+      contextModule: "admin",
+    }),
+  getDeliveryPartnerSubmissions: (id) =>
+    apiClient.get(`/food/admin/delivery/${id}/submissions`, {
       contextModule: "admin",
     }),
   /** List approved delivery partners (Deliveryman List page) */
@@ -642,6 +669,8 @@ export const adminAPI = {
       },
       { contextModule: "admin" },
     ),
+  /** Alias — same as supportAPI.getSupportTicketsAdmin */
+  getSupportTicketsAdmin: (params = {}) => supportAPI.getSupportTicketsAdmin(params),
   /** Orders (admin) – list, get by id, assign delivery partner */
   getOrders: (params = {}) =>
     apiClient.get("/food/admin/orders", {
@@ -797,7 +826,11 @@ export const adminAPI = {
   /** Delivery Partner Bonus (admin) */
   getDeliveryPartnerBonusTransactions: (params = {}) =>
     apiClient.get("/food/admin/delivery/bonus-transactions", {
-      params,
+      params: {
+        page: params.page ?? 1,
+        limit: Math.min(Number(params.limit) || 20, 100),
+        ...(params.search ? { search: String(params.search).trim() } : {}),
+      },
       contextModule: "admin",
     }),
   /** Delivery Earnings (admin) */
@@ -806,15 +839,21 @@ export const adminAPI = {
       params,
       contextModule: "admin",
     }),
-  addDeliveryPartnerBonus: (deliveryPartnerId, amount, reference = "") =>
+  addDeliveryPartnerBonus: (deliveryPartnerId, amount, reference = "", idempotencyKey = null) =>
     apiClient.post(
       "/food/admin/delivery/bonus",
       {
         deliveryPartnerId: String(deliveryPartnerId),
         amount: Number(amount),
         reference: String(reference || ""),
+        ...(idempotencyKey ? { idempotencyKey: String(idempotencyKey) } : {}),
       },
-      { contextModule: "admin" },
+      {
+        contextModule: "admin",
+        headers: idempotencyKey
+          ? { "Idempotency-Key": String(idempotencyKey) }
+          : undefined,
+      },
     ),
 
   /** Earning Addon Offers (admin) */

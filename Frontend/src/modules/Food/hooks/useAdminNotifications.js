@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { adminAPI } from "@food/api";
+import { adminAPI, supportAPI } from "@food/api";
 import { API_BASE_URL } from "@food/api/config";
 import io from "socket.io-client";
 import { getCurrentUser } from "@food/utils/auth";
@@ -317,7 +317,7 @@ export default function useAdminNotifications(options = {}) {
         : Promise.resolve({ data: { success: true, data: [], requests: [] } });
 
       const supportPromise = hasSupportPerm
-        ? adminAPI.getSupportTicketsAdmin({ page: 1, limit: 50, source: "all" })
+        ? supportAPI.getSupportTicketsAdmin({ page: 1, limit: 50, source: "all" })
         : Promise.resolve({ data: { success: true, data: [], tickets: [] } });
 
       const deliverySupportPromise = hasDeliverySupportPerm

@@ -45,14 +45,14 @@ export default function Footer() {
 
   const footerLinks = {
     company: [
-      { name: "About Us", href: "/user/help" },
-      { name: "Careers", href: "/user/help" },
-      { name: "Blog", href: "/user/help" },
-      { name: "Press", href: "/user/help" },
+      { name: "About Us", href: "/food/user/profile/support" },
+      { name: "Careers", href: "/food/user/profile/support" },
+      { name: "Blog", href: "/food/user/profile/support" },
+      { name: "Press", href: "/food/user/profile/support" },
     ],
     support: [
-      { name: "Help Center", href: "/user/help" },
-      { name: "Contact Us", href: "/user/help" },
+      { name: "Help Center", href: "/food/user/profile/support" },
+      { name: "Contact Us", href: "/food/user/profile/support" },
       { name: "Privacy Policy", href: "/profile/privacy" },
       { name: "Terms of Service", href: "/profile/terms" },
     ],
@@ -63,7 +63,7 @@ export default function Footer() {
       { name: "Offers", href: "/user/offers" },
     ],
     restaurants: [
-      { name: "Partner With Us", href: "/user/help" },
+      { name: "Partner With Us", href: "/food/user/profile/support" },
       { name: "Restaurant Login", href: "/restaurant" },
       { name: "Delivery", href: "/delivery" },
     ],

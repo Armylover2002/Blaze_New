@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 import { FoodDeliveryCashDeposit } from '../models/foodDeliveryCashDeposit.model.js';
-import { registerDeliveryPartner, updateDeliveryPartnerProfile, updateDeliveryPartnerBankDetails, listSupportTicketsByPartner, createSupportTicket, getSupportTicketByIdAndPartner, updateDeliveryPartnerDetails, updateDeliveryPartnerProfilePhotoBase64, updateDeliveryAvailability, getDeliveryPartnerWallet, getDeliveryPartnerEarnings, getDeliveryPartnerTripHistory, getDeliveryPocketDetails, getActiveEarningAddonsForPartner, deleteDeliveryPartnerAccount, getDeliveryPartnerVehicles, setDeliveryPartnerActiveVehicle, validateUniqueDocuments, getSignupVehicleCatalog } from '../services/delivery.service.js';
+import { registerDeliveryPartner, updateDeliveryPartnerProfile, updateDeliveryPartnerBankDetails, listSupportTicketsByPartner, createSupportTicket, getSupportTicketByIdAndPartner, updateDeliveryPartnerDetails, updateDeliveryPartnerProfilePhotoBase64, updateDeliveryAvailability, getDeliveryPartnerWallet, getDeliveryPartnerEarnings, getDeliveryPartnerTripHistory, getDeliveryPocketDetails, getActiveEarningAddonsForPartner, deleteDeliveryPartnerAccount, getDeliveryPartnerVehicles, setDeliveryPartnerActiveVehicle, validateUniqueDocuments, resolveDocumentValidationExcludePartnerId, getSignupVehicleCatalog } from '../services/delivery.service.js';
 import { createDeliveryCashDepositOrder, getDeliveryPartnerWalletEnhanced, requestDeliveryWithdrawal, verifyDeliveryCashDepositPayment, submitDeliveryManualDeposit } from '../services/deliveryFinance.service.js';
 import { getDeliveryCashLimitSettings, getDeliveryEmergencyHelp } from '../../admin/services/admin.service.js';
 import { DeliveryBonusTransaction } from '../../admin/models/deliveryBonusTransaction.model.js';
@@ -14,8 +14,12 @@ import {
 
 export const validateDocumentsController = async (req, res, next) => {
     try {
-        const userId = req.user?.userId || null;
-        await validateUniqueDocuments(req.body, userId);
+        let excludeUserId = req.user?.userId || null;
+        // Public reapply (Edit Existing / Create New): no JWT — resolve self by phone/partnerId.
+        if (!excludeUserId) {
+            excludeUserId = await resolveDocumentValidationExcludePartnerId(req.body || {});
+        }
+        await validateUniqueDocuments(req.body, excludeUserId);
         return sendResponse(res, 200, 'Documents are valid');
     } catch (error) {
         if (error.statusCode === 409) {
@@ -43,14 +47,24 @@ export const registerDeliveryPartnerController = async (req, res, next) => {
         const validated = validateDeliveryRegisterDto(req.body);
         
         const requiredFiles = ['profilePhoto', 'aadharPhoto', 'panPhoto', 'drivingLicensePhoto'];
-        const missingFiles = requiredFiles.filter(field => !req.files || !req.files[field] || req.files[field].length === 0);
-        if (missingFiles.length > 0) {
+        const submissionType = String(validated?.submissionType || req.body?.submissionType || '')
+            .trim()
+            .toLowerCase();
+        const isEditExisting = submissionType === 'edit_existing';
+        const missingFiles = requiredFiles.filter(
+            (field) => !req.files || !req.files[field] || req.files[field].length === 0
+        );
+        // edit_existing may reuse prior document URLs from the rejected submission snapshot.
+        if (missingFiles.length > 0 && !isEditExisting) {
             return res.status(400).json({
                 success: false,
                 message: `Missing required document photos: ${missingFiles.join(', ')}`
             });
         }
-        const partner = await registerDeliveryPartner(validated, req.files);
+        const partner = await registerDeliveryPartner(
+            { ...validated, submissionType: submissionType || validated?.submissionType },
+            req.files
+        );
         return sendResponse(
             res,
             201,

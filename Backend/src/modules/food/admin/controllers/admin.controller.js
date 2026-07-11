@@ -2,7 +2,7 @@ import mongoose from 'mongoose';
 import * as adminService from '../services/admin.service.js';
 import { validateCategoryListQuery, validateCategoryRejectDto, validateCategoryUpsertDto } from '../validators/category.validator.js';
 import { validateCreateOfferDto, validateUpdateOfferCartVisibilityDto } from '../validators/offer.validator.js';
-import { validateAddDeliveryBonusDto } from '../validators/deliveryBonus.validator.js';
+import { validateAddDeliveryBonusDto, validateBonusTransactionsQuery } from '../validators/deliveryBonus.validator.js';
 import { validateCheckCompletionsDto, validateEarningAddonHistoryActionDto, validateEarningAddonUpsertDto, validateToggleEarningAddonStatusDto } from '../validators/earningAddon.validator.js';
 import { validateDeliveryCommissionRuleDto, validateOptionalStatusDto } from '../validators/commission.validator.js';
 import { validateFeeSettingsUpsertDto } from '../validators/feeSettings.validator.js';
@@ -42,9 +42,20 @@ export async function updateCustomerStatus(req, res, next) {
             return res.status(400).json({ success: false, message: 'Invalid customer id' });
         }
         const isActive = req.body?.isActive;
+        if (typeof isActive !== 'boolean') {
+            return res.status(400).json({ success: false, message: 'isActive must be a boolean' });
+        }
         const updated = await adminService.updateCustomerStatus(id, isActive);
         if (!updated) return res.status(404).json({ success: false, message: 'Customer not found' });
-        res.status(200).json({ success: true, message: 'Customer status updated successfully', data: { user: updated, customer: updated } });
+        // Single customer object (user/customer were identical duplicates). Admin UI uses optimistic local state.
+        console.log(
+            `[AUDIT] customer_status_update adminId=${req.user?.userId || req.user?.id || 'unknown'} customerId=${id} isActive=${isActive}`
+        );
+        res.status(200).json({
+            success: true,
+            message: 'Customer status updated successfully',
+            data: { customer: updated },
+        });
     } catch (error) {
         next(error);
     }
@@ -57,9 +68,20 @@ export async function updateCustomerCodAccess(req, res, next) {
             return res.status(400).json({ success: false, message: 'Invalid customer id' });
         }
         const isCodAllowed = req.body?.isCodAllowed;
+        if (typeof isCodAllowed !== 'boolean') {
+            return res.status(400).json({ success: false, message: 'isCodAllowed must be a boolean' });
+        }
         const updated = await adminService.updateCustomerCodAccess(id, isCodAllowed);
         if (!updated) return res.status(404).json({ success: false, message: 'Customer not found' });
-        res.status(200).json({ success: true, message: 'Customer COD access updated successfully', data: { user: updated, customer: updated } });
+        // Single customer object (user/customer were identical duplicates). Admin UI uses optimistic local state.
+        console.log(
+            `[AUDIT] customer_cod_access_update adminId=${req.user?.userId || req.user?.id || 'unknown'} customerId=${id} isCodAllowed=${isCodAllowed}`
+        );
+        res.status(200).json({
+            success: true,
+            message: 'Customer COD access updated successfully',
+            data: { customer: updated },
+        });
     } catch (error) {
         next(error);
     }
@@ -105,7 +127,13 @@ export async function bulkUpdateCustomersCodAccess(req, res, next) {
     try {
         const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
         const isCodAllowed = req.body?.isCodAllowed;
+        if (typeof isCodAllowed !== 'boolean') {
+            return res.status(400).json({ success: false, message: 'isCodAllowed must be a boolean' });
+        }
         const result = await adminService.bulkUpdateCustomersCodAccess(ids, isCodAllowed);
+        console.log(
+            `[AUDIT] customer_cod_access_bulk_update adminId=${req.user?.userId || req.user?.id || 'unknown'} count=${ids.length} isCodAllowed=${isCodAllowed} matched=${result?.matched ?? 0} modified=${result?.modified ?? 0}`
+        );
         res.status(200).json({
             success: true,
             message: 'Bulk customer COD access updated successfully',
@@ -683,9 +711,28 @@ export async function updateSupportTicketController(req, res, next) {
         if (!id || !mongoose.Types.ObjectId.isValid(id)) {
             return res.status(400).json({ success: false, message: 'Invalid ticket id' });
         }
-        const updated = await adminService.updateSupportTicket(id, req.body || {});
-        if (!updated) return res.status(404).json({ success: false, message: 'Ticket not found' });
-        res.status(200).json({ success: true, message: 'Support ticket updated successfully', data: { ticket: updated } });
+        const performer = await resolveActionPerformerSnapshot(req.user);
+        const data = await adminService.updateSupportTicket(id, {
+            status: req.body?.status,
+            adminResponse: req.body?.adminResponse,
+            source: req.body?.source,
+            adminId: performer?.userId || req.user?.userId || null,
+            adminName: performer?.name || '',
+        });
+        if (data?.error === 'empty_patch') {
+            return res.status(400).json({ success: false, message: 'No valid fields to update' });
+        }
+        if (data?.error === 'empty_response') {
+            return res.status(400).json({ success: false, message: 'Admin response cannot be empty' });
+        }
+        if (!data?.ticket) {
+            return res.status(404).json({ success: false, message: 'Ticket not found' });
+        }
+        res.status(200).json({
+            success: true,
+            message: 'Support ticket updated successfully',
+            data: { ticket: data.ticket, source: data.source }
+        });
     } catch (error) {
         next(error);
     }
@@ -707,7 +754,8 @@ export async function getPendingRestaurants(req, res, next) {
 // ----- Delivery partner bonus (admin) -----
 export async function getDeliveryPartnerBonusTransactions(req, res, next) {
     try {
-        const data = await adminService.getDeliveryPartnerBonusTransactions(req.query || {});
+        const query = validateBonusTransactionsQuery(req.query || {});
+        const data = await adminService.getDeliveryPartnerBonusTransactions(query);
         res.status(200).json({ success: true, message: 'Bonus transactions fetched successfully', data });
     } catch (error) {
         next(error);
@@ -716,9 +764,28 @@ export async function getDeliveryPartnerBonusTransactions(req, res, next) {
 
 export async function addDeliveryPartnerBonus(req, res, next) {
     try {
-        const body = validateAddDeliveryBonusDto(req.body || {});
-        const created = await adminService.addDeliveryPartnerBonus(body, req.user);
-        res.status(201).json({ success: true, message: 'Bonus added successfully', data: { transaction: created } });
+        const body = validateAddDeliveryBonusDto(req.body || {}, req.headers || {});
+        const reqInfo = {
+            ipAddress: req.ip || req.headers['x-forwarded-for'] || null,
+            userAgent: req.headers['user-agent'] || null,
+            requestId: req.requestId || req.headers['x-request-id'] || null,
+            idempotencyKey: body.idempotencyKey || null
+        };
+        // Strip idempotencyKey from persisted business body (kept only in reqInfo / ledger fields)
+        const { idempotencyKey: _ik, ...bonusBody } = body;
+        const result = await adminService.addDeliveryPartnerBonus(
+            { ...bonusBody, idempotencyKey: body.idempotencyKey },
+            req.user,
+            reqInfo
+        );
+        const status = result?.idempotentReplay ? 200 : 201;
+        res.status(status).json({
+            success: true,
+            message: result?.idempotentReplay
+                ? 'Bonus already processed (idempotent replay)'
+                : 'Bonus added successfully',
+            data: result
+        });
     } catch (error) {
         next(error);
     }
@@ -1100,6 +1167,25 @@ export async function getDeliveryJoinRequests(req, res, next) {
     }
 }
 
+export async function getDeliveryPartnerSubmissions(req, res, next) {
+    try {
+        const data = await adminService.getDeliveryPartnerSubmissions(req.params.id);
+        if (!data) {
+            return res.status(404).json({
+                success: false,
+                message: 'Delivery partner not found'
+            });
+        }
+        res.status(200).json({
+            success: true,
+            message: 'Delivery partner onboarding history fetched successfully',
+            data
+        });
+    } catch (error) {
+        next(error);
+    }
+}
+
 
 // ----- Support tickets -----
 export async function getSupportTicketStats(req, res, next) {
@@ -1229,6 +1315,12 @@ export async function approveDeliveryPartner(req, res, next) {
 export async function rejectDeliveryPartner(req, res, next) {
     try {
         const { reason } = req.body;
+        if (!reason || !String(reason).trim()) {
+            return res.status(400).json({
+                success: false,
+                message: 'Rejection reason is required'
+            });
+        }
         const performer = await resolveActionPerformerSnapshot(req.user);
         const partner = await adminService.rejectDeliveryPartner(req.params.id, reason, performer);
         if (!partner) {

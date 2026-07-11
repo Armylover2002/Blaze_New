@@ -8,6 +8,9 @@ export default function PendingVerification() {
     location.state?.phone ||
     sessionStorage.getItem("deliveryPendingPhone") ||
     ""
+  const reviewMessage =
+    location.state?.message ||
+    "Your onboarding request is under review. Your documents are currently being verified. You will receive approval once reviewed by admin."
 
   return (
     <div className="min-h-screen bg-[#f8faf8] px-6 py-10">
@@ -28,7 +31,7 @@ export default function PendingVerification() {
             </h1>
 
             <p className="text-sm leading-6 text-slate-600">
-              Your onboarding is complete. Our team will verify your documents and activate your account after approval.
+              {reviewMessage}
             </p>
 
             {phone ? (
@@ -53,16 +56,6 @@ export default function PendingVerification() {
             <p className="text-center text-xs leading-5 text-slate-500">
               You can sign in later to check your approval status.
             </p>
-
-            <div className="text-center">
-              <button
-                type="button"
-                onClick={() => navigate("/food/delivery/profile/details")}
-                className="text-xs font-semibold text-[#0f7a42] hover:underline"
-              >
-                View Registered Details
-              </button>
-            </div>
           </div>
         </div>
       </div>

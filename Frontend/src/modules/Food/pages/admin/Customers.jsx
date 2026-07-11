@@ -1,6 +1,6 @@
-import { useState, useMemo, useEffect } from "react"
+import { useState, useMemo, useEffect, useCallback, useRef } from "react"
 import { useSearchParams } from "react-router-dom"
-import { Search, Download, ChevronDown, Calendar, Eye, FileDown, FileSpreadsheet, FileText, X, Mail, Phone, MapPin, Package, IndianRupee, Calendar as CalendarIcon, User, CheckCircle, XCircle } from "lucide-react"
+import { Search, Download, ChevronDown, Eye, FileDown, FileSpreadsheet, FileText, Mail, Phone, MapPin, Package, IndianRupee, Calendar as CalendarIcon, User, CheckCircle, XCircle } from "lucide-react"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@food/components/ui/dropdown-menu"
 import { exportCustomersToCSV, exportCustomersToExcel, exportCustomersToPDF } from "@food/components/admin/customers/customersExportUtils"
 import { adminAPI } from "@food/api"
@@ -10,18 +10,22 @@ const debugLog = (...args) => { }
 const debugWarn = (...args) => { }
 const debugError = (...args) => { }
 
+const PAGE_SIZE = 50
 
 export default function Customers() {
   const [searchQuery, setSearchQuery] = useState("")
   const [customers, setCustomers] = useState([])
   const [loading, setLoading] = useState(true)
   const [totalCustomers, setTotalCustomers] = useState(0)
+  const [page, setPage] = useState(1)
+  const pageSize = PAGE_SIZE
   const [selectedCustomer, setSelectedCustomer] = useState(null)
   const [userDetails, setUserDetails] = useState(null)
   const [loadingDetails, setLoadingDetails] = useState(false)
   const [showUserDetails, setShowUserDetails] = useState(false)
   const [selectedCustomerIds, setSelectedCustomerIds] = useState([])
-  const [bulkCodLoading, setBulkCodLoading] = useState(false)
+  /** null | 'enable' | 'disable' — only the clicked bulk COD button shows loading */
+  const [bulkCodLoadingAction, setBulkCodLoadingAction] = useState(null)
   const [codUpdatingId, setCodUpdatingId] = useState(null)
 
   // User Contacts state
@@ -46,69 +50,20 @@ export default function Customers() {
     chooseFirst: "",
   })
 
-  const filteredCustomers = useMemo(() => {
-    let result = [...customers]
+  // Server handles search/filter — do not re-filter client-side
+  const displayCustomers = customers
 
-    // Filter by search query
-    if (searchQuery.trim()) {
-      const query = searchQuery.toLowerCase().trim()
-      result = result.filter(customer =>
-        customer.name.toLowerCase().includes(query) ||
-        customer.email.toLowerCase().includes(query) ||
-        customer.phone.includes(query)
-      )
-    }
-
-    // Filter by order date when that field is available in the API payload.
-
-    // Filter by joining date
-    if (filters.joiningDate) {
-      result = result.filter(customer => {
-        // Parse joining date from format "17 Oct 2021"
-        const customerDate = new Date(customer.joiningDate)
-        const filterDate = new Date(filters.joiningDate)
-        return customerDate.toDateString() === filterDate.toDateString()
-      })
-    }
-
-    // Filter by status
-    if (filters.status) {
-      if (filters.status === "active") {
-        result = result.filter(customer => customer.status === true)
-      } else if (filters.status === "inactive") {
-        result = result.filter(customer => customer.status === false)
-      }
-    }
-
-    // Sort by options
-    if (filters.sortBy) {
-      if (filters.sortBy === "name-asc") {
-        result.sort((a, b) => a.name.localeCompare(b.name))
-      } else if (filters.sortBy === "name-desc") {
-        result.sort((a, b) => b.name.localeCompare(a.name))
-      } else if (filters.sortBy === "orders-asc") {
-        result.sort((a, b) => a.totalOrder - b.totalOrder)
-      } else if (filters.sortBy === "orders-desc") {
-        result.sort((a, b) => b.totalOrder - a.totalOrder)
-      }
-    }
-
-    // Limit results if "Choose First" is set
-    if (filters.chooseFirst && parseInt(filters.chooseFirst) > 0) {
-      result = result.slice(0, parseInt(filters.chooseFirst))
-    }
-
-    return result
-  }, [customers, searchQuery, filters])
-
-  const getCustomerId = (customer) => customer?._id || customer?.id || customer?.sl || null
+  const getCustomerId = (customer) => customer?._id || customer?.id || null
   const selectedCustomersCount = selectedCustomerIds.length
   const allVisibleSelected =
-    filteredCustomers.length > 0 &&
-    filteredCustomers.every((customer) => selectedCustomerIds.includes(getCustomerId(customer)))
+    displayCustomers.length > 0 &&
+    displayCustomers.every((customer) => selectedCustomerIds.includes(getCustomerId(customer)))
+
+  const totalPages = Math.max(1, Math.ceil((totalCustomers || 0) / pageSize))
 
   const handleFilterChange = (field, value) => {
-    setFilters(prev => ({ ...prev, [field]: value }))
+    setFilters((prev) => ({ ...prev, [field]: value }))
+    setPage(1)
   }
 
   const formatDateTime = (value) => {
@@ -130,89 +85,91 @@ export default function Customers() {
     }
   }
 
-  // Fetch customers from API
+  const loadCustomers = useCallback(async () => {
+    try {
+      setLoading(true)
+      const params = {
+        page,
+        limit: pageSize,
+        ...(searchQuery && { search: searchQuery }),
+        ...(filters.status && { status: filters.status }),
+        ...(filters.joiningDate && { joiningDate: filters.joiningDate }),
+        ...(filters.orderDate && { orderDate: filters.orderDate }),
+        ...(filters.sortBy && { sortBy: filters.sortBy }),
+        ...(filters.chooseFirst && { chooseFirst: filters.chooseFirst }),
+      }
+
+      const response = await adminAPI.getCustomers(params)
+      const data = response?.data?.data || response?.data
+
+      const list = data?.customers || data?.users || []
+      if (Array.isArray(list)) {
+        setCustomers(list)
+        setTotalCustomers(data?.total ?? data?.pagination?.total ?? list.length)
+      } else {
+        setCustomers([])
+        setTotalCustomers(0)
+      }
+    } catch (error) {
+      debugError("Error fetching customers:", error)
+      toast.error("Failed to load customers")
+      setCustomers([])
+      setTotalCustomers(0)
+    } finally {
+      setLoading(false)
+    }
+  }, [page, pageSize, searchQuery, filters])
+
+  const loadCustomersRef = useRef(loadCustomers)
+  loadCustomersRef.current = loadCustomers
+
+  // Fetch customers from API (debounced)
   useEffect(() => {
     let cancelled = false
-    const fetchCustomers = async () => {
-      try {
-        setLoading(true)
-        const params = {
-          limit: 1000,
-          page: 1,
-          ...(searchQuery && { search: searchQuery }),
-          ...(filters.status && { status: filters.status }),
-          ...(filters.joiningDate && { joiningDate: filters.joiningDate }),
-          ...(filters.sortBy && { sortBy: filters.sortBy }),
-          ...(filters.chooseFirst && { chooseFirst: filters.chooseFirst }),
-        }
-
-        const response = await adminAPI.getCustomers(params)
-        const data = response?.data?.data || response?.data?.data || response?.data
-
-        const list = data?.customers || data?.users || []
-        if (!cancelled && Array.isArray(list)) {
-          setCustomers(list)
-          setTotalCustomers(data?.total || list.length)
-        } else {
-          if (!cancelled) {
-            setCustomers([])
-            setTotalCustomers(0)
-          }
-        }
-      } catch (error) {
-        debugError('Error fetching customers:', error)
-        toast.error('Failed to load customers')
-        if (!cancelled) {
-          setCustomers([])
-          setTotalCustomers(0)
-        }
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    }
-
-    const t = setTimeout(fetchCustomers, 250)
+    const t = setTimeout(() => {
+      if (!cancelled) loadCustomersRef.current()
+    }, 250)
     return () => {
       cancelled = true
       clearTimeout(t)
     }
-  }, [searchQuery, filters.status, filters.joiningDate, filters.sortBy, filters.chooseFirst])
+  }, [page, searchQuery, filters.status, filters.joiningDate, filters.orderDate, filters.sortBy, filters.chooseFirst])
 
   const [searchParams] = useSearchParams()
   const userIdFromUrl = searchParams.get("userId")
 
   useEffect(() => {
     if (userIdFromUrl && customers.length > 0) {
-      const customer = customers.find(c => c.id === userIdFromUrl || c._id === userIdFromUrl)
+      const customer = customers.find((c) => c.id === userIdFromUrl || c._id === userIdFromUrl)
       if (customer) {
-        handleViewDetails(customer.id || customer.sl || customer._id)
+        handleViewDetails(getCustomerId(customer))
       }
     }
   }, [userIdFromUrl, customers])
 
   const handleToggleStatus = async (customerId) => {
     try {
-      // Find customer
-      const customer = customers.find(c => (c._id || c.id) === customerId)
+      const customer = customers.find((c) => getCustomerId(c) === customerId)
       if (!customer) return
 
       const newStatus = !customer.status
 
-      // Optimistically update UI
-      setCustomers(customers.map(c =>
-        c.id === customerId ? { ...c, status: newStatus } : c
-      ))
+      setCustomers((prev) =>
+        prev.map((c) =>
+          getCustomerId(c) === customerId ? { ...c, status: newStatus, isActive: newStatus } : c
+        )
+      )
 
-      // Call API to update user status
       await adminAPI.updateCustomerStatus(customerId, newStatus)
-      toast.success(`User ${newStatus ? 'activated' : 'deactivated'} successfully`)
+      toast.success(`User ${newStatus ? "activated" : "deactivated"} successfully`)
     } catch (error) {
-      debugError('Error updating status:', error)
-      toast.error('Failed to update status')
-      // Revert optimistic update
-      setCustomers(customers.map(c =>
-        c.id === customerId ? { ...c, status: !c.status } : c
-      ))
+      debugError("Error updating status:", error)
+      toast.error("Failed to update status")
+      setCustomers((prev) =>
+        prev.map((c) =>
+          getCustomerId(c) === customerId ? { ...c, status: !c.status, isActive: !c.status } : c
+        )
+      )
     }
   }
 
@@ -253,11 +210,11 @@ export default function Customers() {
 
   const toggleSelectAllVisible = () => {
     if (allVisibleSelected) {
-      const visibleIds = filteredCustomers.map((customer) => getCustomerId(customer)).filter(Boolean)
+      const visibleIds = displayCustomers.map((customer) => getCustomerId(customer)).filter(Boolean)
       setSelectedCustomerIds((prev) => prev.filter((id) => !visibleIds.includes(id)))
       return
     }
-    const visibleIds = filteredCustomers.map((customer) => getCustomerId(customer)).filter(Boolean)
+    const visibleIds = displayCustomers.map((customer) => getCustomerId(customer)).filter(Boolean)
     setSelectedCustomerIds((prev) => Array.from(new Set([...prev, ...visibleIds])))
   }
 
@@ -266,8 +223,10 @@ export default function Customers() {
       toast.error("Please select at least one customer")
       return
     }
+    if (bulkCodLoadingAction) return
+    const action = isCodAllowed ? "enable" : "disable"
     try {
-      setBulkCodLoading(true)
+      setBulkCodLoadingAction(action)
       await adminAPI.bulkUpdateCustomerCodAccess(selectedCustomerIds, isCodAllowed)
       setCustomers((prev) =>
         prev.map((customer) =>
@@ -282,7 +241,7 @@ export default function Customers() {
       debugError("Error in bulk COD update:", error)
       toast.error("Failed to update selected users")
     } finally {
-      setBulkCodLoading(false)
+      setBulkCodLoadingAction(null)
     }
   }
 
@@ -299,26 +258,40 @@ export default function Customers() {
       const data = response?.data?.data || response?.data
 
       if (data?.user) {
-        setUserDetails(data.user)
+        const user = data.user
+        const recentOrders = (user.recentOrders || data.recentOrders || user.orders || data.orders || []).map((o) => ({
+          ...o,
+          orderId: o.orderId || o._id,
+          restaurantName: o.restaurantName || o.restaurant?.name || "",
+          total: o.total ?? o.pricing?.total ?? 0,
+          status: o.status || o.orderStatus || "",
+        }))
+        setUserDetails({
+          ...user,
+          phoneVerified: user.phoneVerified ?? user.isPhoneVerified ?? user.isVerified ?? false,
+          addresses: user.addresses || data.addresses || [],
+          orders: recentOrders,
+          gender: user.gender || data.gender || "",
+          dateOfBirth: user.dateOfBirth || data.dateOfBirth || null,
+        })
 
-        // Fetch contacts in parallel
         try {
           const contactsRes = await adminAPI.getCustomerContacts(customerId, { limit: 500 })
           const contactsData = contactsRes?.data?.data?.contacts || contactsRes?.data?.contacts || []
           setUserContacts(contactsData)
         } catch (contactsError) {
-          debugError('Error fetching customer contacts:', contactsError)
-          toast.error('Failed to load user contacts')
+          debugError("Error fetching customer contacts:", contactsError)
+          toast.error("Failed to load user contacts")
         } finally {
           setLoadingContacts(false)
         }
       } else {
-        toast.error('Failed to load user details')
+        toast.error("Failed to load user details")
         setShowUserDetails(false)
       }
     } catch (error) {
-      debugError('Error fetching user details:', error)
-      toast.error('Failed to load user details')
+      debugError("Error fetching user details:", error)
+      toast.error("Failed to load user details")
       setShowUserDetails(false)
     } finally {
       setLoadingDetails(false)
@@ -326,7 +299,7 @@ export default function Customers() {
   }
 
   const handleExport = (format) => {
-    if (filteredCustomers.length === 0) {
+    if (displayCustomers.length === 0) {
       toast.error("No customers to export")
       return
     }
@@ -335,15 +308,15 @@ export default function Customers() {
     try {
       switch (format) {
         case "csv":
-          exportCustomersToCSV(filteredCustomers, filename)
+          exportCustomersToCSV(displayCustomers, filename)
           toast.success("CSV export started")
           break
         case "excel":
-          exportCustomersToExcel(filteredCustomers, filename)
+          exportCustomersToExcel(displayCustomers, filename)
           toast.success("Excel export started")
           break
         case "pdf":
-          exportCustomersToPDF(filteredCustomers, filename)
+          exportCustomersToPDF(displayCustomers, filename)
           toast.success("PDF download started")
           break
         default:
@@ -365,6 +338,18 @@ export default function Customers() {
       .slice(0, 2)
       .map((part) => part[0]?.toUpperCase() || "")
       .join("") || "NA"
+  }
+
+  const handleResetFilters = () => {
+    setSearchQuery("")
+    setFilters({
+      orderDate: "",
+      joiningDate: "",
+      status: "",
+      sortBy: "",
+      chooseFirst: "",
+    })
+    setPage(1)
   }
 
   return (
@@ -450,30 +435,22 @@ export default function Customers() {
           <div className="mt-4 flex items-center justify-between">
             <div className="flex items-center gap-3">
               <button
-                onClick={() => {
-                  // Filters are applied automatically via useMemo
-                }}
+                onClick={() => loadCustomers()}
                 className="px-6 py-2.5 text-sm font-medium rounded-lg bg-[#FF0000] text-white hover:bg-[#CC0000] transition-all"
               >
                 Apply Filters
               </button>
               <button
-                onClick={() => {
-                  setFilters({
-                    orderDate: "",
-                    joiningDate: "",
-                    status: "",
-                    sortBy: "",
-                    chooseFirst: "",
-                  })
-                }}
+                onClick={handleResetFilters}
                 className="px-6 py-2.5 text-sm font-medium rounded-lg border border-[#EDE8E0] bg-white text-[#5C5247] hover:bg-[#FFEDED] hover:text-[#FF0000] transition-all"
               >
                 Reset Filters
               </button>
             </div>
             <div className="text-sm text-[#5C5247]">
-              {loading ? 'Loading...' : `Showing ${filteredCustomers.length} of ${totalCustomers} customers`}
+              {loading
+                ? "Loading..."
+                : `Showing ${displayCustomers.length} of ${totalCustomers} customers (page ${page} of ${totalPages})`}
             </div>
           </div>
         </div>
@@ -484,7 +461,7 @@ export default function Customers() {
             <div className="flex items-center gap-2">
               <h2 className="text-xl font-bold text-[#1A1A1A]">Customer list</h2>
               <span className="px-3 py-1 rounded-full text-sm font-semibold bg-[#FFEDED] text-[#FF0000]">
-                {filteredCustomers.length}
+                {totalCustomers}
               </span>
             </div>
 
@@ -494,7 +471,10 @@ export default function Customers() {
                   type="text"
                   placeholder="Ex: Search by name"
                   value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onChange={(e) => {
+                    setSearchQuery(e.target.value)
+                    setPage(1)
+                  }}
                   className="pl-10 pr-4 py-2.5 w-full text-sm rounded-lg border border-[#EDE8E0] bg-white focus:outline-none focus:ring-2 focus:ring-[#FF0000] focus:border-[#FF0000]"
                 />
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#9E8F7E]" />
@@ -536,18 +516,24 @@ export default function Customers() {
             </p>
             <div className="flex items-center gap-2">
               <button
+                type="button"
                 onClick={() => handleBulkCodAccess(true)}
-                disabled={bulkCodLoading || selectedCustomersCount === 0}
-                className="px-3 py-2 text-xs font-semibold rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled={selectedCustomersCount === 0 || bulkCodLoadingAction !== null}
+                className={`px-3 py-2 text-xs font-semibold rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:cursor-not-allowed ${
+                  selectedCustomersCount === 0 || bulkCodLoadingAction === "enable" ? "opacity-50" : ""
+                }`}
               >
-                Enable COD
+                {bulkCodLoadingAction === "enable" ? "Enabling..." : "Enable COD"}
               </button>
               <button
+                type="button"
                 onClick={() => handleBulkCodAccess(false)}
-                disabled={bulkCodLoading || selectedCustomersCount === 0}
-                className="px-3 py-2 text-xs font-semibold rounded-md bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled={selectedCustomersCount === 0 || bulkCodLoadingAction !== null}
+                className={`px-3 py-2 text-xs font-semibold rounded-md bg-rose-600 text-white hover:bg-rose-700 disabled:cursor-not-allowed ${
+                  selectedCustomersCount === 0 || bulkCodLoadingAction === "disable" ? "opacity-50" : ""
+                }`}
               >
-                Disable COD
+                {bulkCodLoadingAction === "disable" ? "Disabling..." : "Disable COD"}
               </button>
             </div>
           </div>
@@ -582,14 +568,14 @@ export default function Customers() {
                       <div className="text-sm text-[#9E8F7E]">Loading customers...</div>
                     </td>
                   </tr>
-                ) : filteredCustomers.length === 0 ? (
+                ) : displayCustomers.length === 0 ? (
                   <tr>
                     <td colSpan={9} className="px-6 py-8 text-center">
                       <div className="text-sm text-[#9E8F7E]">No customers found</div>
                     </td>
                   </tr>
                 ) : (
-                  filteredCustomers.map((customer, index) => (
+                  displayCustomers.map((customer, index) => (
                     <tr key={getCustomerId(customer) || index} className="hover:bg-[#FAF7F2]/55 transition-colors">
                       <td className="px-4 py-4 text-center">
                         <input
@@ -603,7 +589,7 @@ export default function Customers() {
                         <div className="flex items-center gap-3">
                           <div
                             className="w-10 h-10 rounded-full bg-[#FAF7F2] text-[#5C5247] flex items-center justify-center shrink-0 overflow-hidden cursor-pointer hover:opacity-80 transition-all border border-[#EDE8E0]"
-                            onClick={() => handleViewDetails(customer._id || customer.id || customer.sl)}
+                            onClick={() => handleViewDetails(getCustomerId(customer))}
                           >
                             {customer.profileImage ? (
                               <img
@@ -620,7 +606,7 @@ export default function Customers() {
                           </div>
                           <span
                             className="text-sm font-medium text-[#1A1A1A] cursor-pointer hover:text-[#FF0000] transition-colors"
-                            onClick={() => handleViewDetails(customer._id || customer.id || customer.sl)}
+                            onClick={() => handleViewDetails(getCustomerId(customer))}
                           >
                             {customer.name}
                           </span>
@@ -636,37 +622,11 @@ export default function Customers() {
                         <span className="text-sm text-[#5C5247]">{customer.totalOrder || 0}</span>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <span className="text-sm font-medium text-[#1A1A1A]">{"\u20B9"} {(customer.totalOrderAmount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                        <span className="text-sm font-medium text-[#1A1A1A]">{"\u20B9"} {(customer.totalOrderAmount || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <span className="text-sm text-[#5C5247]">{formatDateTime(customer.joiningDate)}</span>
                       </td>
-                      {/* <td className="px-6 py-4 whitespace-nowrap">
-                        <button
-                          onClick={() => handleToggleCodAccess(getCustomerId(customer))}
-                          disabled={codUpdatingId === getCustomerId(customer)}
-                          
-                          className={`relative inline-flex shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-[#FF0000] focus:ring-offset-2 disabled:opacity-60 ${customer.isCodAllowed !== false ? "bg-emerald-600" : "bg-slate-300"}`}
-                        >
-                          <span
-                            style={{ width: "20px", height: "20px", transform: customer.isCodAllowed !== false ? "translateX(16px)" : "translateX(0px)" }}
-                            className={`pointer-events-none inline-block transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out`}
-                          />
-                        </button>
-                      </td> */}
-                      {/* <td className="px-6 py-4 whitespace-nowrap">
-                        <button
-                          onClick={() => handleToggleStatus(getCustomerId(customer))}
-                          style={{ width: "44px", height: "24px", minWidth: "44px" }}
-                          className={`relative inline-flex shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-[#FF0000] focus:ring-offset-2 ${customer.status ? "bg-[#FF0000]" : "bg-slate-300"}`}
-                        >
-                          <span
-                            style={{ width: "20px", height: "20px", transform: customer.status ? "translateX(16px)" : "translateX(0px)" }}
-                            className={`pointer-events-none inline-block transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out`}
-                          />
-                        </button>
-                      </td> */}
-
                       <td className="px-6 py-4 whitespace-nowrap">
                         <button
                           onClick={() => handleToggleCodAccess(getCustomerId(customer))}
@@ -694,7 +654,7 @@ export default function Customers() {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-center">
                         <button
-                          onClick={() => handleViewDetails(customer._id || customer.id || customer.sl)}
+                          onClick={() => handleViewDetails(getCustomerId(customer))}
                           className="p-1.5 rounded text-[#FF0000] hover:bg-[#FFEDED] transition-colors"
                         >
                           <Eye className="w-4 h-4" />
@@ -705,6 +665,31 @@ export default function Customers() {
                 )}
               </tbody>
             </table>
+          </div>
+
+          {/* Pagination */}
+          <div className="mt-4 flex items-center justify-between gap-3">
+            <p className="text-sm text-[#5C5247]">
+              Page {page} of {totalPages}
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page <= 1 || loading}
+                className="px-4 py-2 text-sm font-medium rounded-lg border border-[#EDE8E0] bg-white text-[#5C5247] hover:bg-[#FFEDED] hover:text-[#FF0000] disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+              >
+                Prev
+              </button>
+              <button
+                type="button"
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={page >= totalPages || loading}
+                className="px-4 py-2 text-sm font-medium rounded-lg border border-[#EDE8E0] bg-white text-[#5C5247] hover:bg-[#FFEDED] hover:text-[#FF0000] disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+              >
+                Next
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -783,7 +768,7 @@ export default function Customers() {
                     <span className="text-xs font-semibold text-[#5C5247]">Total Spent</span>
                   </div>
                   <p className="text-xl font-bold text-[#2E7D32]">
-                    {"\u20B9"}{(userDetails.totalOrderAmount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    {"\u20B9"}{(userDetails.totalOrderAmount || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </p>
                 </div>
                 <div className="bg-white border border-[#EDE8E0] rounded-xl p-3">
@@ -806,7 +791,7 @@ export default function Customers() {
                     {userDetails.addresses.map((address, index) => (
                       <div key={index} className="bg-white rounded-xl p-3 border border-[#EDE8E0]">
                         <div className="flex items-center justify-between mb-2">
-                          <span className="text-sm font-semibold text-[#1A1A1A]">{address.label || 'Address'}</span>
+                          <span className="text-sm font-semibold text-[#1A1A1A]">{address.label || "Address"}</span>
                           {address.isDefault && (
                             <span className="px-2 py-1 rounded-full text-xs font-semibold bg-[#FFEDED] text-[#FF0000] border border-[#EDE8E0]">
                               Default
@@ -841,7 +826,7 @@ export default function Customers() {
                           <p className="text-xs text-[#5C5247]">{order.restaurantName}</p>
                         </div>
                         <div className="text-right">
-                          <p className="text-sm font-semibold text-[#1A1A1A]">{"\u20B9"}{(order.total || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                          <p className="text-sm font-semibold text-[#1A1A1A]">{"\u20B9"}{(order.total || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                           <p className="text-xs text-[#5C5247] capitalize">{order.status}</p>
                         </div>
                       </div>
@@ -903,10 +888,10 @@ export default function Customers() {
                   <div className="bg-white rounded-xl p-3 border border-[#EDE8E0]">
                     <p className="text-xs font-semibold text-[#5C5247] mb-1">Date of Birth</p>
                     <p className="text-sm text-[#1A1A1A]">
-                      {new Date(userDetails.dateOfBirth).toLocaleDateString('en-GB', {
-                        day: 'numeric',
-                        month: 'short',
-                        year: 'numeric'
+                      {new Date(userDetails.dateOfBirth).toLocaleDateString("en-GB", {
+                        day: "numeric",
+                        month: "short",
+                        year: "numeric",
                       })}
                     </p>
                   </div>
@@ -923,4 +908,3 @@ export default function Customers() {
     </div>
   )
 }
-

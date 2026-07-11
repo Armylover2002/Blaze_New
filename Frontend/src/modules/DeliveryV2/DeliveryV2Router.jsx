@@ -17,6 +17,7 @@ const OTP = lazy(() => import("./pages/auth/OTP"))
 const SignupStep1 = lazy(() => import("./pages/auth/SignupStep1"))
 const SignupStep2 = lazy(() => import("./pages/auth/SignupStep2"))
 const PendingVerification = lazy(() => import("./pages/auth/PendingVerification"))
+const RejectedOnboarding = lazy(() => import("./pages/auth/RejectedOnboarding"))
 
 // V2 Pages
 import DeliveryHomeV2 from './pages/DeliveryHomeV2';
@@ -72,6 +73,7 @@ const DeliveryV2Router = () => {
         <Route path="signup/details" element={<SignupStep1 />} />
         <Route path="signup/documents" element={<SignupStep2 />} />
         <Route path="verification" element={<PendingVerification />} />
+        <Route path="onboarding/rejected" element={<RejectedOnboarding />} />
         <Route path="terms" element={<TermsAndConditionsV2 />} />
         <Route path="support" element={<SupportInfoV2 />} />
 

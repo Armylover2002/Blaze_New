@@ -395,11 +395,23 @@ export default function SignupStep1() {
     setIsSubmitting(true)
 
     try {
-      // Validate unique documents with backend
+      // Validate unique documents with backend.
+      // Pass phone (+ partnerId when reapplying) so rejected partners can reuse their own docs.
+      let partnerId = null;
+      try {
+        const ctxRaw = sessionStorage.getItem("deliveryRejectionContext");
+        const ctx = ctxRaw ? JSON.parse(ctxRaw) : null;
+        partnerId = ctx?.partnerId || null;
+      } catch {
+        /* ignore */
+      }
+      const phoneDigits = String(formData.phone || "").replace(/\D/g, "").slice(-10);
       await deliveryAPI.validateDocumentsPublic({
          drivingLicenseNumber: formData.drivingLicenseNumber,
          panNumber: formData.panNumber,
-         aadharNumber: formData.aadharNumber
+         aadharNumber: formData.aadharNumber,
+         phone: phoneDigits || undefined,
+         ...(partnerId ? { partnerId } : {}),
       })
 
       const details = {
@@ -418,7 +430,9 @@ export default function SignupStep1() {
       }
       sessionStorage.setItem("deliverySignupDetails", JSON.stringify(details))
       toast.success("Details saved")
-      navigate("/food/delivery/signup/documents")
+      navigate("/food/delivery/signup/documents", {
+        state: location.state || undefined,
+      })
     } catch (error) {
       debugError("Error saving details:", error)
       if (error?.response?.status === 409) {

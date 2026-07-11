@@ -278,23 +278,45 @@ export const exportReviewsToJSON = (reviews, filename = "deliveryman_reviews") =
 }
 
 // Export utilities for bonus transactions
+const formatMoneyCell = (value) => {
+  const num = Number(value)
+  if (!Number.isFinite(num)) return 'â‚¹0.00'
+  return `â‚¹${num.toFixed(2)}`
+}
+
 export const exportBonusToCSV = (transactions, filename = "deliveryman_bonus") => {
-  const headers = ["S.No", "Transaction ID", "Delivery Boy ID", "Deliveryman", "Bonus", "Reference", "Created At"]
+  const headers = [
+    "S.No",
+    "Transaction ID",
+    "Delivery Partner",
+    "Delivery Boy ID",
+    "Bonus",
+    "Reference",
+    "Previous Balance",
+    "Updated Balance",
+    "Created By",
+    "Created At",
+  ]
   const rows = transactions.map((transaction) => [
     transaction.sl,
     transaction.transactionId,
-    transaction.deliveryId || 'N/A',
-    transaction.deliveryman,
-    transaction.bonus,
-    transaction.reference,
-    transaction.createdAt
+    transaction.deliveryPartner || transaction.deliveryman || "",
+    transaction.deliveryId || "N/A",
+    formatMoneyCell(transaction.amount ?? transaction.bonus),
+    transaction.reference || "",
+    formatMoneyCell(transaction.previousBalance),
+    formatMoneyCell(transaction.updatedBalance),
+    transaction.createdBy || "N/A",
+    transaction.createdAt || "",
   ])
-  
+
   const csvContent = [
     headers.join(","),
-    ...rows.map(row => row.map(cell => `"${cell}"`).join(","))
+    ...rows.map((row) =>
+      row.map((cell) => `"${String(cell ?? "").replace(/"/g, '""')}"`).join(","),
+    ),
   ].join("\n")
-  
+
   const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" })
   const link = document.createElement("a")
   const url = URL.createObjectURL(blob)
@@ -304,37 +326,30 @@ export const exportBonusToCSV = (transactions, filename = "deliveryman_bonus") =
   document.body.appendChild(link)
   link.click()
   document.body.removeChild(link)
+  URL.revokeObjectURL(url)
 }
 
 // Helper function to format bonus amount properly (remove superscript and special characters)
 const formatBonusForExport = (transaction) => {
-  // First priority: use raw amount value if available
   if (transaction.amount !== undefined && transaction.amount !== null && !isNaN(transaction.amount)) {
-    const amount = parseFloat(transaction.amount)
-    return `?${amount.toFixed(2)}`
+    return formatMoneyCell(transaction.amount)
   }
-  
-  // Second priority: clean and extract from bonus string
+
   if (transaction.bonus) {
-    // Remove all superscript/special characters and unwanted text
-    let cleaned = transaction.bonus.toString()
-      .replace(/¹/g, '') // Remove superscript 1
-      .replace(/[¹²³45678?°]/g, '') // Remove all superscript numbers
-      .replace(/[\u2070-\u207F\u2080-\u208F]/g, '') // Remove all superscript Unicode ranges
-      .replace(/[^\d.-]/g, '') // Keep only digits, dots, and minus signs
+    let cleaned = transaction.bonus
+      .toString()
+      .replace(/[\u2070-\u207F\u2080-\u208F]/g, "")
+      .replace(/[^\d.-]/g, "")
       .trim()
-    
-    // Extract numeric value
+
     const numericMatch = cleaned.match(/[\d.]+/)
     if (numericMatch) {
       const amount = parseFloat(numericMatch[0])
-      if (!isNaN(amount)) {
-        return `?${amount.toFixed(2)}`
-      }
+      if (!isNaN(amount)) return formatMoneyCell(amount)
     }
   }
-  
-  return '?0.00'
+
+  return "â‚¹0.00"
 }
 
 export const exportBonusToExcel = (transactions, filename = "deliveryman_bonus") => {
@@ -343,15 +358,29 @@ export const exportBonusToExcel = (transactions, filename = "deliveryman_bonus")
     return
   }
 
-  const headers = ["S.No", "Transaction ID", "Delivery Boy ID", "Deliveryman", "Bonus", "Reference", "Created At"]
+  const headers = [
+    "S.No",
+    "Transaction ID",
+    "Delivery Partner",
+    "Delivery Boy ID",
+    "Bonus",
+    "Reference",
+    "Previous Balance",
+    "Updated Balance",
+    "Created By",
+    "Created At",
+  ]
   const rows = transactions.map((transaction) => [
-    transaction.sl || 'N/A',
-    transaction.transactionId || 'N/A',
-    transaction.deliveryId || 'N/A',
-    transaction.deliveryman || 'N/A',
+    transaction.sl || "N/A",
+    transaction.transactionId || "N/A",
+    transaction.deliveryPartner || transaction.deliveryman || "N/A",
+    transaction.deliveryId || "N/A",
     formatBonusForExport(transaction),
-    transaction.reference || 'N/A',
-    transaction.createdAt || 'N/A'
+    transaction.reference || "N/A",
+    formatMoneyCell(transaction.previousBalance),
+    formatMoneyCell(transaction.updatedBalance),
+    transaction.createdBy || "N/A",
+    transaction.createdAt || "N/A",
   ])
   
   // Create HTML table for better Excel compatibility with UTF-8 encoding
@@ -410,7 +439,7 @@ export const exportBonusToPDF = (transactions, filename = "deliveryman_bonus") =
 
         // Add title
         doc.setFontSize(16)
-        doc.text('Deliveryman Bonus Transactions Report', 14, 15)
+        doc.text('Delivery Partner Bonus Transactions Report', 14, 15)
         
         // Add export info
         doc.setFontSize(10)
@@ -426,7 +455,7 @@ export const exportBonusToPDF = (transactions, filename = "deliveryman_bonus") =
         // Prepare table data - ensure bonus is properly formatted
         const tableData = transactions.map((transaction) => {
           // ALWAYS use raw amount value - don't rely on formatted bonus string
-          let bonusAmount = '?0.00'
+          let bonusAmount = 'â‚¹0.00'
           
           // First priority: Use raw numeric amount from transaction.amount
           if (transaction.amount !== undefined && transaction.amount !== null) {
@@ -434,7 +463,7 @@ export const exportBonusToPDF = (transactions, filename = "deliveryman_bonus") =
               ? parseFloat(transaction.amount.replace(/[^\d.-]/g, ''))
               : parseFloat(transaction.amount)
             if (!isNaN(numAmount)) {
-              bonusAmount = `?${numAmount.toFixed(2)}`
+              bonusAmount = `â‚¹${numAmount.toFixed(2)}`
             }
           } 
           // Second priority: Extract number from bonus string and rebuild
@@ -443,29 +472,32 @@ export const exportBonusToPDF = (transactions, filename = "deliveryman_bonus") =
             const numericPart = String(transaction.bonus).replace(/[^\d.-]/g, '')
             const numAmount = parseFloat(numericPart)
             if (!isNaN(numAmount) && numAmount > 0) {
-              bonusAmount = `?${numAmount.toFixed(2)}`
+              bonusAmount = `â‚¹${numAmount.toFixed(2)}`
             }
           }
           
           return [
             transaction.sl || 'N/A',
             transaction.transactionId || 'N/A',
+            transaction.deliveryPartner || transaction.deliveryman || 'N/A',
             transaction.deliveryId || 'N/A',
-            transaction.deliveryman || 'N/A',
             bonusAmount,
             transaction.reference || 'N/A',
+            formatMoneyCell(transaction.previousBalance),
+            formatMoneyCell(transaction.updatedBalance),
+            transaction.createdBy || 'N/A',
             transaction.createdAt || 'N/A'
           ]
         })
 
         // Add table using autoTable
         autoTable(doc, {
-          head: [["S.No", "Transaction ID", "Delivery Boy ID", "Deliveryman", "Bonus", "Reference", "Created At"]],
+          head: [["S.No", "Transaction ID", "Delivery Partner", "Delivery Boy ID", "Bonus", "Reference", "Previous Balance", "Updated Balance", "Created By", "Created At"]],
           body: tableData,
           startY: 28,
           styles: {
-            fontSize: 7,
-            cellPadding: 2,
+            fontSize: 6,
+            cellPadding: 1.5,
           },
           headStyles: {
             fillColor: [241, 245, 249],
@@ -476,15 +508,18 @@ export const exportBonusToPDF = (transactions, filename = "deliveryman_bonus") =
             fillColor: [248, 250, 252],
           },
           columnStyles: {
-            0: { cellWidth: 12 }, // SI
-            1: { cellWidth: 40 }, // Transaction ID
-            2: { cellWidth: 30 }, // Delivery Boy ID
-            3: { cellWidth: 35 }, // Deliveryman
-            4: { cellWidth: 20 }, // Bonus
-            5: { cellWidth: 35 }, // Reference
-            6: { cellWidth: 35 }, // Created At
+            0: { cellWidth: 10 }, // SI
+            1: { cellWidth: 35 }, // Transaction ID
+            2: { cellWidth: 30 }, // Delivery Partner
+            3: { cellWidth: 25 }, // Delivery Boy ID
+            4: { cellWidth: 15 }, // Bonus
+            5: { cellWidth: 30 }, // Reference
+            6: { cellWidth: 20 }, // Previous Balance
+            7: { cellWidth: 20 }, // Updated Balance
+            8: { cellWidth: 25 }, // Created By
+            9: { cellWidth: 30 }, // Created At
           },
-          margin: { top: 28, left: 14, right: 14 },
+          margin: { top: 28, left: 10, right: 10 },
         })
 
         // Save the PDF instantly

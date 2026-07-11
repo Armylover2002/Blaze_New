@@ -153,7 +153,7 @@ export default function Accessibility() {
             <p className="text-sm md:text-base text-gray-600 dark:text-gray-400 mb-3 md:mb-4">
               If you need additional accessibility features or have suggestions, please contact our support team.
             </p>
-            <Link to="/user/help">
+            <Link to="/food/user/profile/support">
               <Button variant="outline" className="w-full text-sm md:text-base h-10 md:h-12">
                 Contact Support
               </Button>

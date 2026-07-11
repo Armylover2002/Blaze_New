@@ -38,7 +38,10 @@ const deliveryRegisterSchema = z.object({
     platform: z.enum(['web', 'mobile']).optional().default('web'),
     razorpayOrderId: z.string().optional(),
     razorpayPaymentId: z.string().optional(),
-    razorpaySignature: z.string().optional()
+    razorpaySignature: z.string().optional(),
+    submissionType: z
+        .enum(['initial', 'edit_existing', 'new_onboarding'])
+        .optional()
 }).superRefine((data, ctx) => {
     let hasVehicles = false;
     if (data.vehicles) {

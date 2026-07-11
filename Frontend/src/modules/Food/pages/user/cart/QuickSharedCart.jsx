@@ -95,12 +95,19 @@ export default function QuickSharedCart({ initialAddress = null, addressMode = "
   const { cart, updateQuantity, clearCart } = useCart();
   const { addresses = [], getDefaultAddress, userProfile } = useProfile();
   const companyName = useCompanyName();
+  const isUserCodAllowed = userProfile?.isCodAllowed !== false;
 
   const [selectedAddressId, setSelectedAddressId] = useState(null);
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState("cash");
   const [pricing, setPricing] = useState(null);
   const [isPricingLoading, setIsPricingLoading] = useState(false);
   const [isPlacingOrder, setIsPlacingOrder] = useState(false);
+
+  useEffect(() => {
+    if (!isUserCodAllowed && selectedPaymentMethod === "cash") {
+      setSelectedPaymentMethod("razorpay");
+    }
+  }, [isUserCodAllowed, selectedPaymentMethod]);
 
   const quickCart = useMemo(
     () => cart.filter((item) => (item.orderType || "food") === "quick"),
@@ -209,6 +216,11 @@ export default function QuickSharedCart({ initialAddress = null, addressMode = "
     if (invalidQuickItems.length > 0) {
       console.error("Quick cart contains items without a valid seller/store id", invalidQuickItems);
       toast.error("Some quick-cart items are missing store info. Clear the cart and add them again.");
+      return;
+    }
+
+    if (!isUserCodAllowed && selectedPaymentMethod === "cash") {
+      toast.error("Cash on delivery is not available for your account");
       return;
     }
 
@@ -464,21 +476,27 @@ export default function QuickSharedCart({ initialAddress = null, addressMode = "
             <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
               <p className="text-xs font-bold uppercase tracking-[0.24em] text-slate-500">Payment</p>
               <div className="mt-4 grid gap-3">
-                <button
-                  type="button"
-                  onClick={() => setSelectedPaymentMethod("cash")}
-                  className={`flex items-center justify-between rounded-2xl border px-4 py-3 text-left ${
-                    selectedPaymentMethod === "cash"
-                      ? "border-emerald-500 bg-emerald-50"
-                      : "border-slate-200"
-                  }`}
-                >
-                  <span className="flex items-center gap-3 font-semibold text-slate-900">
-                    <Wallet className="h-4 w-4" />
-                    Cash on delivery
-                  </span>
-                  <span className="text-xs font-bold text-slate-500">Pay later</span>
-                </button>
+                {isUserCodAllowed ? (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedPaymentMethod("cash")}
+                    className={`flex items-center justify-between rounded-2xl border px-4 py-3 text-left ${
+                      selectedPaymentMethod === "cash"
+                        ? "border-emerald-500 bg-emerald-50"
+                        : "border-slate-200"
+                    }`}
+                  >
+                    <span className="flex items-center gap-3 font-semibold text-slate-900">
+                      <Wallet className="h-4 w-4" />
+                      Cash on delivery
+                    </span>
+                    <span className="text-xs font-bold text-slate-500">Pay later</span>
+                  </button>
+                ) : (
+                  <p className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                    Cash on delivery is not available for your account. Please pay online.
+                  </p>
+                )}
 
                 <button
                   type="button"
