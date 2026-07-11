@@ -102,17 +102,17 @@ export const SettingsProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  const fetchSettings = useCallback(async () => {
+  const fetchSettings = useCallback(async ({ forceRefresh = false } = {}) => {
     try {
       setLoading(true);
       setError(null);
       const cached = getCachedSettings();
-      if (cached) {
+      if (cached && !forceRefresh) {
         const merged = { ...DEFAULT_SETTINGS, ...normalizeGlobalSettings(cached) };
         setSettings(merged);
         applyThemeVariables(merged);
       }
-      const data = await loadBusinessSettings();
+      const data = await loadBusinessSettings({ forceRefresh });
       const merged = {
         ...DEFAULT_SETTINGS,
         ...normalizeGlobalSettings(data || {}),
@@ -163,7 +163,7 @@ export const SettingsProvider = ({ children }) => {
     settings,
     loading,
     error,
-    refetch: fetchSettings,
+    refetch: () => fetchSettings({ forceRefresh: true }),
   };
 
   return (

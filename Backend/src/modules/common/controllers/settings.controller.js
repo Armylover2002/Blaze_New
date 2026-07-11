@@ -8,7 +8,7 @@ import { clearGlobalBrandingCache } from '../services/globalBranding.service.js'
 import { clearGlobalPaymentSettingsCache } from '../services/globalPaymentSettings.service.js';
 
 const SETTINGS_CACHE_KEY = 'global_settings_public';
-const SETTINGS_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const SETTINGS_CACHE_TTL_MS = 60 * 1000; // 1 minute server-side safety TTL
 const SETTINGS_REDIS_KEY = 'common:global_settings:public';
 
 const getRedisCache = async (key) => {
@@ -45,6 +45,14 @@ export const clearGlobalSettingsCache = async () => {
     clearGlobalPaymentSettingsCache();
 };
 
+const warmGlobalSettingsCache = async (payload) => {
+    if (!payload) return;
+    setCache(SETTINGS_CACHE_KEY, payload, SETTINGS_CACHE_TTL_MS);
+    try {
+        await setRedisCache(SETTINGS_REDIS_KEY, payload, SETTINGS_CACHE_TTL_MS);
+    } catch {}
+};
+
 const buildSettingsPayload = (settings) => {
     const rawSettings = settings.toObject ? settings.toObject() : settings;
     const allowedModules = Object.keys(GlobalSettings.schema.paths)
@@ -73,7 +81,7 @@ export async function getGlobalSettings(req, res, next) {
                 cached = getCache(SETTINGS_CACHE_KEY);
             }
             if (cached) {
-                res.set('Cache-Control', 'public, max-age=300, stale-while-revalidate=60');
+                res.set('Cache-Control', 'no-cache, must-revalidate');
                 return sendResponse(res, 200, 'Global settings fetched successfully', cached);
             }
         }
@@ -93,7 +101,7 @@ export async function getGlobalSettings(req, res, next) {
             try {
                 await setRedisCache(SETTINGS_REDIS_KEY, payload, SETTINGS_CACHE_TTL_MS);
             } catch {}
-            res.set('Cache-Control', 'public, max-age=300, stale-while-revalidate=60');
+            res.set('Cache-Control', 'no-cache, must-revalidate');
         }
 
         return sendResponse(res, 200, 'Global settings fetched successfully', payload);
@@ -270,8 +278,10 @@ export async function updateGlobalSettings(req, res, next) {
         }
 
         await settings.save();
+        const payload = buildSettingsPayload(settings);
         await clearGlobalSettingsCache();
-        return sendResponse(res, 200, 'Global settings updated successfully', settings);
+        await warmGlobalSettingsCache(payload);
+        return sendResponse(res, 200, 'Global settings updated successfully', payload);
     } catch (error) {
         next(error);
     }

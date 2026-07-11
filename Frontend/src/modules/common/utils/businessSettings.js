@@ -8,9 +8,71 @@ import { API_ENDPOINTS } from "@/services/api/config";
 import { searchAPI } from "@/services/api";
 
 const SETTINGS_KEY = 'global_business_settings';
-const SETTINGS_FETCH_TTL_MS = 5 * 60 * 1000; // 5 minutes — skip network when fresh
+const SETTINGS_FETCH_TTL_MS = 60 * 1000; // 1 minute soft TTL; updatedAt + polling catch changes sooner
+const SETTINGS_POLL_INTERVAL_MS = 45 * 1000; // Poll for cross-client updates while tab is visible
 let currentAppType = 'user'; // Default to user app
 let lastSettingsFetchAt = 0;
+let settingsPollTimer = null;
+
+const getSettingsUpdatedAt = (settings) => {
+  if (!settings?.updatedAt) return '';
+  return String(settings.updatedAt);
+};
+
+const applySettingsToCache = (settings, { notify = false } = {}) => {
+  if (!settings) return;
+
+  cachedSettings = settings;
+  lastSettingsFetchAt = Date.now();
+  try {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+  } catch (e) {}
+
+  updateTitle(settings.companyName);
+  updateThemeColor(settings.themeColor);
+
+  const favicon = getAppFavicon(currentAppType);
+  if (favicon) updateFavicon(favicon);
+
+  if (notify && typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('businessSettingsUpdated', { detail: settings }));
+  }
+};
+
+const initSettingsSyncListeners = () => {
+  if (typeof window === 'undefined') return;
+
+  window.addEventListener('storage', (event) => {
+    if (event.key !== SETTINGS_KEY || !event.newValue) return;
+
+    try {
+      const settings = JSON.parse(event.newValue);
+      const currentUpdatedAt = getSettingsUpdatedAt(cachedSettings);
+      const incomingUpdatedAt = getSettingsUpdatedAt(settings);
+      if (incomingUpdatedAt && incomingUpdatedAt === currentUpdatedAt) return;
+      applySettingsToCache(settings, { notify: true });
+    } catch (e) {}
+  });
+
+  const refreshIfVisible = () => {
+    if (document.visibilityState === 'visible') {
+      refreshBusinessSettingsIfStale().catch(() => {});
+    }
+  };
+
+  document.addEventListener('visibilitychange', refreshIfVisible);
+  window.addEventListener('focus', refreshIfVisible);
+
+  if (settingsPollTimer) {
+    clearInterval(settingsPollTimer);
+  }
+
+  settingsPollTimer = setInterval(() => {
+    if (document.visibilityState === 'visible') {
+      refreshBusinessSettingsIfStale().catch(() => {});
+    }
+  }, SETTINGS_POLL_INTERVAL_MS);
+};
 
 /**
  * Detect app type from URL if not set
@@ -94,22 +156,14 @@ export const loadBusinessSettings = async (options = {}) => {
     }
 
     inFlightSettingsPromise = (async () => {
-      const response = await apiClient.get(endpoint);
+      const response = await apiClient.get(endpoint, {
+        params: forceRefresh ? { _: Date.now() } : undefined,
+        headers: { 'Cache-Control': 'no-cache' },
+      });
       const settings = response?.data?.data || response?.data;
 
       if (settings) {
-        cachedSettings = settings;
-        lastSettingsFetchAt = Date.now();
-        try {
-          localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
-        } catch (e) {}
-        
-        updateTitle(settings.companyName);
-        updateThemeColor(settings.themeColor);
-        
-        const favicon = getAppFavicon(currentAppType);
-        if (favicon) updateFavicon(favicon);
-
+        applySettingsToCache(settings);
         return settings;
       }
       return cachedSettings;
@@ -164,22 +218,38 @@ export const updateTitle = (companyName) => {
  * Set cached settings manually (useful after update)
  */
 export const setCachedSettings = (settings) => {
-  if (settings) {
-    cachedSettings = settings;
-    lastSettingsFetchAt = Date.now();
-    try {
-      localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
-    } catch (e) {}
-    
-    updateTitle(settings.companyName);
-    updateThemeColor(settings.themeColor);
-    
-    // Auto update favicon based on current app type
-    const favicon = getAppFavicon(currentAppType);
-    if (favicon) updateFavicon(favicon);
-    
-    // Dispatch event so all components listening can update immediately
-    window.dispatchEvent(new CustomEvent('businessSettingsUpdated', { detail: settings }));
+  applySettingsToCache(settings, { notify: true });
+};
+
+/**
+ * Refresh settings when another client/tab may have changed them.
+ */
+export const refreshBusinessSettingsIfStale = async () => {
+  try {
+    const endpoint = API_ENDPOINTS.ADMIN.BUSINESS_SETTINGS_PUBLIC;
+    if (!endpoint || (typeof endpoint === 'string' && !endpoint.trim())) {
+      return cachedSettings;
+    }
+
+    const response = await apiClient.get(endpoint, {
+      params: { _: Date.now() },
+      headers: { 'Cache-Control': 'no-cache' },
+    });
+    const settings = response?.data?.data || response?.data;
+    if (!settings) return cachedSettings;
+
+    const currentUpdatedAt = getSettingsUpdatedAt(cachedSettings);
+    const remoteUpdatedAt = getSettingsUpdatedAt(settings);
+
+    if (!cachedSettings || currentUpdatedAt !== remoteUpdatedAt) {
+      applySettingsToCache(settings, { notify: true });
+    } else {
+      lastSettingsFetchAt = Date.now();
+    }
+
+    return settings;
+  } catch (error) {
+    return cachedSettings;
   }
 };
 
@@ -294,3 +364,5 @@ export const getCompanyNameAsync = async () => {
     return "Appzeto";
   }
 };
+
+initSettingsSyncListeners();
