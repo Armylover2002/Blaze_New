@@ -194,6 +194,7 @@ const userSchema = new mongoose.Schema(
     }
 );
 
+
 userSchema.index({ phone: 1 }, { unique: true, sparse: true });
 userSchema.index({ email: 1 }, { unique: true, sparse: true });
 userSchema.index({ 'addresses.location': '2dsphere' });
