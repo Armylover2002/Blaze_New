@@ -38,6 +38,7 @@ import {
     initiateRazorpayRefund
 } from '../helpers/razorpay.helper.js';
 import { getIO, rooms } from '../../../../config/socket.js';
+import { isPointInPolygon } from '../../../../utils/geo.js';
 import { addOrderJob } from '../../../../queues/producers/order.producer.js';
 import { fetchPolyline } from '../utils/googleMaps.js';
 import { getFirebaseDB } from '../../../../config/firebase.js';
@@ -568,6 +569,32 @@ async function resolveTrustedDeliveryAddress(userId, dto = {}) {
   }
   validateDeliveryCoordinates(normalized.location);
   return normalized;
+}
+
+async function detectServiceZoneForPoint(lat, lng) {
+  const zones = await FoodZone.find({ isActive: true }).lean();
+  for (const zone of zones) {
+    const coords = (Array.isArray(zone.coordinates) ? zone.coordinates : []).filter(
+      (point) => Number.isFinite(point?.latitude) && Number.isFinite(point?.longitude),
+    );
+    if (coords.length < 3) continue;
+    if (isPointInPolygon(lat, lng, coords)) {
+      return { status: "IN_SERVICE", zoneId: zone._id, zone };
+    }
+  }
+  return { status: "OUT_OF_SERVICE", zoneId: null, zone: null };
+}
+
+async function assertDeliveryInServiceArea(deliveryAddress) {
+  const point = getPointLatLng(deliveryAddress?.location);
+  if (!point) {
+    throw new ValidationError("Delivery location coordinates are required");
+  }
+  const result = await detectServiceZoneForPoint(point.lat, point.lng);
+  if (result.status !== "IN_SERVICE") {
+    throw new ValidationError("Delivery address is outside our service area");
+  }
+  return result;
 }
 
 function roundCurrency(value) {
@@ -2193,6 +2220,10 @@ export async function calculateOrder(userId, dto) {
     orderType === "food" || orderType === "mixed"
       ? await resolveTrustedDeliveryAddress(userId, dto)
       : normalizeDeliveryAddress(dto.address);
+  const serviceZone =
+    orderType === "food" || orderType === "mixed"
+      ? await assertDeliveryInServiceArea(trustedDeliveryAddress)
+      : null;
   const eligibility =
     orderType === "mixed"
       ? await evaluateCombinedPickupEligibility(pickupPoints, trustedDeliveryAddress)
@@ -2231,6 +2262,7 @@ export async function calculateOrder(userId, dto) {
         couponCode: null,
         appliedCoupon: null,
       },
+      serviceZone: null,
     };
   }
 
@@ -2522,7 +2554,10 @@ export async function calculateOrder(userId, dto) {
         eligibilityReason: eligibility.reason,
         pickupPoints,
       },
-    };
+    serviceZone: serviceZone
+      ? { zoneId: serviceZone.zoneId, status: serviceZone.status }
+      : null,
+  };
 }
 
 // ----- Create order -----
@@ -2633,7 +2668,7 @@ export async function createOrder(userId, dto) {
   const couponCodeFromClient = dto.pricing?.couponCode
     ? String(dto.pricing.couponCode).trim().toUpperCase()
     : "";
-  const { pricing: serverPricing } = await calculateOrder(userId, {
+  const { pricing: serverPricing, serviceZone: detectedServiceZone } = await calculateOrder(userId, {
     orderType,
     items: dto.items,
     address: deliveryAddress,
@@ -2841,11 +2876,11 @@ export async function createOrder(userId, dto) {
     restaurantId:
       hasFoodItems && primaryRestaurant?.sourceId ? new mongoose.Types.ObjectId(primaryRestaurant.sourceId) : null,
     zoneId:
-      hasFoodItems
-        ? dto.zoneId
-          ? new mongoose.Types.ObjectId(dto.zoneId)
-          : primaryRestaurant?.zoneId || undefined
-        : undefined,
+      hasFoodItems && detectedServiceZone?.zoneId
+        ? new mongoose.Types.ObjectId(detectedServiceZone.zoneId)
+        : hasFoodItems && primaryRestaurant?.zoneId
+          ? new mongoose.Types.ObjectId(primaryRestaurant.zoneId)
+          : undefined,
     items,
     pickupPoints,
     ...(deliveryAddress ? { deliveryAddress } : {}),
