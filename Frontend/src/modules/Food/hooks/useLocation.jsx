@@ -386,6 +386,7 @@ function useLocationInternal() {
   const lastDbLocationRef = useRef(null)
   const lastDbUpdateAtRef = useRef(0)
   const lastDbUpdatedCoordsRef = useRef({ latitude: null, longitude: null })
+  const gpsRequestSeqRef = useRef(0)
 
   const GEOCODE_REUSE_DISTANCE_METERS = 120
   const GEOCODE_REUSE_TIME_MS = 10 * 60 * 1000
@@ -1015,18 +1016,44 @@ function useLocationInternal() {
 
   /* ===================== MAIN LOCATION ===================== */
   const getLocation = async (updateDB = true, forceFresh = false, showLoading = false) => {
+    const requestId = ++gpsRequestSeqRef.current
+    const isCurrentGpsRequest = () => requestId === gpsRequestSeqRef.current
+
+    const commitGpsUpdate = ({
+      loc,
+      loading: nextLoading,
+      error: nextError,
+      persist = false,
+      permission = null,
+    } = {}) => {
+      if (!isCurrentGpsRequest()) return false
+      if (loc !== undefined) {
+        setLocation(loc)
+        syncCoordinatesFromLocation(loc)
+      }
+      if (nextLoading !== undefined) setLoading(nextLoading)
+      if (nextError !== undefined) setError(nextError)
+      if (permission === "granted") markBrowserGeolocationGranted()
+      if (permission === "denied") markBrowserGeolocationDenied()
+      if (persist && loc) {
+        localStorage.setItem("userLocation", JSON.stringify(loc))
+      }
+      return true
+    }
+
     // If not forcing fresh, try DB first (faster)
     let dbLocation = !forceFresh ? await fetchLocationFromDB() : null
     if (dbLocation && !forceFresh) {
-      setLocation(dbLocation)
-      if (showLoading) setLoading(false)
-      return dbLocation
+      commitGpsUpdate({ loc: dbLocation, loading: showLoading ? false : undefined })
+      return isCurrentGpsRequest() ? dbLocation : null
     }
 
     if (!navigator.geolocation) {
-      setError("Geolocation not supported")
-      if (showLoading) setLoading(false)
-      return dbLocation
+      if (isCurrentGpsRequest()) {
+        setError("Geolocation not supported")
+        if (showLoading) setLoading(false)
+      }
+      return isCurrentGpsRequest() ? dbLocation : null
     }
 
     // Helper function to get position with retry mechanism
@@ -1154,8 +1181,6 @@ function useLocationInternal() {
 
               if (hasPlaceholder) {
                 debugWarn("?? Skipping save - location contains placeholder values:", finalLoc)
-                // Don't save placeholder values to localStorage or DB
-                // Just set in state for display but don't persist
                 const coordOnlyLoc = {
                   latitude,
                   longitude,
@@ -1164,29 +1189,37 @@ function useLocationInternal() {
                   address: finalLoc.address,
                   formattedAddress: finalLoc.formattedAddress
                 }
-                setLocation(coordOnlyLoc)
-                markBrowserGeolocationGranted()
-                syncCoordinatesFromLocation(coordOnlyLoc)
-                if (showLoading) setLoading(false)
-                setError(null)
+                if (!commitGpsUpdate({
+                  loc: coordOnlyLoc,
+                  loading: showLoading ? false : undefined,
+                  error: null,
+                  permission: "granted",
+                })) {
+                  resolve(null)
+                  return
+                }
                 resolve(coordOnlyLoc)
                 return
               }
 
               debugLog("?? Saving location:", finalLoc)
-              localStorage.setItem("userLocation", JSON.stringify(finalLoc))
-              setLocation(finalLoc)
-              markBrowserGeolocationGranted()
-              syncCoordinatesFromLocation(finalLoc)
-              if (showLoading) setLoading(false)
-              setError(null)
+              if (!commitGpsUpdate({
+                loc: finalLoc,
+                loading: showLoading ? false : undefined,
+                error: null,
+                permission: "granted",
+                persist: true,
+              })) {
+                resolve(null)
+                return
+              }
 
-              if (updateDB) {
+              if (updateDB && isCurrentGpsRequest()) {
                 await updateLocationInDB(finalLoc).catch(err => {
                   debugWarn("Failed to update location in DB:", err)
                 })
               }
-              resolve(finalLoc)
+              resolve(isCurrentGpsRequest() ? finalLoc : null)
             } catch (err) {
               debugError("? Error processing location:", err)
               // Try one more time with direct reverse geocode as last resort
@@ -1209,14 +1242,20 @@ function useLocationInternal() {
                     accuracy: pos.coords.accuracy || null
                   }
                   debugLog("? Last resort geocoding succeeded:", lastResortLoc)
-                  localStorage.setItem("userLocation", JSON.stringify(lastResortLoc))
-                  setLocation(lastResortLoc)
-                  markBrowserGeolocationGranted()
-                  syncCoordinatesFromLocation(lastResortLoc)
-                  if (showLoading) setLoading(false)
-                  setError(null)
-                  if (updateDB) await updateLocationInDB(lastResortLoc).catch(() => { })
-                  resolve(lastResortLoc)
+                  if (!commitGpsUpdate({
+                    loc: lastResortLoc,
+                    loading: showLoading ? false : undefined,
+                    error: null,
+                    permission: "granted",
+                    persist: true,
+                  })) {
+                    resolve(null)
+                    return
+                  }
+                  if (updateDB && isCurrentGpsRequest()) {
+                    await updateLocationInDB(lastResortLoc).catch(() => { })
+                  }
+                  resolve(isCurrentGpsRequest() ? lastResortLoc : null)
                   return
                 } else {
                   debugWarn("?? Last resort geocoding returned invalid data:", lastResortAddr)
@@ -1238,12 +1277,15 @@ function useLocationInternal() {
               // Don't save placeholder values to localStorage
               // Only set in state for display
               debugWarn("?? Skipping save - all geocoding failed, using placeholder")
-              setLocation(fallbackLoc)
-              markBrowserGeolocationGranted()
-              syncCoordinatesFromLocation(fallbackLoc)
-              if (showLoading) setLoading(false)
-              // Don't try to update DB with placeholder
-              resolve(fallbackLoc)
+              if (!commitGpsUpdate({
+                loc: fallbackLoc,
+                loading: showLoading ? false : undefined,
+                permission: "granted",
+              })) {
+                resolve(null)
+                return
+              }
+              resolve(isCurrentGpsRequest() ? fallbackLoc : null)
             }
           },
           async (err) => {
@@ -1288,37 +1330,40 @@ function useLocationInternal() {
 
               if (fallback) {
                 debugLog("? Using fallback location:", fallback)
-                setLocation(fallback)
-                // Don't set error for timeout when we have fallback
-                if (err.code !== 3) {
-                  setError(err.message)
+                if (!commitGpsUpdate({
+                  loc: fallback,
+                  loading: showLoading ? false : undefined,
+                  error: err.code !== 3 ? err.message : undefined,
+                  permission: err.code === 1 ? "denied" : "granted",
+                })) {
+                  resolve(null)
+                  return
                 }
-                syncCoordinatesFromLocation(fallback)
-                if (err.code === 1) {
-                  markBrowserGeolocationDenied()
-                } else {
-                  markBrowserGeolocationGranted()
-                }
-                if (showLoading) setLoading(false)
-                resolve(fallback)
+                resolve(isCurrentGpsRequest() ? fallback : null)
               } else {
-                // No fallback available - set a default location so UI doesn't hang
                 debugWarn("?? No fallback location available, setting default")
                 const defaultLocation = {
                   city: "Select location",
                   address: "Select location",
                   formattedAddress: "Select location"
                 }
-                setLocation(defaultLocation)
-                setError(err.code === 3 ? "Location request timed out. Please try again." : err.message)
-                if (err.code === 1) {
-                  markBrowserGeolocationDenied()
+                if (!commitGpsUpdate({
+                  loc: defaultLocation,
+                  loading: showLoading ? false : undefined,
+                  error: err.code === 3 ? "Location request timed out. Please try again." : err.message,
+                  permission: err.code === 1 ? "denied" : undefined,
+                })) {
+                  resolve(null)
+                  return
                 }
-                if (showLoading) setLoading(false)
-                resolve(defaultLocation) // Always resolve with something
+                resolve(isCurrentGpsRequest() ? defaultLocation : null)
               }
             } catch (fallbackErr) {
               debugWarn("?? Fallback retrieval failed:", fallbackErr)
+              if (!isCurrentGpsRequest()) {
+                resolve(null)
+                return
+              }
               setLocation(null)
               setError(err.code === 3 ? "Location request timed out. Please try again." : err.message)
               if (err.code === 1) {
@@ -1771,8 +1816,6 @@ function useLocationInternal() {
                 debugLog("?? Geolocation permission changed to granted! Fetching fresh location...");
                 getLocation(true, true).then((freshLoc) => {
                   if (freshLoc) {
-                    setLocation(freshLoc);
-                    syncCoordinatesFromLocation(freshLoc);
                     window.dispatchEvent(new CustomEvent("userLocationUpdated", { detail: { location: freshLoc } }));
                   }
                 }).catch(() => {});
@@ -1825,10 +1868,6 @@ function useLocationInternal() {
                   state: location?.state,
                   area: location?.area
                 })
-                // CRITICAL: Update state with fresh location so PageNavbar displays it
-                setLocation(location)
-                syncCoordinatesFromLocation(location)
-                markBrowserGeolocationGranted()
                 if (AUTO_START_LIVE_WATCH) startWatchingLocation()
               } else {
                 // Placeholder result means reverse-geocode failed or was unavailable.
@@ -1869,6 +1908,8 @@ function useLocationInternal() {
 
   const requestLocation = async () => {
     debugLog("?????? User requested location update - clearing cache and fetching fresh")
+    // Invalidate any in-flight GPS work from init/PageNavbar before starting a user request.
+    gpsRequestSeqRef.current += 1
     setLoading(true)
     setError(null)
 
