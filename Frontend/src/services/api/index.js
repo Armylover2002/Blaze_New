@@ -2652,23 +2652,15 @@ export const userAPI = {
       addresses.find((entry) => entry?.isDefault === true) || addresses[0];
     const targetId = target?._id || target?.id;
 
-    if (!targetId) {
-      return {
-        data: {
-          success: true,
-          message: "No saved address to update",
-          data: null,
-          persisted: false,
-        },
-      };
-    }
-
+    const resolvedCity = String(payload?.city || target?.city || "").trim();
+    const resolvedState =
+      String(payload?.state || target?.state || "").trim() || resolvedCity;
     const body = {
       latitude,
       longitude,
       address: completeAddress,
-      city: String(payload?.city || target?.city || "").trim(),
-      state: String(payload?.state || target?.state || "").trim(),
+      city: resolvedCity,
+      state: resolvedState,
       street:
         String(payload?.street || target?.street || "").trim() ||
         completeAddress.split(",")[0]?.trim() ||
@@ -2680,6 +2672,29 @@ export const userAPI = {
         payload?.postalCode || payload?.zipCode || target?.zipCode || "",
       ).trim(),
     };
+
+    if (!targetId) {
+      // No saved address yet: create a default one from the geocoded GPS
+      // location so it survives cache clears / re-login / device switches.
+      if (!body.city || !body.state) {
+        return {
+          data: {
+            success: true,
+            message: "Location skipped (incomplete geocode, no saved address)",
+            data: null,
+            persisted: false,
+          },
+        };
+      }
+      const created = await userAPI.addAddress({ ...body, label: "Home" });
+      return {
+        ...(created || {}),
+        data: {
+          ...(created?.data || {}),
+          persisted: true,
+        },
+      };
+    }
 
     const updated = await userAPI.updateAddress(String(targetId), body);
     return {
