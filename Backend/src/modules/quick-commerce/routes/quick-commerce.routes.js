@@ -135,6 +135,7 @@ import * as notificationBroadcastController from "../../food/admin/controllers/n
 import {
   geocodeAddress,
   reverseGeocode,
+  geocodePlaceId,
 } from "../controllers/location.controller.js";
 
 import { authMiddleware, checkPermission } from "../../../core/auth/auth.middleware.js";
@@ -189,6 +190,7 @@ router.get("/stores/:storeId", getStoreDetails);
 // Location endpoints
 router.get("/location/geocode", geocodeAddress);
 router.get("/location/reverse-geocode", reverseGeocode);
+router.get("/location/geocode-place", geocodePlaceId);
 
 router.get("/cart", optionalAuth, getCart);
 router.post("/cart/add", optionalAuth, addToCart);
