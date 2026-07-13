@@ -1,5 +1,6 @@
 import { FoodTransaction } from '../models/foodTransaction.model.js';
 import { FoodDeliveryCommissionRule } from '../../admin/models/deliveryCommissionRule.model.js';
+import { resolveDiscountSplitByCoupon } from '../../shared/discountSplit.util.js';
 import mongoose from 'mongoose';
 
 const DELIVERY_COMMISSION_CACHE_MS = 10 * 1000;
@@ -112,7 +113,32 @@ export async function createInitialTransaction(order) {
 
     restaurantNet = Math.max(0, restaurantNet - restaurantCommission);
 
-    const platformNetProfit = (order.pricing?.platformFee || 0) + totalDeliveryFee - riderShare + restaurantCommission + sellerCommission;
+    const discount = Number(order.pricing?.discount || 0) || 0;
+    const couponCode = order.pricing?.couponCode;
+    const couponSource = order.pricing?.appliedCoupon?.source;
+    let adminDiscountShare = 0;
+    let restaurantDiscountShare = 0;
+    let discountAdminBearPercentage = 0;
+    let discountRestaurantBearPercentage = 0;
+
+    if (discount > 0) {
+        const split = await resolveDiscountSplitByCoupon({
+            couponCode,
+            discount,
+            couponSource,
+        });
+        adminDiscountShare = split.adminDiscountShare;
+        restaurantDiscountShare = split.restaurantDiscountShare;
+        discountAdminBearPercentage = split.adminBearPercentage;
+        discountRestaurantBearPercentage = split.restaurantBearPercentage;
+    }
+
+    restaurantNet = Math.max(0, restaurantNet - restaurantDiscountShare);
+    let platformNetProfit = (order.pricing?.platformFee || 0) + totalDeliveryFee - riderShare + restaurantCommission + sellerCommission;
+    platformNetProfit = Math.max(0, platformNetProfit - adminDiscountShare);
+
+    restaurantNet = Math.round((Number(restaurantNet) || 0) * 100) / 100;
+    platformNetProfit = Math.round((Number(platformNetProfit) || 0) * 100) / 100;
 
     const transaction = new FoodTransaction({
         orderId: order._id,
@@ -171,7 +197,11 @@ export async function createInitialTransaction(order) {
             sellerCommission: Math.max(0, sellerCommission),
             riderShare,
             platformNetProfit,
-            taxAmount: order.pricing?.tax || 0
+            taxAmount: order.pricing?.tax || 0,
+            adminDiscountShare,
+            restaurantDiscountShare,
+            discountAdminBearPercentage,
+            discountRestaurantBearPercentage,
         },
         gateway: {
             razorpayOrderId: order.payment?.razorpay?.orderId,

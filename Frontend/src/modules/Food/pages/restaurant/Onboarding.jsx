@@ -1622,6 +1622,7 @@ export default function RestaurantOnboarding() {
             id="restaurant-field-primaryContactNumber"
             data-restaurant-field="primaryContactNumber"
             type="tel"
+            value={step1.primaryContactNumber || ""}
             onChange={(e) => {
               clearFieldError("primaryContactNumber")
               const val = e.target.value.replace(/\D/g, "").slice(0, 10)

@@ -1461,10 +1461,6 @@ export default function RestaurantsList() {
       toast.error("Permission denied")
       return
     }
-    if (restaurant.productCount <= 0) {
-      toast.error("Cannot list a restaurant with 0 products.");
-      return;
-    }
     try {
       const restaurantId = restaurant._id || restaurant.id;
       const newStatus = !restaurant.isListed;
@@ -1481,6 +1477,38 @@ export default function RestaurantsList() {
     } catch (err) {
       debugError("Error toggling visibility:", err);
       toast.error(err.response?.data?.message || "Failed to toggle visibility");
+    }
+  }
+
+  const handleToggleShowWithoutMenu = async (restaurant) => {
+    if (!canEdit) {
+      toast.error("Permission denied")
+      return
+    }
+    try {
+      const restaurantId = restaurant._id || restaurant.id;
+      const newStatus = !restaurant.originalData?.showWithoutMenu;
+      await adminAPI.toggleShowWithoutMenu(restaurantId, newStatus);
+      
+      setRestaurants(prev => 
+        prev.map(r => {
+          if (r.id === restaurant.id || r._id === restaurant._id) {
+            const updatedR = { ...r };
+            if (updatedR.originalData) {
+              updatedR.originalData = { ...updatedR.originalData, showWithoutMenu: newStatus };
+            }
+            if (!newStatus && r.productCount <= 0) {
+              updatedR.isListed = false; // Auto turn off listing in UI if productCount is 0 and showWithoutMenu is false
+            }
+            return updatedR;
+          }
+          return r;
+        })
+      );
+      toast.success(`Show w/o menu is now ${newStatus ? 'ON' : 'OFF'}`);
+    } catch (err) {
+      debugError("Error toggling show w/o menu:", err);
+      toast.error(err.response?.data?.message || "Failed to toggle show w/o menu");
     }
   }
 
@@ -1651,14 +1679,8 @@ export default function RestaurantsList() {
                         <ArrowUpDown className={`w-3 h-3 ${sortConfig.key === 'zone' ? 'text-blue-600' : 'text-slate-400'}`} />
                       </div>
                     </th>
-                    <th
-                      className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider cursor-pointer hover:bg-slate-100 transition-colors"
-                      onClick={() => handleSort('rating')}
-                    >
-                      <div className="flex items-center gap-1">
-                        <span>Rating</span>
-                        <ArrowUpDown className={`w-3 h-3 ${sortConfig.key === 'rating' ? 'text-blue-600' : 'text-slate-400'}`} />
-                      </div>
+                    <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">
+                      Address
                     </th>
                     <th
                       className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider cursor-pointer hover:bg-slate-100 transition-colors"
@@ -1669,7 +1691,7 @@ export default function RestaurantsList() {
                         <ArrowUpDown className={`w-3 h-3 ${sortConfig.key === 'status' ? 'text-blue-600' : 'text-slate-400'}`} />
                       </div>
                     </th>
-                    <th className="px-6 py-4 text-center text-[10px] font-bold text-slate-700 uppercase tracking-wider">Visibility</th>
+                    <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">Dates</th>
                     <th className="px-6 py-4 text-center text-[10px] font-bold text-slate-700 uppercase tracking-wider">Action</th>
                   </tr>
                 </thead>
@@ -1715,7 +1737,10 @@ export default function RestaurantsList() {
                                 {restaurant.name}
                               </span>
                               <span className="text-xs text-slate-500">ID {formatRestaurantId(restaurant.originalData || restaurant)}</span>
-                              <span className="text-xs text-slate-500">{renderStars(restaurant.rating)}</span>
+                              <span className={`w-fit mt-1 px-2 py-0.5 rounded text-[10px] font-semibold flex items-center gap-1 ${(restaurant.originalData?.pureVegRestaurant === true || String(restaurant.originalData?.pureVegRestaurant).toLowerCase() === 'true') ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                                <span className={`inline-block w-1.5 h-1.5 rounded-full ${(restaurant.originalData?.pureVegRestaurant === true || String(restaurant.originalData?.pureVegRestaurant).toLowerCase() === 'true') ? 'bg-green-600' : 'bg-red-600'}`}></span>
+                                {(restaurant.originalData?.pureVegRestaurant === true || String(restaurant.originalData?.pureVegRestaurant).toLowerCase() === 'true') ? 'Pure Veg' : 'Non Veg'}
+                              </span>
                             </div>
                           </div>
                         </td>
@@ -1728,41 +1753,61 @@ export default function RestaurantsList() {
                         <td className="px-6 py-4 whitespace-nowrap">
                           <span className="text-sm text-slate-700">{restaurant.zone}</span>
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="flex items-center gap-1.5">
-                            <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
-                            <span className="text-sm font-semibold text-slate-900">
-                              {(Number(restaurant.rating) || 0).toFixed(1)}
-                            </span>
+                        <td className="px-6 py-4">
+                          <div className="text-sm text-slate-700 line-clamp-2 max-w-[200px]" title={formatLocationAddress(restaurant.originalData?.location, restaurant.zone)}>
+                            {formatLocationAddress(restaurant.originalData?.location, restaurant.zone)}
                           </div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="flex flex-col gap-1">
+                          <div className="flex flex-col gap-1.5">
                             <span className={`inline-flex w-fit items-center rounded-full px-2.5 py-1 text-xs font-semibold ${approvalStatusBadgeClass(restaurant.approvalStatus)}`}>
                               {approvalStatusLabel(restaurant.approvalStatus)}
                             </span>
-                            <span className="text-[11px] text-slate-500">
-                              Outlet: {restaurant.isActive ? "Active" : "Inactive"}
-                            </span>
+                            <div className="flex items-center gap-2 mt-1">
+                              <span className="text-[11px] text-slate-500 min-w-[75px]">Visible to Users:</span>
+                              <button
+                                onClick={() => handleToggleVisibility(restaurant)}
+                                disabled={!canEdit}
+                                title={!canEdit ? "Cannot edit visibility" : "Toggle Visibility"}
+                                className={`relative inline-flex h-4 w-7 shrink-0 cursor-pointer items-center justify-center rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 ${
+                                  !canEdit ? 'opacity-50 cursor-not-allowed' : ''
+                                }`}
+                              >
+                                <span aria-hidden="true" className={`absolute mx-auto h-full w-7 rounded-full transition-colors ${restaurant.isListed ? 'bg-green-500' : 'bg-slate-200'}`} />
+                                <span
+                                  aria-hidden="true"
+                                  className={`pointer-events-none absolute left-0 inline-block h-3 w-3 transform rounded-full border border-slate-200 bg-white shadow ring-0 transition-transform duration-200 ease-in-out ${
+                                    restaurant.isListed ? 'translate-x-3' : 'translate-x-0.5'
+                                  }`}
+                                />
+                              </button>
+                            </div>
+                            <div className="flex items-center gap-2 mt-1">
+                              <span className="text-[11px] text-slate-500 min-w-[75px]">Show w/o menu:</span>
+                              <button
+                                onClick={() => handleToggleShowWithoutMenu(restaurant)}
+                                disabled={!canEdit}
+                                title={!canEdit ? "Cannot edit show without menu" : "Toggle Show w/o menu"}
+                                className={`relative inline-flex h-4 w-7 shrink-0 cursor-pointer items-center justify-center rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 ${
+                                  !canEdit ? 'opacity-50 cursor-not-allowed' : ''
+                                }`}
+                              >
+                                <span aria-hidden="true" className={`absolute mx-auto h-full w-7 rounded-full transition-colors ${restaurant.originalData?.showWithoutMenu ? 'bg-green-500' : 'bg-slate-200'}`} />
+                                <span
+                                  aria-hidden="true"
+                                  className={`pointer-events-none absolute left-0 inline-block h-3 w-3 transform rounded-full border border-slate-200 bg-white shadow ring-0 transition-transform duration-200 ease-in-out ${
+                                    restaurant.originalData?.showWithoutMenu ? 'translate-x-3' : 'translate-x-0.5'
+                                  }`}
+                                />
+                              </button>
+                            </div>
                           </div>
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-center">
-                          <button
-                            onClick={() => handleToggleVisibility(restaurant)}
-                            disabled={!canEdit}
-                            title={!canEdit ? "Cannot edit visibility" : "Toggle Visibility"}
-                            className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 ${
-                              !canEdit ? 'opacity-50 cursor-not-allowed' : ''
-                            }`}
-                          >
-                            <span aria-hidden="true" className={`absolute mx-auto h-full w-9 rounded-full transition-colors ${restaurant.isListed ? 'bg-green-500' : 'bg-slate-200'}`} />
-                            <span
-                              aria-hidden="true"
-                              className={`pointer-events-none absolute left-0 inline-block h-4 w-4 transform rounded-full border border-slate-200 bg-white shadow ring-0 transition-transform duration-200 ease-in-out ${
-                                restaurant.isListed ? 'translate-x-4' : 'translate-x-0.5'
-                              }`}
-                            />
-                          </button>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="flex flex-col gap-1.5">
+                            <span className="text-[11px] text-slate-500">Created: <span className="text-slate-700 font-medium">{restaurant.originalData?.createdAt ? new Date(restaurant.originalData.createdAt).toLocaleDateString() : "N/A"}</span></span>
+                            <span className="text-[11px] text-slate-500">Updated: <span className="text-slate-700 font-medium">{restaurant.originalData?.updatedAt ? new Date(restaurant.originalData.updatedAt).toLocaleDateString() : "N/A"}</span></span>
+                          </div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-center">
                           <div className="flex items-center justify-center gap-2">

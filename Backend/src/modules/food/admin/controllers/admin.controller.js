@@ -458,6 +458,28 @@ export async function toggleRestaurantListing(req, res, next) {
     }
 }
 
+export async function toggleShowWithoutMenu(req, res, next) {
+    try {
+        const { id } = req.params;
+        const { showWithoutMenu } = req.body;
+        if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({ success: false, message: 'Invalid restaurant id' });
+        }
+        if (typeof showWithoutMenu !== 'boolean') {
+            return res.status(400).json({ success: false, message: 'showWithoutMenu boolean flag is required' });
+        }
+        const updated = await adminService.toggleShowWithoutMenu(id, showWithoutMenu);
+        await Promise.all([
+            invalidateCache('restaurants*'),
+            invalidateCache('food_search*'),
+            invalidateCache(`restaurant_detail*`),
+        ]).catch(console.error);
+        res.status(200).json({ success: true, message: 'Restaurant show without menu updated successfully', data: { restaurant: updated } });
+    } catch (error) {
+        next(error);
+    }
+}
+
 export async function updateRestaurantLocation(req, res, next) {
     try {
         const { id } = req.params;

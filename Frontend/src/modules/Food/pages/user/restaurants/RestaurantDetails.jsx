@@ -160,6 +160,33 @@ function RestaurantDetailsContent() {
   const fetchedRestaurantRef = useRef(false) // Track if restaurant has been fetched for current slug
   const fetchedSlugRef = useRef(null)
 
+  const hasNonVegItems = useMemo(() => {
+    if (!restaurant?.menuSections) return false;
+    
+    let foundNonVeg = false;
+    const checkItem = (item) => {
+      const ft = item?.foodType?.toLowerCase()?.trim() || "";
+      return ft === "non-veg" || ft === "nonveg";
+    };
+
+    for (const section of restaurant.menuSections) {
+      if (Array.isArray(section?.items) && section.items.some(checkItem)) {
+        foundNonVeg = true;
+        break;
+      }
+      if (Array.isArray(section?.subsections)) {
+        for (const sub of section.subsections) {
+          if (Array.isArray(sub?.items) && sub.items.some(checkItem)) {
+            foundNonVeg = true;
+            break;
+          }
+        }
+      }
+      if (foundNonVeg) break;
+    }
+    return foundNonVeg;
+  }, [restaurant?.menuSections]);
+
   useEffect(() => {
     const intervalId = setInterval(() => {
       setAvailabilityTick(Date.now())
@@ -2050,6 +2077,8 @@ function RestaurantDetailsContent() {
         activeFilterCount={activeFilterCount}
         filters={filters}
         vegMode={vegMode}
+        isPureVeg={restaurant?.pureVegRestaurant === true || String(restaurant?.pureVegRestaurant).toLowerCase() === "true" || restaurant?.details?.pureVegRestaurant === true || String(restaurant?.details?.pureVegRestaurant).toLowerCase() === "true"}
+        hasNonVegItems={hasNonVegItems}
         menuCategories={menuCategories}
         selectedMenuCategory={selectedMenuCategory}
         onOpenFilters={() => setShowFilterSheet(true)}

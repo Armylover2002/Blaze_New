@@ -47,7 +47,8 @@ const foodTransactionSchema = new mongoose.Schema({
         couponCode: { type: String, default: null, trim: true },
         appliedCoupon: {
             code: { type: String, default: null, trim: true },
-            discount: { type: Number, default: 0, min: 0 }
+            discount: { type: Number, default: 0, min: 0 },
+            source: { type: String, enum: ['admin', 'restaurant'], default: null }
         },
         referralDiscount: { type: Number, default: 0, min: 0 },
         restaurantCommissionPercentage: { type: Number, default: 0 },
@@ -85,7 +86,11 @@ const foodTransactionSchema = new mongoose.Schema({
         sellerCommission: { type: Number, default: 0, min: 0 },
         riderShare: { type: Number, required: true, min: 0 },
         platformNetProfit: { type: Number, required: true, min: 0 },
-        taxAmount: { type: Number, default: 0, min: 0 }
+        taxAmount: { type: Number, default: 0, min: 0 },
+        adminDiscountShare: { type: Number, default: 0, min: 0 },
+        restaurantDiscountShare: { type: Number, default: 0, min: 0 },
+        discountAdminBearPercentage: { type: Number, default: 0, min: 0, max: 100 },
+        discountRestaurantBearPercentage: { type: Number, default: 0, min: 0, max: 100 }
     },
 
     // Gateway / Provider Metadata

@@ -91,6 +91,7 @@ router.post('/restaurants', checkPermission('food::restaurant_management::restau
 router.patch('/restaurants/:id', checkPermission('food::restaurant_management::restaurants::list', 'edit'), adminController.updateRestaurantById);
 router.patch('/restaurants/:id/status', checkPermission('food::restaurant_management::restaurants::list', 'edit'), adminController.updateRestaurantStatus);
 router.patch('/restaurants/:id/visibility', checkPermission('food::restaurant_management::restaurants::list', 'edit'), adminController.toggleRestaurantListing);
+router.patch('/restaurants/:id/show-without-menu', checkPermission('food::restaurant_management::restaurants::list', 'edit'), adminController.toggleShowWithoutMenu);
 router.patch('/restaurants/:id/location', checkPermission('food::restaurant_management::restaurants::list', 'edit'), adminController.updateRestaurantLocation);
 router.patch('/restaurants/:id/menu', checkPermission('food::restaurant_management::restaurants::list', 'edit'), adminController.updateRestaurantMenuById);
 router.patch('/restaurants/:id/approve', checkPermission('food::restaurant_management::restaurants::joining_request', 'edit'), adminController.approveRestaurant);

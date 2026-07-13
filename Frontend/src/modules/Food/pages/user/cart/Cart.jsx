@@ -24,6 +24,10 @@ import { getCompanyNameAsync } from "@common/utils/businessSettings"
 import { useCompanyName } from "@food/hooks/useCompanyName"
 import { getRestaurantAvailabilityStatus } from "@food/utils/restaurantAvailability"
 import useAppBackNavigation from "@food/hooks/useAppBackNavigation"
+import {
+  calculateDistanceKm,
+  normalizeRestaurantLocation,
+} from "@food/utils/geo"
 import zoopSound from "@food/assets/audio/zomato_sms.mp3"
 import deliveryBoyGif from "@/assets/Delivery Boy.gif"
 const debugLog = (...args) => { }
@@ -82,6 +86,55 @@ const formatFullAddress = (address) => {
 const RUPEE_SYMBOL = "\u20B9"
 const CART_RECIPIENT_DETAILS_STORAGE_KEY = "food-cart-recipient-details-v1"
 const CART_ORDER_NOTE_STORAGE_KEY = "food-cart-order-note-v1"
+
+const resolveFallbackDeliveryFee = ({
+  feeSettings = {},
+  restaurantData = null,
+  defaultAddress = null,
+}) => {
+  const ranges = Array.isArray(feeSettings.deliveryFeeRanges)
+    ? [...feeSettings.deliveryFeeRanges]
+    : []
+  const rangeFees = ranges
+    .map((range) => Number(range?.fee))
+    .filter((fee) => Number.isFinite(fee) && fee >= 0)
+
+  const flat = Number(feeSettings.deliveryFee ?? feeSettings.baseDeliveryFee)
+  const hasPositiveFlat = Number.isFinite(flat) && flat > 0
+
+  const distanceKm = calculateDistanceKm(restaurantData, defaultAddress)
+  if (Number.isFinite(distanceKm) && ranges.length > 0) {
+    const sortedRanges = ranges.sort((a, b) => Number(a.min) - Number(b.min))
+    for (let i = 0; i < sortedRanges.length; i += 1) {
+      const range = sortedRanges[i]
+      const min = Number(range.min)
+      const max = Number(range.max)
+      const fee = Number(range.fee)
+      const isLastRange = i === sortedRanges.length - 1
+      const inRange = isLastRange
+        ? distanceKm >= min && distanceKm <= max
+        : distanceKm >= min && distanceKm < max
+
+      if (inRange && Number.isFinite(fee)) return fee
+    }
+  }
+
+  if (rangeFees.length > 0) {
+    return hasPositiveFlat ? flat : Math.min(...rangeFees)
+  }
+
+  return Number.isFinite(flat) && flat >= 0 ? flat : 0
+}
+
+const normalizeRestaurantForPricing = (restaurant) => {
+  if (!restaurant || typeof restaurant !== "object") return restaurant
+  if (!restaurant.location) return restaurant
+  return {
+    ...restaurant,
+    location: normalizeRestaurantLocation(restaurant.location),
+  }
+}
+
 const mapOrderItem = (item) => ({
   itemId: item.itemId || item.id,
   name: item.name,
@@ -257,9 +310,9 @@ export default function Cart() {
 
   // Fee settings from public API (UI fallback only; createOrder recalculates server-side)
   const [feeSettings, setFeeSettings] = useState({
-    baseDistanceKm: 0,
+    deliveryFee: 0,
     baseDeliveryFee: 0,
-    perKmCharge: 0,
+    deliveryFeeRanges: [],
     platformFee: 0,
     gstRate: 0,
   })
@@ -835,9 +888,9 @@ export default function Cart() {
     fetchAddons()
   }, [restaurantData, cart.length, loadingRestaurant, isQuickCart])
 
-  // Fetch coupons for items in cart
+  // Fetch applicable coupons for cart (server-validated list)
   useEffect(() => {
-    const fetchCouponsForCartItems = async () => {
+    const fetchCouponsForCart = async () => {
       if (isQuickCart) {
         setAvailableCoupons([])
         setLoadingCoupons(false)
@@ -849,65 +902,67 @@ export default function Cart() {
         return
       }
 
-      debugLog(`[CART-COUPONS] Fetching coupons for ${cart.length} items in cart`)
+      const cartSubtotal = cart.reduce(
+        (sum, item) => sum + (Number(item.price) || 0) * (Number(item.quantity) || 1),
+        0,
+      )
+
+      debugLog(`[CART-COUPONS] Fetching applicable coupons for restaurant ${restaurantId}, subtotal ${cartSubtotal}`)
       setLoadingCoupons(true)
 
-      const allCoupons = []
-      const uniqueCouponCodes = new Set()
+      try {
+        const response = await restaurantAPI.getCouponsByItemIdPublic(
+          restaurantId,
+          null,
+          cartSubtotal,
+        )
 
-      // Fetch coupons for each item in cart
-      for (const cartItem of cart) {
-        const couponItemId = cartItem.itemId || cartItem.id
-        if (!couponItemId) {
-          debugLog(`[CART-COUPONS] Skipping item without id:`, cartItem)
-          continue
+        if (response?.data?.success && response?.data?.data?.coupons) {
+          const coupons = response.data.data.coupons.map((coupon) => {
+            const isPct = coupon.discountType === "percentage"
+            const discountValue = Number(coupon.discountValue) || 0
+            const estimatedDiscount = Number(coupon.estimatedDiscount) || 0
+            const displayDiscount = Number(coupon.displayDiscount) || (isPct ? estimatedDiscount : discountValue)
+            const meetsMinOrder = coupon.meetsMinOrder !== false
+            const amountToUnlock = Number(coupon.amountToUnlock || 0)
+            return {
+              code: coupon.couponCode,
+              discount: estimatedDiscount,
+              discountType: coupon.discountType,
+              discountValue,
+              displayDiscount,
+              discountPercentage: coupon.discountPercentage,
+              discountDisplay: isPct
+                ? `${coupon.discountPercentage}% OFF`
+                : `${RUPEE_SYMBOL}${displayDiscount} OFF`,
+              minOrder: coupon.minOrderValue || 0,
+              description: isPct
+                ? `${coupon.discountPercentage}% OFF on item total with '${coupon.couponCode}'`
+                : `Save ${RUPEE_SYMBOL}${displayDiscount} on item total with '${coupon.couponCode}'`,
+              customerGroup: coupon.customerGroup || coupon.customerScope || "all",
+              customerScope: coupon.customerScope || coupon.customerGroup || "all",
+              isFirstOrderOnly: Boolean(coupon.isFirstOrderOnly),
+              isGlobalCoupon: Boolean(coupon.isGlobalCoupon),
+              restaurantScope: coupon.restaurantScope || (coupon.isGlobalCoupon ? "all" : "selected"),
+              couponSource: coupon.couponSource || "admin",
+              meetsMinOrder,
+              amountToUnlock,
+            }
+          })
+          debugLog(`[CART-COUPONS] Applicable coupons: ${coupons.length}`, coupons)
+          setAvailableCoupons(coupons)
+        } else {
+          setAvailableCoupons([])
         }
-
-        try {
-          debugLog(`[CART-COUPONS] Fetching coupons for itemId: ${couponItemId}, name: ${cartItem.name}`)
-          const response = await restaurantAPI.getCouponsByItemIdPublic(restaurantId, couponItemId)
-
-          if (response?.data?.success && response?.data?.data?.coupons) {
-            const coupons = response.data.data.coupons
-            debugLog(`[CART-COUPONS] Found ${coupons.length} coupons for item ${couponItemId}`)
-
-            // Add coupons, avoiding duplicates
-            coupons.forEach(coupon => {
-              if (!uniqueCouponCodes.has(coupon.couponCode)) {
-                uniqueCouponCodes.add(coupon.couponCode)
-                // Convert backend coupon format to frontend format
-                allCoupons.push({
-                  code: coupon.couponCode,
-                  discount: coupon.originalPrice - coupon.discountedPrice,
-                  discountPercentage: coupon.discountPercentage,
-                  discountDisplay: coupon.discountType === "percentage"
-                    ? `${coupon.discountPercentage}% OFF`
-                    : `${RUPEE_SYMBOL}${Math.max(0, (coupon.originalPrice || 0) - (coupon.discountedPrice || 0))} OFF`,
-                  minOrder: coupon.minOrderValue || 0,
-                  description: coupon.discountType === "percentage"
-                    ? `${coupon.discountPercentage}% OFF with '${coupon.couponCode}'`
-                    : `Save ${RUPEE_SYMBOL}${Math.max(0, (coupon.originalPrice || 0) - (coupon.discountedPrice || 0))} with '${coupon.couponCode}'`,
-                  originalPrice: coupon.originalPrice,
-                  discountedPrice: coupon.discountedPrice,
-                  customerGroup: coupon.customerGroup || "all",
-                  isGlobalCoupon: Boolean(coupon.isGlobalCoupon),
-                  itemId: couponItemId,
-                  itemName: cartItem.name,
-                })
-              }
-            })
-          }
-        } catch (error) {
-          debugError(`[CART-COUPONS] Error fetching coupons for item ${cartItem.id}:`, error)
-        }
+      } catch (error) {
+        debugError("[CART-COUPONS] Error fetching coupons:", error)
+        setAvailableCoupons([])
+      } finally {
+        setLoadingCoupons(false)
       }
-
-      debugLog(`[CART-COUPONS] Total unique coupons found: ${allCoupons.length}`, allCoupons)
-      setAvailableCoupons(allCoupons)
-      setLoadingCoupons(false)
     }
 
-    fetchCouponsForCartItems()
+    fetchCouponsForCart()
   }, [cart, restaurantId, isQuickCart])
 
   // Calculate pricing from backend whenever cart, address, or coupon changes
@@ -1006,11 +1061,13 @@ export default function Cart() {
         const settings = response?.data?.data?.feeSettings
         if (response?.data?.success && settings) {
           setFeeSettings({
-            baseDistanceKm: Number(settings.baseDistanceKm ?? 0),
+            deliveryFee: Number(settings.deliveryFee ?? settings.baseDeliveryFee ?? 0),
             baseDeliveryFee: Number(
               settings.baseDeliveryFee ?? settings.deliveryFee ?? 0,
             ),
-            perKmCharge: Number(settings.perKmCharge ?? 0),
+            deliveryFeeRanges: Array.isArray(settings.deliveryFeeRanges)
+              ? settings.deliveryFeeRanges
+              : [],
             platformFee: Number(settings.platformFee ?? 0),
             gstRate: Number(settings.gstRate ?? 0),
           })
@@ -1041,7 +1098,11 @@ export default function Cart() {
       return 0
     }
 
-    return Number(feeSettings.baseDeliveryFee || 0)
+    return resolveFallbackDeliveryFee({
+      feeSettings,
+      restaurantData: normalizeRestaurantForPricing(restaurantData),
+      defaultAddress,
+    })
   })()
   const baseComputedDeliveryFee =
     pricing?.deliveryFee !== undefined && pricing?.deliveryFee !== null
@@ -1053,7 +1114,7 @@ export default function Cart() {
     deliveryFeeBreakdown?.source === "distance" &&
     Number.isFinite(Number(deliveryFeeBreakdown?.distanceKm))
   const deliveryFeeBreakdownText = hasDistanceDeliveryBreakdown
-    ? `Distance ${Number(deliveryFeeBreakdown.distanceKm).toFixed(1)} km: ${RUPEE_SYMBOL}${Number(deliveryFeeBreakdown.basePayout || 0).toFixed(0)} base + ${Number(deliveryFeeBreakdown.extraDistanceKm || 0).toFixed(1)} km x ${RUPEE_SYMBOL}${Number(deliveryFeeBreakdown.commissionPerKm || 0).toFixed(0)}`
+    ? `${Number(deliveryFeeBreakdown.distanceKm).toFixed(1)} km delivery`
     : null
   const platformFee = pricing?.platformFee ?? Number(feeSettings.platformFee || 0)
   const gstCharges = pricing?.tax ?? Math.round(subtotal * (Number(feeSettings.gstRate || 0) / 100))
@@ -1321,9 +1382,15 @@ export default function Cart() {
     }
   }
 
+  const isFirstTimeOnlyCoupon = (coupon) =>
+    coupon?.customerGroup === "first-time" ||
+    coupon?.customerGroup === "new" ||
+    coupon?.customerScope === "first-time" ||
+    coupon?.isFirstOrderOnly === true
+
   const handleApplyCoupon = async (coupon) => {
-    if (coupon?.customerGroup === "new" && userOrderCount > 0) {
-      toast.error("This coupon is only for first-time users")
+    if (coupon?.meetsMinOrder === false) {
+      toast.error(`Add items worth ${RUPEE_SYMBOL}${Number(coupon.amountToUnlock || 0)} to apply this coupon`)
       return
     }
 
@@ -1347,7 +1414,11 @@ export default function Cart() {
 
         const pricingData = response?.data?.data?.pricing
         if (!pricingData || !pricingData.appliedCoupon) {
-          toast.error("Coupon not applicable")
+          toast.error(
+            isFirstTimeOnlyCoupon(coupon)
+              ? "This coupon is only for first-time users"
+              : "Coupon not applicable",
+          )
           return
         }
 
@@ -1379,12 +1450,6 @@ export default function Cart() {
       (coupon) => String(coupon.code || "").toUpperCase() === inputCode,
     )
 
-    // If we know this is first-time only and user already ordered, block early.
-    if (matchedCoupon?.customerGroup === "new" && userOrderCount > 0) {
-      toast.error("This coupon is only for first-time users")
-      return
-    }
-
     try {
       const items = cart.map(mapOrderItem)
 
@@ -1403,7 +1468,11 @@ export default function Cart() {
       }
 
       if (!pricingData.appliedCoupon) {
-        toast.error("Invalid or unavailable coupon code")
+        toast.error(
+          isFirstTimeOnlyCoupon(matchedCoupon)
+            ? "This coupon is only for first-time users"
+            : "Invalid or unavailable coupon code",
+        )
         setCouponCode("")
         return
       }
@@ -1498,9 +1567,9 @@ export default function Cart() {
       debugLog("?? Applied coupon:", appliedCoupon?.code || "None")
       debugLog("?? Delivery address:", defaultAddress?.label || defaultAddress?.city)
 
-      // Ensure we place the order with backend-calculated pricing when available.
+      // Always recalculate with backend before placing order so payment matches cart.
       let resolvedPricing = pricing
-      if (!resolvedPricing) {
+      try {
         const pricingResponse = await orderAPI.calculateOrder({
           orderType: "food",
           items: cart.map(mapOrderItem),
@@ -1509,10 +1578,12 @@ export default function Cart() {
           deliveryAddressId: resolvedDeliveryAddressId,
           couponCode: appliedCoupon?.code || couponCode || undefined,
         })
-        resolvedPricing = pricingResponse?.data?.data?.pricing || null
+        resolvedPricing = pricingResponse?.data?.data?.pricing || resolvedPricing
         if (resolvedPricing) {
           setPricing(resolvedPricing)
         }
+      } catch (pricingError) {
+        debugWarn("Could not refresh pricing before order placement:", pricingError)
       }
 
       // Ensure couponCode is included in pricing
@@ -1720,6 +1791,7 @@ export default function Cart() {
         restaurantId: finalRestaurantId,
         restaurantName: finalRestaurantName || undefined,
         pricing: orderPricing,
+        couponCode: orderPricing.couponCode || appliedCoupon?.code || couponCode || undefined,
         note: note || "",
         sendCutlery: sendCutlery !== false,
         paymentMethod: selectedPaymentMethod,
@@ -2538,7 +2610,7 @@ export default function Cart() {
                         <p className="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Available Coupons</p>
                         <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
                           {availableCoupons.map((coupon) => {
-                            const canApply = subtotal >= coupon.minOrder && !(coupon.customerGroup === "new" && userOrderCount > 0);
+                            const canApply = coupon.meetsMinOrder !== false;
                             return (
                               <div key={coupon.code} className="flex items-start justify-between p-3 rounded-2xl border border-slate-100 dark:border-gray-800 bg-slate-50/50 dark:bg-slate-900/30">
                                 <div className="flex items-start gap-3 flex-1">
@@ -2550,11 +2622,12 @@ export default function Cart() {
                                       </span>
                                       {coupon.discountDisplay || `Save ${RUPEE_SYMBOL}${coupon.discount}`}
                                     </p>
-                                    {coupon.customerGroup === "new" ? (
+                                    {isFirstTimeOnlyCoupon(coupon) && (
                                       <p className="text-[11px] text-[#FF0000] mb-1 font-medium">First-time users only</p>
-                                    ) : subtotal < coupon.minOrder ? (
+                                    )}
+                                    {coupon.meetsMinOrder === false ? (
                                       <p className="text-xs text-blue-600 font-semibold mb-1">
-                                        Add items worth {RUPEE_SYMBOL}{(coupon.minOrder - subtotal).toFixed(0)} more to unlock
+                                        Add items worth {RUPEE_SYMBOL}{Number(coupon.amountToUnlock || 0)} to apply this coupon
                                       </p>
                                     ) : (
                                       <p className="text-xs text-gray-500 mt-1 leading-relaxed">{coupon.description}</p>
@@ -2905,7 +2978,7 @@ export default function Cart() {
                     </div>
                     {discount > 0 && (
                       <div className="flex justify-between text-sm text-[#FF0000] font-medium">
-                        <span>Coupon Discount</span>
+                        <span>Item Discount</span>
                         <span>-{RUPEE_SYMBOL}{discount.toFixed(2)}</span>
                       </div>
                     )}

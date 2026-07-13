@@ -20,8 +20,9 @@ import { restaurantAPI } from "@food/api"
 import { toast } from "sonner"
 
 const isCouponExpired = (coupon) => {
-  if (!coupon?.expiryDate) return false
-  const expiry = new Date(coupon.expiryDate)
+  const endRaw = coupon?.endDate || coupon?.expiryDate
+  if (!endRaw) return false
+  const expiry = new Date(endRaw)
   if (Number.isNaN(expiry.getTime())) return false
   const endOfDay = new Date(expiry)
   endOfDay.setHours(23, 59, 59, 999)
@@ -32,9 +33,13 @@ const defaultFormData = {
   couponCode: "",
   discountType: "percentage",
   discountValue: "",
-  minOrderAmount: "",
-  expiryDate: "",
+  customerScope: "all",
+  minOrderValue: "",
+  maxDiscount: "",
+  startDate: "",
+  endDate: "",
   usageLimit: "",
+  perUserLimit: "",
   description: "",
 }
 
@@ -48,11 +53,23 @@ const statusBadgeClass = (status) => {
 export default function CreateCouponsPage() {
   const navigate = useNavigate()
   const goBack = useRestaurantBackNavigation()
+  const todayYMD = (() => {
+    const d = new Date()
+    const m = String(d.getMonth() + 1).padStart(2, "0")
+    const day = String(d.getDate()).padStart(2, "0")
+    return `${d.getFullYear()}-${m}-${day}`
+  })()
   const [coupons, setCoupons] = useState([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
   const [editingCoupon, setEditingCoupon] = useState(null)
   const [formData, setFormData] = useState(defaultFormData)
+  const preservePastStartOnEdit = Boolean(
+    editingCoupon?.startDate &&
+    formData.startDate &&
+    formData.startDate === new Date(editingCoupon.startDate).toISOString().split("T")[0] &&
+    formData.startDate < todayYMD,
+  )
 
   useEffect(() => {
     fetchCoupons()
@@ -102,13 +119,18 @@ export default function CreateCouponsPage() {
 
   const openEditModal = (coupon) => {
     setEditingCoupon(coupon)
+    const endRaw = coupon?.endDate || coupon?.expiryDate
     setFormData({
       couponCode: coupon?.couponCode || "",
-      discountType: coupon?.discountType || "percentage",
+      discountType: coupon?.discountType === "fixed" ? "flat-price" : (coupon?.discountType || "percentage"),
       discountValue: coupon?.discountValue || "",
-      minOrderAmount: coupon?.minOrderAmount || "",
-      expiryDate: coupon?.expiryDate ? new Date(coupon.expiryDate).toISOString().split('T')[0] : "",
+      customerScope: coupon?.customerScope || "all",
+      minOrderValue: coupon?.minOrderValue ?? coupon?.minOrderAmount ?? "",
+      maxDiscount: coupon?.maxDiscount ?? "",
+      startDate: coupon?.startDate ? new Date(coupon.startDate).toISOString().split("T")[0] : "",
+      endDate: endRaw ? new Date(endRaw).toISOString().split("T")[0] : "",
       usageLimit: coupon?.usageLimit || "",
+      perUserLimit: coupon?.perUserLimit || "",
       description: coupon?.description || "",
     })
     setShowModal(true)
@@ -123,8 +145,20 @@ export default function CreateCouponsPage() {
       toast.error("Discount value must be greater than 0")
       return
     }
-    if (!formData.expiryDate) {
-      toast.error("Expiry date is required")
+    if (formData.discountType === "percentage" && (!formData.maxDiscount || Number(formData.maxDiscount) <= 0)) {
+      toast.error("Max discount is required for percentage coupons")
+      return
+    }
+    if (!formData.endDate) {
+      toast.error("End date is required")
+      return
+    }
+    if (formData.startDate && formData.startDate < todayYMD && !preservePastStartOnEdit) {
+      toast.error("Start date cannot be in the past")
+      return
+    }
+    if (formData.endDate < todayYMD) {
+      toast.error("End date cannot be in the past")
       return
     }
 
@@ -133,10 +167,14 @@ export default function CreateCouponsPage() {
         couponCode: formData.couponCode.trim().toUpperCase(),
         discountType: formData.discountType,
         discountValue: Number(formData.discountValue),
-        minOrderAmount: Number(formData.minOrderAmount) || 0,
-        expiryDate: new Date(formData.expiryDate).toISOString(),
+        customerScope: formData.customerScope,
+        minOrderValue: Number(formData.minOrderValue) || 0,
+        maxDiscount: formData.discountType === "percentage" ? Number(formData.maxDiscount) : null,
+        startDate: formData.startDate ? new Date(formData.startDate).toISOString() : null,
+        endDate: new Date(formData.endDate).toISOString(),
         usageLimit: formData.usageLimit ? Number(formData.usageLimit) : null,
-        description: formData.description.trim()
+        perUserLimit: formData.perUserLimit ? Number(formData.perUserLimit) : null,
+        description: formData.description.trim(),
       }
 
       if (editingCoupon) {
@@ -204,7 +242,7 @@ export default function CreateCouponsPage() {
             className="w-full rounded-xl border border-slate-300 px-3 py-3 outline-none focus:border-red-600 focus:ring-2 focus:ring-red-600/10"
           >
             <option value="percentage">Percentage (%)</option>
-            <option value="fixed">Fixed Flat (₹)</option>
+            <option value="flat-price">Fixed Flat (₹)</option>
           </select>
         </div>
 
@@ -220,36 +258,86 @@ export default function CreateCouponsPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div>
+        <label className="mb-1 block text-sm font-medium text-slate-700">Customer Eligibility</label>
+        <select
+          value={formData.customerScope}
+          onChange={(e) => setFormData((prev) => ({ ...prev, customerScope: e.target.value }))}
+          className="w-full rounded-xl border border-slate-300 px-3 py-3 outline-none focus:border-red-600 focus:ring-2 focus:ring-red-600/10"
+        >
+          <option value="all">All Users</option>
+          <option value="first-time">First-time Users Only</option>
+        </select>
+      </div>
+
+      {formData.discountType === "percentage" && (
         <div>
-          <label className="mb-1 block text-sm font-medium text-slate-700">Min. Order Amount (₹)</label>
+          <label className="mb-1 block text-sm font-medium text-slate-700">Max Discount (₹)</label>
           <input
             type="number"
-            value={formData.minOrderAmount}
-            onChange={(e) => setFormData((prev) => ({ ...prev, minOrderAmount: e.target.value }))}
+            value={formData.maxDiscount}
+            onChange={(e) => setFormData((prev) => ({ ...prev, maxDiscount: e.target.value }))}
+            placeholder="E.g. 100"
+            className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-red-600 focus:ring-2 focus:ring-red-600/10"
+          />
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <label className="mb-1 block text-sm font-medium text-slate-700">Min. Order Value (₹)</label>
+          <input
+            type="number"
+            value={formData.minOrderValue}
+            onChange={(e) => setFormData((prev) => ({ ...prev, minOrderValue: e.target.value }))}
             placeholder="E.g. 199"
             className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-red-600 focus:ring-2 focus:ring-red-600/10"
           />
         </div>
 
         <div>
-          <label className="mb-1 block text-sm font-medium text-slate-700">Usage Limit (Optional)</label>
+          <label className="mb-1 block text-sm font-medium text-slate-700">Total Usage Limit</label>
           <input
             type="number"
             value={formData.usageLimit}
             onChange={(e) => setFormData((prev) => ({ ...prev, usageLimit: e.target.value }))}
-            placeholder="Total uses allowed"
+            placeholder="Optional"
+            className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-red-600 focus:ring-2 focus:ring-red-600/10"
+          />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <label className="mb-1 block text-sm font-medium text-slate-700">Per User Limit</label>
+          <input
+            type="number"
+            value={formData.perUserLimit}
+            onChange={(e) => setFormData((prev) => ({ ...prev, perUserLimit: e.target.value }))}
+            placeholder="Optional"
+            className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-red-600 focus:ring-2 focus:ring-red-600/10"
+          />
+        </div>
+
+        <div>
+          <label className="mb-1 block text-sm font-medium text-slate-700">Start Date (Optional)</label>
+          <input
+            type="date"
+            value={formData.startDate}
+            min={preservePastStartOnEdit ? undefined : todayYMD}
+            onChange={(e) => setFormData((prev) => ({ ...prev, startDate: e.target.value }))}
             className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-red-600 focus:ring-2 focus:ring-red-600/10"
           />
         </div>
       </div>
 
       <div>
-        <label className="mb-1 block text-sm font-medium text-slate-700">Expiry Date</label>
+        <label className="mb-1 block text-sm font-medium text-slate-700">End Date</label>
         <input
           type="date"
-          value={formData.expiryDate}
-          onChange={(e) => setFormData((prev) => ({ ...prev, expiryDate: e.target.value }))}
+          value={formData.endDate}
+          min={formData.startDate && formData.startDate >= todayYMD ? formData.startDate : todayYMD}
+          onChange={(e) => setFormData((prev) => ({ ...prev, endDate: e.target.value }))}
           className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-red-600 focus:ring-2 focus:ring-red-600/10"
         />
       </div>
@@ -406,7 +494,10 @@ export default function CreateCouponsPage() {
             {coupons.map((coupon) => {
               const status = coupon?.status || "Pending"
               const expired = isCouponExpired(coupon)
-              const expiryFormatted = coupon?.expiryDate ? new Date(coupon.expiryDate).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' }) : 'N/A'
+              const expiryFormatted = (coupon?.endDate || coupon?.expiryDate)
+                ? new Date(coupon.endDate || coupon.expiryDate).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })
+                : 'N/A'
+              const customerLabel = coupon?.customerScope === 'first-time' ? 'First-time users' : 'All users'
 
               return (
                 <motion.div
@@ -437,8 +528,16 @@ export default function CreateCouponsPage() {
                           Value: {coupon.discountType === "percentage" ? `${coupon.discountValue}% OFF` : `₹${coupon.discountValue} FLAT OFF`}
                         </p>
                         <p className="text-xs text-slate-500">
-                          Min. Order Amount: ₹{coupon.minOrderAmount || 0}
+                          Customers: {customerLabel}
                         </p>
+                        <p className="text-xs text-slate-500">
+                          Min. Order Value: ₹{coupon.minOrderValue ?? coupon.minOrderAmount ?? 0}
+                        </p>
+                        {coupon.perUserLimit ? (
+                          <p className="text-xs text-slate-500">
+                            Per user limit: {coupon.perUserLimit}
+                          </p>
+                        ) : null}
                         <p className="text-xs text-slate-500">
                           Expires: {expiryFormatted}
                         </p>
