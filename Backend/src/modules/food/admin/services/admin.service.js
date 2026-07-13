@@ -4385,10 +4385,9 @@ export async function getAllOffers(_query = {}) {
     const offers = list.map((o, index) => {
         const now = Date.now();
         const startTs = o.startDate ? new Date(o.startDate).getTime() : null;
-        const endTs = o.endDate ? new Date(o.endDate).getTime() : null;
 
         const isScheduled = Boolean(startTs && now < startTs);
-        const isExpired = Boolean(endTs && now >= endTs);
+        const isExpired = isOfferEndDateExpired(o.endDate);
 
         const restaurantName =
             o.restaurantScope === 'selected'
@@ -4429,6 +4428,9 @@ export async function getAllOffers(_query = {}) {
             usedCount: o.usedCount ?? 0,
             isFirstOrderOnly: Boolean(o.isFirstOrderOnly),
             restaurantScope: o.restaurantScope,
+            restaurantDbId: o.restaurantId
+                ? String(o.restaurantId?._id || o.restaurantId)
+                : null,
             createdByRole: o.createdByRole || 'ADMIN',
         };
     });
