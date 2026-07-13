@@ -6,6 +6,7 @@ import { FoodRestaurant } from '../models/restaurant.model.js';
 import {
     backfillLegacyCategoryWorkflow,
     GLOBAL_CATEGORY_FILTER,
+    getCategoryApprovalStatus,
     normalizeCategoryFoodTypeScope,
     serializeCategoryForResponse,
     toObjectId
@@ -222,7 +223,7 @@ export async function getRestaurantCategoryStatus(restaurantId, id) {
         _id: String(category._id),
         name: category.name || '',
         isActive: category.isActive !== false,
-        approvalStatus: category.approvalStatus || 'approved',
+        approvalStatus: getCategoryApprovalStatus(category),
         foodTypeScope: normalizeCategoryFoodTypeScope(category.foodTypeScope, 'Veg'),
         ownedByRestaurant:
             String(category.restaurantId || '') === String(context.restaurantId) ||

@@ -4,7 +4,7 @@ import { FoodRestaurant } from '../models/restaurant.model.js';
 import { FoodItem } from '../../admin/models/food.model.js';
 import { FoodCategory } from '../../admin/models/category.model.js';
 import { getFoodDisplayPrice, getFoodDisplayOtherPrice, serializeFoodVariants } from '../../admin/services/foodVariant.service.js';
-import { isCategoryVisibleInPublicMenu } from '../../shared/categoryWorkflow.js';
+import { isCategoryVisibleInPublicMenu, backfillLegacyCategoryWorkflow } from '../../shared/categoryWorkflow.js';
 
 const buildMenuFromFoods = async (foods = [], filterPublicOnly = false) => {
     const categoryIds = Array.from(
@@ -21,9 +21,12 @@ const buildMenuFromFoods = async (foods = [], filterPublicOnly = false) => {
 
     const categoryDocs = categoryIds.length
         ? await FoodCategory.find({ _id: { $in: categoryIds } })
-            .select('name image sortOrder isActive approvalStatus isApproved approvedAt')
+            .select('name image sortOrder isActive approvalStatus isApproved approvedAt restaurantId createdByRestaurantId')
             .lean()
         : [];
+    if (categoryDocs.length) {
+        await backfillLegacyCategoryWorkflow(categoryDocs, { persist: false });
+    }
     const categoryMap = new Map(categoryDocs.map((doc) => [String(doc._id), doc]));
 
     const allowedCategories = new Set();
@@ -217,8 +220,13 @@ export async function getPublicMenusBatch(restaurantIds = []) {
         )
     );
     const categoryDocs = categoryIds.length
-        ? await FoodCategory.find({ _id: { $in: categoryIds } }).select('name image isActive approvalStatus isApproved approvedAt').lean()
+        ? await FoodCategory.find({ _id: { $in: categoryIds } })
+            .select('name image isActive approvalStatus isApproved approvedAt restaurantId createdByRestaurantId')
+            .lean()
         : [];
+    if (categoryDocs.length) {
+        await backfillLegacyCategoryWorkflow(categoryDocs, { persist: false });
+    }
     const categoryMap = new Map(categoryDocs.map((doc) => [String(doc._id), doc]));
 
     const allowedCategories = new Set();
