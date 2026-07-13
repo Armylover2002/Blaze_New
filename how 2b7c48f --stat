@@ -1,0 +1,35 @@
+[33mcommit a34ac6280e761b640cda360fc77a3fe6d940b515[m
+Author: Vishal Patel <mrindianarmy100@gmail.com>
+Date:   Fri Jul 10 15:07:57 2026 +0530
+
+    vechicle issue fix
+
+ .../delivery/controllers/delivery.controller.js    | 11 [32m++++[m[31m-[m
+ .../food/delivery/routes/delivery.routes.js        |  5 [32m+[m[31m-[m
+ .../food/delivery/services/delivery.service.js     |  6 [32m+++[m
+ .../modules/porter/models/porterVehicle.model.js   |  6 [31m---[m
+ .../services/porter-driver-vehicle.service.js      | 27 [32m+++++++[m[31m---[m
+ .../services/porter-order-dispatch.service.js      |  5 [32m+[m[31m-[m
+ .../services/porter-order-pricing.service.js       |  4 [32m+[m[31m-[m
+ .../porter/orders/services/porter-order.service.js |  2 [32m+[m[31m-[m
+ .../src/modules/porter/services/pricing.service.js |  4 [32m+[m[31m-[m
+ .../src/modules/porter/services/vehicle.service.js | 33 [32m++++++++++[m[31m---[m
+ Backend/src/modules/porter/utils/mappers.util.js   | 27 [32m+++++[m[31m-----[m
+ .../modules/porter/validators/vehicle.validator.js |  3 [31m--[m
+ Frontend/src/core/context/AuthContext.jsx          | 24 [32m+++++++[m[31m--[m
+ .../components/modals/VehicleSwitcherSheet.jsx     | 10 [32m++[m[31m--[m
+ .../modules/DeliveryV2/pages/DeliveryHomeV2.jsx    | 12 [32m+++[m[31m--[m
+ .../modules/DeliveryV2/pages/auth/SignupStep1.jsx  | 44 [32m++++++++++++++[m[31m---[m
+ .../modules/DeliveryV2/pages/auth/SignupStep2.jsx  | 57 [32m+++++++++++++++++++[m[31m---[m
+ .../DeliveryV2/utils/deliveryPartnerSync.js        | 28 [32m+++++++++++[m
+ .../src/modules/DeliveryV2/utils/orderRouting.js   |  2 [32m+[m[31m-[m
+ .../src/modules/porter/admin/pages/Coupons.jsx     |  9 [32m++[m[31m--[m
+ .../src/modules/porter/admin/pages/Dashboard.jsx   |  4 [32m+[m[31m-[m
+ .../porter/admin/pages/PricingCommission.jsx       | 19 [32m++++[m[31m----[m
+ .../src/modules/porter/admin/pages/Vehicles.jsx    | 19 [32m+++[m[31m-----[m
+ .../modules/porter/user/components/VehicleCard.jsx |  8 [32m++[m[31m-[m
+ .../src/modules/porter/user/pages/FareEstimate.jsx |  4 [32m+[m[31m-[m
+ .../modules/porter/user/pages/FindingPartner.jsx   |  2 [32m+[m[31m-[m
+ .../modules/porter/user/pages/SchedulePickup.jsx   |  4 [32m+[m[31m-[m
+ Frontend/src/services/api/index.js                 | 17 [32m+++++++[m
+ 28 files changed, 285 insertions(+), 111 deletions(-)
