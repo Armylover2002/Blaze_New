@@ -103,6 +103,7 @@ const pricingSchema = new mongoose.Schema(
         sponsoredDelivery: { type: Boolean, default: false },
         sponsoredKm: { type: Number, default: 0, min: 0 },
         deliveryDistanceKm: { type: Number, default: null, min: 0 },
+        distanceEstimated: { type: Boolean, default: false },
         deliverySponsorType: { type: String, default: 'USER_FULL', trim: true },
         platformFee: { type: Number, default: 0, min: 0 },
         discount: { type: Number, default: 0, min: 0 },

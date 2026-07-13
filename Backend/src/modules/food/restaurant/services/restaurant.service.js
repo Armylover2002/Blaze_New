@@ -8,7 +8,6 @@ import { ValidationError } from '../../../../core/auth/errors.js';
 import mongoose from 'mongoose';
 import { FoodZone } from '../../admin/models/zone.model.js';
 import { FoodOffer } from '../../admin/models/offer.model.js';
-import { getRestaurantDiningSnapshot, submitRestaurantDiningRequest } from '../../dining/services/dining.service.js';
 import {
     notifyAdminsSafely,
     notifyOwnerSafely
@@ -354,15 +353,6 @@ const toRestaurantProfile = (doc) => {
             Number.isFinite(Number(doc.estimatedDeliveryTimeMinutes))
                 ? Number(doc.estimatedDeliveryTimeMinutes)
                 : null,
-        diningSettings: {
-            isEnabled: doc.diningSettings?.isEnabled !== false,
-            maxGuests: Math.max(1, parseInt(doc.diningSettings?.maxGuests, 10) || 6),
-            diningType: String(doc.diningSettings?.diningType || 'family-dining').trim() || 'family-dining'
-        },
-        diningCategoryIds: Array.isArray(doc.diningCategoryIds) ? doc.diningCategoryIds.map((id) => String(id)) : [],
-        diningCategories: Array.isArray(doc.diningCategories) ? doc.diningCategories : [],
-        diningPrimaryCategoryId: doc.diningPrimaryCategoryId || null,
-        pendingDiningRequest: doc.pendingDiningRequest || null,
         isAcceptingOrders: doc.isAcceptingOrders !== false,
         status: doc.status || null,
         onboardingStep: doc.onboardingStep ?? 1,
@@ -1603,7 +1593,6 @@ export const getCurrentRestaurantProfile = async (restaurantId) => {
                 'featuredPrice',
                 'offer',
                 'estimatedDeliveryTimeMinutes',
-                'diningSettings',
                 'isAcceptingOrders',
                 'isActive',
                 'wasEverApproved',
@@ -1660,14 +1649,9 @@ export const getCurrentRestaurantProfile = async (restaurantId) => {
         logger.error(`[PROFILE-HYDRATION] Error validating accepts orders status: ${err.message}`);
     }
 
-    const diningSnapshot = await getRestaurantDiningSnapshot(restaurantId);
     return toRestaurantProfile({
         ...doc,
         isAcceptingOrders,
-        diningCategoryIds: diningSnapshot.categoryIds,
-        diningCategories: diningSnapshot.categories,
-        diningPrimaryCategoryId: diningSnapshot.primaryCategoryId,
-        pendingDiningRequest: diningSnapshot.pendingDiningRequest
     });
 };
 
@@ -1740,7 +1724,6 @@ export const updateRestaurantAcceptingOrders = async (restaurantId, isAcceptingO
                 'openingTime',
                 'closingTime',
                 'openDays',
-                'diningSettings',
                 'isAcceptingOrders',
                 'status',
                 'createdAt',
@@ -1749,14 +1732,6 @@ export const updateRestaurantAcceptingOrders = async (restaurantId, isAcceptingO
         }
     ).lean();
     return toRestaurantProfile(doc);
-};
-
-export const updateCurrentRestaurantDiningSettings = async (restaurantId, body = {}) => {
-    if (!restaurantId) {
-        throw new ValidationError('Invalid restaurant id');
-    }
-    await submitRestaurantDiningRequest(restaurantId, body);
-    return getCurrentRestaurantProfile(restaurantId);
 };
 
 export const updateRestaurantProfile = async (restaurantId, body = {}) => {
@@ -2688,7 +2663,7 @@ export const listPublicOffers = async (query = {}) => {
 
     const adminOffers = [];
     for (const o of list) {
-        if (!isCouponWithinDateWindow(o, now) || !isCouponUsageAvailable(o)) continue;
+        if (!isCouponWithinDateWindow(o, now) || !(await isCouponUsageAvailable(o))) continue;
 
         const { minOrderValue, meetsMinOrder, amountToUnlock, estimatedDiscount, displayDiscount } =
             getCouponCartEligibility(o, numericSubtotal);
@@ -2763,7 +2738,7 @@ export const listPublicOffers = async (query = {}) => {
 
         for (const c of dbCoupons) {
             if (c.showInCart === false) continue;
-            if (!isCouponWithinDateWindow(c, now) || !isCouponUsageAvailable(c)) continue;
+            if (!isCouponWithinDateWindow(c, now) || !(await isCouponUsageAvailable(c))) continue;
 
             const { minOrderValue, meetsMinOrder, amountToUnlock, estimatedDiscount, displayDiscount } =
                 getCouponCartEligibility(c, numericSubtotal);

@@ -11,7 +11,6 @@ import {
     getCurrentRestaurantController,
     updateRestaurantProfileController,
     updateRestaurantAcceptingOrdersController,
-    updateCurrentRestaurantDiningSettingsController,
     uploadRestaurantProfileImageController,
     uploadRestaurantMenuImageController,
     uploadRestaurantCoverImagesController,
@@ -78,6 +77,7 @@ import {
 } from '../controllers/restaurantCoupon.controller.js';
 
 import { cacheResponse, invalidateCache } from '../../../../middleware/cache.js';
+import { invalidateCategoryCaches } from '../../shared/categoryCache.js';
 
 const router = express.Router();
 
@@ -138,7 +138,6 @@ router.patch('/availability', authMiddleware, requireRestaurant, async (req, res
     await invalidateCache('restaurant_detail:*');
     next();
 }, updateRestaurantAcceptingOrdersController);
-router.patch('/dining-settings', authMiddleware, requireRestaurant, updateCurrentRestaurantDiningSettingsController);
 router.get('/outlet-timings', authMiddleware, requireRestaurant, getCurrentRestaurantOutletTimingsController);
 router.put('/outlet-timings', authMiddleware, requireRestaurant, async (req, res, next) => {
     await invalidateCache('restaurants:*');
@@ -205,16 +204,17 @@ router.post(
     uploadRestaurantMenuImagesController
 );
 
+const invalidateCategoryCacheMiddleware = async (req, res, next) => {
+    await invalidateCategoryCaches();
+    next();
+};
+
 // Categories (restaurant dashboard). Read-only for item creation, CRUD for Menu Categories page.
 router.get('/categories', authMiddleware, requireRestaurant, listCategoriesController);
 router.get('/categories/:id/status', authMiddleware, requireRestaurant, getCategoryStatusController);
-router.post('/categories', authMiddleware, requireRestaurant, createCategoryController);
-router.patch('/categories/:id', authMiddleware, requireRestaurant, updateCategoryController);
-router.delete('/categories/:id', authMiddleware, requireRestaurant, async (req, res, next) => {
-    await invalidateCache('restaurant_menu:*');
-    await invalidateCache('restaurant_menus_batch:*');
-    next();
-}, deleteCategoryController);
+router.post('/categories', authMiddleware, requireRestaurant, invalidateCategoryCacheMiddleware, createCategoryController);
+router.patch('/categories/:id', authMiddleware, requireRestaurant, invalidateCategoryCacheMiddleware, updateCategoryController);
+router.delete('/categories/:id', authMiddleware, requireRestaurant, invalidateCategoryCacheMiddleware, deleteCategoryController);
 
 // Item slot timings (restaurant dashboard)
 router.get('/item-slot-timings', authMiddleware, requireRestaurant, listItemSlotTimingsController);

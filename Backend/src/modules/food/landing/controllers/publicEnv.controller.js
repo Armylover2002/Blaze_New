@@ -8,9 +8,8 @@ const sanitize = (value) => (value ? String(value).trim().replace(/^['"]|['"]$/g
  */
 export const getPublicEnvController = async (_req, res, next) => {
     try {
-        const googleMapsKey =
-            sanitize(process.env.VITE_GOOGLE_MAPS_API_KEY) ||
-            sanitize(process.env.GOOGLE_MAPS_API_KEY);
+        // Browser-only key (HTTP referrer restricted). Never expose GOOGLE_MAPS_API_KEY here.
+        const googleMapsKey = sanitize(process.env.VITE_GOOGLE_MAPS_API_KEY);
 
         return res.status(200).json({
             success: true,

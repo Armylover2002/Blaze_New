@@ -33,15 +33,18 @@ const buildMenuFromFoods = async (foods = [], filterPublicOnly = false, options 
 
     const categoryDocs = categoryIds.length
         ? await FoodCategory.find({ _id: { $in: categoryIds } })
-            .select('name image sortOrder isActive approvalStatus')
+            .select('name image sortOrder isActive approvalStatus isApproved approvedAt restaurantId createdByRestaurantId')
             .lean()
         : [];
+    if (categoryDocs.length) {
+        await backfillLegacyCategoryWorkflow(categoryDocs, { persist: false });
+    }
     const categoryMap = new Map(categoryDocs.map((doc) => [String(doc._id), doc]));
 
     const allowedCategories = new Set();
     if (filterPublicOnly) {
         for (const doc of categoryDocs) {
-            if (doc.isActive !== false && doc.approvalStatus === 'approved') {
+            if (isCategoryVisibleInPublicMenu(doc)) {
                 allowedCategories.add(String(doc._id));
             }
         }
@@ -255,13 +258,18 @@ export async function getPublicMenusBatch(restaurantIds = []) {
         )
     );
     const categoryDocs = categoryIds.length
-        ? await FoodCategory.find({ _id: { $in: categoryIds } }).select('name image isActive approvalStatus').lean()
+        ? await FoodCategory.find({ _id: { $in: categoryIds } })
+            .select('name image isActive approvalStatus isApproved approvedAt restaurantId createdByRestaurantId')
+            .lean()
         : [];
+    if (categoryDocs.length) {
+        await backfillLegacyCategoryWorkflow(categoryDocs, { persist: false });
+    }
     const categoryMap = new Map(categoryDocs.map((doc) => [String(doc._id), doc]));
 
     const allowedCategories = new Set();
     for (const doc of categoryDocs) {
-        if (doc.isActive !== false && doc.approvalStatus === 'approved') {
+        if (isCategoryVisibleInPublicMenu(doc)) {
             allowedCategories.add(String(doc._id));
         }
     }

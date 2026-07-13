@@ -69,30 +69,69 @@ export default function CategoryPage() {
   const [loadingRestaurants, setLoadingRestaurants] = useState(true)
   const [isEnrichingMenus, setIsEnrichingMenus] = useState(false)
   const [approvedFoodsData, setApprovedFoodsData] = useState([])
-  const [categoryKeywords, setCategoryKeywords] = useState({})
   const showCategorySkeleton = useDelayedLoading(loadingCategories)
   const deferredSearchQuery = useDeferredValue(searchQuery)
   const BACKEND_ORIGIN = useMemo(() => API_BASE_URL.replace(/\/api\/?$/, ""), [])
   const slugify = (value) => String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "")
-  const normalizeCategoryToken = (value) =>
-    String(value || "")
-      .toLowerCase()
-      .replace(/&/g, " and ")
-      .replace(/[^a-z0-9]+/g, " ")
-      .trim()
-  const matchesCategoryText = (value, keywords) => {
-    const normalizedValue = normalizeCategoryToken(value)
-    if (!normalizedValue) return false
 
-    return keywords.some((keyword) => {
-      const normalizedKeyword = normalizeCategoryToken(keyword)
-      if (!normalizedKeyword) return false
-      return (
-        normalizedValue === normalizedKeyword ||
-        normalizedValue.includes(normalizedKeyword) ||
-        slugify(normalizedValue) === slugify(normalizedKeyword)
-      )
+  const resolveCategoryRef = (categoryKey) => {
+    if (!categoryKey || categoryKey === "all") return null
+    const raw = String(categoryKey).trim().toLowerCase()
+    return (
+      categories.find(
+        (cat) =>
+          cat.slug === raw ||
+          String(cat.id || "").toLowerCase() === raw ||
+          String(cat.categoryId || "").toLowerCase() === raw ||
+          slugify(cat.name) === raw
+      ) || null
+    )
+  }
+
+  const getResolvedCategoryIds = (categoryKey) => {
+    const ref = resolveCategoryRef(categoryKey)
+    const ids = new Set()
+    if (ref) {
+      ;[ref.categoryId, ref.id]
+        .filter((value) => value && String(value) !== "all")
+        .forEach((value) => ids.add(String(value)))
+    } else {
+      const raw = String(categoryKey || "").trim()
+      if (/^[a-f0-9]{24}$/i.test(raw)) ids.add(raw)
+    }
+    return ids
+  }
+
+  const matchesCategoryIds = (categoryIds, ...candidates) => {
+    if (!categoryIds?.size) return false
+    return candidates.some((value) => {
+      const normalized = String(value || "").trim()
+      return normalized && categoryIds.has(normalized)
     })
+  }
+
+  const hasPaneerInMenu = (menu) => {
+    if (!menu?.sections || !Array.isArray(menu.sections)) return false
+
+    for (const section of menu.sections) {
+      const sectionName = String(section?.name || "").toLowerCase()
+      if (sectionName.includes("paneer")) return true
+
+      const items = [
+        ...(Array.isArray(section.items) ? section.items : []),
+        ...(Array.isArray(section.subsections)
+          ? section.subsections.flatMap((sub) => (Array.isArray(sub.items) ? sub.items : []))
+          : []),
+      ]
+
+      for (const item of items) {
+        const name = String(item?.name || "").toLowerCase()
+        const catName = String(item?.categoryName || item?.category || "").toLowerCase()
+        if (name.includes("paneer") || catName.includes("paneer")) return true
+      }
+    }
+
+    return false
   }
   const uniqueByRestaurant = (list) => {
     const seen = new Set()
@@ -212,10 +251,12 @@ export default function CategoryPage() {
     const sectionsMap = new Map()
     matchingFoods.forEach((food, index) => {
       const sectionName = String(food?.categoryName || food?.category || "Varieties").trim() || "Varieties"
-      const sectionKey = slugify(sectionName)
+      const sectionCategoryId = food?.categoryId ? String(food.categoryId) : ""
+      const sectionKey = sectionCategoryId || slugify(sectionName)
       if (!sectionsMap.has(sectionKey)) {
         sectionsMap.set(sectionKey, {
-          id: sectionKey || `section-${index}`,
+          id: sectionCategoryId || sectionKey || `section-${index}`,
+          categoryId: sectionCategoryId || null,
           name: sectionName,
           items: [],
           subsections: [],
@@ -225,6 +266,7 @@ export default function CategoryPage() {
       sectionsMap.get(sectionKey).items.push({
         id: String(food?.id || food?._id || `${sectionKey}-${index}`),
         _id: food?._id,
+        categoryId: sectionCategoryId || null,
         name: food?.name || "Unnamed Item",
         description: food?.description || "",
         price: Number(food?.price || 0),
@@ -244,9 +286,9 @@ export default function CategoryPage() {
     }
   }
 
-  const getCategoryFallbackDishesFromApprovedFoods = (categoryId, restaurants) => {
-    const keywords = getCategoryKeywords(categoryId)
-    if (keywords.length === 0 || !Array.isArray(approvedFoodsData) || approvedFoodsData.length === 0) {
+  const getCategoryFallbackDishesFromApprovedFoods = (categoryKey, restaurants) => {
+    const categoryIds = getResolvedCategoryIds(categoryKey)
+    if (!categoryIds.size || !Array.isArray(approvedFoodsData) || approvedFoodsData.length === 0) {
       return []
     }
 
@@ -277,13 +319,7 @@ export default function CategoryPage() {
       .filter((food) => {
         if (food?.isAvailable === false) return false
         if (String(food?.approvalStatus || "").toLowerCase() !== "approved") return false
-
-        const categoryName = String(food?.categoryName || food?.category || "").toLowerCase()
-        const foodName = String(food?.name || "").toLowerCase()
-        return (
-          matchesCategoryText(categoryName, keywords) ||
-          matchesCategoryText(foodName, keywords)
-        )
+        return matchesCategoryIds(categoryIds, food?.categoryId)
       })
       .map((food, index) => {
         const restaurantId = String(food?.restaurantId || "").trim()
@@ -578,29 +614,21 @@ export default function CategoryPage() {
           // Transform API categories to match expected format
           const transformedCategories = [
             { id: 'all', name: "All", image: null, slug: 'all' },
-            ...categoriesArray.map((cat) => ({
-              id: cat.slug || cat.id,
-              name: cat.name,
-              image: cat.image || foodImages[0],
-              slug: cat.slug || cat.name.toLowerCase().replace(/\s+/g, '-'),
-              type: cat.type,
-            }))
+            ...categoriesArray.map((cat) => {
+              const categoryId = String(cat.id || cat._id || "")
+              const slug = slugify(cat.name) || categoryId
+              return {
+                id: categoryId,
+                categoryId,
+                name: cat.name,
+                image: cat.image || foodImages[0],
+                slug,
+                type: cat.type,
+              }
+            })
           ]
 
           setCategories(transformedCategories)
-
-          // Generate category keywords dynamically from category names
-          const keywordsMap = {}
-          categoriesArray.forEach((cat) => {
-            const categoryId = cat.slug || cat.id
-            const categoryName = cat.name.toLowerCase()
-
-            // Generate keywords from category name
-            const words = categoryName.split(/[\s-]+/).filter(w => w.length > 0)
-            keywordsMap[categoryId] = [categoryName, ...words]
-          })
-
-          setCategoryKeywords(keywordsMap)
         } else {
           // Keep default "All" category on error
           setCategories([{ id: 'all', name: "All", image: null, slug: 'all' }])
@@ -622,74 +650,46 @@ export default function CategoryPage() {
     }
   }, [zoneId])
 
-  // Helper function to check if menu has dishes matching category keywords
-  const getCategoryKeywords = (categoryId) => {
-    const raw = String(categoryId || "").trim().toLowerCase()
-    const fromAdmin = categoryKeywords[raw]
-    let keywords = []
-    if (Array.isArray(fromAdmin) && fromAdmin.length > 0) {
-      keywords = [...fromAdmin]
-    } else {
-      // Fallback: derive keywords from the slug in URL (e.g. "samosha" -> ["samosha"])
-      // This prevents "no data" when admin categories don't include the slug.
-      const parts = raw.split(/[\s-]+/).filter(Boolean)
-      keywords = parts.length > 0 ? Array.from(new Set([raw, ...parts])) : []
-    }
-
-    // Add common variations/misspellings (e.g. "samosha" vs "samosa")
-    if (keywords.includes('samosha') || keywords.includes('samosa')) {
-      if (!keywords.includes('samosa')) keywords.push('samosa')
-      if (!keywords.includes('samosha')) keywords.push('samosha')
-    }
-
-    return keywords
-  }
-
-  const checkCategoryInMenu = (menu, categoryId) => {
-    if (!menu || !menu.sections || !Array.isArray(menu.sections)) {
+  const checkCategoryInMenu = (menu, categoryKey) => {
+    if (!menu?.sections || !Array.isArray(menu.sections)) {
       return false
     }
 
-    const keywords = getCategoryKeywords(categoryId)
-    if (keywords.length === 0) {
+    const categoryIds = getResolvedCategoryIds(categoryKey)
+    if (!categoryIds.size) {
       return false
     }
 
     for (const section of menu.sections) {
-      const sectionNameLower = (section.name || '').toLowerCase()
-      if (matchesCategoryText(sectionNameLower, keywords)) {
+      if (matchesCategoryIds(categoryIds, section.categoryId, section.id)) {
         return true
       }
 
       if (section.items && Array.isArray(section.items)) {
         for (const item of section.items) {
-          const itemNameLower = (item.name || '').toLowerCase()
-          const itemCategoryLower = (item.categoryName || item.category || '').toLowerCase()
-
-          if (
-            matchesCategoryText(itemNameLower, keywords) ||
-            matchesCategoryText(itemCategoryLower, keywords)
-          ) {
+          if (matchesCategoryIds(categoryIds, item.categoryId, section.categoryId, section.id)) {
             return true
           }
         }
       }
 
-      // Also check subsection items (new menu builder can nest items)
       if (section.subsections && Array.isArray(section.subsections)) {
         for (const subsection of section.subsections) {
-          const subsectionNameLower = (subsection?.name || "").toLowerCase()
-          if (matchesCategoryText(subsectionNameLower, keywords)) {
+          if (matchesCategoryIds(categoryIds, subsection.categoryId, subsection.id)) {
             return true
           }
 
           const subItems = Array.isArray(subsection?.items) ? subsection.items : []
           for (const item of subItems) {
-            const itemNameLower = (item?.name || "").toLowerCase()
-            const itemCategoryLower = (item?.categoryName || item?.category || "").toLowerCase()
             if (
-              matchesCategoryText(itemNameLower, keywords) ||
-              matchesCategoryText(itemCategoryLower, keywords)
+              matchesCategoryIds(
+                categoryIds,
+                item.categoryId,
+                section.categoryId,
+                section.id,
+                subsection.categoryId,
+                subsection.id
+              )
             ) {
               return true
             }
@@ -701,89 +701,68 @@ export default function CategoryPage() {
     return false
   }
 
-  // Helper function to get ALL dishes matching a category from menu (returns array of dish info)
-  const getAllCategoryDishesFromMenu = (menu, categoryId) => {
-    if (!menu || !menu.sections || !Array.isArray(menu.sections)) {
+  const getAllCategoryDishesFromMenu = (menu, categoryKey) => {
+    if (!menu?.sections || !Array.isArray(menu.sections)) {
       return []
     }
 
-    const keywords = getCategoryKeywords(categoryId)
-    if (keywords.length === 0) {
+    const categoryIds = getResolvedCategoryIds(categoryKey)
+    if (!categoryIds.size) {
       return []
     }
 
     const matchingDishes = []
 
+    const pushDish = (item, section, subsection = null) => {
+      const originalPrice = item?.originalPrice || item?.price || 0
+      const discountPercent = item?.discountPercent || 0
+      const finalPrice = discountPercent > 0
+        ? Math.round(originalPrice * (1 - discountPercent / 100))
+        : originalPrice
+
+      const dishImage = normalizeImageUrl(
+        item?.image?.url || item?.image || subsection?.image?.url || subsection?.image || section?.image?.url || section?.image
+      )
+
+      matchingDishes.push({
+        name: item.name,
+        price: finalPrice,
+        image: dishImage,
+        originalPrice,
+        itemId: item._id || item.id || `${item.name}-${finalPrice}`,
+        foodType: item.foodType,
+      })
+    }
+
     for (const section of menu.sections) {
-      const sectionNameLower = (section?.name || "").toLowerCase()
-      const sectionMatches = matchesCategoryText(sectionNameLower, keywords)
+      const sectionMatches = matchesCategoryIds(categoryIds, section.categoryId, section.id)
 
       if (section.items && Array.isArray(section.items)) {
         for (const item of section.items) {
-          const itemNameLower = (item.name || '').toLowerCase()
-          const itemCategoryLower = (item.categoryName || item.category || '').toLowerCase()
-
-          const itemMatches =
-            matchesCategoryText(itemNameLower, keywords) ||
-            matchesCategoryText(itemCategoryLower, keywords)
-
-          // If the section name matches the category, include all items in it.
+          const itemMatches = matchesCategoryIds(categoryIds, item.categoryId, section.categoryId, section.id)
           if (sectionMatches || itemMatches) {
-            // Calculate final price considering discounts
-            const originalPrice = item.originalPrice || item.price || 0
-            const discountPercent = item.discountPercent || 0
-            const finalPrice = discountPercent > 0
-              ? Math.round(originalPrice * (1 - discountPercent / 100))
-              : originalPrice
-
-            // Get dish image (prioritize item image, then section image)
-            const dishImage = normalizeImageUrl(item.image?.url || item.image || section.image?.url || section.image)
-
-            matchingDishes.push({
-              name: item.name,
-              price: finalPrice,
-              image: dishImage,
-              originalPrice: originalPrice,
-              itemId: item._id || item.id || `${item.name}-${finalPrice}`,
-              foodType: item.foodType, // Include foodType for vegMode filtering
-            })
+            pushDish(item, section)
           }
         }
       }
 
-      // Include subsection items too
       if (section.subsections && Array.isArray(section.subsections)) {
         for (const subsection of section.subsections) {
-          const subsectionNameLower = (subsection?.name || "").toLowerCase()
-          const subsectionMatches = matchesCategoryText(subsectionNameLower, keywords)
+          const subsectionMatches = matchesCategoryIds(categoryIds, subsection.categoryId, subsection.id)
           const subItems = Array.isArray(subsection?.items) ? subsection.items : []
 
           for (const item of subItems) {
-            const itemNameLower = (item?.name || "").toLowerCase()
-            const itemCategoryLower = (item?.categoryName || item?.category || "").toLowerCase()
-            const itemMatches =
-              matchesCategoryText(itemNameLower, keywords) ||
-              matchesCategoryText(itemCategoryLower, keywords)
+            const itemMatches = matchesCategoryIds(
+              categoryIds,
+              item.categoryId,
+              section.categoryId,
+              section.id,
+              subsection.categoryId,
+              subsection.id
+            )
 
             if (sectionMatches || subsectionMatches || itemMatches) {
-              const originalPrice = item?.originalPrice || item?.price || 0
-              const discountPercent = item?.discountPercent || 0
-              const finalPrice = discountPercent > 0
-                ? Math.round(originalPrice * (1 - discountPercent / 100))
-                : originalPrice
-
-              const dishImage = normalizeImageUrl(
-                item?.image?.url || item?.image || subsection?.image?.url || subsection?.image || section?.image?.url || section?.image
-              )
-
-              matchingDishes.push({
-                name: item?.name,
-                price: finalPrice,
-                image: dishImage,
-                originalPrice: originalPrice,
-                itemId: item?._id || item?.id || `${item?.name}-${finalPrice}`,
-                foodType: item?.foodType,
-              })
+              pushDish(item, section, subsection)
             }
           }
         }
@@ -948,7 +927,7 @@ export default function CategoryPage() {
                       }
 
                       if (menu?.sections?.length > 0) {
-                        const hasPaneer = checkCategoryInMenu(menu, 'paneer-tikka')
+                        const hasPaneer = hasPaneerInMenu(menu)
 
                         let featuredDish = restaurant.featuredDish
                         let featuredPrice = restaurant.featuredPrice
@@ -1201,7 +1180,7 @@ export default function CategoryPage() {
     }
 
     return applyFiltersAndSorting(filtered)
-  }, [selectedCategory, activeFilters, deferredSearchQuery, restaurantsData, categoryKeywords, vegMode, approvedFoodsData, sortBy])
+  }, [selectedCategory, activeFilters, deferredSearchQuery, restaurantsData, categories, vegMode, approvedFoodsData, sortBy])
 
   const filteredAllRestaurants = useMemo(() => {
     const sourceData = restaurantsData.length > 0 ? restaurantsData : []
@@ -1251,7 +1230,7 @@ export default function CategoryPage() {
     }
 
     return applyFiltersAndSorting(filtered)
-  }, [selectedCategory, activeFilters, deferredSearchQuery, restaurantsData, categoryKeywords, vegMode, approvedFoodsData, sortBy])
+  }, [selectedCategory, activeFilters, deferredSearchQuery, restaurantsData, categories, vegMode, approvedFoodsData, sortBy])
 
   const showRestaurantSkeleton = useDelayedLoading(
     isLoadingFilterResults || loadingRestaurants || (isEnrichingMenus && selectedCategory !== 'all' && filteredRecommended.length === 0),
@@ -1312,7 +1291,10 @@ export default function CategoryPage() {
             ) : (
               categories && categories.length > 0 ? categories.map((cat) => {
                 const categorySlug = cat.slug || cat.id
-                const isSelected = selectedCategory === categorySlug || selectedCategory === cat.id
+                const isSelected =
+                  selectedCategory === categorySlug ||
+                  selectedCategory === cat.id ||
+                  selectedCategory === cat.categoryId
                 const isAllCategory = categorySlug === "all" || cat.id === "all"
                 return (
                   <button

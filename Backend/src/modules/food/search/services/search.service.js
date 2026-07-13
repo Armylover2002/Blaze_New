@@ -236,22 +236,28 @@ export const searchUnified = async (query = {}, options = {}) => {
  * Fetch Admin-only categories
  */
 export const getAdminCategories = async (query = {}) => {
-    const filter = { 
-        isActive: true, 
+    const filter = {
+        isActive: true,
         isApproved: true,
-        $or: [
-            { restaurantId: { $exists: false } },
-            { restaurantId: null },
-            { restaurantId: { $eq: undefined } }
+        $and: [
+            {
+                $or: [
+                    { restaurantId: { $exists: false } },
+                    { restaurantId: null },
+                    { restaurantId: { $eq: undefined } }
+                ]
+            }
         ]
     };
 
     if (query.zoneId && mongoose.Types.ObjectId.isValid(query.zoneId)) {
-        filter.$or = [
-            { zoneId: new mongoose.Types.ObjectId(query.zoneId) },
-            { zoneId: { $exists: false } },
-            { zoneId: null }
-        ];
+        filter.$and.push({
+            $or: [
+                { zoneId: new mongoose.Types.ObjectId(query.zoneId) },
+                { zoneId: { $exists: false } },
+                { zoneId: null }
+            ]
+        });
     }
 
     const categories = await FoodCategory.find(filter).sort({ sortOrder: 1, name: 1 }).lean();

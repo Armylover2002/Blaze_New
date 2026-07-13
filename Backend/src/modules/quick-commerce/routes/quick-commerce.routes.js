@@ -83,6 +83,7 @@ import {
   updateAdminZone,
   deleteAdminZone,
   listPublicZones,
+  detectQuickZonePublic,
   getAdminExperienceSections,
   createAdminExperienceSection,
   updateAdminExperienceSection,
@@ -134,6 +135,7 @@ import * as notificationBroadcastController from "../../food/admin/controllers/n
 import {
   geocodeAddress,
   reverseGeocode,
+  geocodePlaceId,
 } from "../controllers/location.controller.js";
 
 import { authMiddleware, checkPermission } from "../../../core/auth/auth.middleware.js";
@@ -203,12 +205,14 @@ router.get("/products/:productId/reviews", getProductReviews);
 router.post("/products/reviews", optionalAuth, submitProductReview);
 router.get("/products/:productId", getProductById);
 router.get("/zones/public", listPublicZones);
+router.get("/zones/detect", detectQuickZonePublic);
 router.get("/billing/settings", getPublicBillingSettings);
 router.get("/stores/:storeId", getStoreDetails);
 
 // Location endpoints
 router.get("/location/geocode", geocodeAddress);
 router.get("/location/reverse-geocode", reverseGeocode);
+router.get("/location/geocode-place", geocodePlaceId);
 
 router.get("/cart", optionalAuth, getCart);
 router.post("/cart/add", optionalAuth, addToCart);

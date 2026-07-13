@@ -83,56 +83,21 @@ const getAddressIcon = (address) => {
     return MapPin;
 };
 
-// Reverse geocode via Google Maps, fallback to Nominatim
+// Reverse geocode via backend proxy, fallback to Nominatim
 const reverseGeocode = async (lat, lng) => {
     try {
-        const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
-        if (apiKey) {
-            const url = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${apiKey}`;
-            const response = await fetch(url);
-            if (response.ok) {
-                const data = await response.json();
-                if (data.status === "OK" && data.results && data.results[0]) {
-                    const result = data.results[0];
-                    const components = result.address_components || [];
-                    
-                    const getComponent = (types) =>
-                        components.find((c) => types.some((t) => c.types.includes(t)))?.long_name;
-                    
-                    const street_number = getComponent(["street_number"]) || "";
-                    const route = getComponent(["route"]) || "";
-                    const premise = getComponent(["premise"]) || "";
-                    const subpremise = getComponent(["subpremise"]) || "";
-                    
-                    const streetParts = [subpremise, street_number, premise, route].filter(Boolean);
-                    const street = streetParts.join(", ");
-                    
-                    const neighborhood = getComponent(["neighborhood"]) || "";
-                    const sublocality = getComponent(["sublocality_level_1", "sublocality", "sublocality_level_2"]) || "";
-                    const area = neighborhood || sublocality || "";
-                    
-                    const city = getComponent(["locality", "administrative_area_level_2"]) || "";
-                    const state = getComponent(["administrative_area_level_1"]) || "";
-                    const pincode = getComponent(["postal_code"]) || "";
-                    
-                    let shortAddress = area || city;
-                    if (street && area) {
-                        shortAddress = `${street}, ${area}`;
-                    } else if (area && city) {
-                        shortAddress = `${area}, ${city}`;
-                    }
-                    
-                    return {
-                        street,
-                        area,
-                        city,
-                        state,
-                        postalCode: pincode,
-                        address: shortAddress || result.formatted_address,
-                        formattedAddress: result.formatted_address
-                    };
-                }
-            }
+        const response = await customerApi.reverseGeocode(lat, lng);
+        const geo = response?.data?.data;
+        if (geo?.formattedAddress) {
+            return {
+                street: geo.area || "",
+                area: geo.area || "",
+                city: geo.city || "",
+                state: geo.state || "",
+                postalCode: geo.pincode || "",
+                address: geo.formattedAddress,
+                formattedAddress: geo.formattedAddress,
+            };
         }
     } catch (err) {
         // Fallback to nominatim

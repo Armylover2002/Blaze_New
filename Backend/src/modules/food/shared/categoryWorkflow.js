@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { ValidationError } from '../../../core/auth/errors.js';
 import { FoodItem } from '../admin/models/food.model.js';
 
 export const CATEGORY_APPROVAL_STATUSES = ['pending', 'approved', 'rejected'];
@@ -45,6 +46,60 @@ export const getCategoryApprovalStatus = (category = {}) => {
         return String(category.approvalStatus).trim();
     }
     return category?.isApproved === false ? 'pending' : 'approved';
+};
+
+/** Whether a category's existing items should appear on customer-facing menus. */
+export const isCategoryVisibleInPublicMenu = (category = {}) => {
+    if (category?.isActive === false) return false;
+    const status = getCategoryApprovalStatus(category);
+    if (status === 'approved') return true;
+    if (status === 'rejected') return false;
+    // Pending re-review after a prior approval: keep live items visible until admin acts.
+    if (status === 'pending' && category?.approvedAt) return true;
+    return false;
+};
+
+const escapeCategoryNameRegex = (value) => String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+export const buildCategoryDuplicateNameFilter = ({ name, restaurantId, zoneId, excludeCategoryId } = {}) => {
+    const normalizedName = String(name || '').trim();
+    if (!normalizedName) return null;
+
+    const filter = {
+        name: { $regex: new RegExp(`^${escapeCategoryNameRegex(normalizedName)}$`, 'i') }
+    };
+
+    if (excludeCategoryId && mongoose.Types.ObjectId.isValid(String(excludeCategoryId))) {
+        filter._id = { $ne: new mongoose.Types.ObjectId(String(excludeCategoryId)) };
+    }
+
+    const hasRestaurantOwner =
+        restaurantId &&
+        mongoose.Types.ObjectId.isValid(String(restaurantId));
+
+    if (hasRestaurantOwner) {
+        filter.restaurantId = new mongoose.Types.ObjectId(String(restaurantId));
+        return filter;
+    }
+
+    filter.$and = [
+        { $or: GLOBAL_CATEGORY_FILTER },
+        zoneId && mongoose.Types.ObjectId.isValid(String(zoneId))
+            ? { zoneId: new mongoose.Types.ObjectId(String(zoneId)) }
+            : { $or: [{ zoneId: { $exists: false } }, { zoneId: null }] }
+    ];
+    return filter;
+};
+
+export const ensureUniqueCategoryName = async (name, options = {}) => {
+    const { FoodCategory } = await import('../admin/models/category.model.js');
+    const filter = buildCategoryDuplicateNameFilter({ name, ...options });
+    if (!filter) return;
+
+    const duplicate = await FoodCategory.findOne(filter).select('_id').lean();
+    if (duplicate?._id) {
+        throw new ValidationError('A category with this name already exists. Please use a different name.');
+    }
 };
 
 const buildCategoryStatsMap = async (categoryIds = []) => {

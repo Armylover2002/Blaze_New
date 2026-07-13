@@ -59,6 +59,10 @@ const debugLog = (...args) => { }
 const debugWarn = (...args) => { }
 const debugError = (...args) => { }
 
+const INACTIVE_CATEGORY_WARNING = "This category is currently inactive and is not available for use."
+const PENDING_CATEGORY_WARNING = "This category is awaiting admin approval. Please wait for approval before adding items."
+const isRealCategoryId = (value) => /^[a-f0-9]{24}$/i.test(String(value || "").trim())
+
 const INVENTORY_RECOMMENDED_KEY = "restaurant_inventory_recommended_map"
 
 
@@ -149,6 +153,7 @@ export default function ItemDetailsPage() {
   const [loadingItem, setLoadingItem] = useState(false)
   const [keyboardInset, setKeyboardInset] = useState(0)
   const [isPureVegRestaurant, setIsPureVegRestaurant] = useState(false)
+  const [categoryLiveStatus, setCategoryLiveStatus] = useState(null)
 
   const [suggestedImages, setSuggestedImages] = useState([])
   const [loadingSuggestions, setLoadingSuggestions] = useState(false)
@@ -173,7 +178,7 @@ export default function ItemDetailsPage() {
 
   const showNonVegFoodType = canSelectNonVegFoodType({
     pureVegRestaurant: isPureVegRestaurant,
-    categoryFoodTypeScope: selectedCategory?.foodTypeScope,
+    categoryFoodTypeScope: displayCategory?.foodTypeScope,
   })
 
   useEffect(() => {
@@ -193,6 +198,35 @@ export default function ItemDetailsPage() {
     setCategory(nextCategory.name)
     setFoodType("Veg")
   }, [isPureVegRestaurant, selectableCategories, selectedCategoryId])
+
+  useEffect(() => {
+    let isMounted = true
+    const categoryId = String(selectedCategoryId || "").trim()
+
+    if (!isRealCategoryId(categoryId)) {
+      setCategoryLiveStatus(null)
+      return () => {
+        isMounted = false
+      }
+    }
+
+    const checkCategoryStatus = async () => {
+      try {
+        const response = await restaurantAPI.getCategoryStatus(categoryId)
+        const statusCategory = response?.data?.data?.category
+        if (!isMounted) return
+        setCategoryLiveStatus(statusCategory || null)
+      } catch {
+        if (isMounted) setCategoryLiveStatus(null)
+      }
+    }
+
+    checkCategoryStatus()
+
+    return () => {
+      isMounted = false
+    }
+  }, [selectedCategoryId, categoriesRefreshKey])
 
   // Auto-suggestions query logic with 450ms debounce and deduplication/cache
   useEffect(() => {
@@ -847,9 +881,29 @@ export default function ItemDetailsPage() {
       return { message: "Please enter an item name" }
     }
 
-    const matchedCategory = selectedCategory
-    const categoryId = matchedCategory?.id || matchedCategory?._id || null
-    if (!categoryId) {
+    const matchedCategory =
+      displayCategory ||
+      (categoryLiveStatus && String(categoryLiveStatus.id) === String(selectedCategoryId || "")
+        ? {
+            id: categoryLiveStatus.id,
+            name: categoryLiveStatus.name,
+            foodTypeScope: categoryLiveStatus.foodTypeScope || "Veg",
+          }
+        : null)
+    const categoryId = String(selectedCategoryId || matchedCategory?.id || "").trim()
+    if (!isRealCategoryId(categoryId)) {
+      return { message: "Please select an approved category first", openCategoryPopup: true }
+    }
+
+    if (isCategoryInactive) {
+      return { message: INACTIVE_CATEGORY_WARNING }
+    }
+
+    if (isCategoryPending) {
+      return { message: PENDING_CATEGORY_WARNING }
+    }
+
+    if (!matchedCategory?.id) {
       return { message: "Please select an approved category first", openCategoryPopup: true }
     }
 
@@ -1139,6 +1193,16 @@ export default function ItemDetailsPage() {
     if (createdId && createdName) {
       setSelectedCategoryId(createdId)
       setCategory(createdName)
+      setCategoryLiveStatus({
+        id: createdId,
+        name: createdName,
+        isActive: createdCategory?.isActive !== false,
+        approvalStatus: createdCategory?.approvalStatus || "pending",
+        foodTypeScope: createdCategory?.foodTypeScope || "Veg",
+      })
+      if (String(createdCategory?.approvalStatus || "pending").toLowerCase() !== "approved") {
+        toast.info(PENDING_CATEGORY_WARNING)
+      }
       if (!canSelectNonVegFoodType({
         pureVegRestaurant: isPureVegRestaurant,
         categoryFoodTypeScope: createdCategory?.foodTypeScope,
@@ -1543,7 +1607,7 @@ export default function ItemDetailsPage() {
               className="w-full px-4 py-3 border border-gray-300 rounded-xl text-left flex items-center justify-between gap-3 bg-white hover:bg-gray-50 transition-colors"
             >
               {(() => {
-                const selected = selectedCategory
+                const selected = displayCategory
                 if (!selected) {
                   return (
                     <>
@@ -1577,6 +1641,16 @@ export default function ItemDetailsPage() {
                 )
               })()}
             </button>
+            {isCategoryInactive && (
+              <div className="mt-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
+                {INACTIVE_CATEGORY_WARNING}
+              </div>
+            )}
+            {!isCategoryInactive && isCategoryPending && (
+              <div className="mt-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
+                {PENDING_CATEGORY_WARNING}
+              </div>
+            )}
           </div>
 
           {/* Item Name */}

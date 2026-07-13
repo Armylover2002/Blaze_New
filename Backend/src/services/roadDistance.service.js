@@ -51,6 +51,7 @@ function readCache(key) {
 }
 
 function writeCache(key, value) {
+  if (value?.estimated) return;
   if (cache.size >= CACHE_MAX_SIZE) {
     const oldest = cache.keys().next().value;
     if (oldest) cache.delete(oldest);
