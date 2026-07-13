@@ -1,5 +1,6 @@
 import apiClient from '@/services/api/axios.js';
 import { calculateDistance as haversineFallbackKm } from '@/modules/Food/utils/common.js';
+import { getQuickSessionId } from '@/modules/quickCommerce/user/services/quickApi.js';
 
 const CACHE_TTL_MS = 30 * 60 * 1000;
 const CACHE_MAX_SIZE = 500;
@@ -41,6 +42,17 @@ const fallbackDistanceKm = (lat1, lng1, lat2, lng2) => {
   return Math.round(straight * 1.3 * 100) / 100;
 };
 
+const mapsRequestConfig = () => {
+  const headers = {};
+  try {
+    const sessionId = getQuickSessionId();
+    if (sessionId) headers['x-quick-session'] = sessionId;
+  } catch {
+    // ignore session lookup errors
+  }
+  return { headers };
+};
+
 /**
  * Road/travel distance details via backend Google Distance Matrix proxy.
  * @returns {Promise<{ distanceKm: number|null, estimated: boolean }|null>}
@@ -59,6 +71,7 @@ export async function getRoadDistanceDetails(lat1, lng1, lat2, lng2) {
 
   try {
     const response = await apiClient.get('/common/maps/distance', {
+      ...mapsRequestConfig(),
       params: {
         originLat: aLat,
         originLng: aLng,
@@ -124,7 +137,7 @@ export async function getRoadDistancesFromOrigin(originLat, originLng, destinati
         originLat: lat,
         originLng: lng,
         destinations: uncached.map((item) => ({ lat: item.dest.lat, lng: item.dest.lng })),
-      });
+      }, mapsRequestConfig());
       const distances = response?.data?.data?.distances || [];
       uncached.forEach((item, i) => {
         const distanceKm = Number(distances[i]?.distanceKm);
