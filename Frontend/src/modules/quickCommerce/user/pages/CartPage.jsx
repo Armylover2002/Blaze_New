@@ -29,6 +29,7 @@ import { useLocation as useAppLocation } from '../context/LocationContext';
 import LocationDrawer from '../components/shared/LocationDrawer';
 import PharmacyMetaLines from '../components/pharmacy/PharmacyMetaLines';
 import { getVariantDisplayLabel } from '../components/pharmacy/pharmacyProductMeta';
+import { getRoadDistanceKm } from '@/shared/services/roadDistance';
 
 // ─── Pure helpers (outside component — no closure allocation on each render) ──
 
@@ -44,7 +45,7 @@ const DEFAULT_QUICK_BILLING_SETTINGS = {
 const FALLBACK_IMAGE =
   'https://images.unsplash.com/photo-1542838132-92c53300491e?q=80&w=200&auto=format&fit=crop';
 
-import { getRoadDistanceKm } from '@/shared/services/roadDistance'; = (distanceKm, rules = []) => {
+const calculateFrontendRiderEarning = (distanceKm, rules = []) => {
   const d = Number(distanceKm);
   if (!Number.isFinite(d) || d < 0 || !rules.length) return 0;
 
