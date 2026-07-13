@@ -390,7 +390,8 @@ export async function deleteRestaurantCategory(restaurantId, id) {
             {
                 $set: {
                     isAvailable: false,
-                    categoryId: null
+                    categoryId: null,
+                    categoryName: ''
                 }
             }
         );
