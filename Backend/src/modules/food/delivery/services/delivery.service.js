@@ -29,7 +29,7 @@ import {
     mergeVehicleDocumentUploads,
 } from '../utils/deliveryPartnerUpload.helper.js';
 import {
-    createOnboardingSubmission,
+    createOnboardingSubmission
     ensureLegacySubmission,
     getLatestSubmissionForPartner,
     getLastRejectedSubmission,
@@ -85,7 +85,7 @@ export const validateUniqueDocuments = async (payload, excludeUserId = null) => 
 
 /**
  * For public document validation during rejected reapply (Edit Existing / Create New),
- * exclude the current partner so they can reuse their own PAN/Aadhaar/DL.
+ *  partner so they can reuse their own PAN/Aadhaar/DL.
  * Never excludes approved partners via the public path (auth path uses req.user).
  */
 export const resolveDocumentValidationExcludePartnerId = async (body = {}) => {
