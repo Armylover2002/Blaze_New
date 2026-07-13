@@ -109,10 +109,32 @@ export function isCouponWithinDateWindow(coupon, now = new Date()) {
     return now <= end;
 }
 
-export function isCouponUsageAvailable(coupon) {
+export async function countGlobalCouponApplications(couponCode) {
+    const code = couponCode ? String(couponCode).trim().toUpperCase() : '';
+    if (!code) return 0;
+
+    return FoodOrder.countDocuments({
+        orderStatus: { $nin: CANCELLED_ORDER_STATUSES },
+        $or: [
+            { 'pricing.couponCode': code },
+            { 'pricing.appliedCoupon.code': code },
+        ],
+    });
+}
+
+export async function isCouponUsageAvailable(coupon) {
     const usageLimit = Number(coupon?.usageLimit);
     if (!Number.isFinite(usageLimit) || usageLimit <= 0) return true;
-    return Number(coupon?.usedCount || 0) < usageLimit;
+
+    let usedCount = Number(coupon?.usedCount || 0);
+
+    // Count in-flight orders too (usage is only incremented on delivery).
+    if (coupon?.couponCode) {
+        const appliedOrders = await countGlobalCouponApplications(coupon.couponCode);
+        usedCount = Math.max(usedCount, appliedOrders);
+    }
+
+    return usedCount < usageLimit;
 }
 
 export async function isCouponFirstTimeEligible(coupon, userId, resolvedRestaurantObjectId = null) {
@@ -252,7 +274,7 @@ export async function validateAndApplyCoupon({
         const scopeOk = offerMatchesRestaurant(offer, resolvedRestaurantObjectId);
         const minOk = itemSubtotal >= getCouponMinOrderValue(offer);
         const dateOk = isCouponWithinDateWindow(offer, now);
-        const usageOk = isCouponUsageAvailable(offer);
+        const usageOk = await isCouponUsageAvailable(offer);
 
         let perUserOk = true;
         if (userId) {
@@ -294,7 +316,7 @@ export async function validateAndApplyCoupon({
 
     const minOk = itemSubtotal >= getCouponMinOrderValue(restCoupon);
     const dateOk = isCouponWithinDateWindow(restCoupon, now);
-    const usageOk = isCouponUsageAvailable(restCoupon);
+    const usageOk = await isCouponUsageAvailable(restCoupon);
 
     let perUserOk = true;
     if (userId) {
