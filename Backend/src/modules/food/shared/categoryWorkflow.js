@@ -47,6 +47,17 @@ export const getCategoryApprovalStatus = (category = {}) => {
     return category?.isApproved === false ? 'pending' : 'approved';
 };
 
+/** Whether a category's existing items should appear on customer-facing menus. */
+export const isCategoryVisibleInPublicMenu = (category = {}) => {
+    if (category?.isActive === false) return false;
+    const status = getCategoryApprovalStatus(category);
+    if (status === 'approved') return true;
+    if (status === 'rejected') return false;
+    // Pending re-review after a prior approval: keep live items visible until admin acts.
+    if (status === 'pending' && category?.approvedAt) return true;
+    return false;
+};
+
 const buildCategoryStatsMap = async (categoryIds = []) => {
     const validIds = Array.from(
         new Set(

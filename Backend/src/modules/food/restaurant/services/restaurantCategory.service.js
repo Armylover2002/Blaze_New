@@ -320,14 +320,12 @@ export async function updateRestaurantCategory(restaurantId, id, body = {}) {
         const image = String(body.image || '').trim();
         if (doc.image !== image) {
             doc.image = image;
-            needsApproval = true;
         }
     }
     if (body.type !== undefined) {
         const type = String(body.type || '').trim();
         if (doc.type !== type) {
             doc.type = type;
-            needsApproval = true;
         }
     }
     if (body.isActive !== undefined) {
@@ -337,7 +335,6 @@ export async function updateRestaurantCategory(restaurantId, id, body = {}) {
         const sortOrder = Number(body.sortOrder) || 0;
         if (doc.sortOrder !== sortOrder) {
             doc.sortOrder = sortOrder;
-            needsApproval = true;
         }
     }
     if (body.foodTypeScope !== undefined) {
@@ -360,8 +357,8 @@ export async function updateRestaurantCategory(restaurantId, id, body = {}) {
         doc.isApproved = false;
         doc.rejectionReason = '';
         doc.requestedAt = new Date();
-        doc.approvedAt = undefined;
         doc.rejectedAt = undefined;
+        // Keep approvedAt so existing approved items stay visible during re-review.
     }
 
     await doc.save();
