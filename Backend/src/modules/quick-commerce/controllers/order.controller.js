@@ -18,7 +18,7 @@ import { FoodTransaction } from '../../food/orders/models/foodTransaction.model.
 import { emitQuickCommerceStatusUpdate } from '../services/quickStatusRealtime.service.js';
 import { getSellerLocation, getOrderAddressPoint } from '../services/quickOrder.service.js';
 import { assertQuickDeliveryInServiceArea } from '../services/quick-zone-lookup.service.js';
-import { roadDistanceKm } from '../../food/orders/services/order.helpers.js';
+import { roadDistanceDetails } from '../../food/orders/services/order.helpers.js';
 import { buildReturnEligibilityMeta } from '../utils/return.helpers.js';
 import {
   buildCartLineKey,
@@ -526,10 +526,20 @@ export const placeOrder = async (req, res) => {
     const seller = sellerId ? await Seller.findById(sellerId).select('location').lean() : null;
 
     let distanceKm = 0.1; // Default fallback distance if coordinates are missing
+    let distanceEstimated = true;
     if (seller && deliveryCoords) {
       const sellerCoords = getSellerLocation(seller);
       if (sellerCoords) {
-        distanceKm = await roadDistanceKm(sellerCoords.lat, sellerCoords.lng, deliveryCoords.lat, deliveryCoords.lng);
+        const distanceResult = await roadDistanceDetails(
+          sellerCoords.lat,
+          sellerCoords.lng,
+          deliveryCoords.lat,
+          deliveryCoords.lng,
+        );
+        distanceKm = Number.isFinite(distanceResult?.distanceKm)
+          ? distanceResult.distanceKm
+          : 0.1;
+        distanceEstimated = Boolean(distanceResult?.estimated);
       }
     }
 
@@ -630,6 +640,8 @@ export const placeOrder = async (req, res) => {
         discount,
         couponCode: couponCode || null,
         total,
+        deliveryDistanceKm: distanceKm,
+        distanceEstimated,
       },
       deliveryAddress,
       timeSlot: req.body?.timeSlot || 'now',
