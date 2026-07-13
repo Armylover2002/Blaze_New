@@ -318,6 +318,25 @@ export default function MenuCategoriesPage() {
       </div>
 
       <div>
+        <label className="mb-2 block text-sm font-medium text-slate-700">Display Order</label>
+        <input
+          type="number"
+          min="0"
+          step="1"
+          value={formData.sortOrder}
+          onChange={(e) =>
+            setFormData((prev) => ({
+              ...prev,
+              sortOrder: Number(e.target.value) || 0,
+            }))
+          }
+          className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-slate-900"
+          placeholder="0"
+        />
+        <p className="mt-2 text-xs text-slate-500">Lower numbers appear first on your menu.</p>
+      </div>
+
+      <div>
         <label className="mb-2 block text-sm font-medium text-slate-700">Optional Type Label</label>
         <input
           type="text"
@@ -493,6 +512,7 @@ export default function MenuCategoriesPage() {
 
                       <div className="mt-2 space-y-1 text-sm text-slate-500">
                         <p>{category?.itemCount || 0} item(s) linked</p>
+                        <p>Display order: {Number.isFinite(Number(category?.sortOrder)) ? Number(category.sortOrder) : 0}</p>
                         {isGlobal ? (
                           <p>Admin controls this category now, so you can use it but not rename or delete it.</p>
                         ) : status === "approved" ? (

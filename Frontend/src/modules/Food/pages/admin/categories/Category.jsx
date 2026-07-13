@@ -30,6 +30,7 @@ const defaultFormData = {
   type: "",
   zoneId: "global",
   foodTypeScope: "Veg",
+  sortOrder: 0,
 }
 
 const approvalBadgeClass = (status) => {
@@ -265,6 +266,7 @@ export default function Category() {
       type: category?.type || "",
       zoneId: zoneIdValue || "global",
       foodTypeScope: category?.foodTypeScope || "Veg",
+      sortOrder: Number.isFinite(Number(category?.sortOrder)) ? Number(category.sortOrder) : 0,
     })
     setSelectedImageFile(null)
     setImagePreview(category?.image || null)
@@ -456,6 +458,7 @@ export default function Category() {
         image: imageUrl || undefined,
         zoneId: formData.zoneId || "global",
         foodTypeScope: formData.foodTypeScope,
+        sortOrder: Number.isFinite(Number(formData.sortOrder)) ? Number(formData.sortOrder) : 0,
       }
 
       if (editingCategory) {
@@ -550,6 +553,7 @@ export default function Category() {
                 <th className="w-[25%] px-5 py-4 text-left text-[11px] font-bold uppercase tracking-wider text-slate-600">Category</th>
                 <th className="w-[17%] px-4 py-4 text-left text-[11px] font-bold uppercase tracking-wider text-slate-600">Owner</th>
                 <th className="w-[15%] px-4 py-4 text-left text-[11px] font-bold uppercase tracking-wider text-slate-600">Zone</th>
+                <th className="w-[8%] px-4 py-4 text-center text-[11px] font-bold uppercase tracking-wider text-slate-600">Order</th>
                 <th className="w-[10%] px-4 py-4 text-center text-[11px] font-bold uppercase tracking-wider text-slate-600">Diet</th>
                 <th className="w-[10%] px-4 py-4 text-center text-[11px] font-bold uppercase tracking-wider text-slate-600">Status</th>
                 <th className="w-[13%] px-4 py-4 text-left text-[11px] font-bold uppercase tracking-wider text-slate-600">Approval</th>
@@ -621,6 +625,9 @@ export default function Category() {
                             {zoneText}
                           </p>
                         </div>
+                      </td>
+                      <td className="px-4 py-5 text-center text-sm font-medium text-slate-700">
+                        {Number.isFinite(Number(category?.sortOrder)) ? Number(category.sortOrder) : 0}
                       </td>
                       <td className="px-4 py-5 text-center">
                         <span className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] font-semibold ${scopeBadgeClass(category?.foodTypeScope)}`}>
@@ -799,6 +806,25 @@ export default function Category() {
                             className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-slate-900"
                             placeholder="Enter category name"
                           />
+                        </div>
+
+                        <div>
+                          <label className="mb-2 block text-sm font-medium text-slate-700">Display Order</label>
+                          <input
+                            type="number"
+                            min="0"
+                            step="1"
+                            value={formData.sortOrder}
+                            onChange={(event) =>
+                              setFormData((prev) => ({
+                                ...prev,
+                                sortOrder: Number(event.target.value) || 0,
+                              }))
+                            }
+                            className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-slate-900"
+                            placeholder="0"
+                          />
+                          <p className="mt-2 text-xs text-slate-500">Lower numbers appear first in menus and category lists.</p>
                         </div>
 
                         <div>
