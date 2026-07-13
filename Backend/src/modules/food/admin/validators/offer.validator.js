@@ -101,3 +101,20 @@ export const validateUpdateOfferCartVisibilityDto = (body) => {
     }
     return result.data;
 };
+
+/** Full offer update uses the same rules as creation. */
+export const validateUpdateOfferDto = (body) => validateCreateOfferDto(body);
+
+const offerStatusSchema = z.object({
+    status: z.enum(['active', 'paused', 'inactive'], {
+        errorMap: () => ({ message: 'Status must be active, paused or inactive' })
+    })
+});
+
+export const validateUpdateOfferStatusDto = (body) => {
+    const result = offerStatusSchema.safeParse(body || {});
+    if (!result.success) {
+        throw new ValidationError(result.error.errors[0].message);
+    }
+    return result.data;
+};

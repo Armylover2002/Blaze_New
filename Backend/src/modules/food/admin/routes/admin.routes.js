@@ -1,5 +1,6 @@
 import express from 'express';
 import { AuthError } from '../../../../core/auth/errors.js';
+import { invalidateCategoryCaches } from '../../shared/categoryCache.js';
 import * as adminController from '../controllers/admin.controller.js';
 import roleRoutes from './role.routes.js';
 import { getCustomerContactsAdminController } from '../../user/controllers/userContact.controller.js';
@@ -96,15 +97,20 @@ router.patch('/restaurants/:id/menu', checkPermission('food::restaurant_manageme
 router.patch('/restaurants/:id/approve', checkPermission('food::restaurant_management::restaurants::joining_request', 'edit'), adminController.approveRestaurant);
 router.patch('/restaurants/:id/reject', checkPermission('food::restaurant_management::restaurants::joining_request', 'edit'), adminController.rejectRestaurant);
 
+const invalidateCategoryCacheMiddleware = async (req, res, next) => {
+    await invalidateCategoryCaches();
+    next();
+};
+
 // ----- Categories -----
 router.get('/categories', checkPermission('food::food_management::categories::list', 'view'), adminController.getCategories);
-router.post('/categories', checkPermission('food::food_management::categories::list', 'create'), adminController.createCategory);
-router.patch('/categories/:id', checkPermission('food::food_management::categories::list', 'edit'), adminController.updateCategory);
-router.delete('/categories/:id', checkPermission('food::food_management::categories::list', 'delete'), adminController.deleteCategory);
-router.patch('/categories/:id/toggle', checkPermission('food::food_management::categories::list', 'edit'), adminController.toggleCategoryStatus);
-router.patch('/categories/:id/approve', checkPermission('food::food_management::categories::list', 'edit'), adminController.approveCategory);
-router.patch('/categories/:id/reject', checkPermission('food::food_management::categories::list', 'edit'), adminController.rejectCategory);
-router.patch('/categories/:id/make-global', checkPermission('food::food_management::categories::list', 'edit'), adminController.makeCategoryGlobal);
+router.post('/categories', checkPermission('food::food_management::categories::list', 'create'), invalidateCategoryCacheMiddleware, adminController.createCategory);
+router.patch('/categories/:id', checkPermission('food::food_management::categories::list', 'edit'), invalidateCategoryCacheMiddleware, adminController.updateCategory);
+router.delete('/categories/:id', checkPermission('food::food_management::categories::list', 'delete'), invalidateCategoryCacheMiddleware, adminController.deleteCategory);
+router.patch('/categories/:id/toggle', checkPermission('food::food_management::categories::list', 'edit'), invalidateCategoryCacheMiddleware, adminController.toggleCategoryStatus);
+router.patch('/categories/:id/approve', checkPermission('food::food_management::categories::list', 'edit'), invalidateCategoryCacheMiddleware, adminController.approveCategory);
+router.patch('/categories/:id/reject', checkPermission('food::food_management::categories::list', 'edit'), invalidateCategoryCacheMiddleware, adminController.rejectCategory);
+router.patch('/categories/:id/make-global', checkPermission('food::food_management::categories::list', 'edit'), invalidateCategoryCacheMiddleware, adminController.makeCategoryGlobal);
 
 // ----- Restaurant Add-ons Approval -----
 router.get('/addons', checkPermission('food::food_management::foods::addons', 'view'), addonsApprovalController.getRestaurantAddons);
@@ -126,6 +132,8 @@ router.patch('/foods/:id/reject', checkPermission('food::food_management::food_a
 router.get('/offers', checkPermission('food::promotions_management::coupons', 'view'), adminController.getAllOffers);
 router.post('/offers', checkPermission('food::promotions_management::coupons', 'create'), adminController.createAdminOffer);
 router.patch('/offers/:id/cart-visibility', checkPermission('food::promotions_management::coupons', 'edit'), adminController.updateAdminOfferCartVisibility);
+router.patch('/offers/:id/status', checkPermission('food::promotions_management::coupons', 'edit'), adminController.updateAdminOfferStatus);
+router.patch('/offers/:id', checkPermission('food::promotions_management::coupons', 'edit'), adminController.updateAdminOffer);
 router.delete('/offers/:id', checkPermission('food::promotions_management::coupons', 'delete'), adminController.deleteAdminOffer);
 router.get('/restaurant-coupons', checkPermission('food::promotions_management::coupons', 'view'), adminController.getRestaurantCoupons);
 router.patch('/restaurant-coupons/:id/status', checkPermission('food::promotions_management::coupons', 'edit'), adminController.updateRestaurantCouponStatus);

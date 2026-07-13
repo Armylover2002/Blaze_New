@@ -13,6 +13,7 @@ import {
 import {
     backfillLegacyCategoryWorkflow,
     categoryAllowsFoodType,
+    getCategoryApprovalStatus,
     GLOBAL_CATEGORY_FILTER
 } from '../../shared/categoryWorkflow.js';
 
@@ -172,7 +173,11 @@ const resolveCategoryForRestaurant = async (context, body = {}) => {
     if (category.isActive === false) {
         throw new ValidationError('This category is currently inactive and is not available for use.');
     }
-    if (String(category.approvalStatus || '') !== 'approved') {
+    const approvalStatus = getCategoryApprovalStatus(category);
+    if (approvalStatus === 'rejected') {
+        throw new ValidationError('This category has been rejected by admin');
+    }
+    if (approvalStatus === 'pending') {
         throw new ValidationError('This category is awaiting admin approval');
     }
     if (context.pureVegRestaurant && String(category.foodTypeScope || '') === 'Non-Veg') {

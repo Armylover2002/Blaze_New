@@ -2368,7 +2368,7 @@ export async function calculateOrder(userId, dto) {
       const rangePricing = applyRangeBasedFoodDeliveryPricing({
         feeSettings,
         subtotal,
-        address: dto.address,
+        address: trustedDeliveryAddress,
         restaurant: primaryRestaurant,
       });
       deliveryFee = rangePricing.deliveryFee;
@@ -2381,6 +2381,31 @@ export async function calculateOrder(userId, dto) {
       deliverySponsorType = rangePricing.deliverySponsorType;
       deliveryFeeBreakdown = rangePricing.deliveryFeeBreakdown;
     } else {
+      const userPoint = getPointLatLng(trustedDeliveryAddress?.location);
+      const restaurantPoint = getPointLatLng(primaryRestaurant?.location);
+      const distanceKm =
+        userPoint && restaurantPoint
+          ? await roadDistanceKm(
+              restaurantPoint.lat,
+              restaurantPoint.lng,
+              userPoint.lat,
+              userPoint.lng,
+            )
+          : 0;
+      const deliveryPricing = calculateFoodDeliveryPricing({
+        subtotal,
+        distanceKm,
+        feeSettings,
+      });
+      deliveryFee = deliveryPricing.deliveryFee;
+      totalDeliveryFee = deliveryPricing.totalDeliveryFee;
+      userDeliveryFee = deliveryPricing.userDeliveryFee;
+      restaurantDeliveryFee = deliveryPricing.restaurantDeliveryFee;
+      sponsoredDelivery = deliveryPricing.sponsoredDelivery;
+      sponsoredKm = deliveryPricing.sponsoredKm;
+      deliveryDistanceKm = deliveryPricing.deliveryDistanceKm;
+      deliverySponsorType = deliveryPricing.deliverySponsorType;
+    }
       const userPoint = getPointLatLng(trustedDeliveryAddress?.location);
       const restaurantPoint = getPointLatLng(primaryRestaurant?.location);
       const distanceKm =
@@ -2809,6 +2834,23 @@ export async function createOrder(userId, dto) {
   }
   if (normalizedPricing.deliveryDistanceKm == null && Number.isFinite(distanceKm)) {
     normalizedPricing.deliveryDistanceKm = Number(distanceKm.toFixed(2));
+    }
+    if (
+      primaryRestaurant?.location?.coordinates?.length === 2 &&
+      dto.address?.location?.coordinates?.length === 2
+    ) {
+      const [rLng, rLat] = primaryRestaurant.location.coordinates;
+      const [dLng, dLat] = dto.address.location.coordinates;
+      const d = await roadDistanceKm(rLat, rLng, dLat, dLng);
+      distanceKm = Number.isFinite(d) ? d : null;
+    } else {
+      console.warn(
+        `Food order ${orderId}: distance not available, rider earning set to 0`,
+      );
+    }
+    if (normalizedPricing.deliveryDistanceKm == null && Number.isFinite(distanceKm)) {
+      normalizedPricing.deliveryDistanceKm = Number(distanceKm.toFixed(2));
+    }
   }
 
   const riderDistanceKm =

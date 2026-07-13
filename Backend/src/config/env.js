@@ -39,6 +39,8 @@ export const config = {
     rateLimitMaxRequests: Number(process.env.RATE_LIMIT_MAX || 500),
     authRateLimitWindowMinutes: Number(process.env.AUTH_RATE_LIMIT_WINDOW || 15),
     authRateLimitMax: Number(process.env.AUTH_RATE_LIMIT_MAX || 30),
+    mapsRateLimitWindowMinutes: Number(process.env.MAPS_RATE_LIMIT_WINDOW || 15),
+    mapsRateLimitMax: Number(process.env.MAPS_RATE_LIMIT_MAX || 60),
     authLoginMaxAttempts: Number(process.env.AUTH_LOGIN_MAX_ATTEMPTS || 5),
     authLoginLockoutMinutes: Number(process.env.AUTH_LOGIN_LOCKOUT_MINUTES || 15),
 

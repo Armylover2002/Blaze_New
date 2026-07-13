@@ -4,6 +4,7 @@ import { FoodRestaurant } from '../models/restaurant.model.js';
 import { FoodItem } from '../../admin/models/food.model.js';
 import { FoodCategory } from '../../admin/models/category.model.js';
 import { getFoodDisplayPrice, getFoodDisplayOtherPrice, serializeFoodVariants } from '../../admin/services/foodVariant.service.js';
+import { isCategoryVisibleInPublicMenu, backfillLegacyCategoryWorkflow } from '../../shared/categoryWorkflow.js';
 
 const buildMenuFromFoods = async (foods = [], filterPublicOnly = false) => {
     const categoryIds = Array.from(
@@ -20,15 +21,18 @@ const buildMenuFromFoods = async (foods = [], filterPublicOnly = false) => {
 
     const categoryDocs = categoryIds.length
         ? await FoodCategory.find({ _id: { $in: categoryIds } })
-            .select('name image sortOrder isActive approvalStatus')
+            .select('name image sortOrder isActive approvalStatus isApproved approvedAt restaurantId createdByRestaurantId')
             .lean()
         : [];
+    if (categoryDocs.length) {
+        await backfillLegacyCategoryWorkflow(categoryDocs, { persist: false });
+    }
     const categoryMap = new Map(categoryDocs.map((doc) => [String(doc._id), doc]));
 
     const allowedCategories = new Set();
     if (filterPublicOnly) {
         for (const doc of categoryDocs) {
-            if (doc.isActive !== false && doc.approvalStatus === 'approved') {
+            if (isCategoryVisibleInPublicMenu(doc)) {
                 allowedCategories.add(String(doc._id));
             }
         }
@@ -216,13 +220,18 @@ export async function getPublicMenusBatch(restaurantIds = []) {
         )
     );
     const categoryDocs = categoryIds.length
-        ? await FoodCategory.find({ _id: { $in: categoryIds } }).select('name image isActive approvalStatus').lean()
+        ? await FoodCategory.find({ _id: { $in: categoryIds } })
+            .select('name image isActive approvalStatus isApproved approvedAt restaurantId createdByRestaurantId')
+            .lean()
         : [];
+    if (categoryDocs.length) {
+        await backfillLegacyCategoryWorkflow(categoryDocs, { persist: false });
+    }
     const categoryMap = new Map(categoryDocs.map((doc) => [String(doc._id), doc]));
 
     const allowedCategories = new Set();
     for (const doc of categoryDocs) {
-        if (doc.isActive !== false && doc.approvalStatus === 'approved') {
+        if (isCategoryVisibleInPublicMenu(doc)) {
             allowedCategories.add(String(doc._id));
         }
     }

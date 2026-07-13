@@ -6,6 +6,8 @@ import { FoodRestaurant } from '../models/restaurant.model.js';
 import {
     backfillLegacyCategoryWorkflow,
     GLOBAL_CATEGORY_FILTER,
+    ensureUniqueCategoryName,
+    getCategoryApprovalStatus,
     normalizeCategoryFoodTypeScope,
     serializeCategoryForResponse,
     toObjectId
@@ -168,17 +170,7 @@ export async function listPublicCategories(query = {}) {
     const search = typeof query.search === 'string' ? query.search.trim() : '';
     const zoneIdRaw = typeof query.zoneId === 'string' ? query.zoneId.trim() : '';
 
-    const approvedCategoryIds = await FoodItem.distinct('categoryId', {
-        approvalStatus: 'approved',
-        categoryId: { $ne: null }
-    });
-
-    if (!approvedCategoryIds.length) {
-        return { categories: [], total: 0, page, limit };
-    }
-
     const filter = {
-        _id: { $in: approvedCategoryIds },
         isActive: true,
         $and: [{ $or: GLOBAL_CATEGORY_FILTER }, { $or: APPROVED_CATEGORY_FILTER }]
     };
@@ -232,7 +224,7 @@ export async function getRestaurantCategoryStatus(restaurantId, id) {
         _id: String(category._id),
         name: category.name || '',
         isActive: category.isActive !== false,
-        approvalStatus: category.approvalStatus || 'approved',
+        approvalStatus: getCategoryApprovalStatus(category),
         foodTypeScope: normalizeCategoryFoodTypeScope(category.foodTypeScope, 'Veg'),
         ownedByRestaurant:
             String(category.restaurantId || '') === String(context.restaurantId) ||
@@ -262,6 +254,13 @@ export async function createRestaurantCategory(restaurantId, body = {}) {
         throw new ValidationError('Pure veg restaurants can only create veg categories');
     }
 
+    const zoneId =
+        context.zoneId && mongoose.Types.ObjectId.isValid(context.zoneId)
+            ? new mongoose.Types.ObjectId(context.zoneId)
+            : undefined;
+
+    await ensureUniqueCategoryName(name, { restaurantId: context.restaurantId });
+
     const doc = new FoodCategory({
         name,
         image: typeof body.image === 'string' ? body.image.trim() : '',
@@ -275,9 +274,7 @@ export async function createRestaurantCategory(restaurantId, body = {}) {
         isApproved: false,
         rejectionReason: '',
         requestedAt: new Date(),
-        zoneId: context.zoneId && mongoose.Types.ObjectId.isValid(context.zoneId)
-            ? new mongoose.Types.ObjectId(context.zoneId)
-            : undefined
+        zoneId
     });
     await doc.save();
     return doc.toObject();
@@ -312,6 +309,10 @@ export async function updateRestaurantCategory(restaurantId, id, body = {}) {
         if (!name) throw new ValidationError('Category name is required');
         if (name.length > 200) throw new ValidationError('Category name is too long');
         if (doc.name !== name) {
+            await ensureUniqueCategoryName(name, {
+                restaurantId: context.restaurantId,
+                excludeCategoryId: doc._id
+            });
             doc.name = name;
             needsApproval = true;
         }
@@ -320,14 +321,12 @@ export async function updateRestaurantCategory(restaurantId, id, body = {}) {
         const image = String(body.image || '').trim();
         if (doc.image !== image) {
             doc.image = image;
-            needsApproval = true;
         }
     }
     if (body.type !== undefined) {
         const type = String(body.type || '').trim();
         if (doc.type !== type) {
             doc.type = type;
-            needsApproval = true;
         }
     }
     if (body.isActive !== undefined) {
@@ -337,7 +336,6 @@ export async function updateRestaurantCategory(restaurantId, id, body = {}) {
         const sortOrder = Number(body.sortOrder) || 0;
         if (doc.sortOrder !== sortOrder) {
             doc.sortOrder = sortOrder;
-            needsApproval = true;
         }
     }
     if (body.foodTypeScope !== undefined) {
@@ -360,8 +358,8 @@ export async function updateRestaurantCategory(restaurantId, id, body = {}) {
         doc.isApproved = false;
         doc.rejectionReason = '';
         doc.requestedAt = new Date();
-        doc.approvedAt = undefined;
         doc.rejectedAt = undefined;
+        // Keep approvedAt so existing approved items stay visible during re-review.
     }
 
     await doc.save();
@@ -392,7 +390,8 @@ export async function deleteRestaurantCategory(restaurantId, id) {
             {
                 $set: {
                     isAvailable: false,
-                    categoryId: null
+                    categoryId: null,
+                    categoryName: ''
                 }
             }
         );

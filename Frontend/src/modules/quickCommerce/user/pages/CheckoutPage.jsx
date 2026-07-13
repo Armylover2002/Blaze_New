@@ -96,6 +96,9 @@ const TIME_SLOTS = [
 // ─── Pure helpers (unchanged) ─────────────────────────────────────────────────
 
 const calculateFrontendRiderEarning = (distanceKm, rules = []) => {
+import { getRoadDistanceDetails } from '@/shared/services/roadDistance';
+
+const calculateFrontendRiderEarning = (distanceKm, rules = []) => {
   const d = Number(distanceKm);
   if (!Number.isFinite(d) || d < 0) return 0;
   if (!Array.isArray(rules) || !rules.length) return 0;
@@ -416,6 +419,7 @@ const CheckoutPage = () => {
   const [quickBillingSettings, setQuickBillingSettings] = useState(DEFAULT_QUICK_BILLING_SETTINGS);
   const [storeLocation, setStoreLocation] = useState(null);
   const [distanceKm, setDistanceKm] = useState(0);
+  const [distanceEstimated, setDistanceEstimated] = useState(false);
   const [categoryFeeMap, setCategoryFeeMap] = useState({});
   const postOrderNavigateRef = useRef(null);
   const [currentAddress, setCurrentAddress] = useState(storedCheckoutState.currentAddress || DEFAULT_CURRENT_ADDRESS);
@@ -1097,7 +1101,7 @@ const CheckoutPage = () => {
     const firstCartItem = cart[0];
     const sellerId = firstCartItem?.sellerId?._id || firstCartItem?.sellerId || firstCartItem?.seller?._id || firstCartItem?.quickStoreId || firstCartItem?.storeId;
     if (!sellerId || typeof sellerId !== "string" || sellerId === "quick-commerce") {
-      setStoreLocation(null); setDistanceKm(0); return;
+      setStoreLocation(null); setDistanceKm(0); setDistanceEstimated(false); return;
     }
     const fetchStoreDetails = async () => {
       try {
@@ -1119,7 +1123,7 @@ const CheckoutPage = () => {
   }, [cart]);
 
   useEffect(() => {
-    if (!storeLocation) { setDistanceKm(0); return; }
+    if (!storeLocation) { setDistanceKm(0); setDistanceEstimated(false); return; }
     const lat1 = storeLocation.lat, lon1 = storeLocation.lng;
     const deliveryLoc = savedRecipient
       ? (currentLocation?.latitude && currentLocation?.longitude ? { lat: currentLocation.latitude, lng: currentLocation.longitude } : currentAddress?.location)
@@ -1131,10 +1135,14 @@ const CheckoutPage = () => {
 
     const loadDistance = async () => {
       if (Number.isFinite(lat1) && Number.isFinite(lon1) && Number.isFinite(lat2) && Number.isFinite(lon2)) {
-        const km = await getRoadDistanceKm(lat1, lon1, lat2, lon2);
-        if (!cancelled) setDistanceKm(Number.isFinite(km) ? km : 0);
+        const details = await getRoadDistanceDetails(lat1, lon1, lat2, lon2);
+        if (!cancelled) {
+          setDistanceKm(Number.isFinite(details?.distanceKm) ? details.distanceKm : 0);
+          setDistanceEstimated(Boolean(details?.estimated));
+        }
       } else if (!cancelled) {
         setDistanceKm(0);
+        setDistanceEstimated(false);
       }
     }
 
@@ -1449,7 +1457,11 @@ const CheckoutPage = () => {
                 </div>
                 {pricingPreview && typeof pricingPreview.distanceKmActual === "number" && (
                   <div className="px-2 -mt-3 flex items-center justify-between text-[13px] font-semibold text-slate-400">
-                    <span>Distance: {pricingPreview.distanceKmActual.toFixed(2)} km{pricingPreview.distanceKmRounded ? ` (billed ${pricingPreview.distanceKmRounded.toFixed(2)} km)` : ""}</span>
+                    <span>
+                      Distance: {pricingPreview.distanceKmActual.toFixed(2)} km
+                      {pricingPreview.distanceKmRounded ? ` (billed ${pricingPreview.distanceKmRounded.toFixed(2)} km)` : ""}
+                      {distanceEstimated ? " (estimated)" : ""}
+                    </span>
                     <span className="uppercase tracking-wider">{pricingPreview?.snapshots?.deliverySettings?.deliveryPricingMode || pricingPreview?.snapshots?.deliverySettings?.pricingMode || ""}</span>
                   </div>
                 )}

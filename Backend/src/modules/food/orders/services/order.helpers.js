@@ -64,6 +64,15 @@ export async function roadDistanceKm(lat1, lon1, lat2, lon2) {
   );
 }
 
+/** Full road distance result including whether the value is an estimate. */
+export async function roadDistanceDetails(lat1, lon1, lat2, lon2) {
+  const { getRoadDistanceKm } = await import('../../../../services/roadDistance.service.js');
+  return getRoadDistanceKm(
+    { lat: lat1, lng: lon1 },
+    { lat: lat2, lng: lon2 },
+  );
+}
+
 export function generateFourDigitDeliveryOtp() {
   return String(Math.floor(1000 + Math.random() * 9000));
 }

@@ -70,6 +70,7 @@ import {
 } from '../controllers/restaurantCoupon.controller.js';
 
 import { cacheResponse, invalidateCache } from '../../../../middleware/cache.js';
+import { invalidateCategoryCaches } from '../../shared/categoryCache.js';
 
 const router = express.Router();
 
@@ -196,16 +197,17 @@ router.post(
     uploadRestaurantMenuImagesController
 );
 
+const invalidateCategoryCacheMiddleware = async (req, res, next) => {
+    await invalidateCategoryCaches();
+    next();
+};
+
 // Categories (restaurant dashboard). Read-only for item creation, CRUD for Menu Categories page.
 router.get('/categories', authMiddleware, requireRestaurant, listCategoriesController);
 router.get('/categories/:id/status', authMiddleware, requireRestaurant, getCategoryStatusController);
-router.post('/categories', authMiddleware, requireRestaurant, createCategoryController);
-router.patch('/categories/:id', authMiddleware, requireRestaurant, updateCategoryController);
-router.delete('/categories/:id', authMiddleware, requireRestaurant, async (req, res, next) => {
-    await invalidateCache('restaurant_menu:*');
-    await invalidateCache('restaurant_menus_batch:*');
-    next();
-}, deleteCategoryController);
+router.post('/categories', authMiddleware, requireRestaurant, invalidateCategoryCacheMiddleware, createCategoryController);
+router.patch('/categories/:id', authMiddleware, requireRestaurant, invalidateCategoryCacheMiddleware, updateCategoryController);
+router.delete('/categories/:id', authMiddleware, requireRestaurant, invalidateCategoryCacheMiddleware, deleteCategoryController);
 
 // Menu (restaurant dashboard) - only fields needed by UI
 router.get('/menu', authMiddleware, requireRestaurant, getMenuController);

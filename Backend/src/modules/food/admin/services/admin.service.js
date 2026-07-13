@@ -61,6 +61,7 @@ import { getDeliveryPartnerWalletEnhanced } from '../../delivery/services/delive
 import {
     backfillLegacyCategoryWorkflow,
     categoryAllowsFoodType,
+    ensureUniqueCategoryName,
     normalizeCategoryFoodTypeScope,
     serializeCategoryForResponse
 } from '../../shared/categoryWorkflow.js';
@@ -3586,20 +3587,24 @@ export async function createCategory(body) {
     if (!foodTypeScope) {
         throw new ValidationError('Category diet type must be Veg or Non-Veg');
     }
+    const zoneId =
+        body.zoneId && String(body.zoneId).trim()
+            ? (() => {
+                const zid = String(body.zoneId).trim();
+                if (zid === 'global') return undefined;
+                if (!mongoose.Types.ObjectId.isValid(zid)) throw new ValidationError('Invalid zoneId');
+                return new mongoose.Types.ObjectId(zid);
+            })()
+            : undefined;
+
+    await ensureUniqueCategoryName(name, { restaurantId: null, zoneId });
+
     const doc = new FoodCategory({
         name,
         image: typeof body.image === 'string' ? body.image.trim() : '',
         type: typeof body.type === 'string' ? body.type.trim() : '',
         foodTypeScope,
-        zoneId:
-            body.zoneId && String(body.zoneId).trim()
-                ? (() => {
-                    const zid = String(body.zoneId).trim();
-                    if (zid === 'global') return undefined;
-                    if (!mongoose.Types.ObjectId.isValid(zid)) throw new ValidationError('Invalid zoneId');
-                    return new mongoose.Types.ObjectId(zid);
-                })()
-                : undefined,
+        zoneId,
         isActive: body.isActive !== false,
         sortOrder: Number.isFinite(Number(body.sortOrder)) ? Number(body.sortOrder) : 0,
         // Admin-created categories are globally available immediately.
@@ -3671,6 +3676,13 @@ export async function makeCategoryGlobal(id) {
     doc.rejectionReason = '';
     doc.globalizedAt = new Date();
     doc.approvedAt = doc.approvedAt || new Date();
+
+    await ensureUniqueCategoryName(doc.name, {
+        restaurantId: null,
+        zoneId: undefined,
+        excludeCategoryId: doc._id
+    });
+
     await doc.save();
     return doc.toObject();
 }
@@ -3720,6 +3732,13 @@ export async function updateCategory(id, body) {
     if (!doc.createdByRestaurantId && doc.restaurantId) {
         doc.createdByRestaurantId = doc.restaurantId;
     }
+
+    await ensureUniqueCategoryName(doc.name, {
+        restaurantId: doc.restaurantId || null,
+        zoneId: doc.zoneId || null,
+        excludeCategoryId: doc._id
+    });
+
     await doc.save();
 
     const nextIsActive = doc.isActive !== false;
@@ -4668,10 +4687,9 @@ export async function getAllOffers(_query = {}) {
     const offers = list.map((o, index) => {
         const now = Date.now();
         const startTs = o.startDate ? new Date(o.startDate).getTime() : null;
-        const endTs = o.endDate ? new Date(o.endDate).getTime() : null;
 
         const isScheduled = Boolean(startTs && now < startTs);
-        const isExpired = Boolean(endTs && now >= endTs);
+        const isExpired = isOfferEndDateExpired(o.endDate);
 
         const restaurantName =
             o.restaurantScope === 'selected'
@@ -4712,6 +4730,9 @@ export async function getAllOffers(_query = {}) {
             usedCount: o.usedCount ?? 0,
             isFirstOrderOnly: Boolean(o.isFirstOrderOnly),
             restaurantScope: o.restaurantScope,
+            restaurantDbId: o.restaurantId
+                ? String(o.restaurantId?._id || o.restaurantId)
+                : null,
             createdByRole: o.createdByRole || 'ADMIN',
         };
     });
@@ -4770,6 +4791,97 @@ export async function createAdminOffer(body) {
     return doc.toObject();
 }
 
+async function invalidateOffersCacheSafely(context) {
+    try {
+        const { invalidateCache } = await import('../../../../middleware/cache.js');
+        await invalidateCache('offers*');
+    } catch (err) {
+        console.error(`Failed to invalidate offers cache on ${context}:`, err);
+    }
+}
+
+/** End-of-day semantics: an offer is only expired once its endDate is before today. */
+function isOfferEndDateExpired(endDate, now = new Date()) {
+    if (!endDate) return false;
+    const startOfToday = new Date(now);
+    startOfToday.setHours(0, 0, 0, 0);
+    return new Date(endDate) < startOfToday;
+}
+
+export async function updateAdminOffer(id, body) {
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) return null;
+
+    const existing = await FoodOffer.findById(id).lean();
+    if (!existing) return null;
+
+    if (body.couponCode && body.couponCode !== existing.couponCode) {
+        const duplicate = await FoodOffer.findOne({
+            couponCode: body.couponCode,
+            _id: { $ne: existing._id },
+        }).select('_id').lean();
+        if (duplicate) {
+            throw new ValidationError('Coupon code already exists');
+        }
+    }
+
+    // Recompute lifecycle status from the new dates without overriding a manual pause.
+    let status = existing.status;
+    if (isOfferEndDateExpired(body.endDate)) {
+        status = 'inactive';
+    } else if (existing.status === 'inactive') {
+        status = 'active';
+    }
+
+    const updated = await FoodOffer.findByIdAndUpdate(
+        id,
+        {
+            $set: {
+                couponCode: body.couponCode,
+                discountType: body.discountType,
+                discountValue: body.discountValue,
+                customerScope: body.customerScope,
+                restaurantScope: body.restaurantScope,
+                restaurantId: body.restaurantScope === 'selected' ? body.restaurantId : null,
+                minOrderValue: body.minOrderValue ?? 0,
+                maxDiscount: body.maxDiscount ?? null,
+                usageLimit: body.usageLimit ?? null,
+                perUserLimit: body.perUserLimit ?? null,
+                startDate: body.startDate ?? null,
+                endDate: body.endDate ?? null,
+                isFirstOrderOnly: body.isFirstOrderOnly ?? false,
+                status,
+            },
+        },
+        { new: true }
+    ).lean();
+
+    await invalidateOffersCacheSafely('offer update');
+    return updated;
+}
+
+export async function updateAdminOfferStatus(id, status) {
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) return null;
+    if (!['active', 'paused', 'inactive'].includes(status)) {
+        throw new ValidationError('Status must be active, paused or inactive');
+    }
+
+    const existing = await FoodOffer.findById(id).lean();
+    if (!existing) return null;
+
+    if (status === 'active' && isOfferEndDateExpired(existing.endDate)) {
+        throw new ValidationError('Cannot activate an expired offer. Extend the end date first.');
+    }
+
+    const updated = await FoodOffer.findByIdAndUpdate(
+        id,
+        { $set: { status } },
+        { new: true }
+    ).lean();
+
+    await invalidateOffersCacheSafely('offer status update');
+    return updated;
+}
+
 export async function updateAdminOfferCartVisibility(offerId, itemId, showInCart) {
     if (!offerId || !mongoose.Types.ObjectId.isValid(offerId)) return null;
     if (!itemId) return null;
@@ -4790,9 +4902,10 @@ export async function deleteAdminOffer(id) {
 }
 
 export async function expireExpiredOffers() {
-    const now = new Date();
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
     await FoodOffer.updateMany(
-        { status: 'active', endDate: { $lte: now } },
+        { status: 'active', endDate: { $lt: startOfToday } },
         { $set: { status: 'inactive' } }
     );
 }

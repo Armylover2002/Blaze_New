@@ -45,6 +45,8 @@ const DEFAULT_QUICK_BILLING_SETTINGS = {
 const FALLBACK_IMAGE =
   'https://images.unsplash.com/photo-1542838132-92c53300491e?q=80&w=200&auto=format&fit=crop';
 
+import { getRoadDistanceDetails } from '@/shared/services/roadDistance';
+
 const calculateFrontendRiderEarning = (distanceKm, rules = []) => {
   const d = Number(distanceKm);
   if (!Number.isFinite(d) || d < 0 || !rules.length) return 0;
@@ -229,6 +231,7 @@ const CartPage = () => {
   const [isUserCodAllowed, setIsUserCodAllowed] = useState(true);
   const [storeLocation, setStoreLocation] = useState(null);
   const [distanceKm, setDistanceKm] = useState(0);
+  const [distanceEstimated, setDistanceEstimated] = useState(false);
   const [selectedPayment, setSelectedPayment] = useState('cash');
   const [walletBalance, setWalletBalance] = useState(Number(userProfile?.walletBalance || 0));
 
@@ -294,6 +297,7 @@ const CartPage = () => {
     if (!sellerId || typeof sellerId !== 'string' || sellerId === 'quick-commerce') {
       setStoreLocation(null);
       setDistanceKm(0);
+      setDistanceEstimated(false);
       return;
     }
 
@@ -317,7 +321,7 @@ const CartPage = () => {
 
   // Compute distance whenever store or user location changes
   useEffect(() => {
-    if (!storeLocation) { setDistanceKm(0); return; }
+    if (!storeLocation) { setDistanceKm(0); setDistanceEstimated(false); return; }
 
     const lat1 = storeLocation.lat;
     const lon1 = storeLocation.lng;
@@ -328,10 +332,14 @@ const CartPage = () => {
 
     const loadDistance = async () => {
       if (Number.isFinite(lat1) && Number.isFinite(lon1) && Number.isFinite(lat2) && Number.isFinite(lon2)) {
-        const km = await getRoadDistanceKm(lat1, lon1, lat2, lon2);
-        if (!cancelled) setDistanceKm(Number.isFinite(km) ? km : 0);
+        const details = await getRoadDistanceDetails(lat1, lon1, lat2, lon2);
+        if (!cancelled) {
+          setDistanceKm(Number.isFinite(details?.distanceKm) ? details.distanceKm : 0);
+          setDistanceEstimated(Boolean(details?.estimated));
+        }
       } else if (!cancelled) {
         setDistanceKm(0);
+        setDistanceEstimated(false);
       }
     }
 

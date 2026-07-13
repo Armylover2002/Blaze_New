@@ -2663,7 +2663,7 @@ export const listPublicOffers = async (query = {}) => {
 
     const adminOffers = [];
     for (const o of list) {
-        if (!isCouponWithinDateWindow(o, now) || !isCouponUsageAvailable(o)) continue;
+        if (!isCouponWithinDateWindow(o, now) || !(await isCouponUsageAvailable(o))) continue;
 
         const { minOrderValue, meetsMinOrder, amountToUnlock, estimatedDiscount, displayDiscount } =
             getCouponCartEligibility(o, numericSubtotal);
@@ -2738,7 +2738,7 @@ export const listPublicOffers = async (query = {}) => {
 
         for (const c of dbCoupons) {
             if (c.showInCart === false) continue;
-            if (!isCouponWithinDateWindow(c, now) || !isCouponUsageAvailable(c)) continue;
+            if (!isCouponWithinDateWindow(c, now) || !(await isCouponUsageAvailable(c))) continue;
 
             const { minOrderValue, meetsMinOrder, amountToUnlock, estimatedDiscount, displayDiscount } =
                 getCouponCartEligibility(c, numericSubtotal);
