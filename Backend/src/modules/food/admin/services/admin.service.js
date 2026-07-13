@@ -4507,9 +4507,10 @@ export async function deleteAdminOffer(id) {
 }
 
 export async function expireExpiredOffers() {
-    const now = new Date();
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
     await FoodOffer.updateMany(
-        { status: 'active', endDate: { $lte: now } },
+        { status: 'active', endDate: { $lt: startOfToday } },
         { $set: { status: 'inactive' } }
     );
 }
