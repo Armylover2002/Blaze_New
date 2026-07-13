@@ -19,7 +19,20 @@ const restaurantSupportTicketSchema = new mongoose.Schema(
         orderRef: { type: String, default: '', trim: true },
         priority: { type: String, enum: ['low', 'medium', 'high'], default: 'medium', index: true },
         status: { type: String, enum: ['open', 'in-progress', 'resolved'], default: 'open', index: true },
-        adminResponse: { type: String, default: '' }
+        adminResponse: { type: String, default: '' },
+        respondedAt: { type: Date, default: null },
+        responseHistory: {
+            type: [
+                {
+                    status: { type: String },
+                    adminResponse: { type: String },
+                    adminId: { type: mongoose.Schema.Types.ObjectId, default: null },
+                    adminName: { type: String, default: '' },
+                    at: { type: Date, default: Date.now }
+                }
+            ],
+            default: []
+        }
     },
     { collection: 'food_restaurant_support_tickets', timestamps: true }
 );

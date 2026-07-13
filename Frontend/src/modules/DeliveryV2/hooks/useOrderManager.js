@@ -3,6 +3,7 @@ import { deliveryAPI } from '@food/api';
 import { toast } from 'sonner';
 import { getPrimaryPickupLocation, normalizeLocationPoint, normalizePickupPoints, isReturnPickupTrip, isPorterParcelTrip, getDeliveryDocumentId, getReturnDropLocation, enrichReturnDeliveryOrder, enrichPorterDeliveryOrder, mapPorterStatusToTripStatus } from '@/modules/DeliveryV2/utils/orderRouting';
 import porterDriverApi from '@/modules/porter/driver/services/driverApi';
+import { refreshActiveTrip } from '@/modules/DeliveryV2/services/deliveryOrderSync';
 
 /**
  * useOrderManager - Professional hook for real-world trip lifecycle actions.
@@ -41,6 +42,7 @@ export const useOrderManager = () => {
         });
         setActiveOrder(fullOrder);
         updateTripStatus(mapPorterStatusToTripStatus(fullOrder.status));
+        void refreshActiveTrip('accept');
       } catch (error) {
         toast.error(error?.response?.data?.message || 'Order already taken or unavailable');
         throw error;
@@ -113,6 +115,7 @@ export const useOrderManager = () => {
         }));
 
         updateTripStatus('PICKING_UP');
+        void refreshActiveTrip('accept');
         // toast.success('Order Accepted! Opening Map...');
       } else {
         toast.error(response?.data?.message || 'Order already taken or unavailable');
@@ -327,6 +330,7 @@ export const useOrderManager = () => {
 
   const resetTrip = () => {
     clearActiveOrder();
+    void refreshActiveTrip('complete');
   };
 
   // Porter-only: a driver may cancel an accepted parcel trip BEFORE pickup.
@@ -343,6 +347,7 @@ export const useOrderManager = () => {
       await porterDriverApi.cancelOrder(orderId, trimmed);
       toast.success('Trip cancelled');
       clearActiveOrder();
+      void refreshActiveTrip('cancel');
     } catch (error) {
       const message = error?.response?.data?.message || error?.message;
       toast.error(message || 'Failed to cancel trip');

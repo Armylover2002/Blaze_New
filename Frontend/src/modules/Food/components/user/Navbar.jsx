@@ -184,7 +184,7 @@ export default function Navbar() {
                 <Link to="/food/user/offers">
                   <DropdownMenuItem>Offers</DropdownMenuItem>
                 </Link>
-                <Link to="/food/user/help">
+                <Link to="/food/user/profile/support">
                   <DropdownMenuItem>Help</DropdownMenuItem>
                 </Link>
                 <Link to="/user/auth/login">

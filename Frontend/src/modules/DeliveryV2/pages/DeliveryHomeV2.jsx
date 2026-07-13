@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { useDeliveryStore } from '@/modules/DeliveryV2/store/useDeliveryStore';
 import { useProximityCheck } from '@/modules/DeliveryV2/hooks/useProximityCheck';
 import { useOrderManager } from '@/modules/DeliveryV2/hooks/useOrderManager';
-import { useDeliveryNotifications } from '@food/hooks/useDeliveryNotifications';
+import { useDeliveryNotificationsContext } from '@/modules/DeliveryV2/components/DeliveryShell';
 import { deliveryAPI } from '@food/api';
 import { toast } from 'sonner';
 
@@ -34,8 +34,10 @@ import useDeliveryPartnerHydration from '@/modules/DeliveryV2/hooks/useDeliveryP
 import {
   getApprovedVehicles,
   extractAvailabilityPayload,
+  getVehicleDisplayName,
+  getVehicleIconUrl,
 } from '@/modules/DeliveryV2/utils/deliveryPartnerSync';
-import porterDriverApi from '@/modules/porter/driver/services/driverApi';
+import deliveryOrderSync from '@/modules/DeliveryV2/services/deliveryOrderSync';
 
 import { getHaversineDistance, calculateETA, calculateHeading } from '@/modules/DeliveryV2/utils/geo';
 import { getPrimaryPickupLocation, normalizeLocationPoint, normalizePickupPoints } from '@/modules/DeliveryV2/utils/orderRouting';
@@ -244,7 +246,7 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
   const [vehicleSelectMode, setVehicleSelectMode] = useState('switch');
   const { isWithinRange, distanceToTarget } = useProximityCheck();
   const { acceptOrder, reachPickup, pickUpOrder, reachDrop, completeDelivery, resetTrip, cancelPorterTrip } = useOrderManager();
-  const { newOrder, clearNewOrder, orderStatusUpdate, clearOrderStatusUpdate, isConnected: isSocketConnected, emitLocation, forcedOfflineEvent, clearForcedOfflineEvent } = useDeliveryNotifications();
+  const { newOrder, clearNewOrder, orderStatusUpdate, clearOrderStatusUpdate, isConnected: isSocketConnected, emitLocation, forcedOfflineEvent, clearForcedOfflineEvent } = useDeliveryNotificationsContext();
   const [isProcessingToggle, setIsProcessingToggle] = useState(false);
 
   useEffect(() => {
@@ -339,10 +341,9 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
     }
   }, [completeGoOnline]);
 
-  const syncActiveTripFromServer = useCallback(async () => {
+  const applyActiveTripBundle = useCallback((bundle = {}) => {
     try {
-      const porterResult = await porterDriverApi.getActiveOrder().catch(() => null);
-      const porterOrder = porterResult?.order || porterResult;
+      const porterOrder = bundle.porterOrder;
       if (porterOrder?.id || porterOrder?.orderId) {
         const enriched = enrichPorterDeliveryOrder(porterOrder);
         if (isPorterParcelTrip(enriched)) {
@@ -352,10 +353,7 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
         }
       }
 
-      const response = await deliveryAPI.getCurrentDelivery();
-      const rawData = response?.data?.data?.activeOrder || response?.data?.data;
-      const serverData = (rawData && (rawData._id || rawData.orderId)) ? rawData : null;
-
+      const serverData = bundle.foodCurrent;
       if (serverData && !isPorterParcelTrip(serverData)) {
         const getLoc = (ref, keysLat, keysLng) => {
           if (!ref) return null;
@@ -419,13 +417,64 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
         return;
       }
 
-      if (!porterOrder?.id && !porterOrder?.orderId && !serverData) {
-        clearActiveOrder();
+      if (bundle.type === 'idle' || (!porterOrder && !serverData && bundle.reason === 'coldStart')) {
+        // Only clear on explicit idle/cold-start empty — avoid wiping local accept race.
+        if (bundle.reason === 'coldStart' || bundle.reason === 'complete' || bundle.reason === 'cancel') {
+          clearActiveOrder();
+        }
       }
     } catch (err) {
       console.error('Order Sync Failed:', err);
     }
   }, [setActiveOrder, updateTripStatus, clearActiveOrder]);
+
+  const [incomingOrder, setIncomingOrder] = useState(null);
+
+  const applyAvailableOffers = useCallback((payload = {}) => {
+    const porterOffers = Array.isArray(payload.porterOffers) ? payload.porterOffers : [];
+    const nextPorterOffer = porterOffers.find((order) => isPorterParcelTrip(order));
+    if (nextPorterOffer) {
+      setIncomingOrder((prev) => {
+        const prevKey = prev?.orderId || prev?.id || prev?.orderMongoId || '';
+        const nextKey = nextPorterOffer?.orderId || nextPorterOffer?.id || nextPorterOffer?.orderMongoId || '';
+        return prevKey === nextKey && prev ? prev : enrichIncomingDeliveryOrder(nextPorterOffer);
+      });
+      return;
+    }
+
+    const availableOrders = Array.isArray(payload.foodOrders) ? payload.foodOrders : [];
+    const nextIncomingOrder = availableOrders.find((order) => {
+      if (isPorterParcelTrip(order)) return false;
+      const dispatchStatus = String(order?.dispatch?.status || '').toLowerCase();
+      const orderStatus = String(order?.orderStatus || order?.status || '').toLowerCase();
+      if (isReturnPickupTrip(order)) {
+        return ['unassigned', 'assigned'].includes(dispatchStatus);
+      }
+      return (
+        ['unassigned', 'assigned'].includes(dispatchStatus) &&
+        ['confirmed', 'preparing', 'ready_for_pickup'].includes(orderStatus)
+      );
+    });
+
+    if (nextIncomingOrder) {
+      setIncomingOrder((prev) => {
+        const prevKey = [
+          prev?.orderId || prev?._id || prev?.orderMongoId || '',
+          prev?.dispatchLeg?.legId || prev?.legId || '',
+        ].filter(Boolean).join(':');
+        const nextKey = [
+          nextIncomingOrder?.orderId ||
+            nextIncomingOrder?._id ||
+            nextIncomingOrder?.orderMongoId ||
+            '',
+          nextIncomingOrder?.dispatchLeg?.legId ||
+            nextIncomingOrder?.legId ||
+            '',
+        ].filter(Boolean).join(':');
+        return prevKey === nextKey && prev ? prev : nextIncomingOrder;
+      });
+    }
+  }, []);
 
   const [showSubModal, setShowSubModal] = useState(false);
   const [showLowBalanceModal, setShowLowBalanceModal] = useState(false);
@@ -434,7 +483,6 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
   const companyName = useCompanyName();
   const { unreadCount: notificationUnreadCount } = useNotificationInbox("delivery", { limit: 20 });
 
-    const [incomingOrder, setIncomingOrder] = useState(null);
     const [currentTab, setCurrentTab] = useState(tab);
   
   // Track URL changes (Prop changes) to update sub-page content
@@ -661,10 +709,40 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
     setIsModalMinimized(false);
   }, [tripStatus, showVerification, incomingOrder]);
 
-  // 1. Initial Sync (Porter + Food active trip restore)
+  // 1. Global order sync — cold start + policy + subscriptions (no local poller)
+  const activeOrderKey =
+    activeOrder?.orderId || activeOrder?._id || activeOrder?.id || null;
+
   useEffect(() => {
-    void syncActiveTripFromServer();
-  }, [syncActiveTripFromServer]);
+    deliveryOrderSync.updateSyncPolicy({
+      isOnline: Boolean(isOnline),
+      isFeedTab: currentTab === 'feed',
+      hasActiveTrip: Boolean(activeOrderKey),
+      isSocketConnected: Boolean(isSocketConnected),
+      isAuthenticated: true,
+    });
+  }, [isOnline, currentTab, activeOrderKey, isSocketConnected]);
+
+  const applyActiveTripBundleRef = useRef(applyActiveTripBundle);
+  const applyAvailableOffersRef = useRef(applyAvailableOffers);
+  applyActiveTripBundleRef.current = applyActiveTripBundle;
+  applyAvailableOffersRef.current = applyAvailableOffers;
+
+  useEffect(() => {
+    const unsubActive = deliveryOrderSync.subscribeActiveTrip((payload) => {
+      if (!payload || payload.type === 'error' || payload.type === 'skipped') return;
+      applyActiveTripBundleRef.current(payload);
+    });
+    const unsubAvailable = deliveryOrderSync.subscribeAvailableOffers((payload) => {
+      if (useDeliveryStore.getState().activeOrder) return;
+      applyAvailableOffersRef.current(payload);
+    });
+    void deliveryOrderSync.requestColdStart();
+    return () => {
+      unsubActive();
+      unsubAvailable();
+    };
+  }, []);
   
   // 1.5 Professional Unified ETA Calculation Hook
   useEffect(() => {
@@ -682,90 +760,142 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
 
   // 2. Online/Offline Status Sync (REMOVED: Handled manually in toggle for subscription safety)
 
-  // 3. Location logic (Smart Frequency Tracking)
+  // 3. Location logic — single watchPosition; restart only on isOnline / isSimMode.
+  // Volatile trip/GPS values are read from refs so the watcher is never recreated by renders.
+  const gpsCtxRef = useRef({
+    setRiderLocation,
+    activeOrder,
+    activePolyline,
+    emitLocation,
+    eta,
+    tripStatus,
+    distanceToTarget,
+    reachPickup,
+    reachDrop,
+    handleGeolocationError,
+  });
+  gpsCtxRef.current = {
+    setRiderLocation,
+    activeOrder,
+    activePolyline,
+    emitLocation,
+    eta,
+    tripStatus,
+    distanceToTarget,
+    reachPickup,
+    reachDrop,
+    handleGeolocationError,
+  };
+
   useEffect(() => {
-    if (!isOnline) {
-      return;
+    if (!isOnline || isSimMode) {
+      return undefined;
     }
-    
-    const watchId = navigator.geolocation.watchPosition((pos) => {
-      // CRITICAL: In Simulation Mode, we disable actual GPS to prevent overwriting our test position
-      if (isSimMode) return;
-      
-      const { latitude: lat, longitude: lng, heading, speed } = pos.coords;
-      const now = Date.now();
-      
-      const currentRiderPos = { lat, lng, heading: heading || 0 };
-      setRiderLocation(currentRiderPos);
-      
-      // Calculate Rolling Average Speed for Smart ETA
-      if (speed && speed > 0) {
-        rollingSpeedRef.current = [...rollingSpeedRef.current.slice(-4), speed]; // keep last 5 points
+
+    // Guarantee at most one watch across StrictMode / remount races.
+    if (typeof window !== 'undefined' && window.__deliveryGpsWatchId != null) {
+      try {
+        navigator.geolocation.clearWatch(window.__deliveryGpsWatchId);
+      } catch {
+        // ignore
       }
-      
-      const avgSpeed = rollingSpeedRef.current.length > 0 
-        ? rollingSpeedRef.current.reduce((a, b) => a + b, 0) / rollingSpeedRef.current.length 
-        : speed || 0;
+      window.__deliveryGpsWatchId = null;
+    }
 
-      // ETA update is now handled by a separate globally-synchronized effect
+    const watchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        const ctx = gpsCtxRef.current;
+        const { latitude: lat, longitude: lng, heading, speed } = pos.coords;
+        const now = Date.now();
 
-      // Phase 11: Geo-fencing Auto-arrival (within 100m) - Disabled in DEV so UI steps can be tested manually
-      if (!isSimMode && !import.meta.env.DEV && distanceToTarget && distanceToTarget <= 100 && !lastAutoArrivalRef.current[tripStatus]) {
-        if (tripStatus === 'PICKING_UP') {
-          lastAutoArrivalRef.current[tripStatus] = true;
-          reachPickup().catch(() => { lastAutoArrivalRef.current[tripStatus] = false; });
-          // toast.success('Auto-arrived at Restaurant');
-        } else if (tripStatus === 'PICKED_UP') {
-          lastAutoArrivalRef.current[tripStatus] = true;
-          reachDrop().catch(() => { lastAutoArrivalRef.current[tripStatus] = false; });
-          // toast.success('Auto-arrived at Customer');
+        ctx.setRiderLocation({ lat, lng, heading: heading || 0 });
+
+        if (speed && speed > 0) {
+          rollingSpeedRef.current = [...rollingSpeedRef.current.slice(-4), speed];
         }
-      }
 
-      // Reset auto-arrival flag if we move away or status resets (usually handled by component mount, but for safety)
-      if (distanceToTarget > 200) {
-        lastAutoArrivalRef.current[tripStatus] = false;
-      }
+        const distanceToTarget = ctx.distanceToTarget;
+        const tripStatus = ctx.tripStatus;
 
-      // Check threshold for Sync (distance-based or 7s time-based)
-      const distMoved = lastCoordRef.current 
-        ? getHaversineDistance(lat, lng, lastCoordRef.current.lat, lastCoordRef.current.lng) 
-        : 1000; // assume huge distance if first update
+        // Phase 11: Geo-fencing Auto-arrival (within 100m) - Disabled in DEV
+        if (
+          !import.meta.env.DEV &&
+          distanceToTarget &&
+          distanceToTarget <= 100 &&
+          !lastAutoArrivalRef.current[tripStatus]
+        ) {
+          if (tripStatus === 'PICKING_UP') {
+            lastAutoArrivalRef.current[tripStatus] = true;
+            ctx.reachPickup().catch(() => {
+              lastAutoArrivalRef.current[tripStatus] = false;
+            });
+          } else if (tripStatus === 'PICKED_UP') {
+            lastAutoArrivalRef.current[tripStatus] = true;
+            ctx.reachDrop().catch(() => {
+              lastAutoArrivalRef.current[tripStatus] = false;
+            });
+          }
+        }
 
-      if (distMoved >= 25 || (now - lastLocationSentAt.current >= 7000)) {
+        if (distanceToTarget > 200) {
+          lastAutoArrivalRef.current[tripStatus] = false;
+        }
+
+        const distMoved = lastCoordRef.current
+          ? getHaversineDistance(lat, lng, lastCoordRef.current.lat, lastCoordRef.current.lng)
+          : 1000;
+
+        if (distMoved < 25) {
+          return;
+        }
+
         lastLocationSentAt.current = now;
         lastCoordRef.current = { lat, lng };
-        
-          const payload = { 
-            lat, 
-            lng, 
+
+        const order = ctx.activeOrder;
+        const payload = {
+          lat,
+          lng,
+          heading: heading || 0,
+          speed: speed || 0,
+          accuracy: pos.coords.accuracy,
+          orderId: order?.orderId || order?._id,
+          status: 'on_the_way',
+          polyline: ctx.activePolyline,
+          eta: ctx.eta,
+        };
+
+        deliveryAPI
+          .updateLocation(lat, lng, true, {
             heading: heading || 0,
             speed: speed || 0,
             accuracy: pos.coords.accuracy,
-            orderId: activeOrder?.orderId || activeOrder?._id,
-            status: 'on_the_way',
-            polyline: activePolyline,
-            eta,
-          };
+          })
+          .catch(() => {});
 
-        // A. HTTP Backup
-        deliveryAPI.updateLocation(lat, lng, true, { 
-          heading: heading || 0,
-          speed: speed || 0,
-          accuracy: pos.coords.accuracy 
-          }).catch(() => {});
-
-          // B. SOCKET LIVE (SILKY SMOOTH)
-          if (payload.orderId) emitLocation(payload);
-        }
-      }, handleGeolocationError, {
+        if (payload.orderId) ctx.emitLocation(payload);
+      },
+      (error) => {
+        gpsCtxRef.current.handleGeolocationError(error);
+      },
+      {
         enableHighAccuracy: true,
         maximumAge: 0,
-        timeout: 5000
-      });
-      
-      return () => navigator.geolocation.clearWatch(watchId);
-  }, [isOnline, setRiderLocation, isSimMode, activeOrder, activePolyline, emitLocation, eta, tripStatus, distanceToTarget, reachPickup, reachDrop, handleGeolocationError]);
+        timeout: 5000,
+      }
+    );
+
+    if (typeof window !== 'undefined') {
+      window.__deliveryGpsWatchId = watchId;
+    }
+
+    return () => {
+      navigator.geolocation.clearWatch(watchId);
+      if (typeof window !== 'undefined' && window.__deliveryGpsWatchId === watchId) {
+        window.__deliveryGpsWatchId = null;
+      }
+    };
+  }, [isOnline, isSimMode]);
 
   // 3.5. Background Ping / Heartbeat
   // If watchPosition stops firing (e.g. app in background or device stationary),
@@ -802,120 +932,7 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
     }
   }, [activeOrder, incomingOrder]);
 
-  useEffect(() => {
-    if (!isOnline) return;
-    if (currentTab !== 'feed') return;
-    if (activeOrder) return;
-
-    let cancelled = false;
-
-    const hydrateAvailableOrder = async () => {
-      try {
-        const porterActive = await porterDriverApi.getActiveOrder().catch(() => null);
-        const porterOrder = porterActive?.order || porterActive;
-        if (!cancelled && (porterOrder?.id || porterOrder?.orderId)) {
-          const enriched = enrichPorterDeliveryOrder(porterOrder);
-          if (isPorterParcelTrip(enriched)) {
-            setActiveOrder(enriched);
-            updateTripStatus(mapPorterStatusToTripStatus(enriched.status));
-            return;
-          }
-        }
-
-        const currentResponse = await deliveryAPI.getCurrentDelivery();
-        const currentPayload =
-          currentResponse?.data?.data?.activeOrder ||
-          currentResponse?.data?.data ||
-          null;
-
-        if (!cancelled && currentPayload && (currentPayload._id || currentPayload.orderId)) {
-          if (!isPorterParcelTrip(currentPayload)) {
-            setActiveOrder(enrichReturnDeliveryOrder({
-              ...currentPayload,
-              pickupPoints: normalizePickupPoints(currentPayload),
-              restaurantLocation: getPrimaryPickupLocation(currentPayload) || currentPayload.restaurantLocation,
-            }));
-          }
-          return;
-        }
-
-        const porterAvailable = await porterDriverApi.getAvailableOrders().catch(() => null);
-        const porterOffers = Array.isArray(porterAvailable?.orders)
-          ? porterAvailable.orders
-          : Array.isArray(porterAvailable)
-            ? porterAvailable
-            : [];
-        const nextPorterOffer = porterOffers.find((order) => isPorterParcelTrip(order));
-        if (!cancelled && nextPorterOffer) {
-          setIncomingOrder((prev) => {
-            const prevKey = prev?.orderId || prev?.id || prev?.orderMongoId || '';
-            const nextKey = nextPorterOffer?.orderId || nextPorterOffer?.id || nextPorterOffer?.orderMongoId || '';
-            return prevKey === nextKey && prev ? prev : enrichIncomingDeliveryOrder(nextPorterOffer);
-          });
-          return;
-        }
-
-        const availableResponse = await deliveryAPI.getOrders({ limit: 20, page: 1 });
-        const availablePayload =
-          availableResponse?.data?.data ||
-          availableResponse?.data ||
-          {};
-        const availableOrders = Array.isArray(availablePayload?.docs)
-          ? availablePayload.docs
-          : Array.isArray(availablePayload?.items)
-            ? availablePayload.items
-            : Array.isArray(availablePayload)
-              ? availablePayload
-              : [];
-
-        const nextIncomingOrder = availableOrders.find((order) => {
-          if (isPorterParcelTrip(order)) return false;
-          const dispatchStatus = String(order?.dispatch?.status || '').toLowerCase();
-          const orderStatus = String(order?.orderStatus || order?.status || '').toLowerCase();
-          if (isReturnPickupTrip(order)) {
-            return ['unassigned', 'assigned'].includes(dispatchStatus);
-          }
-          return (
-            ['unassigned', 'assigned'].includes(dispatchStatus) &&
-            ['confirmed', 'preparing', 'ready_for_pickup'].includes(orderStatus)
-          );
-        });
-
-        if (!cancelled && nextIncomingOrder) {
-          setIncomingOrder((prev) => {
-            const prevKey = [
-              prev?.orderId || prev?._id || prev?.orderMongoId || '',
-              prev?.dispatchLeg?.legId || prev?.legId || '',
-            ].filter(Boolean).join(':');
-            const nextKey = [
-              nextIncomingOrder?.orderId ||
-                nextIncomingOrder?._id ||
-                nextIncomingOrder?.orderMongoId ||
-                '',
-              nextIncomingOrder?.dispatchLeg?.legId ||
-                nextIncomingOrder?.legId ||
-                '',
-            ].filter(Boolean).join(':');
-            return prevKey === nextKey && prev ? prev : nextIncomingOrder;
-          });
-        }
-      } catch (error) {
-        console.warn('[DeliveryHomeV2] Available order fallback sync failed:', error?.message || error);
-      }
-    };
-
-    void hydrateAvailableOrder();
-    const poller = window.setInterval(() => {
-      if (!document.hidden) {
-        void hydrateAvailableOrder();
-      }
-    }, isSocketConnected ? 12000 : 5000);
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(poller);
-    };
-  }, [activeOrder, currentTab, isOnline, isSocketConnected, setActiveOrder, updateTripStatus]);
+  // Available-order HTTP polling owned by deliveryOrderSync (not this component).
 
   useEffect(() => {
     if (!orderStatusUpdate) return;
@@ -1096,12 +1113,12 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
                                 
                                 <div className="flex items-center gap-3">
                                   <div className="w-12 h-12 bg-white/5 rounded-lg flex items-center justify-center shrink-0 shadow-inner p-1">
-                                    <img src={(activeVehicle.master || activeVehicle).image || "https://i.ibb.co/68zRzVv/Auto.png"} alt="Vehicle" className="w-full h-full object-contain drop-shadow-md" />
+                                    <img src={getVehicleIconUrl(activeVehicle) || "https://i.ibb.co/68zRzVv/Auto.png"} alt={getVehicleDisplayName(activeVehicle)} className="w-full h-full object-contain drop-shadow-md" />
                                   </div>
                                   <div className="flex-1 min-w-0 pr-16">
-                                    <h3 className="text-white font-bold text-sm truncate">{(activeVehicle.master || activeVehicle).name || 'Vehicle'}</h3>
+                                    <h3 className="text-white font-bold text-sm truncate capitalize">{getVehicleDisplayName(activeVehicle)}</h3>
                                     <div className="text-[10px] text-gray-400 uppercase tracking-widest font-semibold flex items-center gap-1.5 mt-1 truncate">
-                                      <span className="text-gray-300">{activeVehicle.registrationNumber || 'No Reg'}</span>
+                                      <span className="text-gray-300">{activeVehicle.registrationNumber || activeVehicle.vehicleNumber || 'No Reg'}</span>
                                       <span>•</span>
                                       <span className={activeVehicle.isDispatchEligible || ['active', 'approved'].includes(String(activeVehicle.status || '').toLowerCase()) ? 'text-green-400' : 'text-orange-400'}>
                                         {activeVehicle.verificationStatus || activeVehicle.status || 'Unknown'}
@@ -1110,9 +1127,9 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
                                   </div>
                                 </div>
                                 
-                                {((activeVehicle.master || activeVehicle).supportedServices || []).length > 0 && (
+                                {((activeVehicle.master || activeVehicle).supportedServices || activeVehicle.supportedServices || []).length > 0 && (
                                   <div className="flex items-center gap-1.5 mt-3 pt-3 border-t border-white/5 flex-wrap">
-                                    {((activeVehicle.master || activeVehicle).supportedServices || []).map(s => (
+                                    {((activeVehicle.master || activeVehicle).supportedServices || activeVehicle.supportedServices || []).map(s => (
                                       <span key={s} className="text-[9px] bg-white/10 text-white px-2 py-0.5 rounded font-black uppercase tracking-wider">{s}</span>
                                     ))}
                                   </div>

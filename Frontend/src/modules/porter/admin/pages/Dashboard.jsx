@@ -218,7 +218,7 @@ const Dashboard = () => {
                     <BarChart data={vehicleUtilization} layout="vertical" margin={{ top: 10, right: 10, bottom: 0, left: 0 }}>
                         <CartesianGrid strokeDasharray="3 3" horizontal={false} />
                         <XAxis type="number" tickLine={false} axisLine={false} tick={{ fontSize: 12 }} />
-                        <YAxis type="category" dataKey="name" tickLine={false} axisLine={false} tick={{ fontSize: 12 }} width={80} />
+                        <YAxis type="category" dataKey="category" tickLine={false} axisLine={false} tick={{ fontSize: 12 }} width={80} />
                         <Tooltip />
                         <Bar dataKey="value" fill="#3b82f6" name="Orders" />
                         <Bar dataKey="revenue" fill="#10b981" name="Revenue (₹)" />
@@ -250,7 +250,7 @@ const Dashboard = () => {
                                     <Truck size={20} className="text-gray-500" />
                                 </div>
                                 <div>
-                                    <p className="font-medium text-sm">{vehicle.name}</p>
+                                    <p className="font-medium text-sm">{vehicle.category}</p>
                                     <p className="text-xs text-gray-500">{vehicle.value} Orders</p>
                                 </div>
                             </div>

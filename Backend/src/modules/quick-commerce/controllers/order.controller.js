@@ -46,7 +46,7 @@ import {
 } from '../../food/orders/helpers/razorpay.helper.js';
 import * as orderService from '../../food/orders/services/order.service.js';
 import { z } from 'zod';
-import { ValidationError } from '../../../core/auth/errors.js';
+import { ForbiddenError, ValidationError } from '../../../core/auth/errors.js';
 import { getQuickCoupons } from '../services/content.service.js';
 import {
   isQuickCouponCurrentlyValid,
@@ -549,6 +549,18 @@ export const placeOrder = async (req, res) => {
         success: false,
         message: paymentCheck.message,
       });
+    // Block deactivated accounts for all payment modes (optionalAuth alone is not enough).
+    // COD flag is enforced only for cash.
+    if (idQuery.userId) {
+      const orderingUser = await FoodUser.findById(idQuery.userId)
+        .select('isCodAllowed isActive')
+        .lean();
+      if (!orderingUser || orderingUser.isActive === false) {
+        throw new ForbiddenError('User account is deactivated');
+      }
+      if (paymentMode === 'cash' && orderingUser.isCodAllowed === false) {
+        throw new ForbiddenError('Cash on Delivery is not available for this account');
+      }
     }
 
     // Calculate rider earning using actual distance
@@ -874,9 +886,11 @@ export const placeOrder = async (req, res) => {
     });
   } catch (error) {
     logger.error(`Quick placeOrder failed: ${error?.message || error}`);
-    return res.status(500).json({
+    const statusCode = Number(error?.statusCode) || 500;
+    return res.status(statusCode).json({
       success: false,
       error: error?.message || 'Failed to place quick order',
+      message: error?.message || 'Failed to place quick order',
     });
   }
 };

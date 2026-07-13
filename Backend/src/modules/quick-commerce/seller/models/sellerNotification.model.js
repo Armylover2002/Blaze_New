@@ -45,6 +45,8 @@ const sellerNotificationSchema = new mongoose.Schema(
 
 sellerNotificationSchema.index({ sellerId: 1, key: 1 }, { unique: true });
 sellerNotificationSchema.index({ sellerId: 1, isRead: 1, createdAt: -1 });
+// Supports deleteMany({ key: 'broadcast:…' }) without collection scan.
+sellerNotificationSchema.index({ key: 1 }, { name: 'key_1' });
 
 export const SellerNotification = mongoose.model(
   "SellerNotification",

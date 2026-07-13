@@ -3,12 +3,6 @@ import { actionPerformerSchema } from '../../../core/models/actionPerformer.sche
 
 const porterVehicleSchema = new mongoose.Schema(
     {
-        name: {
-            type: String,
-            required: true,
-            trim: true,
-            index: true,
-        },
         vehicleCode: {
             type: String,
             required: true,

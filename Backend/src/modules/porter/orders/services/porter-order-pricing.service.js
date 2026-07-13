@@ -41,7 +41,7 @@ async function resolveVehiclePricing(vehicleId) {
         ...baseFilter,
         status: 'active',
         supportedServices: { $in: ['parcel'] },
-    }).select({ name: 1, vehicleCode: 1 }).lean();
+    }).select({ category: 1, vehicleCode: 1 }).lean();
 
     if (!vehicle) throw new NotFoundError('Vehicle not found or not available for parcel');
 
@@ -131,7 +131,7 @@ export async function calculatePorterOrderPricing({
 
     return {
         route,
-        vehicle: { id: String(vehicle._id), name: vehicle.name, vehicleCode: vehicle.vehicleCode },
+        vehicle: { id: String(vehicle._id), category: vehicle.category, vehicleCode: vehicle.vehicleCode },
         zoneId: zone?._id ? String(zone._id) : null,
         dropZoneId: serviceability.dropZone?._id ? String(serviceability.dropZone._id) : null,
         sameZone: serviceability.sameZone,

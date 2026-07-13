@@ -171,8 +171,6 @@ export default function NotificationComposer() {
             ? selectedRecipients.map((item) => ({
                 ownerType: item.ownerType,
                 ownerId: item.ownerId,
-                label: item.label,
-                subLabel: item.subLabel,
               }))
             : [],
       });

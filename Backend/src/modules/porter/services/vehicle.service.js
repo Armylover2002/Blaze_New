@@ -19,7 +19,7 @@ import { generateVehicleCode } from '../utils/vehicleCode.util.js';
 const baseFilter = { isDeleted: { $ne: true } };
 
 const buildSort = (sortBy, sortOrder) => {
-    const allowed = ['name', 'category', 'status', 'displayOrder', 'vehicleCode', 'minWeight', 'maxWeight', 'createdAt', 'updatedAt'];
+    const allowed = ['category', 'status', 'displayOrder', 'vehicleCode', 'minWeight', 'maxWeight', 'createdAt', 'updatedAt'];
     const key = allowed.includes(sortBy) ? sortBy : 'displayOrder';
     return { [key]: sortOrder };
 };
@@ -44,7 +44,6 @@ export async function listVehicles(query = {}) {
     if (parsed.search) {
         const term = escapeRegex(parsed.search);
         filter.$or = [
-            { name: { $regex: term, $options: 'i' } },
             { category: { $regex: term, $options: 'i' } },
             { vehicleCode: { $regex: term, $options: 'i' } },
             { description: { $regex: term, $options: 'i' } },
@@ -190,28 +189,50 @@ export async function deleteVehicle(id, reqUser) {
 
 export async function listVehicleDropdown() {
     const docs = await PorterVehicle.find({ ...baseFilter, status: 'active' })
-        .sort({ displayOrder: 1, name: 1 })
+        .sort({ displayOrder: 1, category: 1 })
         .lean();
 
     return docs.map((doc) => mapVehicle(doc));
 }
 
 const PUBLIC_VEHICLE_PROJECTION = {
-    name: 1,
+    category: 1,
     iconUrl: 1,
     maxWeight: 1,
     description: 1,
     displayOrder: 1,
+    supportedServices: 1,
 };
 
-export async function listPublicParcelVehicles() {
+async function listPublicVehiclesByService(service) {
     const docs = await PorterVehicle.find({
         ...baseFilter,
         status: 'active',
-        supportedServices: { $in: ['parcel'] },
+        supportedServices: { $in: [service] },
     })
         .select(PUBLIC_VEHICLE_PROJECTION)
-        .sort({ displayOrder: 1, name: 1 })
+        .sort({ displayOrder: 1, category: 1 })
+        .lean();
+
+    return docs.map((doc) => mapPublicVehicle(doc));
+}
+
+export async function listPublicParcelVehicles() {
+    return listPublicVehiclesByService('parcel');
+}
+
+/**
+ * Delivery partner signup catalog.
+ * Returns all active admin-managed vehicles so newly added vehicles appear immediately.
+ * (Admin controls availability via Active/Inactive; no service-type filter here.)
+ */
+export async function listPublicFoodVehicles() {
+    const docs = await PorterVehicle.find({
+        ...baseFilter,
+        status: 'active',
+    })
+        .select(PUBLIC_VEHICLE_PROJECTION)
+        .sort({ displayOrder: 1, category: 1 })
         .lean();
 
     return docs.map((doc) => mapPublicVehicle(doc));

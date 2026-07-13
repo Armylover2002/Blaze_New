@@ -25,7 +25,28 @@ const resolveDeliveryBackPath = ({ pathname, state }) => {
   const normalizedPath = getNormalizedDeliveryPath(pathname)
   const explicitBackPath = toDeliveryPath(state?.backTo) || toDeliveryPath(state?.from)
 
-  if (normalizedPath === "/signup/details") return "/food/delivery/signup"
+  if (normalizedPath === "/signup/details") {
+    // Prefer explicit back target from Rejected → Edit/Create New.
+    if (explicitBackPath) return explicitBackPath
+
+    // Reapply flows keep rejection context in session — UI back must return to Rejected,
+    // not the dead `/signup` alias that redirects to Login.
+    try {
+      const submissionType = sessionStorage.getItem("deliverySubmissionType")
+      const isRejectedFlow = sessionStorage.getItem("deliveryIsRejected") === "true"
+      if (
+        isRejectedFlow ||
+        submissionType === "edit_existing" ||
+        submissionType === "new_onboarding"
+      ) {
+        return "/food/delivery/onboarding/rejected"
+      }
+    } catch {
+      /* ignore */
+    }
+
+    return "/food/delivery/login"
+  }
   if (normalizedPath === "/signup/documents") return "/food/delivery/signup/details"
   if (normalizedPath === "/otp") return explicitBackPath || "/food/delivery/login"
   if (normalizedPath === "/terms" || normalizedPath === "/support") {
@@ -84,6 +105,15 @@ export default function useDeliveryBackNavigation() {
   const location = useLocation()
 
   return useCallback(() => {
-    navigate(resolveDeliveryBackPath(location))
+    const path = resolveDeliveryBackPath(location)
+    // Preserve Rejected → Signup backTo when returning documents → details.
+    if (
+      path === "/food/delivery/signup/details" &&
+      location.state?.backTo
+    ) {
+      navigate(path, { state: { backTo: location.state.backTo } })
+      return
+    }
+    navigate(path)
   }, [location, navigate])
 }

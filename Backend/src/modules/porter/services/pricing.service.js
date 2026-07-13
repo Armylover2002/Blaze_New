@@ -20,7 +20,6 @@ const baseFilter = { isDeleted: { $ne: true } };
 const globalPricingFilter = { ...baseFilter };
 
 const VEHICLE_PROJECTION = {
-    name: 1,
     category: 1,
     iconUrl: 1,
     status: 1,
@@ -56,7 +55,7 @@ const pickVehiclePricing = (docs = []) => {
 };
 
 const buildVehicleSort = (sortBy, sortOrder) => {
-    const allowed = ['name', 'category', 'status', 'displayOrder', 'createdAt'];
+    const allowed = ['category', 'status', 'displayOrder', 'createdAt'];
     const key = allowed.includes(sortBy) ? sortBy : 'displayOrder';
     return { [key]: sortOrder };
 };
@@ -117,7 +116,6 @@ export async function listPricing(query = {}) {
     if (parsed.search) {
         const term = escapeRegex(parsed.search);
         vehicleFilter.$or = [
-            { name: { $regex: term, $options: 'i' } },
             { category: { $regex: term, $options: 'i' } },
             { vehicleCode: { $regex: term, $options: 'i' } },
         ];

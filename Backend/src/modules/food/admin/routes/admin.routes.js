@@ -179,6 +179,7 @@ router.patch('/delivery/cash-pay-requests/:id', checkPermission('food::deliverym
 
 // ----- Delivery partners & general -----
 router.get('/delivery/join-requests', checkPermission('food::deliveryman_management::deliveryman::join_request', 'view'), adminController.getDeliveryJoinRequests);
+router.get('/delivery/:id/submissions', checkPermission('food::deliveryman_management::deliveryman::join_request', 'view'), adminController.getDeliveryPartnerSubmissions);
 router.get('/delivery/wallets', checkPermission('food::deliveryman_management::wallet', 'view'), adminController.getDeliveryWallets);
 router.patch('/delivery/wallets', checkPermission('food::deliveryman_management::wallet', 'edit'), adminController.updateDeliveryBoyWallet);
 router.get('/delivery/bonus-transactions', checkPermission('food::deliveryman_management::deliveryman::bonus', 'view'), adminController.getDeliveryPartnerBonusTransactions);

@@ -691,12 +691,21 @@ export const verifyDeliveryOtpAndLogin = async (phone, otp, fcmToken, platform) 
     return { needsRegistration: true, phone };
   }
 
-  if (deliveryPartner.isActive === false || deliveryPartner.isDeleted === true || deliveryPartner.accountStatus === 'deleted') {
-    if (deliveryPartner.status !== 'rejected') {
-      throw new AuthError(
-        "Your delivery account has been deleted/deactivated by admin. Please contact support.",
-      );
-    }
+  // Account lifecycle gate — do NOT conflate with onboarding status.
+  // pending + isActive:false is normal during onboarding review.
+  // rejected + isActive:false is allowed so the partner can see rejection / reapply.
+  // deleted/deactivated applies only to deleted accounts OR intentionally deactivated approved partners.
+  const onboardingStatus = String(deliveryPartner.status || '').trim().toLowerCase();
+  const isDeletedAccount =
+    deliveryPartner.isDeleted === true ||
+    deliveryPartner.accountStatus === 'deleted';
+  const isDeactivatedApprovedPartner =
+    deliveryPartner.isActive === false && onboardingStatus === 'approved';
+
+  if (isDeletedAccount || isDeactivatedApprovedPartner) {
+    throw new AuthError(
+      "Your delivery account has been deleted/deactivated by admin. Please contact support.",
+    );
   }
 
   // Update FCM token if provided - CRITICAL: do this BEFORE returning pendingApproval
@@ -724,10 +733,50 @@ export const verifyDeliveryOtpAndLogin = async (phone, otp, fcmToken, platform) 
   if (deliveryPartner.status && deliveryPartner.status !== "approved") {
     const isRejected = deliveryPartner.status === "rejected";
     if (isRejected) {
+      const {
+        ensureLegacySubmission,
+        serializeSubmissionForPrefill,
+      } = await import(
+        "../../modules/food/delivery/services/deliveryPartnerSubmission.service.js"
+      );
+      const { FoodDeliveryPartnerSubmission } = await import(
+        "../../modules/food/delivery/models/deliveryPartnerSubmission.model.js"
+      );
+
+      await ensureLegacySubmission(deliveryPartner);
+
+      let rejectedSubmission = await FoodDeliveryPartnerSubmission.findOne({
+        partnerId: deliveryPartner._id,
+        status: "rejected",
+      })
+        .sort({ submissionNumber: -1 })
+        .lean();
+
+      if (!rejectedSubmission && deliveryPartner.latestSubmissionId) {
+        rejectedSubmission = await FoodDeliveryPartnerSubmission.findById(
+          deliveryPartner.latestSubmissionId
+        ).lean();
+      }
+
       return {
         pendingApproval: true,
         isRejected: true,
-        rejectionReason: deliveryPartner.rejectionReason || "Application rejected by admin",
+        rejectionReason:
+          deliveryPartner.rejectionReason ||
+          rejectedSubmission?.rejectionReason ||
+          "Application rejected by admin",
+        rejectedAt:
+          deliveryPartner.rejectedAt || rejectedSubmission?.reviewedAt || null,
+        rejectedBy:
+          deliveryPartner.rejectedBy || rejectedSubmission?.rejectedBy || null,
+        partnerId: String(deliveryPartner._id),
+        phone: deliveryPartner.phone,
+        latestSubmissionId: deliveryPartner.latestSubmissionId
+          ? String(deliveryPartner.latestSubmissionId)
+          : rejectedSubmission?._id
+            ? String(rejectedSubmission._id)
+            : null,
+        rejectedSubmission: serializeSubmissionForPrefill(rejectedSubmission),
         message: "Your application was rejected.",
       };
     }
@@ -735,7 +784,9 @@ export const verifyDeliveryOtpAndLogin = async (phone, otp, fcmToken, platform) 
       pendingApproval: true,
       isRejected: false,
       rejectionReason: null,
-      message: "Your account is pending admin verification. You will be notified once approved.",
+      rejectedAt: null,
+      message:
+        "Your onboarding request is under review. Your documents are currently being verified. You will receive approval once reviewed by admin.",
     };
   }
 

@@ -2,6 +2,40 @@ const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
 
+const INR = "\u20B9"
+
+const formatAmount = (amount) =>
+  `${INR}${(Number(amount) || 0).toFixed(2)}`
+
+const getCodAllowedLabel = (customer) =>
+  customer?.isCodAllowed !== false ? "Yes" : "No"
+
+const CUSTOMER_HEADERS = [
+  "SI",
+  "Name",
+  "Email",
+  "Phone",
+  "Total Order",
+  "Total Order Amount",
+  "Joining Date",
+  "COD Allowed",
+  "Status",
+]
+
+const buildCustomerRow = (customer, index, { withCurrency = true } = {}) => [
+  customer.sl || index + 1,
+  customer.name || "N/A",
+  customer.email || "N/A",
+  customer.phone || "N/A",
+  customer.totalOrder || 0,
+  withCurrency
+    ? formatAmount(customer.totalOrderAmount)
+    : (Number(customer.totalOrderAmount) || 0).toFixed(2),
+  customer.joiningDate || "N/A",
+  getCodAllowedLabel(customer),
+  customer.status ? "Active" : "Inactive",
+]
+
 // Export utility functions for customers
 export const exportCustomersToCSV = (customers, filename = "customers") => {
   if (!customers || customers.length === 0) {
@@ -9,17 +43,8 @@ export const exportCustomersToCSV = (customers, filename = "customers") => {
     return
   }
 
-  const headers = ["SI", "Name", "Email", "Phone", "Total Order", "Total Order Amount", "Joining Date", "Status"]
-  const rows = customers.map((customer, index) => [
-    customer.sl || index + 1,
-    customer.name || "N/A",
-    customer.email || "N/A",
-    customer.phone || "N/A",
-    customer.totalOrder || 0,
-    `$${(customer.totalOrderAmount || 0).toFixed(2)}`,
-    customer.joiningDate || "N/A",
-    customer.status ? "Active" : "Inactive"
-  ])
+  const headers = CUSTOMER_HEADERS
+  const rows = customers.map((customer, index) => buildCustomerRow(customer, index))
   
   // Escape commas and quotes in CSV
   const escapeCSV = (value) => {
@@ -57,17 +82,12 @@ export const exportCustomersToExcel = (customers, filename = "customers") => {
     return
   }
 
-  const headers = ["SI", "Name", "Email", "Phone", "Total Order", "Total Order Amount", "Joining Date", "Status"]
-  const rows = customers.map((customer, index) => [
-    customer.sl || index + 1,
-    customer.name || "N/A",
-    customer.email || "N/A",
-    customer.phone || "N/A",
-    customer.totalOrder || 0,
-    (customer.totalOrderAmount || 0).toFixed(2),
-    customer.joiningDate || "N/A",
-    customer.status ? "Active" : "Inactive"
-  ])
+  const headers = CUSTOMER_HEADERS
+  const rows = customers.map((customer, index) =>
+    buildCustomerRow(customer, index, { withCurrency: false }).map((cell, i) =>
+      i === 5 ? `${INR}${cell}` : cell
+    )
+  )
   
   // Create HTML table for better Excel compatibility
   const htmlContent = `
@@ -140,24 +160,17 @@ export const exportCustomersToPDF = (customers, filename = "customers") => {
         doc.text(`Exported on: ${exportDate} | Total Records: ${customers.length}`, 14, 22)
 
         // Prepare table data
-        const tableData = customers.map((customer, index) => [
-          customer.sl || index + 1,
-          customer.name || "N/A",
-          customer.email || "N/A",
-          customer.phone || "N/A",
-          customer.totalOrder || 0,
-          `$${(customer.totalOrderAmount || 0).toFixed(2)}`,
-          customer.joiningDate || "N/A",
-          customer.status ? "Active" : "Inactive"
-        ])
+        const tableData = customers.map((customer, index) =>
+          buildCustomerRow(customer, index)
+        )
 
         // Add table using autoTable
         autoTable(doc, {
-          head: [["SI", "Name", "Email", "Phone", "Total Order", "Total Order Amount", "Joining Date", "Status"]],
+          head: [CUSTOMER_HEADERS],
           body: tableData,
           startY: 28,
           styles: {
-            fontSize: 8,
+            fontSize: 7,
             cellPadding: 2,
           },
           headStyles: {
@@ -169,14 +182,15 @@ export const exportCustomersToPDF = (customers, filename = "customers") => {
             fillColor: [248, 250, 252],
           },
           columnStyles: {
-            0: { cellWidth: 15 }, // SI
-            1: { cellWidth: 35 }, // Name
-            2: { cellWidth: 45 }, // Email
-            3: { cellWidth: 30 }, // Phone
-            4: { cellWidth: 25 }, // Total Order
-            5: { cellWidth: 30 }, // Total Order Amount
-            6: { cellWidth: 30 }, // Joining Date
-            7: { cellWidth: 25 }, // Status
+            0: { cellWidth: 12 }, // SI
+            1: { cellWidth: 30 }, // Name
+            2: { cellWidth: 40 }, // Email
+            3: { cellWidth: 26 }, // Phone
+            4: { cellWidth: 20 }, // Total Order
+            5: { cellWidth: 28 }, // Total Order Amount
+            6: { cellWidth: 28 }, // Joining Date
+            7: { cellWidth: 22 }, // COD Allowed
+            8: { cellWidth: 22 }, // Status
           },
           margin: { top: 28, left: 14, right: 14 },
         })
@@ -216,6 +230,8 @@ export const exportCustomersToJSON = (customers, filename = "customers") => {
       totalOrders: customer.totalOrder || 0,
       totalOrderAmount: customer.totalOrderAmount || 0,
       joiningDate: customer.joiningDate || "N/A",
+      isCodAllowed: customer.isCodAllowed !== false,
+      codAllowed: getCodAllowedLabel(customer),
       status: customer.status ? "Active" : "Inactive",
       isActive: customer.status
     }))
@@ -234,5 +250,3 @@ export const exportCustomersToJSON = (customers, filename = "customers") => {
   document.body.removeChild(link)
   URL.revokeObjectURL(url)
 }
-
-

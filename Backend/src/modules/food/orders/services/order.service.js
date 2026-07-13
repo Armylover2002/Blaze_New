@@ -2630,6 +2630,15 @@ export async function createOrder(userId, dto) {
   const paymentCheck = assertPaymentMethodAllowed(paymentMethod, paymentSettings);
   if (!paymentCheck.allowed) {
     throw new ValidationError(paymentCheck.message);
+  // Enforce admin COD access flag — UI hide alone is not sufficient (API bypass).
+  if (isCash) {
+    const orderingUser = await FoodUser.findById(userId).select("isCodAllowed isActive").lean();
+    if (!orderingUser || orderingUser.isActive === false) {
+      throw new ForbiddenError("User account is deactivated");
+    }
+    if (orderingUser.isCodAllowed === false) {
+      throw new ForbiddenError("Cash on Delivery is not available for this account");
+    }
   }
 
   const pickupPoints = buildPickupPointsFromItems(items, sourceMap);

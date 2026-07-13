@@ -2,6 +2,8 @@ import mongoose from 'mongoose';
 import { FoodItem } from '../models/food.model.js';
 import { FoodNotification } from '../../../../core/notifications/models/notification.model.js';
 import { notifyOwnersSafely } from '../../../../core/notifications/firebase.service.js';
+import { computeNotificationExpiresAt } from '../../../../core/notifications/utils/notificationTtl.js';
+import { bulkWriteInChunks } from '../../../../core/notifications/utils/bulkWriteChunks.js';
 import { getIO, rooms } from '../../../../config/socket.js';
 
 const INACTIVE_WARNING = 'This category is currently inactive and is not available for use.';
@@ -110,7 +112,8 @@ export const notifyCategoryStatusChange = async (category, { isActive } = {}) =>
                     },
                     $setOnInsert: {
                         broadcastId: new mongoose.Types.ObjectId(),
-                        createdAt: now
+                        createdAt: now,
+                        expiresAt: computeNotificationExpiresAt(now)
                     }
                 },
                 upsert: true
@@ -118,7 +121,7 @@ export const notifyCategoryStatusChange = async (category, { isActive } = {}) =>
         }));
 
         if (operations.length) {
-            await FoodNotification.collection.bulkWrite(operations, { ordered: false });
+            await bulkWriteInChunks(FoodNotification.collection, operations, { ordered: false });
         }
 
         await notifyOwnersSafely(

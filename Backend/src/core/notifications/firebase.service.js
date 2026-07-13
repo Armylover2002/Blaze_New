@@ -447,44 +447,67 @@ export const sendNotificationToOwners = async (targets = [], payload = {}) => {
     return results;
 };
 
-export const notifyOwnersWithReport = async (targets = [], payload = {}) => {
+export const notifyOwnersWithReport = async (targets = [], payload = {}, options = {}) => {
+    const collectRecipients = options.collectRecipients === true;
     const uniqueTargets = Array.isArray(targets)
         ? [...new Map(targets.filter((t) => t?.ownerType && t?.ownerId).map((t) => [`${t.ownerType}:${t.ownerId}`, t])).values()]
         : [];
 
+    // Parallelize owners in bounded chunks — same per-recipient semantics as sequential loop.
+    const PUSH_OWNER_CONCURRENCY = 20;
     const perRecipient = [];
-    for (const target of uniqueTargets) {
-        const result = await sendNotificationToOwner({
-            ownerType: target.ownerType,
-            ownerId: target.ownerId,
-            platform: target.platform,
-            payload
-        });
-        perRecipient.push({
-            ownerType: target.ownerType,
-            ownerId: String(target.ownerId),
-            tokenCount: Number(result?.tokenCount || 0),
-            successCount: Number(result?.successCount || 0),
-            failureCount: Number(result?.failureCount || 0),
-            skipped: Boolean(result?.skipped),
-            reason: result?.reason || null,
-            error: result?.error || null
-        });
-    }
-
     const summary = {
-        attemptedRecipients: uniqueTargets.length,
-        recipientsWithSuccess: perRecipient.filter((row) => row.successCount > 0).length,
-        recipientsWithoutTokens: perRecipient.filter((row) => row.skipped && row.reason === 'NO_TOKENS').length,
-        recipientsWithFailures: perRecipient.filter((row) => row.failureCount > 0).length,
-        totalTokenAttempts: perRecipient.reduce((sum, row) => sum + row.tokenCount, 0),
-        totalTokenSuccess: perRecipient.reduce((sum, row) => sum + row.successCount, 0),
-        totalTokenFailures: perRecipient.reduce((sum, row) => sum + row.failureCount, 0)
+        attemptedRecipients: 0,
+        recipientsWithSuccess: 0,
+        recipientsWithoutTokens: 0,
+        recipientsWithFailures: 0,
+        totalTokenAttempts: 0,
+        totalTokenSuccess: 0,
+        totalTokenFailures: 0
     };
+
+    for (let i = 0; i < uniqueTargets.length; i += PUSH_OWNER_CONCURRENCY) {
+        const chunk = uniqueTargets.slice(i, i + PUSH_OWNER_CONCURRENCY);
+        const chunkResults = await Promise.all(
+            chunk.map(async (target) => {
+                const result = await sendNotificationToOwner({
+                    ownerType: target.ownerType,
+                    ownerId: target.ownerId,
+                    platform: target.platform,
+                    payload
+                });
+                return {
+                    ownerType: target.ownerType,
+                    ownerId: String(target.ownerId),
+                    tokenCount: Number(result?.tokenCount || 0),
+                    successCount: Number(result?.successCount || 0),
+                    failureCount: Number(result?.failureCount || 0),
+                    skipped: Boolean(result?.skipped),
+                    reason: result?.reason || null,
+                    error: result?.error || null
+                };
+            })
+        );
+
+        for (const row of chunkResults) {
+            summary.attemptedRecipients += 1;
+            if (row.successCount > 0) summary.recipientsWithSuccess += 1;
+            if (row.skipped && row.reason === 'NO_TOKENS') summary.recipientsWithoutTokens += 1;
+            if (row.failureCount > 0) summary.recipientsWithFailures += 1;
+            summary.totalTokenAttempts += row.tokenCount;
+            summary.totalTokenSuccess += row.successCount;
+            summary.totalTokenFailures += row.failureCount;
+        }
+
+        // Only retain per-recipient rows when explicitly requested (debug/dev).
+        if (collectRecipients) {
+            perRecipient.push(...chunkResults);
+        }
+    }
 
     return {
         summary,
-        recipients: perRecipient
+        recipients: collectRecipients ? perRecipient : []
     };
 };
 
