@@ -27,7 +27,6 @@ const NAV_TABS = [
     { id: "delivery", label: "Delivery", shortLabel: "Delivery", to: "/food/user", match: "delivery" },
     { id: "quick", label: "Quick", shortLabel: "Quick", to: "/quick", match: "quick" },
     { id: "under250", label: "Under 250", shortLabel: "₹250", to: "/food/user/under-250", match: "under250" },
-    { id: "dining", label: "Dining", shortLabel: "Dining", to: "/food/user/dining", match: "dining" },
     { id: "profile", label: "Profile", shortLabel: "Profile", to: null, match: "profile" },
 ]
 
@@ -61,7 +60,6 @@ export default function DesktopNavbar({ showLogo = true }) {
             : location.pathname
     const profileSource = new URLSearchParams(location.search).get("from")
     const isQuick = normalizedPath === "/quick" || normalizedPath.startsWith("/quick/")
-    const isDining = location.pathname === "/food/user/dining" || location.pathname === "/food/dining"
     const isUnder250 = location.pathname === "/food/user/under-250" || location.pathname === "/food/under-250"
     const isSharedFoodProfile =
         (normalizedPath === "/profile" || normalizedPath.startsWith("/profile/")) &&
@@ -71,14 +69,12 @@ export default function DesktopNavbar({ showLogo = true }) {
         location.pathname.startsWith("/food/profile") ||
         isSharedFoodProfile
     const isDelivery =
-        !isDining &&
         !isUnder250 &&
         !isProfile &&
         !isQuick &&
         (location.pathname === "/food/user" ||
             location.pathname === "/food" ||
             (location.pathname.startsWith("/food/user") &&
-                !location.pathname.includes("/dining") &&
                 !location.pathname.includes("/under-250") &&
                 !location.pathname.includes("/profile")))
     const isBannerRoute =
@@ -92,11 +88,9 @@ export default function DesktopNavbar({ showLogo = true }) {
         ? "quick"
         : isUnder250
             ? "under250"
-            : isDining
-                ? "dining"
-                : isProfile
-                    ? "profile"
-                    : "delivery"
+            : isProfile
+                ? "profile"
+                : "delivery"
 
     const isTransparentNav = isBannerRoute && !hasScrolledPastBanner
 

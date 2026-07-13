@@ -3,7 +3,6 @@ import { NavLink, useNavigate, useLocation } from "react-router-dom";
 import {
   Store,
   FileText,
-  Calendar,
   History,
   Book,
   LayoutGrid,
@@ -90,7 +89,6 @@ export default function DesktopSidebar() {
       items: [
         { name: "Outlet info", path: "/food/restaurant/outlet-info", icon: Info },
         { name: "Outlet timings", path: "/food/restaurant/outlet-timings", icon: Clock },
-        { name: "Dining reservations", path: "/food/restaurant/reservations", icon: Calendar },
       ],
     },
     {
