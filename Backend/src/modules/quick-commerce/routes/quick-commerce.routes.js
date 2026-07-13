@@ -83,6 +83,7 @@ import {
   updateAdminZone,
   deleteAdminZone,
   listPublicZones,
+  detectQuickZonePublic,
   getAdminExperienceSections,
   createAdminExperienceSection,
   updateAdminExperienceSection,
@@ -181,6 +182,7 @@ router.get("/products/:productId/reviews", getProductReviews);
 router.post("/products/reviews", optionalAuth, submitProductReview);
 router.get("/products/:productId", getProductById);
 router.get("/zones/public", listPublicZones);
+router.get("/zones/detect", detectQuickZonePublic);
 router.get("/billing/settings", getPublicBillingSettings);
 router.get("/stores/:storeId", getStoreDetails);
 

@@ -7,6 +7,7 @@ import { Seller } from '../seller/models/seller.model.js';
 import { SellerOrder } from '../seller/models/sellerOrder.model.js';
 import { QuickZone } from '../models/quick_zone.model.js';
 import { assertNoZoneOverlap, ZONE_OVERLAP_MESSAGE } from '../../../utils/zoneOverlap.js';
+import { detectQuickZoneForPoint } from '../services/quick-zone-lookup.service.js';
 import { resolveQuickOrderCancellationReason } from '../utils/cancellation.helpers.js';
 import { resolveQuickOrderCustomer } from '../utils/customer.helpers.js';
 import { uploadImageBuffer } from '../../../services/cloudinary.service.js';
@@ -1290,6 +1291,22 @@ export const listPublicZones = async (_req, res) => {
     success: true,
     message: 'Zones fetched successfully',
     data: { zones },
+  });
+};
+
+export const detectQuickZonePublic = async (req, res) => {
+  const lat = Number(req.query.lat);
+  const lng = Number(req.query.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return res.status(400).json({ success: false, message: 'lat and lng are required' });
+  }
+
+  const data = await detectQuickZoneForPoint(lat, lng);
+
+  return res.json({
+    success: true,
+    message: data.status === 'IN_SERVICE' ? 'Zone detected' : 'Out of service',
+    data,
   });
 };
 

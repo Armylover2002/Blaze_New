@@ -17,6 +17,7 @@ import * as foodTransactionService from '../../food/orders/services/foodTransact
 import { FoodTransaction } from '../../food/orders/models/foodTransaction.model.js';
 import { emitQuickCommerceStatusUpdate } from '../services/quickStatusRealtime.service.js';
 import { getSellerLocation, getOrderAddressPoint } from '../services/quickOrder.service.js';
+import { assertQuickDeliveryInServiceArea } from '../services/quick-zone-lookup.service.js';
 import { roadDistanceKm } from '../../food/orders/services/order.helpers.js';
 import { buildReturnEligibilityMeta } from '../utils/return.helpers.js';
 import {
@@ -497,16 +498,37 @@ export const placeOrder = async (req, res) => {
       }
     }
 
+    const deliveryCoords = getOrderAddressPoint({ deliveryAddress });
+    if (!deliveryCoords) {
+      return res.status(400).json({
+        success: false,
+        code: 'DELIVERY_COORDS_REQUIRED',
+        message: 'Delivery location coordinates are required',
+      });
+    }
+
+    try {
+      await assertQuickDeliveryInServiceArea(deliveryCoords.lat, deliveryCoords.lng);
+    } catch (zoneErr) {
+      if (zoneErr instanceof ValidationError) {
+        return res.status(400).json({
+          success: false,
+          code: 'OUT_OF_SERVICE',
+          message: zoneErr.message,
+        });
+      }
+      throw zoneErr;
+    }
+
     // Calculate precise distance between seller and delivery address
     const firstProduct = products[0];
     const sellerId = firstProduct?.sellerId;
     const seller = sellerId ? await Seller.findById(sellerId).select('location').lean() : null;
 
     let distanceKm = 0.1; // Default fallback distance if coordinates are missing
-    if (seller && deliveryAddress) {
+    if (seller && deliveryCoords) {
       const sellerCoords = getSellerLocation(seller);
-      const deliveryCoords = getOrderAddressPoint({ deliveryAddress });
-      if (sellerCoords && deliveryCoords) {
+      if (sellerCoords) {
         distanceKm = await roadDistanceKm(sellerCoords.lat, sellerCoords.lng, deliveryCoords.lat, deliveryCoords.lng);
       }
     }
