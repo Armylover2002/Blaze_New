@@ -5,6 +5,8 @@ import { FoodFeeSettings } from '../../admin/models/feeSettings.model.js';
 import { FoodOffer } from '../../admin/models/offer.model.js';
 import { FoodOfferUsage } from '../../admin/models/offerUsage.model.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
+import { resolveRestaurantCommissionPercentage } from '../../constants/commission.constants.js';
+import { roadDistanceKm } from './order.helpers.js';
 
 function roundCurrency(value) {
   const num = Number(value);
@@ -109,20 +111,6 @@ function resolveSponsorRule(subtotal, distanceKm, sponsorRules = []) {
   }) || null;
 }
 
-function haversineKm(lat1, lon1, lat2, lon2) {
-  const R = 6371;
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLon = ((lon2 - lon1) * Math.PI) / 180;
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLon / 2) *
-      Math.sin(dLon / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c;
-}
-
 export async function calculateOrderPricing(userId, dto) {
   const restaurant = await FoodRestaurant.findById(dto.restaurantId)
     .select("status location commissionPercentage")
@@ -164,7 +152,7 @@ export async function calculateOrderPricing(userId, dto) {
     restaurantCoords.length === 2 &&
     Array.isArray(customerCoords) &&
     customerCoords.length === 2
-      ? haversineKm(
+      ? await roadDistanceKm(
           Number(restaurantCoords[1]),
           Number(restaurantCoords[0]),
           Number(customerCoords[1]),
@@ -322,7 +310,9 @@ export async function calculateOrderPricing(userId, dto) {
     subtotal + packagingFee + deliveryFee + platformFee + tax - discount,
   );
 
-  const commissionPercentage = Number(restaurant?.commissionPercentage || 0);
+  const commissionPercentage = resolveRestaurantCommissionPercentage(
+    restaurant?.commissionPercentage,
+  );
   const restaurantCommission = roundCurrency(subtotal * (commissionPercentage / 100));
 
   return {

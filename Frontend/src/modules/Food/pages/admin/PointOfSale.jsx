@@ -1,19 +1,57 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Search, TrendingUp, TrendingDown, IndianRupee, ShoppingCart, XCircle, Star, Calendar, BarChart3, Users, Package } from 'lucide-react'
 import { adminAPI } from '@food/api'
 const debugLog = (...args) => { }
 const debugWarn = (...args) => { }
 const debugError = (...args) => { }
 
+const looksLikeOrderId = (value) => {
+  const query = String(value || '').trim()
+  if (!query) return false
+  if (/^FOD-/i.test(query)) return true
+  if (/^[a-f0-9]{24}$/i.test(query)) return true
+  return false
+}
+
+const emptyAnalyticsData = {
+  totalOrders: 0,
+  cancelledOrders: 0,
+  completedOrders: 0,
+  averageRating: 0,
+  totalRatings: 0,
+  monthlyProfit: 0,
+  yearlyProfit: 0,
+  averageOrderValue: 0,
+  totalRevenue: 0,
+  restaurantEarning: 0,
+  restaurantProfit: 0,
+  monthlyOrders: 0,
+  yearlyOrders: 0,
+  averageMonthlyProfit: 0,
+  averageYearlyProfit: 0,
+  status: 'active',
+  joinDate: '',
+  totalCustomers: 0,
+  repeatCustomers: 0,
+  cancellationRate: 0,
+  completionRate: 0,
+  orderId: '',
+  orderStatus: '',
+  orderCreatedAt: '',
+}
+
 
 export default function PointOfSale() {
   const [restaurants, setRestaurants] = useState([])
   const [selectedRestaurant, setSelectedRestaurant] = useState('')
+  const [selectedOrderId, setSelectedOrderId] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
   const [loading, setLoading] = useState(false)
   const [restaurantData, setRestaurantData] = useState(null)
   const [paymentSummary, setPaymentSummary] = useState(null)
   const [showSearchResults, setShowSearchResults] = useState(false)
+  const [orderSearchResults, setOrderSearchResults] = useState([])
+  const [searchError, setSearchError] = useState('')
 
   const getRestaurantName = (restaurant) => {
     return String(
@@ -62,67 +100,86 @@ export default function PointOfSale() {
   }
 
   // Default analytics shape before the API responds
-  const [analyticsData, setAnalyticsData] = useState({
-    totalOrders: 0,
-    cancelledOrders: 0,
-    completedOrders: 0,
-    averageRating: 0,
-    totalRatings: 0,
-    monthlyProfit: 0,
-    yearlyProfit: 0,
-    averageOrderValue: 0,
-    totalRevenue: 0,
-    restaurantEarning: 0,
-    restaurantProfit: 0,
-    monthlyOrders: 0,
-    yearlyOrders: 0,
-    averageMonthlyProfit: 0,
-    averageYearlyProfit: 0,
-    status: 'active',
-    joinDate: '',
-    totalCustomers: 0,
-    repeatCustomers: 0,
-    cancellationRate: 0,
-    completionRate: 0
-  })
+  const [analyticsData, setAnalyticsData] = useState(emptyAnalyticsData)
+
+  const applyAnalyticsResponse = useCallback((restaurant, analytics, apiPaymentSummary) => {
+    setRestaurantData(restaurant)
+    setPaymentSummary(apiPaymentSummary || null)
+    setAnalyticsData({
+      totalOrders: Number(analytics.totalOrders) || 0,
+      cancelledOrders: Number(analytics.cancelledOrders) || 0,
+      completedOrders: Number(analytics.completedOrders) || 0,
+      averageRating: Number(analytics.averageRating) || 0,
+      totalRatings: Number(analytics.totalRatings) || 0,
+      monthlyProfit: analytics.monthlyProfit || 0,
+      yearlyProfit: analytics.yearlyProfit || 0,
+      averageOrderValue: analytics.averageOrderValue || 0,
+      totalRevenue: analytics.totalRevenue || 0,
+      restaurantEarning: analytics.restaurantEarning || 0,
+      restaurantProfit: analytics.restaurantProfit || 0,
+      monthlyOrders: analytics.monthlyOrders || 0,
+      yearlyOrders: analytics.yearlyOrders || 0,
+      averageMonthlyProfit: analytics.averageMonthlyProfit || 0,
+      averageYearlyProfit: analytics.averageYearlyProfit || 0,
+      status: analytics.status || 'inactive',
+      joinDate: analytics.joinDate || restaurant?.createdAt || new Date(),
+      totalCustomers: analytics.totalCustomers || 0,
+      repeatCustomers: analytics.repeatCustomers || 0,
+      cancellationRate: analytics.cancellationRate || 0,
+      completionRate: analytics.completionRate || 0,
+      orderId: analytics.orderId || '',
+      orderStatus: analytics.orderStatus || '',
+      orderCreatedAt: analytics.orderCreatedAt || '',
+    })
+  }, [])
+
+  const resetAnalyticsState = useCallback(() => {
+    setRestaurantData(null)
+    setPaymentSummary(null)
+    setAnalyticsData(emptyAnalyticsData)
+    setSearchError('')
+  }, [])
 
   // Fetch restaurants list
   useEffect(() => {
     fetchRestaurants()
   }, [])
 
-  // Fetch restaurant analytics when restaurant is selected
+  // Fetch restaurant or order analytics when selection changes
   useEffect(() => {
-    if (selectedRestaurant) {
+    if (selectedOrderId) {
+      fetchOrderAnalytics(selectedOrderId)
+    } else if (selectedRestaurant) {
       fetchRestaurantAnalytics(selectedRestaurant)
     } else {
-      setRestaurantData(null)
-      setPaymentSummary(null)
-      setAnalyticsData({
-        totalOrders: 0,
-        cancelledOrders: 0,
-        completedOrders: 0,
-        averageRating: 0,
-        totalRatings: 0,
-        monthlyProfit: 0,
-        yearlyProfit: 0,
-        averageOrderValue: 0,
-        totalRevenue: 0,
-        restaurantEarning: 0,
-        restaurantProfit: 0,
-        monthlyOrders: 0,
-        yearlyOrders: 0,
-        averageMonthlyProfit: 0,
-        averageYearlyProfit: 0,
-        status: 'active',
-        joinDate: '',
-        totalCustomers: 0,
-        repeatCustomers: 0,
-        cancellationRate: 0,
-        completionRate: 0
-      })
+      resetAnalyticsState()
     }
-  }, [selectedRestaurant])
+  }, [selectedRestaurant, selectedOrderId])
+
+  // Debounced order search for order ID lookups
+  useEffect(() => {
+    const query = searchQuery.trim()
+    if (!looksLikeOrderId(query)) {
+      setOrderSearchResults([])
+      return undefined
+    }
+
+    const timer = setTimeout(async () => {
+      try {
+        const response = await adminAPI.searchPosAnalytics(query)
+        if (response?.data?.success) {
+          setOrderSearchResults(response.data.data?.orders || [])
+        } else {
+          setOrderSearchResults([])
+        }
+      } catch (error) {
+        debugError('Error searching orders:', error)
+        setOrderSearchResults([])
+      }
+    }, 300)
+
+    return () => clearTimeout(timer)
+  }, [searchQuery])
 
   const fetchRestaurants = async () => {
     try {
@@ -142,78 +199,24 @@ export default function PointOfSale() {
   const fetchRestaurantAnalytics = async (restaurantId) => {
     try {
       setLoading(true)
+      setSearchError('')
 
-      // Validate restaurantId
       if (!restaurantId) {
         debugError('Restaurant ID is required')
         return
       }
 
       debugLog('Fetching analytics for restaurant:', restaurantId)
-
-      // Fetch comprehensive restaurant analytics from backend
       const analyticsResponse = await adminAPI.getRestaurantAnalytics(restaurantId)
-
       debugLog('Analytics response:', analyticsResponse)
 
       if (analyticsResponse?.data?.success && analyticsResponse.data.data) {
         const { restaurant, analytics, paymentSummary: apiPaymentSummary } = analyticsResponse.data.data
-
         debugLog('Analytics data received:', analytics)
-        // Set restaurant data
-        setRestaurantData(restaurant)
-        setPaymentSummary(apiPaymentSummary || null)
-
-        // Set analytics data - ensure all values are numbers, not null/undefined
-        setAnalyticsData({
-          totalOrders: Number(analytics.totalOrders) || 0,
-          cancelledOrders: Number(analytics.cancelledOrders) || 0,
-          completedOrders: Number(analytics.completedOrders) || 0,
-          averageRating: Number(analytics.averageRating) || 0,
-          totalRatings: Number(analytics.totalRatings) || 0,
-          monthlyProfit: analytics.monthlyProfit || 0,
-          yearlyProfit: analytics.yearlyProfit || 0,
-          averageOrderValue: analytics.averageOrderValue || 0,
-          totalRevenue: analytics.totalRevenue || 0,
-          restaurantEarning: analytics.restaurantEarning || 0,
-          restaurantProfit: analytics.restaurantProfit || 0,
-          monthlyOrders: analytics.monthlyOrders || 0,
-          yearlyOrders: analytics.yearlyOrders || 0,
-          averageMonthlyProfit: analytics.averageMonthlyProfit || 0,
-          averageYearlyProfit: analytics.averageYearlyProfit || 0,
-          status: analytics.status || 'inactive',
-          joinDate: analytics.joinDate || restaurant.createdAt || new Date(),
-          totalCustomers: analytics.totalCustomers || 0,
-          repeatCustomers: analytics.repeatCustomers || 0,
-          cancellationRate: analytics.cancellationRate || 0,
-          completionRate: analytics.completionRate || 0
-        })
+        applyAnalyticsResponse(restaurant, analytics, apiPaymentSummary)
       } else {
-        // Fallback to empty data if API fails
-        setPaymentSummary(null)
-        setAnalyticsData({
-          totalOrders: 0,
-          cancelledOrders: 0,
-          completedOrders: 0,
-          averageRating: 0,
-          totalRatings: 0,
-          monthlyProfit: 0,
-          yearlyProfit: 0,
-          averageOrderValue: 0,
-          totalRevenue: 0,
-          restaurantEarning: 0,
-          restaurantProfit: 0,
-          monthlyOrders: 0,
-          yearlyOrders: 0,
-          averageMonthlyProfit: 0,
-          averageYearlyProfit: 0,
-          status: 'inactive',
-          joinDate: new Date(),
-          totalCustomers: 0,
-          repeatCustomers: 0,
-          cancellationRate: 0,
-          completionRate: 0
-        })
+        resetAnalyticsState()
+        setAnalyticsData({ ...emptyAnalyticsData, status: 'inactive', joinDate: new Date() })
       }
     } catch (error) {
       debugError('Error fetching restaurant analytics:', error)
@@ -224,40 +227,55 @@ export default function PointOfSale() {
         restaurantId: selectedRestaurant
       })
 
-      // Show user-friendly error message
       if (error?.response?.status === 404) {
-        debugWarn('Restaurant not found')
+        setSearchError('Restaurant not found')
       } else if (error?.response?.status === 400) {
-        debugWarn('Invalid restaurant ID')
+        setSearchError('Invalid restaurant ID')
       } else {
-        debugWarn('Failed to fetch analytics. Please try again.')
+        setSearchError('Failed to fetch analytics. Please try again.')
       }
 
-      // Set empty data on error
-      setPaymentSummary(null)
-      setAnalyticsData({
-        totalOrders: 0,
-        cancelledOrders: 0,
-        completedOrders: 0,
-        averageRating: 0,
-        totalRatings: 0,
-        monthlyProfit: 0,
-        yearlyProfit: 0,
-        averageOrderValue: 0,
-        totalRevenue: 0,
-        restaurantEarning: 0,
-        restaurantProfit: 0,
-        monthlyOrders: 0,
-        yearlyOrders: 0,
-        averageMonthlyProfit: 0,
-        averageYearlyProfit: 0,
-        status: 'inactive',
-        joinDate: new Date(),
-        totalCustomers: 0,
-        repeatCustomers: 0,
-        cancellationRate: 0,
-        completionRate: 0
-      })
+      resetAnalyticsState()
+      setAnalyticsData({ ...emptyAnalyticsData, status: 'inactive', joinDate: new Date() })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const fetchOrderAnalytics = async (orderId) => {
+    try {
+      setLoading(true)
+      setSearchError('')
+
+      if (!orderId) {
+        debugError('Order ID is required')
+        return
+      }
+
+      debugLog('Fetching analytics for order:', orderId)
+      const analyticsResponse = await adminAPI.getOrderPosAnalytics(orderId)
+      debugLog('Order analytics response:', analyticsResponse)
+
+      if (analyticsResponse?.data?.success && analyticsResponse.data.data) {
+        const { restaurant, analytics, paymentSummary: apiPaymentSummary } = analyticsResponse.data.data
+        applyAnalyticsResponse(restaurant, analytics, apiPaymentSummary)
+      } else {
+        resetAnalyticsState()
+        setAnalyticsData({ ...emptyAnalyticsData, status: 'inactive', joinDate: new Date() })
+      }
+    } catch (error) {
+      debugError('Error fetching order analytics:', error)
+
+      if (error?.response?.status === 404) {
+        setSearchError(error?.response?.data?.message || 'Order not found')
+      } else if (error?.response?.status === 400) {
+        setSearchError(error?.response?.data?.message || 'Invalid order ID')
+      } else {
+        setSearchError('Failed to fetch order analytics. Please try again.')
+      }
+
+      resetAnalyticsState()
+      setAnalyticsData({ ...emptyAnalyticsData, status: 'inactive', joinDate: new Date() })
     } finally {
       setLoading(false)
     }
@@ -273,26 +291,39 @@ export default function PointOfSale() {
     )
   })
 
-  // Handle restaurant selection from search
+  const hasSearchResults = filteredRestaurants.length > 0 || orderSearchResults.length > 0
+
   const handleRestaurantSelect = (restaurantId) => {
+    setSelectedOrderId('')
     setSelectedRestaurant(restaurantId)
     const selected = restaurants.find(r => r._id === restaurantId)
     if (selected) {
       setSearchQuery(selected.name)
     }
     setShowSearchResults(false)
+    setSearchError('')
   }
 
-  // Handle search input change
+  const handleOrderSelect = (order) => {
+    const orderKey = order.orderId || order._id
+    setSelectedOrderId(orderKey)
+    setSelectedRestaurant(String(order.restaurantId || ''))
+    setSearchQuery(`Order ${order.orderId || order._id}`)
+    setShowSearchResults(false)
+    setSearchError('')
+  }
+
   const handleSearchChange = (e) => {
     const value = e.target.value
     setSearchQuery(value)
     setShowSearchResults(value.trim().length > 0)
 
-    // If search is cleared, clear selection
     if (!value.trim()) {
       setSelectedRestaurant('')
+      setSelectedOrderId('')
+      setOrderSearchResults([])
       setShowSearchResults(false)
+      setSearchError('')
     }
   }
 
@@ -305,9 +336,12 @@ export default function PointOfSale() {
   }
 
   const getSelectedRestaurantName = () => {
+    if (restaurantData?.restaurantName) return restaurantData.restaurantName
     const restaurant = restaurants.find(r => r._id === selectedRestaurant)
     return restaurant?.name || 'Select Restaurant'
   }
+
+  const hasSelection = Boolean(selectedRestaurant || selectedOrderId)
 
   return (
     <div className="min-h-[calc(100vh-5rem)] bg-neutral-200 overflow-x-hidden w-full" style={{ maxWidth: '100vw', boxSizing: 'border-box' }}>
@@ -324,7 +358,7 @@ export default function PointOfSale() {
           <div className="flex flex-col gap-4">
             <div>
               <label className="block text-sm font-medium text-[#334257] mb-2">
-                Search Restaurant by Name or ID <span className="text-red-500">*</span>
+                Search by Restaurant Name, Restaurant ID, or Order ID <span className="text-red-500">*</span>
               </label>
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5 z-10" />
@@ -341,12 +375,12 @@ export default function PointOfSale() {
                     // Delay to allow click on results
                     setTimeout(() => setShowSearchResults(false), 200)
                   }}
-                  placeholder="Type restaurant name or ID to search..."
+                  placeholder="Search by Restaurant Name, Restaurant ID, or Order ID"
                   className="w-full h-11 pl-10 pr-3 rounded-md border border-[#e3e6ef] bg-white text-sm text-[#4a5671] focus:outline-none focus:ring-1 focus:ring-[#006fbd]"
                 />
 
                 {/* Search Results Dropdown */}
-                {showSearchResults && filteredRestaurants.length > 0 && (
+                {showSearchResults && hasSearchResults && (
                   <div className="absolute z-50 w-full mt-1 bg-white border border-[#e3e6ef] rounded-md shadow-lg max-h-60 overflow-y-auto">
                     {filteredRestaurants.map(restaurant => (
                       <button
@@ -361,9 +395,34 @@ export default function PointOfSale() {
                         <div className="flex items-center justify-between">
                           <div>
                             <p className="text-sm font-medium text-[#334257]">{restaurant.name}</p>
-                            <p className="text-xs text-[#8a94aa]">ID: {restaurant.restaurantId || restaurant._id}</p>
+                            <p className="text-xs text-[#8a94aa]">Restaurant ID: {restaurant.restaurantId || restaurant._id}</p>
                           </div>
-                          {selectedRestaurant === restaurant._id && (
+                          {!selectedOrderId && selectedRestaurant === restaurant._id && (
+                            <div className="w-2 h-2 bg-[#006fbd] rounded-full"></div>
+                          )}
+                        </div>
+                      </button>
+                    ))}
+                    {orderSearchResults.map(order => (
+                      <button
+                        key={order._id || order.orderId}
+                        type="button"
+                        onMouseDown={(e) => {
+                          e.preventDefault()
+                          handleOrderSelect(order)
+                        }}
+                        className="w-full px-4 py-3 text-left hover:bg-[#f0f7ff] cursor-pointer border-b border-[#e3e6ef] last:border-b-0 transition-colors"
+                      >
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="text-sm font-medium text-[#334257]">Order #{order.orderId}</p>
+                            <p className="text-xs text-[#8a94aa]">
+                              {order.restaurantName || 'Restaurant'}
+                              {order.restaurantCode ? ` • ${order.restaurantCode}` : ''}
+                              {order.orderStatus ? ` • ${order.orderStatus}` : ''}
+                            </p>
+                          </div>
+                          {selectedOrderId === order.orderId && (
                             <div className="w-2 h-2 bg-[#006fbd] rounded-full"></div>
                           )}
                         </div>
@@ -372,17 +431,23 @@ export default function PointOfSale() {
                   </div>
                 )}
 
-                {/* No Results Message */}
-                {showSearchResults && searchQuery.trim() && filteredRestaurants.length === 0 && (
+                {showSearchResults && searchQuery.trim() && !hasSearchResults && (
                   <div className="absolute z-50 w-full mt-1 bg-white border border-[#e3e6ef] rounded-md shadow-lg p-4">
-                    <p className="text-sm text-[#8a94aa] text-center">No restaurants found matching "{searchQuery}"</p>
+                    <p className="text-sm text-[#8a94aa] text-center">
+                      No restaurants or orders found matching "{searchQuery}"
+                    </p>
                   </div>
                 )}
               </div>
-              {selectedRestaurant && (
+              {hasSelection && (
                 <p className="text-xs text-green-600 mt-2">
-                  Selected: {getSelectedRestaurantName()}
+                  {selectedOrderId
+                    ? `Selected Order: ${selectedOrderId} (${getSelectedRestaurantName()})`
+                    : `Selected: ${getSelectedRestaurantName()}`}
                 </p>
+              )}
+              {searchError && (
+                <p className="text-xs text-red-600 mt-2">{searchError}</p>
               )}
             </div>
 
@@ -395,11 +460,15 @@ export default function PointOfSale() {
                 <select
                   value={selectedRestaurant}
                   onChange={(e) => {
+                    setSelectedOrderId('')
                     setSelectedRestaurant(e.target.value)
                     const selected = restaurants.find(r => r._id === e.target.value)
                     if (selected) {
                       setSearchQuery(selected.name)
+                    } else {
+                      setSearchQuery('')
                     }
+                    setSearchError('')
                   }}
                   className="w-full h-11 rounded-md border border-[#e3e6ef] bg-white px-3 pr-10 text-sm text-[#4a5671] focus:outline-none focus:ring-1 focus:ring-[#006fbd]"
                 >
@@ -416,16 +485,32 @@ export default function PointOfSale() {
         </div>
 
         {/* Analytics Dashboard */}
-        {selectedRestaurant && !loading ? (
+        {hasSelection && !loading ? (
           <div className="space-y-6">
             {/* Restaurant Header Info */}
             <div className="bg-white rounded-lg shadow-sm border border-[#e3e6ef] p-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <h2 className="text-xl font-bold text-[#334257] mb-1">{getSelectedRestaurantName()}</h2>
-                  <p className="text-sm text-[#8a94aa]">
-                    Restaurant ID: {restaurants.find(r => r._id === selectedRestaurant)?.restaurantId || selectedRestaurant}
-                  </p>
+                  {selectedOrderId ? (
+                    <>
+                      <h2 className="text-xl font-bold text-[#334257] mb-1">Order #{selectedOrderId}</h2>
+                      <p className="text-sm text-[#8a94aa]">
+                        Restaurant: {getSelectedRestaurantName()}
+                      </p>
+                      {analyticsData.orderStatus && (
+                        <p className="text-sm text-[#8a94aa]">
+                          Order Status: {analyticsData.orderStatus}
+                        </p>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <h2 className="text-xl font-bold text-[#334257] mb-1">{getSelectedRestaurantName()}</h2>
+                      <p className="text-sm text-[#8a94aa]">
+                        Restaurant ID: {restaurants.find(r => r._id === selectedRestaurant)?.restaurantId || selectedRestaurant}
+                      </p>
+                    </>
+                  )}
                 </div>
                 <div className={`px-4 py-2 rounded-full text-sm font-semibold ${analyticsData.status === 'active'
                     ? 'bg-green-100 text-green-700'
@@ -714,19 +799,21 @@ export default function PointOfSale() {
               </div>
             </div>
           </div>
-        ) : selectedRestaurant && loading ? (
+        ) : hasSelection && loading ? (
           <div className="bg-white rounded-lg shadow-sm border border-[#e3e6ef] p-12 text-center">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#006fbd] mx-auto mb-4"></div>
-            <p className="text-sm text-[#8a94aa]">Loading restaurant analytics...</p>
+            <p className="text-sm text-[#8a94aa]">
+              {selectedOrderId ? 'Loading order analytics...' : 'Loading restaurant analytics...'}
+            </p>
           </div>
         ) : (
           <div className="bg-white rounded-lg shadow-sm border border-[#e3e6ef] p-12 text-center">
             <div className="w-16 h-16 rounded-full border-2 border-dashed border-[#d1d7e6] flex items-center justify-center mx-auto mb-4">
               <Search className="w-8 h-8 text-[#8a94aa]" />
             </div>
-            <p className="text-base font-medium text-[#334257] mb-2">Select a Restaurant</p>
+            <p className="text-base font-medium text-[#334257] mb-2">Select a Restaurant or Order</p>
             <p className="text-sm text-[#8a94aa] max-w-md mx-auto">
-              Please select a restaurant from the dropdown above to view detailed analytics, profit information, and payment details.
+              Search by restaurant name, restaurant ID, or order ID above to view detailed analytics, profit information, and payment details.
             </p>
           </div>
         )}

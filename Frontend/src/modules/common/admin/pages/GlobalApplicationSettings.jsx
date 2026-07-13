@@ -137,6 +137,8 @@ const GlobalApplicationSettings = () => {
     email: "",
     phoneNumber: "",
     address: "",
+    codEnabled: true,
+    onlineEnabled: true,
   });
 
   const fetchSettings = async () => {
@@ -152,27 +154,12 @@ const GlobalApplicationSettings = () => {
           email: settings.email || "",
           phoneNumber: settings.phone?.number || "",
           address: settings.address || "",
+          codEnabled: settings.codEnabled !== false,
+          onlineEnabled: settings.onlineEnabled !== false,
         });
 
-        if (settings.adminLogo?.url) setAdminLogoPreview(settings.adminLogo.url);
-        if (settings.adminFavicon?.url) setAdminFaviconPreview(settings.adminFavicon.url);
-
-        if (settings.userLogo?.url) setUserLogoPreview(settings.userLogo.url);
-        if (settings.userFavicon?.url) setUserFaviconPreview(settings.userFavicon.url);
-
-        if (settings.deliveryLogo?.url) setDeliveryLogoPreview(settings.deliveryLogo.url);
-        if (settings.deliveryFavicon?.url) setDeliveryFaviconPreview(settings.deliveryFavicon.url);
-
-        if (settings.restaurantLogo?.url) setRestaurantLogoPreview(settings.restaurantLogo.url);
-        if (settings.restaurantFavicon?.url) setRestaurantFaviconPreview(settings.restaurantFavicon.url);
-
-        if (settings.sellerLogo?.url) setSellerLogoPreview(settings.sellerLogo.url);
-        if (settings.sellerFavicon?.url) setSellerFaviconPreview(settings.sellerFavicon.url);
-
-        if (settings.sellerLoginBanner?.url) setSellerLoginBannerPreview(settings.sellerLoginBanner.url);
+        syncMediaStateFromSettings(settings);
         setSellerLoginBannerActive(settings.sellerLoginBanner?.active !== false);
-
-        if (settings.restaurantLoginBanner?.url) setRestaurantLoginBannerPreview(settings.restaurantLoginBanner.url);
         setRestaurantLoginBannerActive(settings.restaurantLoginBanner?.active !== false);
       }
     } catch (err) {
@@ -198,6 +185,37 @@ const GlobalApplicationSettings = () => {
     }));
   };
 
+  const buildMediaUrlPayload = (preview, file) => (
+    (file || preview) ? undefined : ""
+  );
+
+  const syncMediaStateFromSettings = (settings) => {
+    setAdminLogoPreview(settings.adminLogo?.url || null);
+    setAdminLogoFile(null);
+    setAdminFaviconPreview(settings.adminFavicon?.url || null);
+    setAdminFaviconFile(null);
+    setUserLogoPreview(settings.userLogo?.url || null);
+    setUserLogoFile(null);
+    setUserFaviconPreview(settings.userFavicon?.url || null);
+    setUserFaviconFile(null);
+    setDeliveryLogoPreview(settings.deliveryLogo?.url || null);
+    setDeliveryLogoFile(null);
+    setDeliveryFaviconPreview(settings.deliveryFavicon?.url || null);
+    setDeliveryFaviconFile(null);
+    setRestaurantLogoPreview(settings.restaurantLogo?.url || null);
+    setRestaurantLogoFile(null);
+    setRestaurantFaviconPreview(settings.restaurantFavicon?.url || null);
+    setRestaurantFaviconFile(null);
+    setSellerLogoPreview(settings.sellerLogo?.url || null);
+    setSellerLogoFile(null);
+    setSellerFaviconPreview(settings.sellerFavicon?.url || null);
+    setSellerFaviconFile(null);
+    setSellerLoginBannerPreview(settings.sellerLoginBanner?.url || null);
+    setSellerLoginBannerFile(null);
+    setRestaurantLoginBannerPreview(settings.restaurantLoginBanner?.url || null);
+    setRestaurantLoginBannerFile(null);
+  };
+
   const handleUpdate = async () => {
     try {
       if (!formData.companyName.trim()) {
@@ -211,9 +229,21 @@ const GlobalApplicationSettings = () => {
         email: formData.email,
         phoneNumber: formData.phoneNumber,
         address: formData.address,
-        sellerLoginBannerUrl: sellerLoginBannerPreview ? undefined : "",
+        codEnabled: formData.codEnabled,
+        onlineEnabled: formData.onlineEnabled,
+        adminLogoUrl: buildMediaUrlPayload(adminLogoPreview, adminLogoFile),
+        adminFaviconUrl: buildMediaUrlPayload(adminFaviconPreview, adminFaviconFile),
+        userLogoUrl: buildMediaUrlPayload(userLogoPreview, userLogoFile),
+        userFaviconUrl: buildMediaUrlPayload(userFaviconPreview, userFaviconFile),
+        deliveryLogoUrl: buildMediaUrlPayload(deliveryLogoPreview, deliveryLogoFile),
+        deliveryFaviconUrl: buildMediaUrlPayload(deliveryFaviconPreview, deliveryFaviconFile),
+        restaurantLogoUrl: buildMediaUrlPayload(restaurantLogoPreview, restaurantLogoFile),
+        restaurantFaviconUrl: buildMediaUrlPayload(restaurantFaviconPreview, restaurantFaviconFile),
+        sellerLogoUrl: buildMediaUrlPayload(sellerLogoPreview, sellerLogoFile),
+        sellerFaviconUrl: buildMediaUrlPayload(sellerFaviconPreview, sellerFaviconFile),
+        sellerLoginBannerUrl: buildMediaUrlPayload(sellerLoginBannerPreview, sellerLoginBannerFile),
         sellerLoginBannerActive: sellerLoginBannerActive,
-        restaurantLoginBannerUrl: restaurantLoginBannerPreview ? undefined : "",
+        restaurantLoginBannerUrl: buildMediaUrlPayload(restaurantLoginBannerPreview, restaurantLoginBannerFile),
         restaurantLoginBannerActive: restaurantLoginBannerActive,
       };
 
@@ -242,6 +272,7 @@ const GlobalApplicationSettings = () => {
 
       if (updatedSettings) {
         setCachedSettings(updatedSettings);
+        syncMediaStateFromSettings(updatedSettings);
       }
       toast.success('Configuration saved successfully!');
     } catch (err) {
@@ -290,6 +321,38 @@ const GlobalApplicationSettings = () => {
             <InputField label="Support Email" name="email" value={formData.email} onChange={handleChange} placeholder="[EMAIL_ADDRESS]" />
             <InputField label="Support Phone" name="phoneNumber" value={formData.phoneNumber} onChange={handleChange} placeholder="0000000000" />
             <InputField label="Office Address" name="address" value={formData.address} onChange={handleChange} placeholder="Main Street, NY" />
+          </div>
+        </SectionCard>
+
+        <SectionCard title="Payment Options">
+          <p className="text-sm text-gray-500 mb-6">
+            Control which payment methods are available to customers in Food and Quick Commerce checkout.
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <label className="flex items-center gap-3 p-4 rounded-xl border border-gray-200 bg-gray-50/50 cursor-pointer hover:border-indigo-200 transition-colors">
+              <input
+                type="checkbox"
+                checked={formData.codEnabled}
+                onChange={(e) => handleChange('codEnabled', e.target.checked)}
+                className="w-4 h-4 text-indigo-600 border-gray-200 rounded focus:ring-indigo-500 cursor-pointer"
+              />
+              <div>
+                <span className="text-sm font-semibold text-gray-800">Cash on Delivery (COD)</span>
+                <p className="text-xs text-gray-500 mt-0.5">Allow customers to pay with cash at delivery</p>
+              </div>
+            </label>
+            <label className="flex items-center gap-3 p-4 rounded-xl border border-gray-200 bg-gray-50/50 cursor-pointer hover:border-indigo-200 transition-colors">
+              <input
+                type="checkbox"
+                checked={formData.onlineEnabled}
+                onChange={(e) => handleChange('onlineEnabled', e.target.checked)}
+                className="w-4 h-4 text-indigo-600 border-gray-200 rounded focus:ring-indigo-500 cursor-pointer"
+              />
+              <div>
+                <span className="text-sm font-semibold text-gray-800">Online Payment</span>
+                <p className="text-xs text-gray-500 mt-0.5">Allow customers to pay online via Razorpay</p>
+              </div>
+            </label>
           </div>
         </SectionCard>
 

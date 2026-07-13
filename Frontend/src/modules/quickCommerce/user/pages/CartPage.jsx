@@ -44,20 +44,7 @@ const DEFAULT_QUICK_BILLING_SETTINGS = {
 const FALLBACK_IMAGE =
   'https://images.unsplash.com/photo-1542838132-92c53300491e?q=80&w=200&auto=format&fit=crop';
 
-const calculateHaversineDistance = (lat1, lon1, lat2, lon2) => {
-  const R = 6371;
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLon = ((lon2 - lon1) * Math.PI) / 180;
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos((lat1 * Math.PI) / 180) *
-    Math.cos((lat2 * Math.PI) / 180) *
-    Math.sin(dLon / 2) *
-    Math.sin(dLon / 2);
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-};
-
-const calculateFrontendRiderEarning = (distanceKm, rules = []) => {
+import { getRoadDistanceKm } from '@/shared/services/roadDistance'; = (distanceKm, rules = []) => {
   const d = Number(distanceKm);
   if (!Number.isFinite(d) || d < 0 || !rules.length) return 0;
 
@@ -336,11 +323,19 @@ const CartPage = () => {
     const lat2 = Number(currentLocation?.latitude || currentLocation?.lat);
     const lon2 = Number(currentLocation?.longitude || currentLocation?.lng);
 
-    if (Number.isFinite(lat1) && Number.isFinite(lon1) && Number.isFinite(lat2) && Number.isFinite(lon2)) {
-      setDistanceKm(calculateHaversineDistance(lat1, lon1, lat2, lon2));
-    } else {
-      setDistanceKm(0);
+    let cancelled = false
+
+    const loadDistance = async () => {
+      if (Number.isFinite(lat1) && Number.isFinite(lon1) && Number.isFinite(lat2) && Number.isFinite(lon2)) {
+        const km = await getRoadDistanceKm(lat1, lon1, lat2, lon2);
+        if (!cancelled) setDistanceKm(Number.isFinite(km) ? km : 0);
+      } else if (!cancelled) {
+        setDistanceKm(0);
+      }
     }
+
+    void loadDistance()
+    return () => { cancelled = true }
   }, [storeLocation, currentLocation]);
 
   // Load billing settings + category fee map (single parallel fetch)

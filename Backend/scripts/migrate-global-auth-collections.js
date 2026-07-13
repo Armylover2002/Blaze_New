@@ -70,7 +70,7 @@ async function mergeByPhone(targetCollection, sourceDoc, existingDoc, stats) {
         }
     }
 
-    for (const key of ['isVerified', 'termsAccepted']) {
+    for (const key of ['isVerified']) {
         if (sourceDoc[key] === true && existingDoc[key] !== true) {
             set[key] = true;
         }

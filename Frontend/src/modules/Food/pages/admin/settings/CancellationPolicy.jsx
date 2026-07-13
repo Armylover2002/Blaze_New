@@ -88,9 +88,19 @@ export default function CancellationPolicy() {
     <div className="h-full overflow-y-auto bg-slate-50 p-4 lg:p-6">
       <div className="max-w-6xl mx-auto">
         {/* Page Header */}
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold text-slate-900">Cancellation Policy</h1>
-          <p className="text-sm text-slate-600 mt-1">Manage your Cancellation Policy content</p>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+          <div>
+            <h1 className="text-2xl font-bold text-slate-900">Cancellation Policy</h1>
+            <p className="text-sm text-slate-600 mt-1">Manage your Cancellation Policy content</p>
+          </div>
+          <button
+            type="button"
+            onClick={handleSubmit}
+            disabled={saving}
+            className="px-6 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+          >
+            {saving ? 'Saving...' : 'Save Changes'}
+          </button>
         </div>
 
         {/* Text Area */}
@@ -146,18 +156,6 @@ export default function CancellationPolicy() {
               />
             </div>
           )}
-        </div>
-
-        {/* Submit Button */}
-        <div className="flex justify-end mt-6">
-          <button
-            type="button"
-            onClick={handleSubmit}
-            disabled={saving}
-            className="px-6 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {saving ? 'Saving...' : 'Save Changes'}
-          </button>
         </div>
       </div>
     </div>

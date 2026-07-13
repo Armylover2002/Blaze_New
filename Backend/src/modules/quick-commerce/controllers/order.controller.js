@@ -17,7 +17,7 @@ import * as foodTransactionService from '../../food/orders/services/foodTransact
 import { FoodTransaction } from '../../food/orders/models/foodTransaction.model.js';
 import { emitQuickCommerceStatusUpdate } from '../services/quickStatusRealtime.service.js';
 import { getSellerLocation, getOrderAddressPoint } from '../services/quickOrder.service.js';
-import { haversineKm } from '../../food/orders/services/order.helpers.js';
+import { roadDistanceKm } from '../../food/orders/services/order.helpers.js';
 import { buildReturnEligibilityMeta } from '../utils/return.helpers.js';
 import {
   buildCartLineKey,
@@ -33,6 +33,10 @@ import {
 import { processQuickOrderRefund } from '../services/quickRefund.service.js';
 import { fanOutQuickSellerOrdersForParent } from '../services/quickSellerOrderFanout.service.js';
 import { deductWalletBalance, refundWalletBalance } from '../../food/user/services/userWallet.service.js';
+import {
+    getGlobalPaymentSettings,
+    assertPaymentMethodAllowed,
+} from '../../common/services/globalPaymentSettings.service.js';
 import {
     createRazorpayOrder,
     fetchRazorpayPayment,
@@ -503,7 +507,7 @@ export const placeOrder = async (req, res) => {
       const sellerCoords = getSellerLocation(seller);
       const deliveryCoords = getOrderAddressPoint({ deliveryAddress });
       if (sellerCoords && deliveryCoords) {
-        distanceKm = haversineKm(sellerCoords.lat, sellerCoords.lng, deliveryCoords.lat, deliveryCoords.lng);
+        distanceKm = await roadDistanceKm(sellerCoords.lat, sellerCoords.lng, deliveryCoords.lat, deliveryCoords.lng);
       }
     }
 
@@ -538,6 +542,13 @@ export const placeOrder = async (req, res) => {
       });
     }
 
+    const paymentSettings = await getGlobalPaymentSettings();
+    const paymentCheck = assertPaymentMethodAllowed(paymentMode, paymentSettings);
+    if (!paymentCheck.allowed) {
+      return res.status(400).json({
+        success: false,
+        message: paymentCheck.message,
+      });
     // Block deactivated accounts for all payment modes (optionalAuth alone is not enough).
     // COD flag is enforced only for cash.
     if (idQuery.userId) {

@@ -1,12 +1,13 @@
 import React, { useMemo } from "react"
 import { motion } from "framer-motion"
 import { useLocation, useNavigate } from "react-router-dom"
-import { UtensilsCrossed, ShoppingBasket, ShieldCheck, User } from "lucide-react"
+import { UtensilsCrossed, ShoppingBasket, ShieldCheck, User, Truck } from "lucide-react"
 import { cn } from "@food/utils/utils"
 
 const SERVICES = [
   {
     id: "food",
+    moduleKey: "food",
     name: "Foods",
     description: "Delicious local favorites",
     image: "/super-app/food.png",
@@ -18,6 +19,7 @@ const SERVICES = [
   },
   {
     id: "grocery",
+    moduleKey: "quickCommerce",
     name: "Quick Commerce",
     description: "20-Min Essentials",
     image: "/super-app/grocery.png",
@@ -27,8 +29,18 @@ const SERVICES = [
     badge: "Instant",
     badgeIcon: "⏱️"
   },
-
-
+  {
+    id: "porter",
+    moduleKey: "porter",
+    name: "Porter",
+    description: "Parcel delivery",
+    image: "/super-app/porter.png",
+    path: "/porter",
+    icon: Truck,
+    color: "from-[#2563EB] to-[#1D4ED8]",
+    badge: "Reliable",
+    badgeIcon: "🚚"
+  },
 ]
 
 export default function SuperAppPortal() {
@@ -57,6 +69,7 @@ export default function SuperAppPortal() {
   const [enabledModules, setEnabledModules] = React.useState({
     food: true,
     quickCommerce: true,
+    porter: true,
   })
   const [companyName, setCompanyName] = React.useState("App")
   const [logoUrl, setLogoUrl] = React.useState(null)
@@ -88,9 +101,10 @@ export default function SuperAppPortal() {
       const settings = e.detail;
       if (settings) {
         if (settings.modules) setEnabledModules(settings.modules);
-        // We can't easily call getCompanyName/getAppLogo here without importing them again
-        // or having them in scope. Since they are imported inside the async loadSettings,
-        // it's better to just re-trigger loadSettings or have the utilities available.
+        import("@common/utils/businessSettings").then(({ getCompanyName, getAppLogo }) => {
+          setCompanyName(getCompanyName());
+          setLogoUrl(getAppLogo('user'));
+        });
       }
     };
     window.addEventListener('businessSettingsUpdated', handleSettingsUpdate);
@@ -98,10 +112,7 @@ export default function SuperAppPortal() {
   }, [])
 
   const filteredServices = useMemo(() => {
-    return SERVICES.filter(service => {
-      const moduleKey = service.id === 'grocery' ? 'quickCommerce' : service.id
-      return enabledModules[moduleKey] !== false
-    })
+    return SERVICES.filter(service => enabledModules[service.moduleKey] !== false)
   }, [enabledModules])
 
   const handleServiceClick = (service) => {
@@ -209,7 +220,11 @@ export default function SuperAppPortal() {
         {/* Main Service Grid - compact for mobile */}
         <div className={cn(
           "w-full max-w-[800px] mx-auto mt-3 sm:mt-4 grid gap-3 sm:gap-4 relative z-10",
-          filteredServices.length === 1 ? "grid-cols-1 max-w-[400px]" : "grid-cols-2"
+          filteredServices.length === 1
+            ? "grid-cols-1 max-w-[400px]"
+            : filteredServices.length === 3
+              ? "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3"
+              : "grid-cols-2"
         )}>
           {filteredServices.map((service, idx) => (
             <motion.div

@@ -11,6 +11,7 @@ import OptimizedImage from "@food/components/OptimizedImage"
 import { RestaurantGridSkeleton } from "@food/components/ui/loading-skeletons"
 import { useDelayedLoading } from "@food/hooks/useDelayedLoading"
 import { useLocation } from "@food/hooks/useLocation"
+import { getRoadDistancesFromOrigin } from "@/shared/services/roadDistance"
 
 // Import banner
 import gourmetBanner from "@food/assets/groumetpagebanner.png"
@@ -24,6 +25,7 @@ export default function Gourmet() {
   const goBack = useAppBackNavigation()
   const [favorites, setFavorites] = useState(new Set())
   const [gourmetRestaurants, setGourmetRestaurants] = useState([])
+  const [distanceByRestaurantId, setDistanceByRestaurantId] = useState({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const { location } = useLocation()
@@ -63,6 +65,44 @@ export default function Gourmet() {
 
     fetchGourmetRestaurants()
   }, [])
+
+  useEffect(() => {
+    let cancelled = false
+
+    const loadDistances = async () => {
+      if (!gourmetRestaurants.length) {
+        setDistanceByRestaurantId({})
+        return
+      }
+
+      const userLat = Number(location?.latitude)
+      const userLng = Number(location?.longitude)
+      if (!Number.isFinite(userLat) || !Number.isFinite(userLng)) return
+
+      const destinations = gourmetRestaurants.map((item) => {
+        const restaurant = item.restaurant || item
+        const restaurantLat = restaurant.location?.latitude || restaurant.location?.coordinates?.[1]
+        const restaurantLng = restaurant.location?.longitude || restaurant.location?.coordinates?.[0]
+        return { lat: restaurantLat, lng: restaurantLng }
+      })
+
+      const distances = await getRoadDistancesFromOrigin(userLat, userLng, destinations)
+      if (cancelled) return
+
+      const next = {}
+      gourmetRestaurants.forEach((item, index) => {
+        const restaurant = item.restaurant || item
+        const restaurantId = restaurant._id || restaurant.restaurantId || restaurant.id
+        if (restaurantId && Number.isFinite(distances[index])) {
+          next[String(restaurantId)] = distances[index]
+        }
+      })
+      setDistanceByRestaurantId(next)
+    }
+
+    void loadDistances()
+    return () => { cancelled = true }
+  }, [gourmetRestaurants, location?.latitude, location?.longitude])
 
   const toggleFavorite = (id) => {
     setFavorites(prev => {
@@ -137,28 +177,15 @@ export default function Gourmet() {
                   const restaurantId = restaurant._id || restaurant.restaurantId || restaurant.id
                   const isFavorite = favorites.has(restaurantId)
 
-                  // Calculate distance if coordinates are available
-                  const calculateDistance = (lat1, lng1, lat2, lng2) => {
-                    const R = 6371; // Earth's radius in kilometers
-                    const dLat = ((lat2 - lat1) * Math.PI) / 180;
-                    const dLng = ((lng2 - lng1) * Math.PI) / 180;
-                    const a =
-                      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-                      Math.cos((lat1 * Math.PI) / 180) *
-                        Math.cos((lat2 * Math.PI) / 180) *
-                        Math.sin(dLng / 2) *
-                        Math.sin(dLng / 2);
-                    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-                    return R * c; // Distance in kilometers
-                  };
-
                   let distanceStr = '1.2 km'
                   const restaurantLat = restaurant.location?.latitude || restaurant.location?.coordinates?.[1]
                   const restaurantLng = restaurant.location?.longitude || restaurant.location?.coordinates?.[0]
                   
-                  if (location?.latitude && location?.longitude && restaurantLat && restaurantLng) {
-                    const d = calculateDistance(location.latitude, location.longitude, restaurantLat, restaurantLng)
-                    distanceStr = `${d.toFixed(1)} km`
+                  const roadDistance = distanceByRestaurantId[String(restaurantId)]
+                  if (Number.isFinite(roadDistance)) {
+                    distanceStr = `${roadDistance.toFixed(1)} km`
+                  } else if (Number.isFinite(restaurant.distanceInKm)) {
+                    distanceStr = `${restaurant.distanceInKm.toFixed(1)} km`
                   } else if (restaurant.distance) {
                     distanceStr = restaurant.distance
                   }

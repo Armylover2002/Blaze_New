@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 import { ValidationError } from '../../../core/auth/errors.js';
 import { logger } from '../../../utils/logger.js';
-import { haversineKm } from '../../food/orders/services/order.helpers.js';
+import { roadDistanceKm } from '../../food/orders/services/order.helpers.js';
 import { QuickOrder } from '../models/order.model.js';
 import { Seller } from '../seller/models/seller.model.js';
 import { getRiderEarningBreakdown } from '../admin/services/billing.service.js';
@@ -77,9 +77,9 @@ const resolveReturnPickupCoords = (parentOrder, seller) => ({
   sellerCoords: seller ? getSellerLocation(seller) : null,
 });
 
-export const computePickupDistanceKm = (customerCoords, sellerCoords) => {
+export const computePickupDistanceKm = async (customerCoords, sellerCoords) => {
   if (!customerCoords || !sellerCoords) return 0;
-  const raw = haversineKm(
+  const raw = await roadDistanceKm(
     customerCoords.lat,
     customerCoords.lng,
     sellerCoords.lat,
@@ -99,7 +99,7 @@ export const computeReturnPickupPricing = async ({ customerCoords, sellerCoords 
     };
   }
 
-  const rawDistanceKm = haversineKm(
+  const rawDistanceKm = await roadDistanceKm(
     customerCoords.lat,
     customerCoords.lng,
     sellerCoords.lat,
@@ -141,7 +141,7 @@ export const loadReturnPickupContext = async (returnDoc, { forceRecalculate = fa
 
   const seller = await Seller.findById(returnDoc.sellerId).lean();
   const { customerCoords, sellerCoords } = resolveReturnPickupCoords(parentOrder, seller);
-  const computedDistanceKm = computePickupDistanceKm(customerCoords, sellerCoords);
+  const computedDistanceKm = await computePickupDistanceKm(customerCoords, sellerCoords);
 
   const storedCharge = num(returnDoc?.calculatedPickupCharge);
   const storedRider = num(returnDoc?.riderEarning);

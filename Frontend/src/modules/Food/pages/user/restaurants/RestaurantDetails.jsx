@@ -28,6 +28,7 @@ import { useCart } from "@food/context/CartContext"
 import { useProfile } from "@food/context/ProfileContext"
 import { getCompanyNameAsync } from "@common/utils/businessSettings"
 import { isModuleAuthenticated } from "@food/utils/auth"
+import { getRoadDistanceKm } from "@/shared/services/roadDistance"
 import { getRestaurantAvailabilityStatus } from "@food/utils/restaurantAvailability"
 import useAppBackNavigation from "@food/hooks/useAppBackNavigation"
 import {
@@ -400,17 +401,11 @@ function RestaurantDetailsContent() {
           const formattedAddress = formatRestaurantAddress(locationObj)
           debugLog('? Final Formatted Address:', formattedAddress)
 
-          // Calculate distance from user to restaurant
-          const calculateDistance = (lat1, lng1, lat2, lng2) => {
-            const R = 6371 // Earth's radius in kilometers
-            const dLat = (lat2 - lat1) * Math.PI / 180
-            const dLng = (lng2 - lng1) * Math.PI / 180
-            const a =
-              Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-              Math.sin(dLng / 2) * Math.sin(dLng / 2)
-            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
-            return R * c // Distance in kilometers
+          // Calculate road distance from user to restaurant
+          const formatRoadDistance = (distanceInKm) => {
+            if (!Number.isFinite(distanceInKm)) return null
+            if (distanceInKm >= 1) return `${distanceInKm.toFixed(1)} km`
+            return `${Math.round(distanceInKm * 1000)} m`
           }
 
           // Get restaurant coordinates
@@ -430,14 +425,8 @@ function RestaurantDetailsContent() {
           let calculatedDistance = null
           if (userLat && userLng && restaurantLat && restaurantLng &&
             !isNaN(userLat) && !isNaN(userLng) && !isNaN(restaurantLat) && !isNaN(restaurantLng)) {
-            const distanceInKm = calculateDistance(userLat, userLng, restaurantLat, restaurantLng)
-            // Format distance: show 1 decimal place if >= 1km, otherwise show in meters
-            if (distanceInKm >= 1) {
-              calculatedDistance = `${distanceInKm.toFixed(1)} km`
-            } else {
-              const distanceInMeters = Math.round(distanceInKm * 1000)
-              calculatedDistance = `${distanceInMeters} m`
-            }
+            const distanceInKm = await getRoadDistanceKm(userLat, userLng, restaurantLat, restaurantLng)
+            calculatedDistance = formatRoadDistance(distanceInKm)
             debugLog('? Calculated distance from user to restaurant:', calculatedDistance, 'km:', distanceInKm)
           } else {
             debugWarn('? Cannot calculate distance - missing coordinates:', {
@@ -1068,49 +1057,34 @@ function RestaurantDetailsContent() {
     if (userLat && userLng && restaurantLat && restaurantLng &&
       !isNaN(userLat) && !isNaN(userLng) && !isNaN(restaurantLat) && !isNaN(restaurantLng)) {
 
-      // Calculate distance
-      const calculateDistance = (lat1, lng1, lat2, lng2) => {
-        const R = 6371 // Earth's radius in kilometers
-        const dLat = (lat2 - lat1) * Math.PI / 180
-        const dLng = (lng2 - lng1) * Math.PI / 180
-        const a =
-          Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-          Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-          Math.sin(dLng / 2) * Math.sin(dLng / 2)
-        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
-        return R * c // Distance in kilometers
+      let cancelled = false
+
+      const recalculateDistance = async () => {
+        const distanceInKm = await getRoadDistanceKm(userLat, userLng, restaurantLat, restaurantLng)
+        if (cancelled || !Number.isFinite(distanceInKm)) return
+
+        const calculatedDistance = distanceInKm >= 1
+          ? `${distanceInKm.toFixed(1)} km`
+          : `${Math.round(distanceInKm * 1000)} m`
+
+        if (calculatedDistance !== prevDistanceRef.current) {
+          debugLog('? Recalculated distance from user to restaurant:', calculatedDistance, 'km:', distanceInKm)
+          prevDistanceRef.current = calculatedDistance
+
+          setRestaurant((prev) => {
+            if (prev?.distance === calculatedDistance) return prev
+            return {
+              ...prev,
+              distance: calculatedDistance,
+            }
+          })
+        }
       }
 
-      const distanceInKm = calculateDistance(userLat, userLng, restaurantLat, restaurantLng)
-      let calculatedDistance = null
-
-      // Format distance: show 1 decimal place if >= 1km, otherwise show in meters
-      if (distanceInKm >= 1) {
-        calculatedDistance = `${distanceInKm.toFixed(1)} km`
-      } else {
-        const distanceInMeters = Math.round(distanceInKm * 1000)
-        calculatedDistance = `${distanceInMeters} m`
-      }
-
-      // Only update if distance actually changed
-      if (calculatedDistance !== prevDistanceRef.current) {
-        debugLog('? Recalculated distance from user to restaurant:', calculatedDistance, 'km:', distanceInKm)
-        prevDistanceRef.current = calculatedDistance
-
-        // Update restaurant distance
-        setRestaurant(prev => {
-          // Only update if distance actually changed to prevent infinite loop
-          if (prev?.distance === calculatedDistance) {
-            return prev
-          }
-          return {
-            ...prev,
-            distance: calculatedDistance
-          }
-        })
-      }
+      void recalculateDistance()
+      return () => { cancelled = true }
     }
-  }, [userLocation?.latitude, userLocation?.longitude, restaurantLat, restaurantLng])
+  }, [userLocation?.latitude, userLocation?.longitude, restaurantLat, restaurantLng, restaurant])
 
   // Sync quantities from cart on mount and when restaurant changes
   useEffect(() => {

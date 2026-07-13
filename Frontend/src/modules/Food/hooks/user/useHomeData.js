@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useMemo } from 'react';
 import { restaurantAPI } from "@food/api";
-import { normalizeImageUrl, extractImages, calculateDistance, slugify } from "@food/utils/common";
+import { normalizeImageUrl, extractImages, slugify } from "@food/utils/common";
+import { getRoadDistancesFromOrigin } from "@/shared/services/roadDistance";
 
 export const useHomeData = (location, zoneId) => {
   const [loadingConfig, setLoadingConfig] = useState(true);
@@ -53,12 +54,25 @@ export const useHomeData = (location, zoneId) => {
         const userLat = location?.latitude;
         const userLng = location?.longitude;
 
-        const transformed = raw.map(r => {
+        const restaurantCoords = raw.map((r) => {
+          const rLoc = r.location;
+          const rLat = rLoc?.latitude || (rLoc?.coordinates?.[1]);
+          const rLng = rLoc?.longitude || (rLoc?.coordinates?.[0]);
+          return { lat: rLat, lng: rLng };
+        });
+
+        const roadDistances = (userLat != null && userLng != null)
+          ? await getRoadDistancesFromOrigin(userLat, userLng, restaurantCoords)
+          : [];
+
+        const transformed = raw.map((r, index) => {
           const rLoc = r.location;
           const rLat = rLoc?.latitude || (rLoc?.coordinates?.[1]);
           const rLng = rLoc?.longitude || (rLoc?.coordinates?.[0]);
           
-          let distInKm = calculateDistance(userLat, userLng, rLat, rLng);
+          const distInKm = Number.isFinite(r.distanceInKm)
+            ? r.distanceInKm
+            : (roadDistances[index] ?? null);
           const coverImgs = extractImages(r.coverImages);
           const menuImgs = extractImages(r.menuImages);
           const profileImgs = extractImages(r.profileImage || r.image);

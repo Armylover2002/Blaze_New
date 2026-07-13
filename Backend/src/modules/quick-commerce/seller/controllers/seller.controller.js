@@ -32,9 +32,9 @@ import { resolveQuickOrderCustomer } from "../../utils/customer.helpers.js";
 import { FoodDeliveryPartner } from "../../../food/delivery/models/deliveryPartner.model.js";
 import {
   buildDeliverySocketPayload,
-  haversineKm,
   notifyOwnerSafely,
 } from "../../../food/orders/services/order.helpers.js";
+import { scorePointsByRoadDistance } from "../../../../services/roadDistance.service.js";
 import { getSellerCommissionSnapshot } from "../../admin/services/commission.service.js";
 import * as quickOrderService from "../../services/quickOrder.service.js";
 import {
@@ -459,7 +459,7 @@ const listNearbyOnlineDeliveryPartnersByCoords = async (
   }
 
   const STALE_GPS_MS = 10 * 60 * 1000;
-  const scored = onlinePartners
+  const candidates = onlinePartners
     .map((partner) => {
       const lat = Number(partner.lastLat);
       const lng = Number(partner.lastLng);
@@ -468,33 +468,21 @@ const listNearbyOnlineDeliveryPartnersByCoords = async (
         Date.now() - new Date(partner.lastLocationAt).getTime() > STALE_GPS_MS;
 
       if (!Number.isFinite(lat) || !Number.isFinite(lng) || isStale) {
-        return {
-          partnerId: partner._id,
-          distanceKm: null,
-          score: Number.MAX_SAFE_INTEGER,
-          name: partner.name || "Delivery Partner",
-          phone: partner.phone || "",
-        };
+        return null;
       }
 
-      const distanceKm = haversineKm(origin.lat, origin.lng, lat, lng);
       return {
         partnerId: partner._id,
-        distanceKm,
-        score: Number.isFinite(distanceKm)
-          ? distanceKm
-          : Number.MAX_SAFE_INTEGER,
+        lat,
+        lng,
         name: partner.name || "Delivery Partner",
         phone: partner.phone || "",
       };
     })
-    .filter(
-      (partner) => partner.distanceKm == null || partner.distanceKm <= maxKm,
-    )
-    .sort((a, b) => a.score - b.score)
-    .slice(0, Math.max(1, limit));
+    .filter(Boolean);
 
-  return scored;
+  const scored = await scorePointsByRoadDistance(origin, candidates, { maxKm });
+  return scored.slice(0, Math.max(1, limit));
 };
 const currency = (value) => `₹${num(value, 0).toLocaleString("en-IN")}`;
 const slugify = (value) =>

@@ -1,5 +1,5 @@
 import { useMemo, useState, useEffect, useRef, useCallback } from "react"
-import { useNavigate } from "react-router-dom"
+import { useNavigate, useLocation as useRouterLocation } from "react-router-dom"
 import { ChevronLeft, ChevronRight, Plus, MapPin, MoreHorizontal, Navigation, Home, Building2, Briefcase, Phone, X, Crosshair, Search, Trash2 } from "lucide-react"
 import { Button } from "@food/components/ui/button"
 import { Input } from "@food/components/ui/input"
@@ -31,6 +31,16 @@ import {
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
+
+const isPlusCode = (value) =>
+  /^[23456789CFGHJMPQRVWX]{4,}\+[23456789CFGHJMPQRVWX]{2,}$/i.test(String(value || "").trim())
+
+const resolveStreetFromGeocode = (parsed, fallback = "") => {
+  const street = String(parsed?.street || "").trim()
+  const area = String(parsed?.area || "").trim()
+  if (street && !isPlusCode(street)) return street
+  return area || street || fallback
+}
 
 // Enable Maps if API Key is available, otherwise fallback to coordinates-only mode
 const MAPS_ENABLED = !!import.meta.env.VITE_GOOGLE_MAPS_API_KEY
@@ -79,7 +89,7 @@ const buildLocationPayloadFromAddress = (address) => {
   const state = String(address.state || "").trim()
   const zipCode = String(address.zipCode || address.postalCode || "").trim()
   const formattedAddress =
-    String(address.formattedAddress || "").trim() ||
+    String(address.formattedAddress || address.address || "").trim() ||
     [area, street, city, state, zipCode].filter(Boolean).join(", ") ||
     [street, city, state].filter(Boolean).join(", ")
 
@@ -93,7 +103,8 @@ const buildLocationPayloadFromAddress = (address) => {
     state,
     zipCode,
     postalCode: zipCode,
-    address: [street, city].filter(Boolean).join(", ") || formattedAddress,
+    placeId: address.placeId || address.place_id || undefined,
+    address: formattedAddress,
     formattedAddress,
   }
 }
@@ -114,8 +125,13 @@ const persistSelectedLocation = (locationData) => {
 
 export default function AddressSelectorPage() {
   const navigate = useNavigate()
+  const routerLocation = useRouterLocation()
+  const returnPath =
+    routerLocation?.state?.from ||
+    routerLocation?.state?.backTo ||
+    "/food/user"
   const goBack = useAppBackNavigation()
-  const { location, loading, requestLocation, reverseGeocode } = useGeoLocation()
+  const { location: geoLocation, loading, requestLocation, reverseGeocode } = useGeoLocation()
   const { addresses = [], addAddress, updateAddress, setDefaultAddress, deleteAddress, userProfile } = useProfile()
   const [addressToDelete, setAddressToDelete] = useState(null)
   const [isDeleting, setIsDeleting] = useState(false)
@@ -138,6 +154,8 @@ export default function AddressSelectorPage() {
   const userLocationMarkerRef = useRef(null) // Blue dot marker for user location
   const blueDotCircleRef = useRef(null) // Accuracy circle for Google Maps
   const [currentAddress, setCurrentAddress] = useState("")
+  const [selectedPlaceId, setSelectedPlaceId] = useState("")
+  const [selectedFormattedAddress, setSelectedFormattedAddress] = useState("")
   const [addressAutocompleteValue, setAddressAutocompleteValue] = useState("")
   const [placePredictions, setPlacePredictions] = useState([])
   const [isKeywordSearching, setIsKeywordSearching] = useState(false)
@@ -149,37 +167,46 @@ export default function AddressSelectorPage() {
   const sessionTokenRef = useRef(null)
   const placesSearchTimerRef = useRef(null)
   const [mapUnavailable, setMapUnavailable] = useState(false)
-  const [formScrollTop, setFormScrollTop] = useState(0)
   const [keyboardInset, setKeyboardInset] = useState(0)
   const [baseMapHeight, setBaseMapHeight] = useState(320)
   const formBodyRef = useRef(null)
   const hasInitializedRef = useRef(false)
   const manualFieldRefs = useRef({})
+  const lastReverseGeocodeCoordsRef = useRef(null)
+  const reverseGeocodeTimeoutRef = useRef(null)
+  const reverseGeocodeInFlightRef = useRef(null)
+  const skipMapIdleRef = useRef(false)
+  const mapIdleLastCoordsRef = useRef({ lat: null, lng: null })
+  const mapIdleListenerRef = useRef(null)
+  const handleMapMoveEndRef = useRef(null)
+
+  const MAP_MOVE_DEBOUNCE_MS = 1000
+  const MAP_MOVE_MIN_PAN_METERS = 50
   
   // Sync currentAddress and mapPosition with the useLocation hook's location address on load/update
   useEffect(() => {
-    if (location && (location.formattedAddress || location.address)) {
-      const addrText = location.formattedAddress || location.address || ""
+    if (geoLocation && (geoLocation.formattedAddress || geoLocation.address)) {
+      const addrText = geoLocation.formattedAddress || geoLocation.address || ""
       setCurrentAddress(addrText)
-      
-      if (!hasInitializedRef.current && location.latitude && location.longitude) {
+
+      if (!hasInitializedRef.current && geoLocation.latitude && geoLocation.longitude) {
         hasInitializedRef.current = true
-        setMapPosition([location.latitude, location.longitude])
+        setMapPosition([geoLocation.latitude, geoLocation.longitude])
         
         // Sync addressFormData on initial load/first set if form values are empty
         setAddressFormData(prev => {
           if (prev.street || prev.city) return prev
           return {
             ...prev,
-            street: location.street || location.area || "",
-            city: location.city || "",
-            state: location.state || "",
-            zipCode: location.postalCode || location.zipCode || "",
+            street: resolveStreetFromGeocode(geoLocation, prev.street),
+            city: geoLocation.city || "",
+            state: geoLocation.state || "",
+            zipCode: geoLocation.postalCode || geoLocation.zipCode || "",
           }
         })
       }
     }
-  }, [location])
+  }, [geoLocation])
 
   const ENABLE_LOCATION_REVERSE_GEOCODE = import.meta.env.VITE_ENABLE_LOCATION_REVERSE_GEOCODE !== "false"
   const getAddressId = (address) => address?.id || address?._id || null
@@ -292,9 +319,24 @@ export default function AddressSelectorPage() {
     }
   }, [addressAutocompleteValue, showAddressForm])
 
+  const panMapTo = useCallback((lat, lng, zoom = 17) => {
+    if (!googleMapRef.current) return
+    skipMapIdleRef.current = true
+    googleMapRef.current.panTo({ lat, lng })
+    if (zoom) googleMapRef.current.setZoom(zoom)
+    window.setTimeout(() => {
+      skipMapIdleRef.current = false
+    }, MAP_MOVE_DEBOUNCE_MS + 200)
+  }, [])
+
   // Map Initialization logic
   useEffect(() => {
     if (!MAPS_ENABLED || mapUnavailable || !showAddressForm || !mapContainerRef.current || !GOOGLE_MAPS_API_KEY) return
+
+    if (googleMapRef.current) {
+      setMapLoading(false)
+      return undefined
+    }
 
     let isMounted = true
     setMapLoading(true)
@@ -306,9 +348,10 @@ export default function AddressSelectorPage() {
         if (!maps || !google?.maps?.Map) {
           throw new Error("Google Maps is unavailable")
         }
-        if (!isMounted || !mapContainerRef.current) return
+        if (!isMounted || !mapContainerRef.current || googleMapRef.current) return
 
         const initialPos = { lat: mapPosition[0], lng: mapPosition[1] }
+        mapIdleLastCoordsRef.current = { lat: initialPos.lat, lng: initialPos.lng }
         
         const map = new google.maps.Map(mapContainerRef.current, {
           center: initialPos,
@@ -330,27 +373,24 @@ export default function AddressSelectorPage() {
           sessionTokenRef.current = placesServices.sessionToken
         }
 
-        // Debounce handleMapMoveEnd to avoid excessive API calls
-        let idleTimeout = null
-        let lastLat = initialPos.lat
-        let lastLng = initialPos.lng
+        mapIdleListenerRef.current = map.addListener("idle", () => {
+          if (skipMapIdleRef.current) return
 
-        map.addListener("idle", () => {
-          clearTimeout(idleTimeout)
-          idleTimeout = setTimeout(() => {
-            const center = map.getCenter()
-            const lat = center.lat()
-            const lng = center.lng()
-            
-            // Only update if moved more than ~5 meters (roughly 0.00005 degrees)
-            const dist = Math.sqrt(Math.pow(lat - lastLat, 2) + Math.pow(lng - lastLng, 2))
-            if (dist > 0.00005) {
-              lastLat = lat
-              lastLng = lng
-              setMapPosition([lat, lng])
-              handleMapMoveEnd(lat, lng)
-            }
-          }, 500) // 500ms debounce for better stability
+          const center = googleMapRef.current?.getCenter()
+          if (!center) return
+
+          const lat = center.lat()
+          const lng = center.lng()
+          const last = mapIdleLastCoordsRef.current
+
+          if (last.lat != null && last.lng != null) {
+            const movedM = calculateDistance(last.lat, last.lng, lat, lng)
+            if (movedM < MAP_MOVE_MIN_PAN_METERS) return
+          }
+
+          mapIdleLastCoordsRef.current = { lat, lng }
+          setMapPosition([lat, lng])
+          handleMapMoveEndRef.current?.(lat, lng)
         })
 
         setMapLoading(false)
@@ -361,7 +401,13 @@ export default function AddressSelectorPage() {
       }
     }
     initializeGoogleMap()
-    return () => { isMounted = false }
+    return () => {
+      isMounted = false
+      if (mapIdleListenerRef.current && window.google?.maps?.event) {
+        window.google.maps.event.removeListener(mapIdleListenerRef.current)
+        mapIdleListenerRef.current = null
+      }
+    }
   }, [showAddressForm, GOOGLE_MAPS_API_KEY, mapUnavailable])
 
   const handleUseCurrentLocation = async () => {
@@ -380,16 +426,13 @@ export default function AddressSelectorPage() {
         try { localStorage.setItem("deliveryAddressMode", "current") } catch {}
         
         // Update map
-        if (googleMapRef.current) {
-          googleMapRef.current.panTo({ lat: loc.latitude, lng: loc.longitude })
-          googleMapRef.current.setZoom(17)
-        }
+        panMapTo(loc.latitude, loc.longitude, 17)
         
         // Update form data if form is open
         if (showAddressForm) {
           setAddressFormData(prev => ({
             ...prev,
-            street: loc.street || loc.area || prev.street,
+            street: resolveStreetFromGeocode(loc, prev.street),
             city: loc.city || prev.city,
             state: loc.state || prev.state,
             zipCode: loc.postalCode || prev.zipCode,
@@ -400,7 +443,7 @@ export default function AddressSelectorPage() {
           toast.success("Location updated", { id: "geo" })
           // Redirect if they are on the main selection page
           setTimeout(() => {
-            navigate("/food/user")
+            navigate(returnPath, { replace: true })
           }, 800)
         }
       } else {
@@ -420,7 +463,7 @@ export default function AddressSelectorPage() {
       toast.success("Address selected")
       
       // Use "from" state if available, otherwise default to home page
-      const from = location?.state?.from || "/food/user"
+      const from = returnPath
       setTimeout(() => {
         navigate(from, { replace: true })
       }, 500)
@@ -432,11 +475,24 @@ export default function AddressSelectorPage() {
   }
 
   const handleCancelAddressForm = () => {
+    if (reverseGeocodeTimeoutRef.current) {
+      clearTimeout(reverseGeocodeTimeoutRef.current)
+      reverseGeocodeTimeoutRef.current = null
+    }
+    if (mapIdleListenerRef.current && window.google?.maps?.event) {
+      window.google.maps.event.removeListener(mapIdleListenerRef.current)
+      mapIdleListenerRef.current = null
+    }
+    googleMapRef.current = null
+    lastReverseGeocodeCoordsRef.current = null
+    mapIdleLastCoordsRef.current = { lat: null, lng: null }
     setShowAddressForm(false)
     setAddressAutocompleteValue("")
     setPlacePredictions([])
     setShowPlacePredictions(false)
     setIsKeywordSearching(false)
+    setSelectedPlaceId("")
+    setSelectedFormattedAddress("")
   }
 
   const scrollFieldIntoView = useCallback((fieldName) => {
@@ -479,38 +535,86 @@ export default function AddressSelectorPage() {
     }, 120)
   }, [keyboardInset])
 
-  const clamp = (value, min, max) => Math.min(max, Math.max(min, value))
-
-  const handleMapMoveEnd = async (lat, lng) => {
+  const handleMapMoveEnd = useCallback(async (lat, lng) => {
     if (!ENABLE_LOCATION_REVERSE_GEOCODE) return
-    
-    // Prevent redundant calls for the same coordinates
-    const coordKey = `${lat.toFixed(5)},${lng.toFixed(5)}`
-    if (manualFieldRefs.current._lastCoords === coordKey) return
-    manualFieldRefs.current._lastCoords = coordKey
 
-    try {
-      const parsed = await reverseGeocode(lat, lng, { forceFresh: true })
-      if (parsed) {
-        const formatted = parsed.formattedAddress || parsed.address || ""
-        setCurrentAddress(prev => prev === formatted ? prev : formatted)
-        setAddressFormData(prev => {
-          if (prev.street === parsed.street && prev.city === parsed.city && prev.state === parsed.state && prev.zipCode === parsed.postalCode) {
-            return prev
-          }
-          return {
-            ...prev,
-            street: parsed.street || parsed.area || prev.street,
-            city: parsed.city || prev.city,
-            state: parsed.state || prev.state,
-            zipCode: parsed.postalCode || prev.zipCode,
-          }
-        })
-      }
-    } catch (e) {
-      debugError("Reverse geocode error:", e)
+    const roundedLat = parseFloat(Number(lat).toFixed(6))
+    const roundedLng = parseFloat(Number(lng).toFixed(6))
+    const coordKey = `${roundedLat.toFixed(6)},${roundedLng.toFixed(6)}`
+
+    const last = lastReverseGeocodeCoordsRef.current
+    if (last) {
+      if (last.key === coordKey) return
+      const movedM = calculateDistance(last.lat, last.lng, roundedLat, roundedLng)
+      if (movedM < MAP_MOVE_MIN_PAN_METERS) return
     }
-  }
+
+    if (reverseGeocodeTimeoutRef.current) {
+      clearTimeout(reverseGeocodeTimeoutRef.current)
+    }
+
+    return new Promise((resolve) => {
+      reverseGeocodeTimeoutRef.current = setTimeout(async () => {
+        if (reverseGeocodeInFlightRef.current) {
+          try {
+            await reverseGeocodeInFlightRef.current
+          } catch {
+            // fall through to a fresh attempt
+          }
+          if (lastReverseGeocodeCoordsRef.current?.key === coordKey) {
+            resolve()
+            return
+          }
+        }
+
+        lastReverseGeocodeCoordsRef.current = { lat: roundedLat, lng: roundedLng, key: coordKey }
+        manualFieldRefs.current._lastCoords = coordKey
+
+        const run = (async () => {
+          try {
+            const parsed = await reverseGeocode(roundedLat, roundedLng)
+            if (!parsed) return
+
+            const formatted = parsed.formattedAddress || parsed.address || ""
+            setCurrentAddress((prev) => (prev === formatted ? prev : formatted))
+            setSelectedFormattedAddress(formatted)
+            setSelectedPlaceId("")
+            setAddressFormData((prev) => {
+              if (
+                prev.street === parsed.street &&
+                prev.city === parsed.city &&
+                prev.state === parsed.state &&
+                prev.zipCode === parsed.postalCode
+              ) {
+                return prev
+              }
+              return {
+                ...prev,
+                street: resolveStreetFromGeocode(parsed, prev.street),
+                city: parsed.city || prev.city,
+                state: parsed.state || prev.state,
+                zipCode: parsed.postalCode || prev.zipCode,
+              }
+            })
+          } catch (e) {
+            debugError("Reverse geocode error:", e)
+          }
+        })()
+
+        reverseGeocodeInFlightRef.current = run
+        try {
+          await run
+        } finally {
+          if (reverseGeocodeInFlightRef.current === run) {
+            reverseGeocodeInFlightRef.current = null
+          }
+          resolve()
+        }
+      }, MAP_MOVE_DEBOUNCE_MS)
+    })
+  }, [reverseGeocode])
+
+  handleMapMoveEndRef.current = handleMapMoveEnd
 
   const handlePlacePredictionSelect = useCallback(async (prediction) => {
     if (!prediction?.place_id) return
@@ -545,15 +649,15 @@ export default function AddressSelectorPage() {
       const display = parsed.formattedAddress || prediction.description || ""
 
       setMapPosition([latitude, longitude])
-      if (googleMapRef.current) {
-        googleMapRef.current.panTo({ lat: latitude, lng: longitude })
-        googleMapRef.current.setZoom(17)
-      }
+      mapIdleLastCoordsRef.current = { lat: latitude, lng: longitude }
+      panMapTo(latitude, longitude, 17)
 
       setAddressAutocompleteValue(display)
       setPlacePredictions([])
       setShowPlacePredictions(false)
       setCurrentAddress(display)
+      setSelectedFormattedAddress(display)
+      setSelectedPlaceId(parsed.placeId || prediction.place_id || "")
       setAddressFormData((prev) => ({
         ...prev,
         street: parsed.area || display.split(",")[0]?.trim() || prev.street,
@@ -595,10 +699,8 @@ export default function AddressSelectorPage() {
             manualFieldRefs.current._lastCoords = coordKey;
             
             setMapPosition([lat, lng]);
-            if (googleMapRef.current) {
-              googleMapRef.current.panTo(location);
-              googleMapRef.current.setZoom(17);
-            }
+            mapIdleLastCoordsRef.current = { lat, lng };
+            panMapTo(lat, lng, 17);
           }
         });
       } catch (err) {
@@ -607,7 +709,7 @@ export default function AddressSelectorPage() {
     }, 1200);
 
     return () => clearTimeout(timeout);
-  }, [addressFormData.street, addressFormData.city, showAddressForm]);
+  }, [addressFormData.street, addressFormData.city, showAddressForm, panMapTo]);
 
   const handleAddressFormSubmit = async (e) => {
     e.preventDefault()
@@ -617,9 +719,17 @@ export default function AddressSelectorPage() {
     }
     setLoadingAddress(true)
     try {
+      const completeAddress =
+        String(selectedFormattedAddress || currentAddress || "").trim() ||
+        [addressFormData.street, addressFormData.city, addressFormData.state, addressFormData.zipCode]
+          .filter(Boolean)
+          .join(", ")
       const payload = {
         ...addressFormData,
         label: addressFormData.label === "Work" ? "Office" : addressFormData.label,
+        address: completeAddress,
+        formattedAddress: completeAddress,
+        ...(selectedPlaceId ? { placeId: selectedPlaceId } : {}),
         location: { type: "Point", coordinates: [mapPosition[1], mapPosition[0]] },
         latitude: mapPosition[0],
         longitude: mapPosition[1]
@@ -637,7 +747,7 @@ export default function AddressSelectorPage() {
         setShowPlacePredictions(false)
         
         // Use "from" state if available, otherwise default to home page
-        const from = location?.state?.from || "/food/user"
+        const from = returnPath
         setTimeout(() => {
           navigate(from, { replace: true })
         }, 500)
@@ -659,11 +769,6 @@ export default function AddressSelectorPage() {
     updateBaseMapHeight()
     window.addEventListener("resize", updateBaseMapHeight)
     return () => window.removeEventListener("resize", updateBaseMapHeight)
-  }, [showAddressForm])
-
-  useEffect(() => {
-    if (!showAddressForm) return
-    setFormScrollTop(0)
   }, [showAddressForm])
 
   useEffect(() => {
@@ -697,20 +802,13 @@ export default function AddressSelectorPage() {
 
         <div
           ref={formBodyRef}
-          onScroll={(e) => {
-            setFormScrollTop(e.currentTarget.scrollTop)
-          }}
           className="flex-1 overflow-y-auto"
           style={{ paddingBottom: `${96 + keyboardInset}px` }}
         >
           {/* Map Section - Parallax enabled */}
           <div
             className="flex-shrink-0 relative z-0"
-            style={{ 
-              height: `${mapHeight}px`,
-              transform: `translateY(${formScrollTop * 0.4}px)`,
-              opacity: clamp(1 - (formScrollTop / 500), 0.4, 1)
-            }}
+            style={{ height: `${mapHeight}px` }}
           >
             <div className="absolute top-4 left-4 right-4 z-20">
               <div className="relative group shadow-2xl">

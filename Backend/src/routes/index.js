@@ -26,6 +26,7 @@ import { requireEnabledModule } from '../middleware/moduleAccess.js';
 
 
 import commonSettingsRoutes from '../modules/common/routes/settings.routes.js';
+import commonMapsRoutes from '../modules/common/routes/maps.routes.js';
 import { getGlobalSettings as getPublicSettings } from '../modules/common/controllers/settings.controller.js';
 import onboardingFeeRoutes from '../modules/common/routes/onboardingFee.routes.js';
 import porterRoutes from '../modules/porter/routes/porter.routes.js';
@@ -57,6 +58,7 @@ router.use('/v1/uploads', uploadRoutes);
 // Mark business-settings/public as truly public (must be before protected admin block)
 // Global Settings routes
 router.use('/v1/common/settings', commonSettingsRoutes);
+router.use('/v1/common/maps', commonMapsRoutes);
 router.use('/v1/common/onboarding-fees', onboardingFeeRoutes);
 
 // Backward compatibility for public settings

@@ -5,6 +5,7 @@ import { FoodOrder, FoodSettings } from '../models/order.model.js';
 import { logger } from '../../../../utils/logger.js';
 import { FoodUser } from '../../../../core/users/user.model.js';
 import { FoodRestaurant } from '../../restaurant/models/restaurant.model.js';
+import { resolveRestaurantCommissionPercentage } from '../../constants/commission.constants.js';
 import { FoodDeliveryPartner } from '../../delivery/models/deliveryPartner.model.js';
 import { FoodZone } from '../../admin/models/zone.model.js';
 import { FoodFeeSettings } from '../../admin/models/feeSettings.model.js';
@@ -51,11 +52,16 @@ import {
     initiateRazorpayRefund
 } from '../helpers/razorpay.helper.js';
 import { getIO, rooms } from '../../../../config/socket.js';
+import { isPointInPolygon } from '../../../../utils/geo.js';
 import { addOrderJob } from '../../../../queues/producers/order.producer.js';
 import { fetchPolyline } from '../utils/googleMaps.js';
 import { getFirebaseDB } from '../../../../config/firebase.js';
 import * as foodTransactionService from './foodTransaction.service.js';
 import { ensureDailyPassEligibility } from "../../subscriptions/services/wallet.service.js";
+import {
+  getGlobalPaymentSettings,
+  assertPaymentMethodAllowed,
+} from '../../../common/services/globalPaymentSettings.service.js';
 import {
   tryAutoAssign,
   processDispatchTimeout,
@@ -68,6 +74,8 @@ import { DISPATCH_DOCUMENT_TYPES } from '../../../quick-commerce/utils/dispatchD
 import * as returnPickupDelivery from '../../../quick-commerce/services/returnPickupDelivery.service.js';
 import { deductWalletBalance, refundWalletBalance } from '../../user/services/userWallet.service.js';
 import { getGlobalBranding } from '../../../common/services/globalBranding.service.js';
+import { roadDistanceKm } from './order.helpers.js';
+import { scorePointsByRoadDistance } from '../../../../services/roadDistance.service.js';
 
 export {
   tryAutoAssign,
@@ -517,6 +525,95 @@ function getPointLatLng(locationLike) {
   return { lat: Number(lat), lng: Number(lng) };
 }
 
+function validateDeliveryCoordinates(location) {
+  const coords = location?.coordinates;
+  if (!Array.isArray(coords) || coords.length !== 2) {
+    throw new ValidationError("Delivery location coordinates are required");
+  }
+  const [lng, lat] = coords.map(Number);
+  if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
+    throw new ValidationError("Delivery location coordinates must be valid numbers");
+  }
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+    throw new ValidationError("Delivery location coordinates are out of range");
+  }
+}
+
+async function loadSavedUserAddress(userId, addressId) {
+  if (!userId || !addressId || !mongoose.Types.ObjectId.isValid(String(addressId))) {
+    return null;
+  }
+  const user = await FoodUser.findById(userId).select("addresses").lean();
+  if (!user?.addresses?.length) return null;
+  const saved = user.addresses.find((entry) => String(entry?._id) === String(addressId));
+  if (!saved) return null;
+  return normalizeDeliveryAddress(saved);
+}
+
+/**
+ * Resolve delivery coordinates from a trusted saved address when possible.
+ * Client-supplied coordinates are only used for live/current-location orders.
+ */
+async function resolveTrustedDeliveryAddress(userId, dto = {}) {
+  const addressId =
+    dto.deliveryAddressId ||
+    dto.address?._id ||
+    dto.address?.id ||
+    null;
+
+  if (addressId && userId) {
+    const saved = await loadSavedUserAddress(userId, addressId);
+    if (!saved) {
+      throw new ValidationError("Delivery address not found");
+    }
+    const client = normalizeDeliveryAddress(dto.address) || {};
+    return {
+      ...saved,
+      label: client.label || saved.label,
+      street: client.street || saved.street,
+      additionalDetails: client.additionalDetails || saved.additionalDetails,
+      city: client.city || saved.city,
+      state: client.state || saved.state,
+      zipCode: client.zipCode || saved.zipCode,
+      phone: client.phone || saved.phone,
+      location: saved.location,
+    };
+  }
+
+  const normalized = normalizeDeliveryAddress(dto.address);
+  if (!normalized?.location?.coordinates) {
+    throw new ValidationError("Delivery location coordinates are required");
+  }
+  validateDeliveryCoordinates(normalized.location);
+  return normalized;
+}
+
+async function detectServiceZoneForPoint(lat, lng) {
+  const zones = await FoodZone.find({ isActive: true }).lean();
+  for (const zone of zones) {
+    const coords = (Array.isArray(zone.coordinates) ? zone.coordinates : []).filter(
+      (point) => Number.isFinite(point?.latitude) && Number.isFinite(point?.longitude),
+    );
+    if (coords.length < 3) continue;
+    if (isPointInPolygon(lat, lng, coords)) {
+      return { status: "IN_SERVICE", zoneId: zone._id, zone };
+    }
+  }
+  return { status: "OUT_OF_SERVICE", zoneId: null, zone: null };
+}
+
+async function assertDeliveryInServiceArea(deliveryAddress) {
+  const point = getPointLatLng(deliveryAddress?.location);
+  if (!point) {
+    throw new ValidationError("Delivery location coordinates are required");
+  }
+  const result = await detectServiceZoneForPoint(point.lat, point.lng);
+  if (result.status !== "IN_SERVICE") {
+    throw new ValidationError("Delivery address is outside our service area");
+  }
+  return result;
+}
+
 function roundCurrency(value) {
   const num = Number(value);
   if (!Number.isFinite(num)) return 0;
@@ -810,7 +907,9 @@ async function fetchPickupSourcesByType(items = []) {
       status: restaurant.status,
       location: restaurant.location,
       zoneId: restaurant.zoneId || null,
-      commissionPercentage: restaurant.commissionPercentage || 0,
+      commissionPercentage: resolveRestaurantCommissionPercentage(
+        restaurant.commissionPercentage,
+      ),
       address:
         restaurant.location?.address ||
         restaurant.location?.formattedAddress ||
@@ -887,7 +986,12 @@ async function evaluateCombinedPickupEligibility(pickupPoints = [], deliveryAddr
   const distLimit = feeDoc?.mixedOrderDistanceLimit ?? 2;
   const angleLimit = feeDoc?.mixedOrderAngleLimit ?? 35;
 
-  const pickupDistanceKm = haversineKm(foodPoint.lat, foodPoint.lng, quickPoint.lat, quickPoint.lng);
+  const pickupDistanceKm = await roadDistanceKm(
+    foodPoint.lat,
+    foodPoint.lng,
+    quickPoint.lat,
+    quickPoint.lng,
+  );
   const angle = angleBetweenPickupVectors(userPoint, foodPoint, quickPoint);
   
   // If pickups are very close to each other (e.g. < 200m), they are definitely in the same direction for practical purposes
@@ -935,7 +1039,7 @@ async function resolveDispatchPlanMeta(orderType, pickupPoints = [], deliveryAdd
     };
   }
 
-  const distanceKm = haversineKm(
+  const distanceKm = await roadDistanceKm(
     pickupPoint.lat,
     pickupPoint.lng,
     deliveryPoint.lat,
@@ -999,14 +1103,19 @@ async function listNearbyPartnersForPoint(point, { maxKm = 15, limit = 5 } = {})
     .select("_id lastLat lastLng")
     .lean();
 
-  const nearbyPartners = partners
-    .map((partner) => ({
+  const scored = await scorePointsByRoadDistance(
+    latLng,
+    partners.map((partner) => ({
       partnerId: partner._id,
-      distanceKm: haversineKm(latLng.lat, latLng.lng, partner.lastLat, partner.lastLng),
-    }))
-    .filter((partner) => Number.isFinite(partner.distanceKm) && partner.distanceKm <= maxKm)
-    .sort((a, b) => a.distanceKm - b.distanceKm)
-    .slice(0, Math.max(1, limit));
+      lat: partner.lastLat,
+      lng: partner.lastLng,
+    })),
+    { maxKm },
+  );
+
+  const nearbyPartners = scored
+    .slice(0, Math.max(1, limit))
+    .map(({ partnerId, distanceKm }) => ({ partnerId, distanceKm }));
 
   if (nearbyPartners.length > 0) {
     return nearbyPartners;
@@ -2123,9 +2232,17 @@ export async function calculateOrder(userId, dto) {
   const feeSettings = normalizeFoodFeeSettings(feeDoc);
 
   const pickupPoints = buildPickupPointsFromItems(items, sourceMap);
+  const trustedDeliveryAddress =
+    orderType === "food" || orderType === "mixed"
+      ? await resolveTrustedDeliveryAddress(userId, dto)
+      : normalizeDeliveryAddress(dto.address);
+  const serviceZone =
+    orderType === "food" || orderType === "mixed"
+      ? await assertDeliveryInServiceArea(trustedDeliveryAddress)
+      : null;
   const eligibility =
     orderType === "mixed"
-      ? await evaluateCombinedPickupEligibility(pickupPoints, dto.address)
+      ? await evaluateCombinedPickupEligibility(pickupPoints, trustedDeliveryAddress)
       : {
           eligible: false,
           pickupDistanceKm: null,
@@ -2161,6 +2278,7 @@ export async function calculateOrder(userId, dto) {
         couponCode: null,
         appliedCoupon: null,
       },
+      serviceZone: null,
     };
   }
 
@@ -2267,6 +2385,34 @@ export async function calculateOrder(userId, dto) {
       totalDeliveryFee = deliveryFee;
       userDeliveryFee = deliveryFee;
     }
+    const userPoint = getPointLatLng(trustedDeliveryAddress?.location);
+    const restaurantPoint = getPointLatLng(primaryRestaurant?.location);
+    const distanceKm =
+      userPoint && restaurantPoint
+        ? await roadDistanceKm(
+            restaurantPoint.lat,
+            restaurantPoint.lng,
+            userPoint.lat,
+            userPoint.lng,
+          )
+        : 0;
+    const deliveryPricing = calculateFoodDeliveryPricing({
+      subtotal,
+      distanceKm,
+      feeSettings,
+    });
+    deliveryFee = deliveryPricing.deliveryFee;
+    totalDeliveryFee = deliveryPricing.totalDeliveryFee;
+    userDeliveryFee = deliveryPricing.userDeliveryFee;
+    restaurantDeliveryFee = deliveryPricing.restaurantDeliveryFee;
+    sponsoredDelivery = deliveryPricing.sponsoredDelivery;
+    sponsoredKm = deliveryPricing.sponsoredKm;
+    deliveryDistanceKm = deliveryPricing.deliveryDistanceKm;
+    deliverySponsorType = deliveryPricing.deliverySponsorType;
+  } else {
+    deliveryFee = feeSettings.deliveryFee;
+    totalDeliveryFee = deliveryFee;
+    userDeliveryFee = deliveryFee;
   }
 
   const quickFeeDoc = (orderType === "mixed")
@@ -2397,7 +2543,10 @@ export async function calculateOrder(userId, dto) {
         eligibilityReason: eligibility.reason,
         pickupPoints,
       },
-    };
+    serviceZone: serviceZone
+      ? { zoneId: serviceZone.zoneId, status: serviceZone.status }
+      : null,
+  };
 }
 
 // ----- Create order -----
@@ -2467,13 +2616,20 @@ export async function createOrder(userId, dto) {
       : null;
   const dispatchMode = settings?.dispatchMode || "manual";
 
-  const deliveryAddress = normalizeDeliveryAddress(dto.address);
+  const deliveryAddress =
+    orderType === "food" || orderType === "mixed"
+      ? await resolveTrustedDeliveryAddress(userId, dto)
+      : normalizeDeliveryAddress(dto.address);
 
   const paymentMethod =
     dto.paymentMethod === "card" ? "razorpay" : dto.paymentMethod;
   const isCash = paymentMethod === "cash";
   const isWallet = paymentMethod === "wallet";
 
+  const paymentSettings = await getGlobalPaymentSettings();
+  const paymentCheck = assertPaymentMethodAllowed(paymentMethod, paymentSettings);
+  if (!paymentCheck.allowed) {
+    throw new ValidationError(paymentCheck.message);
   // Enforce admin COD access flag — UI hide alone is not sufficient (API bypass).
   if (isCash) {
     const orderingUser = await FoodUser.findById(userId).select("isCodAllowed isActive").lean();
@@ -2514,9 +2670,18 @@ export async function createOrder(userId, dto) {
     .map((code) => (code ? String(code).trim().toUpperCase() : ""))
     .find(Boolean) || "";
   const { pricing: serverPricing } = await calculateOrder(userId, {
+  const couponCodeFromClient = dto.pricing?.couponCode
+    ? String(dto.pricing.couponCode).trim().toUpperCase()
+    : "";
+  const { pricing: serverPricing, serviceZone: detectedServiceZone } = await calculateOrder(userId, {
     orderType,
     items: dto.items,
-    address: dto.address,
+    address: deliveryAddress,
+    deliveryAddressId:
+      dto.deliveryAddressId ||
+      dto.address?._id ||
+      dto.address?.id ||
+      undefined,
     restaurantId: dto.restaurantId || primaryRestaurantId || undefined,
     zoneId: dto.zoneId,
     couponCode: couponCodeFromClient,
@@ -2540,7 +2705,7 @@ export async function createOrder(userId, dto) {
   }
 
   const commissionPercentage = primaryRestaurant
-    ? Number(primaryRestaurant.commissionPercentage || 0)
+    ? resolveRestaurantCommissionPercentage(primaryRestaurant.commissionPercentage)
     : 0;
   const commissionBase = Math.max(0, Number(serverPricing.subtotal || 0));
   const restaurantCommission =
@@ -2636,6 +2801,19 @@ export async function createOrder(userId, dto) {
       );
       distanceKm = null;
     }
+  if (
+    (orderType === "food" || orderType === "mixed") &&
+    primaryRestaurant?.location?.coordinates?.length === 2 &&
+    dto.address?.location?.coordinates?.length === 2
+  ) {
+    const [rLng, rLat] = primaryRestaurant.location.coordinates;
+    const [dLng, dLat] = dto.address.location.coordinates;
+    const d = await roadDistanceKm(rLat, rLng, dLat, dLng);
+    distanceKm = Number.isFinite(d) ? d : null;
+  } else {
+    console.warn(
+      `Food order ${orderId}: distance not available, rider earning set to 0`,
+    );
   }
   if (normalizedPricing.deliveryDistanceKm == null && Number.isFinite(distanceKm)) {
     normalizedPricing.deliveryDistanceKm = Number(distanceKm.toFixed(2));
@@ -2719,11 +2897,11 @@ export async function createOrder(userId, dto) {
     restaurantId:
       hasFoodItems && primaryRestaurant?.sourceId ? new mongoose.Types.ObjectId(primaryRestaurant.sourceId) : null,
     zoneId:
-      hasFoodItems
-        ? dto.zoneId
-          ? new mongoose.Types.ObjectId(dto.zoneId)
-          : primaryRestaurant?.zoneId || undefined
-        : undefined,
+      hasFoodItems && detectedServiceZone?.zoneId
+        ? new mongoose.Types.ObjectId(detectedServiceZone.zoneId)
+        : hasFoodItems && primaryRestaurant?.zoneId
+          ? new mongoose.Types.ObjectId(primaryRestaurant.zoneId)
+          : undefined,
     items,
     pickupPoints,
     ...(deliveryAddress ? { deliveryAddress } : {}),
@@ -2968,19 +3146,6 @@ export async function verifyPayment(userId, dto) {
 }
 
 // ----- Auto-assign -----
-function haversineKm(lat1, lon1, lat2, lon2) {
-  const R = 6371;
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLon = ((lon2 - lon1) * Math.PI) / 180;
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLon / 2) *
-      Math.sin(dLon / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c;
-}
 
 // Stale tryAutoAssign and processDispatchTimeout removed (now imported from order-dispatch.service.js)
 

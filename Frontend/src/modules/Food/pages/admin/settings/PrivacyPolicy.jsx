@@ -89,25 +89,43 @@ export default function PrivacyPolicy() {
             <p className="text-sm text-slate-600 mt-1">Manage Privacy Policy for different user roles</p>
           </div>
           
-          {/* Role Selector */}
-          <div className="flex p-1 bg-slate-200 rounded-xl">
-            {[
-              { id: "user", label: "Customer" },
-              { id: "restaurant", label: "Restaurant" },
-              { id: "delivery", label: "Delivery Boy" }
-            ].map((r) => (
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 shrink-0">
+            {/* Role Selector */}
+            <div className="flex p-1 bg-slate-200 rounded-xl">
+              {[
+                { id: "user", label: "Customer" },
+                { id: "restaurant", label: "Restaurant" },
+                { id: "delivery", label: "Delivery Boy" }
+              ].map((r) => (
+                <button
+                  key={r.id}
+                  onClick={() => setRole(r.id)}
+                  className={`px-4 py-2 text-sm font-bold rounded-lg transition-all ${
+                    role === r.id 
+                      ? "bg-white text-blue-600 shadow-sm" 
+                      : "text-slate-600 hover:text-slate-900"
+                  }`}
+                >
+                  {r.label}
+                </button>
+              ))}
+            </div>
+
+            {!loading && (
               <button
-                key={r.id}
-                onClick={() => setRole(r.id)}
-                className={`px-4 py-2 text-sm font-bold rounded-lg transition-all ${
-                  role === r.id 
-                    ? "bg-white text-blue-600 shadow-sm" 
-                    : "text-slate-600 hover:text-slate-900"
-                }`}
+                type="button"
+                onClick={handleSubmit}
+                disabled={saving}
+                className="px-8 py-3 bg-slate-900 text-white rounded-xl hover:bg-black transition-all font-bold disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg hover:shadow-xl"
               >
-                {r.label}
+                {saving ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    Saving...
+                  </>
+                ) : 'Save Changes'}
               </button>
-            ))}
+            )}
           </div>
         </div>
 
@@ -165,22 +183,6 @@ export default function PrivacyPolicy() {
                   </div>
                 )}
               </div>
-            </div>
-
-            <div className="flex justify-end mt-6">
-              <button
-                type="button"
-                onClick={handleSubmit}
-                disabled={saving}
-                className="px-8 py-3 bg-slate-900 text-white rounded-xl hover:bg-black transition-all font-bold disabled:opacity-50 flex items-center gap-2 shadow-lg hover:shadow-xl"
-              >
-                {saving ? (
-                  <>
-                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    Saving...
-                  </>
-                ) : 'Save Changes'}
-              </button>
             </div>
           </>
         )}

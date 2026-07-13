@@ -14,6 +14,7 @@ export const parsePlaceDetails = (place) => {
   const lng = place?.geometry?.location?.lng?.()
   return {
     formattedAddress,
+    placeId: place?.place_id || "",
     area,
     city,
     state,

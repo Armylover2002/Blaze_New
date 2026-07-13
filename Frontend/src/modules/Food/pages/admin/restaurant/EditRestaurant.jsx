@@ -7,6 +7,10 @@ import { Label } from "@food/components/ui/label"
 import { getGoogleMapsApiKey } from "@food/utils/googleMapsApiKey"
 import { ArrowLeft, Loader2 } from "lucide-react"
 import { toast } from "sonner"
+import {
+  DEFAULT_RESTAURANT_COMMISSION_PERCENTAGE,
+  resolveRestaurantCommissionPercentage,
+} from "@food/constants/commission"
 
 const PHONE_REGEX = /^\d{10}$/
 const OWNER_PHONE_DUPLICATE_MSG = "This phone number is already registered with another restaurant."
@@ -105,7 +109,7 @@ const normalizeDetailsFormFromRestaurant = (restaurant) => {
     openingTime: restaurant?.openingTime || restaurant?.deliveryTimings?.openingTime || "",
     closingTime: restaurant?.closingTime || restaurant?.deliveryTimings?.closingTime || "",
     isActive: restaurant?.isActive !== false,
-    commissionPercentage: restaurant?.commissionPercentage ?? "",
+    commissionPercentage: resolveRestaurantCommissionPercentage(restaurant?.commissionPercentage),
   }
 }
 
@@ -361,7 +365,7 @@ export default function EditRestaurant() {
         isActive: detailsForm.isActive !== false,
         commissionPercentage:
           detailsForm.commissionPercentage === ""
-            ? 0
+            ? DEFAULT_RESTAURANT_COMMISSION_PERCENTAGE
             : Number(detailsForm.commissionPercentage),
       }
 
@@ -592,7 +596,7 @@ export default function EditRestaurant() {
                     type="number"
                     min="0"
                     max="100"
-                    placeholder="10"
+                    placeholder={String(DEFAULT_RESTAURANT_COMMISSION_PERCENTAGE)}
                     value={detailsForm.commissionPercentage}
                     onChange={(e) => setDetailsForm((p) => ({ ...p, commissionPercentage: e.target.value }))}
                   />

@@ -13,8 +13,8 @@ import {
   buildDeliverySocketPayload,
   enqueueOrderEvent,
   isStatusAdvance,
-  haversineKm,
 } from '../../food/orders/services/order.helpers.js';
+import { scorePointsByRoadDistance } from '../../../services/roadDistance.service.js';
 import { tryAutoAssign } from '../../food/orders/services/order-dispatch.service.js';
 import * as foodTransactionService from '../../food/orders/services/foodTransaction.service.js';
 import { ValidationError, NotFoundError } from '../../../core/auth/errors.js';
@@ -370,11 +370,10 @@ export const listNearbyOnlineDeliveryPartnersByCoords = async (origin, { maxKm =
     .select("_id name phone status lastLat lastLng")
     .lean();
   const STALE_GPS_MS = 10 * 60 * 1000;
-  const scored = onlinePartners
+  const candidates = onlinePartners
     .map((partner) => {
       const lat = Number(partner.lastLat);
       const lng = Number(partner.lastLng);
-      // Fallback: if lastLocationAt is missing, assume it's fresh if we have coordinates (or check if coordinates exist)
       const isStale = partner.lastLocationAt && Date.now() - new Date(partner.lastLocationAt).getTime() > STALE_GPS_MS;
 
       if (!Number.isFinite(lat) || !Number.isFinite(lng) || isStale) {
@@ -387,17 +386,24 @@ export const listNearbyOnlineDeliveryPartnersByCoords = async (origin, { maxKm =
         };
       }
 
-      const d = haversineKm(origin.lat, origin.lng, lat, lng);
       return {
         partnerId: partner._id,
-        distanceKm: d,
-        score: d,
+        lat,
+        lng,
         name: partner.name || "Delivery Partner",
         phone: partner.phone || "",
       };
     })
-    .filter((p) => p.distanceKm !== null && p.distanceKm <= maxKm)
-    .sort((a, b) => a.score - b.score);
+    .filter((partner) => partner.lat != null && partner.lng != null);
 
-  return scored.slice(0, limit);
+  const scored = await scorePointsByRoadDistance(origin, candidates, { maxKm });
+  return scored
+    .slice(0, limit)
+    .map((partner) => ({
+      partnerId: partner.partnerId,
+      distanceKm: partner.distanceKm,
+      score: partner.distanceKm,
+      name: partner.name || "Delivery Partner",
+      phone: partner.phone || "",
+    }));
 };

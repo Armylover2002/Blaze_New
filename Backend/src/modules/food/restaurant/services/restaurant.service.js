@@ -16,6 +16,7 @@ import {
 import { isPointInPolygon } from '../../../../utils/geo.js';
 import { ensureDailyPassEligibility, activateDailyPass, checkRestaurantEligibilityReadOnly } from '../../subscriptions/services/wallet.service.js';
 import { logger } from '../../../../utils/logger.js';
+import { getRoadDistancesFromOrigin } from '../../../../services/roadDistance.service.js';
 import {
     splitReviewableUpdate,
     mergePendingProfileChanges,
@@ -35,6 +36,49 @@ const DUPLICATE_OWNER_PHONE_MESSAGE =
     'This phone number is already registered with another restaurant.';
 const DUPLICATE_PRIMARY_CONTACT_MESSAGE =
     'This contact number is already registered with another restaurant.';
+
+async function enrichRestaurantsWithRoadDistance(restaurants, userLat, userLng, { resortNearest = false } = {}) {
+    const lat = Number(userLat);
+    const lng = Number(userLng);
+    if (!Array.isArray(restaurants) || !restaurants.length || !Number.isFinite(lat) || !Number.isFinite(lng)) {
+        return restaurants;
+    }
+
+    const entries = restaurants
+        .map((restaurant, index) => {
+            const location = restaurant?.location || {};
+            const coords = Array.isArray(location.coordinates) ? location.coordinates : null;
+            const rLat = Number(location.latitude ?? coords?.[1]);
+            const rLng = Number(location.longitude ?? coords?.[0]);
+            if (!Number.isFinite(rLat) || !Number.isFinite(rLng)) return null;
+            return { index, lat: rLat, lng: rLng };
+        })
+        .filter(Boolean);
+
+    if (!entries.length) return restaurants;
+
+    const distances = await getRoadDistancesFromOrigin(
+        { lat, lng },
+        entries.map((entry) => ({ lat: entry.lat, lng: entry.lng })),
+    );
+
+    entries.forEach((entry, i) => {
+        const distanceKm = distances[i]?.distanceKm;
+        if (!Number.isFinite(distanceKm)) return;
+        restaurants[entry.index].distanceInKm = distanceKm;
+        restaurants[entry.index].distanceMeters = Math.round(distanceKm * 1000);
+    });
+
+    if (resortNearest) {
+        restaurants.sort((a, b) => {
+            const aDist = Number.isFinite(a.distanceInKm) ? a.distanceInKm : Number.MAX_SAFE_INTEGER;
+            const bDist = Number.isFinite(b.distanceInKm) ? b.distanceInKm : Number.MAX_SAFE_INTEGER;
+            return aDist - bDist;
+        });
+    }
+
+    return restaurants;
+}
 
 
 const normalizeName = (value) =>
@@ -2514,6 +2558,7 @@ export const listApprovedRestaurants = async (query = {}) => {
 
         const total = totalDocs?.[0]?.count || 0;
         await attachOutletTimingsToRestaurants(pageDocs);
+        await enrichRestaurantsWithRoadDistance(pageDocs, lat, lng, { resortNearest: sortBy === 'nearest' });
         return { restaurants: pageDocs, total, page, limit };
     }
 
@@ -2555,6 +2600,9 @@ export const listApprovedRestaurants = async (query = {}) => {
     }));
 
     await attachOutletTimingsToRestaurants(restaurants);
+    if (lat !== null && lng !== null) {
+        await enrichRestaurantsWithRoadDistance(restaurants, lat, lng);
+    }
 
     return { restaurants, total, page, limit };
 };

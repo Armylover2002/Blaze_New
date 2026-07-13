@@ -1,9 +1,19 @@
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, createContext, useContext } from "react"
 import { locationAPI, userAPI } from "@food/api"
+import {
+  hasValidCoordinates,
+  USER_LOCATION_STORAGE_KEY,
+} from "@food/utils/locationStorage"
 
-const debugLog = (...args) => {}
-const debugWarn = (...args) => {}
-const debugError = (...args) => {}
+const debugLog = (...args) => {
+  if (import.meta.env.DEV) console.log("[useLocation]", ...args)
+}
+const debugWarn = (...args) => {
+  if (import.meta.env.DEV) console.warn("[useLocation]", ...args)
+}
+const debugError = (...args) => {
+  if (import.meta.env.DEV) console.error("[useLocation]", ...args)
+}
 
 // BigDataCloud reverse-geocode is expensive/noisy if many components mount `useLocation()`.
 // This module-level guard dedupes concurrent calls + rate-limits starts across the whole app.
@@ -119,6 +129,35 @@ const buildBigDataCloudAddress = (data, latitude, longitude) => {
   }
 }
 
+const isPlusCode = (value) => {
+  const text = String(value || "").trim()
+  return /^[23456789CFGHJMPQRVWX]{4,}\+[23456789CFGHJMPQRVWX]{2,}$/i.test(text)
+}
+
+const isGenericAddressPart = (value, { city = "", state = "", country = "" } = {}) => {
+  const trimmed = String(value || "").trim()
+  if (!trimmed || trimmed.length < 2) return true
+  if (isPlusCode(trimmed)) return true
+
+  const lower = trimmed.toLowerCase()
+  if (country && lower === country.toLowerCase()) return true
+  if (lower === "india") return true
+  if (city && lower === city.toLowerCase()) return true
+  if (state && (lower === state.toLowerCase() || lower.startsWith(`${state.toLowerCase()} `))) return true
+  if (/^\d{5,6}$/.test(trimmed)) return true
+
+  return false
+}
+
+const pickMeaningfulAddressPart = (parts, context = {}) => {
+  for (const part of parts) {
+    const trimmed = String(part || "").trim()
+    if (!trimmed || isGenericAddressPart(trimmed, context)) continue
+    return trimmed.replace(/\s+\d{5,6}$/, "").trim()
+  }
+  return ""
+}
+
 const buildGoogleAddress = (data, latitude, longitude) => {
   if (!data || !data.results || !data.results[0]) return null
   const result = data.results[0]
@@ -129,6 +168,7 @@ const buildGoogleAddress = (data, latitude, longitude) => {
   let route = ""
   let subpremise = ""
   let premise = ""
+  let neighborhood = ""
   let sublocality1 = ""
   let sublocality2 = ""
   let locality = ""
@@ -142,6 +182,7 @@ const buildGoogleAddress = (data, latitude, longitude) => {
     if (types.includes("route")) route = comp.long_name
     if (types.includes("subpremise")) subpremise = comp.long_name
     if (types.includes("premise")) premise = comp.long_name
+    if (types.includes("neighborhood")) neighborhood = comp.long_name
     if (types.includes("sublocality_level_1")) sublocality1 = comp.long_name
     if (types.includes("sublocality_level_2")) sublocality2 = comp.long_name
     if (types.includes("locality")) locality = comp.long_name
@@ -150,12 +191,15 @@ const buildGoogleAddress = (data, latitude, longitude) => {
     if (types.includes("postal_code")) postalCode = comp.long_name
   })
 
-  const streetParts = [streetNumber, subpremise, premise, route].filter(Boolean)
-  const street = streetParts.join(", ")
-
-  const area = sublocality1 || sublocality2 || ""
   const city = locality || "Unknown City"
   const state = administrativeArea1 || ""
+  const area = sublocality1 || sublocality2 || neighborhood || ""
+  const addressParts = displayName.split(",").map((part) => part.trim()).filter(Boolean)
+  const fallbackLine = pickMeaningfulAddressPart(addressParts, { city, state, country })
+
+  const streetParts = [streetNumber, route, premise, subpremise].filter(Boolean)
+  const streetFromComponents = streetParts.join(", ")
+  const street = streetFromComponents || area || fallbackLine || ""
 
   return {
     area: area || city,
@@ -163,7 +207,7 @@ const buildGoogleAddress = (data, latitude, longitude) => {
     state: state,
     country: country,
     postalCode: postalCode,
-    street: street || displayName.split(",")[0] || "",
+    street,
     address: displayName,
     formattedAddress: displayName,
   }
@@ -186,6 +230,12 @@ const buildNominatimAddress = (data, latitude, longitude) => {
   const city = addr.city || addr.town || addr.village || addr.municipality || addr.county || ""
   const state = addr.state || ""
   const postcode = addr.postcode || ""
+  const addressParts = displayName.split(",").map((part) => part.trim()).filter(Boolean)
+  const fallbackLine = pickMeaningfulAddressPart(addressParts, {
+    city,
+    state,
+    country: addr.country || "",
+  })
 
   return {
     area: area || city || "",
@@ -193,7 +243,7 @@ const buildNominatimAddress = (data, latitude, longitude) => {
     state,
     country: addr.country || "",
     postalCode: postcode,
-    street: street || displayName.split(",")[0] || "",
+    street: street || area || fallbackLine || "",
     address: displayName,
     formattedAddress: displayName,
   }
@@ -220,9 +270,8 @@ const reverseGeocodeDirect = async (latitude, longitude, forceFresh = false) => 
     return globalReverseGeocodeLastSuccess
   }
 
-  // If another caller is already fetching, wait for it when it's "close enough".
-  // Even if forceFresh is true, if it's currently in flight, it's fresh enough.
-  if (globalReverseGeocodeInFlight) {
+  // If another caller is already fetching nearby coords, wait for it (skip when forceFresh).
+  if (!forceFresh && globalReverseGeocodeInFlight) {
     const inFlightMoved = geoDistanceMeters(
       globalReverseGeocodeLastCoords.latitude,
       globalReverseGeocodeLastCoords.longitude,
@@ -242,86 +291,88 @@ const reverseGeocodeDirect = async (latitude, longitude, forceFresh = false) => 
   globalReverseGeocodeLastCoords = { latitude, longitude }
 
   const run = (async () => {
-    // 1. Try Google Geocoding REST API if the API key is available
-    const googleApiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY
-    if (googleApiKey) {
+    try {
+      // 1. Try Google Geocoding REST API if the API key is available
+      const googleApiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY
+      if (googleApiKey) {
+        try {
+          const controller = new AbortController()
+          const abortTimeout = setTimeout(() => controller.abort(), 4000) // 4s timeout for Google
+
+          const url = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${latitude},${longitude}&key=${googleApiKey}&language=en`
+          const res = await fetch(url, { signal: controller.signal })
+          clearTimeout(abortTimeout)
+
+          if (res.ok) {
+            const data = await res.json()
+            if (data.status === "OK" && data.results && data.results[0]) {
+              const parsed = buildGoogleAddress(data, latitude, longitude)
+              if (parsed && parsed.address && parsed.address.trim() !== "") {
+                globalReverseGeocodeLastSuccess = parsed
+                return parsed
+              }
+            } else {
+              debugWarn("Google Geocoding API returned status:", data.status)
+            }
+          }
+        } catch (googleErr) {
+          debugWarn("Google Geocoding failed, falling back to Nominatim:", googleErr.message)
+        }
+      }
+
+      // 2. Try Nominatim as a fallback for detailed street-level data
       try {
         const controller = new AbortController()
-        const abortTimeout = setTimeout(() => controller.abort(), 4000) // 4s timeout for Google
+        const abortTimeout = setTimeout(() => controller.abort(), 4000) // 4s timeout for Nominatim
 
-        const url = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${latitude},${longitude}&key=${googleApiKey}&language=en`
-        const res = await fetch(url, { signal: controller.signal })
+        const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}`
+        const res = await fetch(url, {
+          signal: controller.signal,
+          headers: {
+            "Accept-Language": "en",
+            "User-Agent": "AppZeto-Food-App"
+          }
+        })
+
         clearTimeout(abortTimeout)
 
         if (res.ok) {
           const data = await res.json()
-          if (data.status === "OK" && data.results && data.results[0]) {
-            const parsed = buildGoogleAddress(data, latitude, longitude)
-            if (parsed && parsed.address && parsed.address.trim() !== "") {
-              globalReverseGeocodeLastSuccess = parsed
-              return parsed
-            }
-          } else {
-            debugWarn("Google Geocoding API returned status:", data.status)
+          const parsed = buildNominatimAddress(data, latitude, longitude)
+          if (parsed && parsed.address && parsed.address.trim() !== "") {
+            globalReverseGeocodeLastSuccess = parsed
+            return parsed
           }
         }
-      } catch (googleErr) {
-        debugWarn("Google Geocoding failed, falling back to Nominatim:", googleErr.message)
+      } catch (nominatimErr) {
+        debugWarn("Nominatim reverse geocode failed, falling back to BigDataCloud:", nominatimErr.message)
       }
-    }
 
-    // 2. Try Nominatim as a fallback for detailed street-level data
-    try {
-      const controller = new AbortController()
-      const abortTimeout = setTimeout(() => controller.abort(), 4000) // 4s timeout for Nominatim
+      // 3. Fallback to BigDataCloud (using new api-bdc.io endpoint)
+      try {
+        const controller = new AbortController()
+        const abortTimeout = setTimeout(() => controller.abort(), 3000) // Faster timeout for fallback
 
-      const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}`
-      const res = await fetch(url, {
-        signal: controller.signal,
-        headers: {
-          "Accept-Language": "en",
-          "User-Agent": "AppZeto-Food-App"
-        }
-      })
+        const res = await fetch(
+          `https://api-bdc.io/data/reverse-geocode-client?latitude=${latitude}&longitude=${longitude}&localityLanguage=en`,
+          { signal: controller.signal }
+        )
 
-      clearTimeout(abortTimeout)
+        clearTimeout(abortTimeout)
 
-      if (res.ok) {
         const data = await res.json()
-        const parsed = buildNominatimAddress(data, latitude, longitude)
-        if (parsed && parsed.address && parsed.address.trim() !== "") {
-          globalReverseGeocodeLastSuccess = parsed
-          return parsed
+        const value = buildBigDataCloudAddress(data, latitude, longitude)
+        globalReverseGeocodeLastSuccess = value
+        return value
+      } catch (bdcErr) {
+        debugError("Fallback BigDataCloud geocoding failed too:", bdcErr.message)
+        const fallback = {
+          city: "Current Location",
+          address: `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`,
+          formattedAddress: `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`,
         }
+        return fallback
       }
-    } catch (nominatimErr) {
-      debugWarn("Nominatim reverse geocode failed, falling back to BigDataCloud:", nominatimErr.message)
-    }
-
-    // 3. Fallback to BigDataCloud (using new api-bdc.io endpoint)
-    try {
-      const controller = new AbortController()
-      const abortTimeout = setTimeout(() => controller.abort(), 3000) // Faster timeout for fallback
-
-      const res = await fetch(
-        `https://api-bdc.io/data/reverse-geocode-client?latitude=${latitude}&longitude=${longitude}&localityLanguage=en`,
-        { signal: controller.signal }
-      )
-
-      clearTimeout(abortTimeout)
-
-      const data = await res.json()
-      const value = buildBigDataCloudAddress(data, latitude, longitude)
-      globalReverseGeocodeLastSuccess = value
-      return value
-    } catch (bdcErr) {
-      debugError("Fallback BigDataCloud geocoding failed too:", bdcErr.message)
-      const fallback = {
-        city: "Current Location",
-        address: `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`,
-        formattedAddress: `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`,
-      }
-      return fallback
     } finally {
       globalReverseGeocodeInFlight = null
     }
@@ -332,10 +383,38 @@ const reverseGeocodeDirect = async (latitude, longitude, forceFresh = false) => 
 }
 
 export function useLocation() {
+  const shared = useContext(LocationContext)
+  if (shared) return shared
+  return useLocationInternal()
+}
+
+export function LocationProvider({ children }) {
+  const value = useLocationInternal()
+  return (
+    <LocationContext.Provider value={value}>{children}</LocationContext.Provider>
+  )
+}
+
+const LocationContext = createContext(null)
+
+function useLocationInternal() {
   const [location, setLocation] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  const [permissionGranted, setPermissionGranted] = useState(false)
+  const [hasCoordinates, setHasCoordinates] = useState(false)
+  const [geolocationPermission, setGeolocationPermission] = useState("unknown")
+
+  const syncCoordinatesFromLocation = (nextLocation) => {
+    setHasCoordinates(hasValidCoordinates(nextLocation))
+  }
+
+  const markBrowserGeolocationGranted = () => {
+    setGeolocationPermission("granted")
+  }
+
+  const markBrowserGeolocationDenied = () => {
+    setGeolocationPermission("denied")
+  }
 
   const watchIdRef = useRef(null)
   const updateTimerRef = useRef(null)
@@ -347,6 +426,7 @@ export function useLocation() {
   const lastDbLocationRef = useRef(null)
   const lastDbUpdateAtRef = useRef(0)
   const lastDbUpdatedCoordsRef = useRef({ latitude: null, longitude: null })
+  const gpsRequestSeqRef = useRef(0)
 
   const GEOCODE_REUSE_DISTANCE_METERS = 120
   const GEOCODE_REUSE_TIME_MS = 10 * 60 * 1000
@@ -412,15 +492,20 @@ export function useLocation() {
         return
       }
 
+      // Persist the full geocoder string in `address` (display may use a shorter label locally).
+      const completeAddress = String(
+        locationData.formattedAddress || locationData.address || "",
+      ).trim()
+
       // Prepare complete location data for database storage
       const locationPayload = {
         latitude: locationData.latitude,
         longitude: locationData.longitude,
-        address: locationData.address || "",
+        address: completeAddress,
         city: locationData.city || "",
         state: locationData.state || "",
         area: locationData.area || "",
-        formattedAddress: locationData.formattedAddress || locationData.address || "",
+        formattedAddress: completeAddress,
       }
 
       // Add optional fields if available
@@ -971,18 +1056,44 @@ export function useLocation() {
 
   /* ===================== MAIN LOCATION ===================== */
   const getLocation = async (updateDB = true, forceFresh = false, showLoading = false) => {
+    const requestId = ++gpsRequestSeqRef.current
+    const isCurrentGpsRequest = () => requestId === gpsRequestSeqRef.current
+
+    const commitGpsUpdate = ({
+      loc,
+      loading: nextLoading,
+      error: nextError,
+      persist = false,
+      permission = null,
+    } = {}) => {
+      if (!isCurrentGpsRequest()) return false
+      if (loc !== undefined) {
+        setLocation(loc)
+        syncCoordinatesFromLocation(loc)
+      }
+      if (nextLoading !== undefined) setLoading(nextLoading)
+      if (nextError !== undefined) setError(nextError)
+      if (permission === "granted") markBrowserGeolocationGranted()
+      if (permission === "denied") markBrowserGeolocationDenied()
+      if (persist && loc) {
+        localStorage.setItem("userLocation", JSON.stringify(loc))
+      }
+      return true
+    }
+
     // If not forcing fresh, try DB first (faster)
     let dbLocation = !forceFresh ? await fetchLocationFromDB() : null
     if (dbLocation && !forceFresh) {
-      setLocation(dbLocation)
-      if (showLoading) setLoading(false)
-      return dbLocation
+      commitGpsUpdate({ loc: dbLocation, loading: showLoading ? false : undefined })
+      return isCurrentGpsRequest() ? dbLocation : null
     }
 
     if (!navigator.geolocation) {
-      setError("Geolocation not supported")
-      if (showLoading) setLoading(false)
-      return dbLocation
+      if (isCurrentGpsRequest()) {
+        setError("Geolocation not supported")
+        if (showLoading) setLoading(false)
+      }
+      return isCurrentGpsRequest() ? dbLocation : null
     }
 
     // Helper function to get position with retry mechanism
@@ -1110,8 +1221,6 @@ export function useLocation() {
 
               if (hasPlaceholder) {
                 debugWarn("?? Skipping save - location contains placeholder values:", finalLoc)
-                // Don't save placeholder values to localStorage or DB
-                // Just set in state for display but don't persist
                 const coordOnlyLoc = {
                   latitude,
                   longitude,
@@ -1120,27 +1229,37 @@ export function useLocation() {
                   address: finalLoc.address,
                   formattedAddress: finalLoc.formattedAddress
                 }
-                setLocation(coordOnlyLoc)
-                setPermissionGranted(true)
-                if (showLoading) setLoading(false)
-                setError(null)
+                if (!commitGpsUpdate({
+                  loc: coordOnlyLoc,
+                  loading: showLoading ? false : undefined,
+                  error: null,
+                  permission: "granted",
+                })) {
+                  resolve(null)
+                  return
+                }
                 resolve(coordOnlyLoc)
                 return
               }
 
               debugLog("?? Saving location:", finalLoc)
-              localStorage.setItem("userLocation", JSON.stringify(finalLoc))
-              setLocation(finalLoc)
-              setPermissionGranted(true)
-              if (showLoading) setLoading(false)
-              setError(null)
+              if (!commitGpsUpdate({
+                loc: finalLoc,
+                loading: showLoading ? false : undefined,
+                error: null,
+                permission: "granted",
+                persist: true,
+              })) {
+                resolve(null)
+                return
+              }
 
-              if (updateDB) {
+              if (updateDB && isCurrentGpsRequest()) {
                 await updateLocationInDB(finalLoc).catch(err => {
                   debugWarn("Failed to update location in DB:", err)
                 })
               }
-              resolve(finalLoc)
+              resolve(isCurrentGpsRequest() ? finalLoc : null)
             } catch (err) {
               debugError("? Error processing location:", err)
               // Try one more time with direct reverse geocode as last resort
@@ -1163,13 +1282,20 @@ export function useLocation() {
                     accuracy: pos.coords.accuracy || null
                   }
                   debugLog("? Last resort geocoding succeeded:", lastResortLoc)
-                  localStorage.setItem("userLocation", JSON.stringify(lastResortLoc))
-                  setLocation(lastResortLoc)
-                  setPermissionGranted(true)
-                  if (showLoading) setLoading(false)
-                  setError(null)
-                  if (updateDB) await updateLocationInDB(lastResortLoc).catch(() => { })
-                  resolve(lastResortLoc)
+                  if (!commitGpsUpdate({
+                    loc: lastResortLoc,
+                    loading: showLoading ? false : undefined,
+                    error: null,
+                    permission: "granted",
+                    persist: true,
+                  })) {
+                    resolve(null)
+                    return
+                  }
+                  if (updateDB && isCurrentGpsRequest()) {
+                    await updateLocationInDB(lastResortLoc).catch(() => { })
+                  }
+                  resolve(isCurrentGpsRequest() ? lastResortLoc : null)
                   return
                 } else {
                   debugWarn("?? Last resort geocoding returned invalid data:", lastResortAddr)
@@ -1191,11 +1317,15 @@ export function useLocation() {
               // Don't save placeholder values to localStorage
               // Only set in state for display
               debugWarn("?? Skipping save - all geocoding failed, using placeholder")
-              setLocation(fallbackLoc)
-              setPermissionGranted(true)
-              if (showLoading) setLoading(false)
-              // Don't try to update DB with placeholder
-              resolve(fallbackLoc)
+              if (!commitGpsUpdate({
+                loc: fallbackLoc,
+                loading: showLoading ? false : undefined,
+                permission: "granted",
+              })) {
+                resolve(null)
+                return
+              }
+              resolve(isCurrentGpsRequest() ? fallbackLoc : null)
             }
           },
           async (err) => {
@@ -1240,33 +1370,45 @@ export function useLocation() {
 
               if (fallback) {
                 debugLog("? Using fallback location:", fallback)
-                setLocation(fallback)
-                // Don't set error for timeout when we have fallback
-                if (err.code !== 3) {
-                  setError(err.message)
+                if (!commitGpsUpdate({
+                  loc: fallback,
+                  loading: showLoading ? false : undefined,
+                  error: err.code !== 3 ? err.message : undefined,
+                  permission: err.code === 1 ? "denied" : "granted",
+                })) {
+                  resolve(null)
+                  return
                 }
-                setPermissionGranted(true) // Still grant permission if we have location
-                if (showLoading) setLoading(false)
-                resolve(fallback)
+                resolve(isCurrentGpsRequest() ? fallback : null)
               } else {
-                // No fallback available - set a default location so UI doesn't hang
                 debugWarn("?? No fallback location available, setting default")
                 const defaultLocation = {
                   city: "Select location",
                   address: "Select location",
                   formattedAddress: "Select location"
                 }
-                setLocation(defaultLocation)
-                setError(err.code === 3 ? "Location request timed out. Please try again." : err.message)
-                setPermissionGranted(false)
-                if (showLoading) setLoading(false)
-                resolve(defaultLocation) // Always resolve with something
+                if (!commitGpsUpdate({
+                  loc: defaultLocation,
+                  loading: showLoading ? false : undefined,
+                  error: err.code === 3 ? "Location request timed out. Please try again." : err.message,
+                  permission: err.code === 1 ? "denied" : undefined,
+                })) {
+                  resolve(null)
+                  return
+                }
+                resolve(isCurrentGpsRequest() ? defaultLocation : null)
               }
             } catch (fallbackErr) {
               debugWarn("?? Fallback retrieval failed:", fallbackErr)
+              if (!isCurrentGpsRequest()) {
+                resolve(null)
+                return
+              }
               setLocation(null)
               setError(err.code === 3 ? "Location request timed out. Please try again." : err.message)
-              setPermissionGranted(false)
+              if (err.code === 1) {
+                markBrowserGeolocationDenied()
+              }
               if (showLoading) setLoading(false)
               resolve(null)
             }
@@ -1474,7 +1616,8 @@ export function useLocation() {
               debugLog("?? Updating live location:", loc)
               localStorage.setItem("userLocation", JSON.stringify(persistedLocation))
               setLocation(persistedLocation)
-              setPermissionGranted(true)
+              markBrowserGeolocationGranted()
+              syncCoordinatesFromLocation(persistedLocation)
               setError(null)
             } else {
               // Coordinates haven't changed significantly, skip state update to prevent re-renders
@@ -1507,7 +1650,8 @@ export function useLocation() {
             // Only set in state for display
             debugWarn("?? Skipping localStorage save - fallback location contains placeholder values")
             setLocation(fallbackLoc)
-            setPermissionGranted(true)
+            markBrowserGeolocationGranted()
+            syncCoordinatesFromLocation(fallbackLoc)
           }
         },
         (err) => {
@@ -1547,7 +1691,9 @@ export function useLocation() {
           // Only set error for non-timeout errors that are critical
           if (err.code !== 3) {
             setError(err.message)
-            setPermissionGranted(false)
+            if (err.code === 1) {
+              markBrowserGeolocationDenied()
+            }
           }
 
           // Don't clear the watch - let it keep trying in background
@@ -1591,10 +1737,7 @@ export function useLocation() {
         if (!nextLocation || typeof nextLocation !== "object") return
 
         setLocation(nextLocation)
-        setPermissionGranted(
-          Number.isFinite(Number(nextLocation.latitude)) &&
-            Number.isFinite(Number(nextLocation.longitude))
-        )
+        syncCoordinatesFromLocation(nextLocation)
         setLoading(false)
         setError(null)
       } catch (err) {
@@ -1611,7 +1754,7 @@ export function useLocation() {
   /* ===================== INIT ===================== */
   useEffect(() => {
     // Load stored location first for IMMEDIATE display (no loading state)
-    const stored = localStorage.getItem("userLocation")
+    const stored = localStorage.getItem(USER_LOCATION_STORAGE_KEY)
     let shouldForceRefresh = false
     let hasInitialLocation = false
 
@@ -1619,26 +1762,25 @@ export function useLocation() {
       try {
         const parsedLocation = JSON.parse(stored)
 
-        // Show cached location immediately.
-        // Requirement: only geocode again on explicit manual change.
         const lat = Number(parsedLocation?.latitude)
         const lng = Number(parsedLocation?.longitude)
         const hasLatLng = Number.isFinite(lat) && Number.isFinite(lng)
 
         if (parsedLocation && hasLatLng) {
           setLocation(parsedLocation)
-          setPermissionGranted(true)
-          setLoading(false) // Set loading to false immediately
+          syncCoordinatesFromLocation(parsedLocation)
+          setLoading(false)
           hasInitialLocation = true
           shouldForceRefresh = false
           debugLog("?? Loaded stored location instantly (no auto-refresh):", parsedLocation)
         } else {
-          // If we don't have usable coordinates, we must fetch once on first open.
-          debugLog("?? Stored location missing coordinates; will fetch once")
+          localStorage.removeItem(USER_LOCATION_STORAGE_KEY)
+          debugLog("?? Stored location missing coordinates; cleared stale cache")
           shouldForceRefresh = true
         }
       } catch (err) {
         debugError("Failed to parse stored location:", err)
+        localStorage.removeItem(USER_LOCATION_STORAGE_KEY)
         shouldForceRefresh = true
       }
     }
@@ -1649,7 +1791,7 @@ export function useLocation() {
         .then((dbLoc) => {
           if (dbLoc && Number.isFinite(Number(dbLoc.latitude)) && Number.isFinite(Number(dbLoc.longitude))) {
             setLocation(dbLoc)
-            setPermissionGranted(true)
+            syncCoordinatesFromLocation(dbLoc)
             setLoading(false)
             hasInitialLocation = true
             debugLog("?? Loaded location from DB:", dbLoc)
@@ -1701,31 +1843,29 @@ export function useLocation() {
     // This prevents "Requests geolocation permission on page load" warning
     const checkPermissionAndStart = async () => {
       try {
-        let permissionGranted = false;
+        let browserGranted = false;
 
         if (navigator.permissions && navigator.permissions.query) {
           try {
             const result = await navigator.permissions.query({ name: 'geolocation' });
             permStatusObj = result;
+            setGeolocationPermission(result.state);
             permListener = () => {
+              setGeolocationPermission(result.state);
               if (result.state === 'granted') {
                 debugLog("?? Geolocation permission changed to granted! Fetching fresh location...");
                 getLocation(true, true).then((freshLoc) => {
                   if (freshLoc) {
-                    setLocation(freshLoc);
-                    setPermissionGranted(true);
                     window.dispatchEvent(new CustomEvent("userLocationUpdated", { detail: { location: freshLoc } }));
                   }
                 }).catch(() => {});
-              } else {
-                setPermissionGranted(false);
               }
             };
             result.addEventListener('change', permListener);
             result.onchange = permListener;
 
             if (result.state === 'granted') {
-              permissionGranted = true;
+              browserGranted = true;
             } else {
               debugLog(`?? Geolocation permission is '${result.state}' - Waiting for user action (avoiding prompt on load)`);
             }
@@ -1734,14 +1874,11 @@ export function useLocation() {
           }
         } else {
           // Fallback for browsers without permissions API - assume not granted to be safe
+          setGeolocationPermission("prompt");
           debugLog("?? Permissions API not available - Skipping auto-start");
         }
 
-        // If permission NOT granted, and we don't have a specific user request (this is page load),
-        // we should SKIP automatic fetching/watching to allow the user to choose when to enable it.
-        // UNLESS we already have a valid initial location from localStorage/DB, in which case we might want to refresh?
-        // Actually, even then, we shouldn't prompt.
-        if (!permissionGranted) {
+        if (!browserGranted) {
           // If we have an initial location, we are fine (it's displayed).
           // If we don't, we show "Select Location".
           // In either case, we avoid the PROMPT.
@@ -1771,9 +1908,6 @@ export function useLocation() {
                   state: location?.state,
                   area: location?.area
                 })
-                // CRITICAL: Update state with fresh location so PageNavbar displays it
-                setLocation(location)
-                setPermissionGranted(true)
                 if (AUTO_START_LIVE_WATCH) startWatchingLocation()
               } else {
                 // Placeholder result means reverse-geocode failed or was unavailable.
@@ -1814,6 +1948,8 @@ export function useLocation() {
 
   const requestLocation = async () => {
     debugLog("?????? User requested location update - clearing cache and fetching fresh")
+    // Invalidate any in-flight GPS work from init/PageNavbar before starting a user request.
+    gpsRequestSeqRef.current += 1
     setLoading(true)
     setError(null)
 
@@ -1886,7 +2022,9 @@ export function useLocation() {
     location,
     loading,
     error,
-    permissionGranted,
+    hasCoordinates,
+    geolocationPermission,
+    permissionGranted: geolocationPermission === "granted",
     requestLocation,
     startWatchingLocation,
     stopWatchingLocation,

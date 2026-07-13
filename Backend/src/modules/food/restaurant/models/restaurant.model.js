@@ -372,7 +372,7 @@ const restaurantSchema = new mongoose.Schema(
     },
     commissionPercentage: {
       type: Number,
-      default: 0,
+      default: 15,
       min: 0,
       max: 100
     },

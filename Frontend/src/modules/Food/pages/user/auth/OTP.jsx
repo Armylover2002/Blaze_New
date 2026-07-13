@@ -6,6 +6,7 @@ import { Input } from "@food/components/ui/input"
 import { Button } from "@food/components/ui/button"
 import { authAPI } from "@food/api"
 import { setAuthData as setUserAuthData } from "@food/utils/auth"
+import { markLocationPromptAfterLogin } from "@food/utils/locationStorage"
 
 export default function OTP() {
   const navigate = useNavigate()
@@ -251,6 +252,7 @@ export default function OTP() {
       sessionStorage.removeItem("userAuthData")
 
       setUserAuthData("user", accessToken, user, refreshToken)
+      markLocationPromptAfterLogin()
 
       // Dispatch custom event for same-tab updates
       window.dispatchEvent(new Event("userAuthChanged"))
@@ -339,6 +341,7 @@ export default function OTP() {
       sessionStorage.removeItem("userAuthData")
 
       setUserAuthData("user", accessToken, user, refreshToken)
+      markLocationPromptAfterLogin()
 
       window.dispatchEvent(new Event("userAuthChanged"))
 

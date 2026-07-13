@@ -3,6 +3,7 @@ import { FoodItem } from '../../admin/models/food.model.js';
 import { FoodCategory } from '../../admin/models/category.model.js';
 import { FoodZone } from '../../admin/models/zone.model.js';
 import mongoose from 'mongoose';
+import { getRoadDistancesFromOrigin } from '../../../../services/roadDistance.service.js';
 
 const zoneToPolygon = (zoneDoc) => {
     const coords = Array.isArray(zoneDoc?.coordinates) ? zoneDoc.coordinates : [];
@@ -177,21 +178,42 @@ export const searchUnified = async (query = {}, options = {}) => {
     // 4. Final Result Formatting
     let results = Array.from(restaurantDetailsMap.values());
 
-    // Simple distance sorting if lat/lng are provided
+    // Road-distance sorting when lat/lng are provided
     if (lat && lng && results.length > 0) {
-        results.forEach(res => {
-            if (res.location && res.location.latitude && res.location.longitude) {
-                const dLat = (res.location.latitude - lat) * Math.PI / 180;
-                const dLon = (res.location.longitude - lng) * Math.PI / 180;
-                const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
-                          Math.cos(lat * Math.PI / 180) * Math.cos(res.location.latitude * Math.PI / 180) *
-                          Math.sin(dLon/2) * Math.sin(dLon/2);
-                const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-                res.distanceScore = 6371 * c; // Km
-            } else {
-                res.distanceScore = 999;
-            }
+        const userLat = Number(lat);
+        const userLng = Number(lng);
+        const entries = results
+            .map((res, index) => {
+                if (!res.location || res.location.latitude == null || res.location.longitude == null) {
+                    return { index, missing: true };
+                }
+                return {
+                    index,
+                    lat: Number(res.location.latitude),
+                    lng: Number(res.location.longitude),
+                };
+            });
+
+        const validEntries = entries.filter((entry) => !entry.missing && Number.isFinite(entry.lat) && Number.isFinite(entry.lng));
+        const distances = validEntries.length
+            ? await getRoadDistancesFromOrigin(
+                { lat: userLat, lng: userLng },
+                validEntries.map((entry) => ({ lat: entry.lat, lng: entry.lng })),
+            )
+            : [];
+
+        validEntries.forEach((entry, i) => {
+            const distanceKm = distances[i]?.distanceKm;
+            results[entry.index].distanceScore = Number.isFinite(distanceKm) ? distanceKm : 999;
+            results[entry.index].distanceInKm = Number.isFinite(distanceKm) ? distanceKm : null;
         });
+
+        entries
+            .filter((entry) => entry.missing)
+            .forEach((entry) => {
+                results[entry.index].distanceScore = 999;
+            });
+
         results.sort((a, b) => (a.distanceScore || 999) - (b.distanceScore || 999));
     }
 

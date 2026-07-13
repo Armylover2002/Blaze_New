@@ -84,6 +84,7 @@ router.get('/reports/tax/:id', checkPermission('food::report_management::tax', '
 router.get('/restaurants/pending', checkPermission('food::restaurant_management::restaurants::joining_request', 'view'), adminController.getPendingRestaurants);
 router.get('/restaurants/reviews', checkPermission('food::restaurant_management::restaurants::reviews', 'view'), adminController.getRestaurantReviews);
 router.get('/restaurants/:id', checkPermission('food::restaurant_management::restaurants::list', 'view'), adminController.getRestaurantById);
+router.get('/pos-analytics/search', checkPermission('food::restaurant_management::restaurants::list', 'view'), adminController.searchPosAnalytics);
 router.get('/restaurants/:id/analytics', checkPermission('food::restaurant_management::restaurants::list', 'view'), adminController.getRestaurantAnalytics);
 router.get('/restaurants/:id/menu', checkPermission('food::restaurant_management::restaurants::list', 'view'), adminController.getRestaurantMenuById);
 router.post('/restaurants', checkPermission('food::restaurant_management::restaurants::list', 'create'), adminController.createRestaurant);
@@ -232,6 +233,7 @@ router.patch('/dining/restaurants/:restaurantId', checkPermission('food::dining_
 
 // ----- Orders -----
 router.get('/orders', checkPermission('food::order_management::orders', 'view'), orderController.listOrdersAdminController);
+router.get('/orders/:orderId/pos-analytics', checkPermission('food::restaurant_management::restaurants::list', 'view'), adminController.getOrderPosAnalytics);
 router.get('/orders/:orderId', checkPermission('food::order_management::orders', 'view'), orderController.getOrderByIdAdminController);
 router.patch('/orders/:orderId/status', checkPermission('food::order_management::orders', 'edit'), orderController.updateOrderStatusAdminController);
 router.post('/orders/:orderId/refund', checkPermission('food::order_management::orders::refunded', 'create'), adminController.processRefund);

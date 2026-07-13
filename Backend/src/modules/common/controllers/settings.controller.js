@@ -1,13 +1,20 @@
 import { GlobalSettings } from '../models/settings.model.js';
 import { sendResponse } from '../../../utils/response.js';
 import { uploadImageBufferDetailed } from '../../../services/cloudinary.service.js';
+import {
+    getGlobalSettingsImagePreset,
+    optimizeImageForUpload,
+} from '../../../services/imageOptimization.service.js';
+import { cleanupUploadedFiles } from '../../../utils/uploadCleanup.js';
+import fs from 'fs/promises';
 import { config } from '../../../config/env.js';
 import { getRedisClient } from '../../../config/redis.js';
 import { getCache, setCache, deleteCache } from '../../../utils/cacheManager.js';
 import { clearGlobalBrandingCache } from '../services/globalBranding.service.js';
+import { clearGlobalPaymentSettingsCache } from '../services/globalPaymentSettings.service.js';
 
 const SETTINGS_CACHE_KEY = 'global_settings_public';
-const SETTINGS_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const SETTINGS_CACHE_TTL_MS = 60 * 1000; // 1 minute server-side safety TTL
 const SETTINGS_REDIS_KEY = 'common:global_settings:public';
 
 const getRedisCache = async (key) => {
@@ -41,6 +48,15 @@ export const clearGlobalSettingsCache = async () => {
         await deleteRedisCache(SETTINGS_REDIS_KEY);
     } catch {}
     clearGlobalBrandingCache();
+    clearGlobalPaymentSettingsCache();
+};
+
+const warmGlobalSettingsCache = async (payload) => {
+    if (!payload) return;
+    setCache(SETTINGS_CACHE_KEY, payload, SETTINGS_CACHE_TTL_MS);
+    try {
+        await setRedisCache(SETTINGS_REDIS_KEY, payload, SETTINGS_CACHE_TTL_MS);
+    } catch {}
 };
 
 const buildSettingsPayload = (settings) => {
@@ -71,7 +87,7 @@ export async function getGlobalSettings(req, res, next) {
                 cached = getCache(SETTINGS_CACHE_KEY);
             }
             if (cached) {
-                res.set('Cache-Control', 'public, max-age=300, stale-while-revalidate=60');
+                res.set('Cache-Control', 'no-cache, must-revalidate');
                 return sendResponse(res, 200, 'Global settings fetched successfully', cached);
             }
         }
@@ -91,7 +107,7 @@ export async function getGlobalSettings(req, res, next) {
             try {
                 await setRedisCache(SETTINGS_REDIS_KEY, payload, SETTINGS_CACHE_TTL_MS);
             } catch {}
-            res.set('Cache-Control', 'public, max-age=300, stale-while-revalidate=60');
+            res.set('Cache-Control', 'no-cache, must-revalidate');
         }
 
         return sendResponse(res, 200, 'Global settings fetched successfully', payload);
@@ -255,22 +271,48 @@ export async function updateGlobalSettings(req, res, next) {
             ];
 
             for (const field of mediaUploadFields) {
-                if (req.files[field.name] && req.files[field.name][0]) {
-                    const result = await uploadImageBufferDetailed(req.files[field.name][0].buffer, field.folder);
+                const uploadedFile = req.files[field.name] && req.files[field.name][0];
+                if (!uploadedFile) continue;
+
+                const sourcePath = uploadedFile.path || null;
+                if (!sourcePath) continue;
+
+                try {
+                    const optimizedBuffer = await optimizeImageForUpload(
+                        sourcePath,
+                        getGlobalSettingsImagePreset(field.name),
+                    );
+                    const result = await uploadImageBufferDetailed(optimizedBuffer, field.folder);
                     settings[field.name] = {
                         url: result.secure_url,
                         publicId: result.public_id,
                         active: settings[field.name]?.active !== undefined ? settings[field.name].active : true
                     };
                     settings.markModified(field.name);
+                } finally {
+                    await fs.unlink(sourcePath).catch(() => {});
                 }
             }
         }
 
         await settings.save();
+        const payload = buildSettingsPayload(settings);
         await clearGlobalSettingsCache();
-        return sendResponse(res, 200, 'Global settings updated successfully', settings);
+        await warmGlobalSettingsCache(payload);
+        return sendResponse(res, 200, 'Global settings updated successfully', payload);
     } catch (error) {
+        await cleanupUploadedFiles(req.files);
+
+        const message = String(error?.message || '');
+        if (
+            message.includes('Unsupported or invalid image file')
+            || message.includes('Only image files are allowed')
+            || message.includes('Unable to optimize image below 10 MB')
+            || message.includes('Input image exceeds pixel limit')
+        ) {
+            return res.status(400).json({ success: false, message });
+        }
+
         next(error);
     }
 }

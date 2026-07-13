@@ -3,6 +3,7 @@ import { useEffect, useState, createContext, useContext } from "react"
 import { ProfileProvider } from "@food/context/ProfileContext"
 import { setAppType } from "@common/utils/businessSettings"
 import LocationPrompt from "./LocationPrompt"
+import { LocationProvider } from "@food/hooks/useLocation"
 import { CartProvider } from "@food/context/CartContext"
 import { OrdersProvider } from "@food/context/OrdersContext"
 const debugLog = (...args) => {}
@@ -84,7 +85,7 @@ function LocationSelectorProvider({ children }) {
 
   const openLocationSelector = () => {
     const currentPath = `${location.pathname || ""}${location.search || ""}${location.hash || ""}` || "/food/user"
-    navigate("/food/user/address-selector", {
+    navigate("/cart/address-selector", {
       state: {
         from: currentPath,
         backTo: currentPath,
@@ -167,6 +168,7 @@ export default function UserLayout({ children }) {
           <OrdersProvider>
               <SearchOverlayProvider>
                 <LocationSelectorProvider>
+                  <LocationProvider>
                   {/* <Navbar /> */}
                   {/* Desktop Navbar - Hidden on mobile, visible on medium+ screens */}
                   <div className="hidden md:block">
@@ -179,6 +181,7 @@ export default function UserLayout({ children }) {
                   {showFoodBottomNav && <BottomNavigation />}
                   {isSharedQuickProfile && <QuickBottomNav />}
                   {isSharedPorterProfile && <PorterBottomNav />}
+                  </LocationProvider>
                 </LocationSelectorProvider>
               </SearchOverlayProvider>
           </OrdersProvider>
