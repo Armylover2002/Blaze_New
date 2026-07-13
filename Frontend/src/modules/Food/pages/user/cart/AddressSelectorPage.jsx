@@ -32,6 +32,16 @@ const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
 
+const isPlusCode = (value) =>
+  /^[23456789CFGHJMPQRVWX]{4,}\+[23456789CFGHJMPQRVWX]{2,}$/i.test(String(value || "").trim())
+
+const resolveStreetFromGeocode = (parsed, fallback = "") => {
+  const street = String(parsed?.street || "").trim()
+  const area = String(parsed?.area || "").trim()
+  if (street && !isPlusCode(street)) return street
+  return area || street || fallback
+}
+
 // Enable Maps if API Key is available, otherwise fallback to coordinates-only mode
 const MAPS_ENABLED = !!import.meta.env.VITE_GOOGLE_MAPS_API_KEY
 
@@ -188,7 +198,7 @@ export default function AddressSelectorPage() {
           if (prev.street || prev.city) return prev
           return {
             ...prev,
-            street: geoLocation.street || geoLocation.area || "",
+            street: resolveStreetFromGeocode(geoLocation, prev.street),
             city: geoLocation.city || "",
             state: geoLocation.state || "",
             zipCode: geoLocation.postalCode || geoLocation.zipCode || "",
@@ -422,7 +432,7 @@ export default function AddressSelectorPage() {
         if (showAddressForm) {
           setAddressFormData(prev => ({
             ...prev,
-            street: loc.street || loc.area || prev.street,
+            street: resolveStreetFromGeocode(loc, prev.street),
             city: loc.city || prev.city,
             state: loc.state || prev.state,
             zipCode: loc.postalCode || prev.zipCode,
@@ -580,7 +590,7 @@ export default function AddressSelectorPage() {
               }
               return {
                 ...prev,
-                street: parsed.street || parsed.area || prev.street,
+                street: resolveStreetFromGeocode(parsed, prev.street),
                 city: parsed.city || prev.city,
                 state: parsed.state || prev.state,
                 zipCode: parsed.postalCode || prev.zipCode,

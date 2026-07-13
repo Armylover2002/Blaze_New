@@ -129,6 +129,35 @@ const buildBigDataCloudAddress = (data, latitude, longitude) => {
   }
 }
 
+const isPlusCode = (value) => {
+  const text = String(value || "").trim()
+  return /^[23456789CFGHJMPQRVWX]{4,}\+[23456789CFGHJMPQRVWX]{2,}$/i.test(text)
+}
+
+const isGenericAddressPart = (value, { city = "", state = "", country = "" } = {}) => {
+  const trimmed = String(value || "").trim()
+  if (!trimmed || trimmed.length < 2) return true
+  if (isPlusCode(trimmed)) return true
+
+  const lower = trimmed.toLowerCase()
+  if (country && lower === country.toLowerCase()) return true
+  if (lower === "india") return true
+  if (city && lower === city.toLowerCase()) return true
+  if (state && (lower === state.toLowerCase() || lower.startsWith(`${state.toLowerCase()} `))) return true
+  if (/^\d{5,6}$/.test(trimmed)) return true
+
+  return false
+}
+
+const pickMeaningfulAddressPart = (parts, context = {}) => {
+  for (const part of parts) {
+    const trimmed = String(part || "").trim()
+    if (!trimmed || isGenericAddressPart(trimmed, context)) continue
+    return trimmed.replace(/\s+\d{5,6}$/, "").trim()
+  }
+  return ""
+}
+
 const buildGoogleAddress = (data, latitude, longitude) => {
   if (!data || !data.results || !data.results[0]) return null
   const result = data.results[0]
@@ -139,6 +168,7 @@ const buildGoogleAddress = (data, latitude, longitude) => {
   let route = ""
   let subpremise = ""
   let premise = ""
+  let neighborhood = ""
   let sublocality1 = ""
   let sublocality2 = ""
   let locality = ""
@@ -152,6 +182,7 @@ const buildGoogleAddress = (data, latitude, longitude) => {
     if (types.includes("route")) route = comp.long_name
     if (types.includes("subpremise")) subpremise = comp.long_name
     if (types.includes("premise")) premise = comp.long_name
+    if (types.includes("neighborhood")) neighborhood = comp.long_name
     if (types.includes("sublocality_level_1")) sublocality1 = comp.long_name
     if (types.includes("sublocality_level_2")) sublocality2 = comp.long_name
     if (types.includes("locality")) locality = comp.long_name
@@ -160,12 +191,15 @@ const buildGoogleAddress = (data, latitude, longitude) => {
     if (types.includes("postal_code")) postalCode = comp.long_name
   })
 
-  const streetParts = [streetNumber, subpremise, premise, route].filter(Boolean)
-  const street = streetParts.join(", ")
-
-  const area = sublocality1 || sublocality2 || ""
   const city = locality || "Unknown City"
   const state = administrativeArea1 || ""
+  const area = sublocality1 || sublocality2 || neighborhood || ""
+  const addressParts = displayName.split(",").map((part) => part.trim()).filter(Boolean)
+  const fallbackLine = pickMeaningfulAddressPart(addressParts, { city, state, country })
+
+  const streetParts = [streetNumber, route, premise, subpremise].filter(Boolean)
+  const streetFromComponents = streetParts.join(", ")
+  const street = streetFromComponents || area || fallbackLine || ""
 
   return {
     area: area || city,
@@ -173,7 +207,7 @@ const buildGoogleAddress = (data, latitude, longitude) => {
     state: state,
     country: country,
     postalCode: postalCode,
-    street: street || displayName.split(",")[0] || "",
+    street,
     address: displayName,
     formattedAddress: displayName,
   }
@@ -196,6 +230,12 @@ const buildNominatimAddress = (data, latitude, longitude) => {
   const city = addr.city || addr.town || addr.village || addr.municipality || addr.county || ""
   const state = addr.state || ""
   const postcode = addr.postcode || ""
+  const addressParts = displayName.split(",").map((part) => part.trim()).filter(Boolean)
+  const fallbackLine = pickMeaningfulAddressPart(addressParts, {
+    city,
+    state,
+    country: addr.country || "",
+  })
 
   return {
     area: area || city || "",
@@ -203,7 +243,7 @@ const buildNominatimAddress = (data, latitude, longitude) => {
     state,
     country: addr.country || "",
     postalCode: postcode,
-    street: street || displayName.split(",")[0] || "",
+    street: street || area || fallbackLine || "",
     address: displayName,
     formattedAddress: displayName,
   }
