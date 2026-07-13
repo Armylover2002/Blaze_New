@@ -549,6 +549,8 @@ export const placeOrder = async (req, res) => {
         success: false,
         message: paymentCheck.message,
       });
+    }
+
     // Block deactivated accounts for all payment modes (optionalAuth alone is not enough).
     // COD flag is enforced only for cash.
     if (idQuery.userId) {
