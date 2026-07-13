@@ -6,6 +6,7 @@ import { FoodRestaurant } from '../models/restaurant.model.js';
 import {
     backfillLegacyCategoryWorkflow,
     GLOBAL_CATEGORY_FILTER,
+    ensureUniqueCategoryName,
     getCategoryApprovalStatus,
     normalizeCategoryFoodTypeScope,
     serializeCategoryForResponse,
@@ -253,6 +254,13 @@ export async function createRestaurantCategory(restaurantId, body = {}) {
         throw new ValidationError('Pure veg restaurants can only create veg categories');
     }
 
+    const zoneId =
+        context.zoneId && mongoose.Types.ObjectId.isValid(context.zoneId)
+            ? new mongoose.Types.ObjectId(context.zoneId)
+            : undefined;
+
+    await ensureUniqueCategoryName(name, { restaurantId: context.restaurantId });
+
     const doc = new FoodCategory({
         name,
         image: typeof body.image === 'string' ? body.image.trim() : '',
@@ -266,9 +274,7 @@ export async function createRestaurantCategory(restaurantId, body = {}) {
         isApproved: false,
         rejectionReason: '',
         requestedAt: new Date(),
-        zoneId: context.zoneId && mongoose.Types.ObjectId.isValid(context.zoneId)
-            ? new mongoose.Types.ObjectId(context.zoneId)
-            : undefined
+        zoneId
     });
     await doc.save();
     return doc.toObject();
@@ -303,6 +309,10 @@ export async function updateRestaurantCategory(restaurantId, id, body = {}) {
         if (!name) throw new ValidationError('Category name is required');
         if (name.length > 200) throw new ValidationError('Category name is too long');
         if (doc.name !== name) {
+            await ensureUniqueCategoryName(name, {
+                restaurantId: context.restaurantId,
+                excludeCategoryId: doc._id
+            });
             doc.name = name;
             needsApproval = true;
         }

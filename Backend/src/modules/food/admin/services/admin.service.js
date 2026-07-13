@@ -56,6 +56,7 @@ import { getDeliveryPartnerWalletEnhanced } from '../../delivery/services/delive
 import {
     backfillLegacyCategoryWorkflow,
     categoryAllowsFoodType,
+    ensureUniqueCategoryName,
     normalizeCategoryFoodTypeScope,
     serializeCategoryForResponse
 } from '../../shared/categoryWorkflow.js';
@@ -3277,20 +3278,24 @@ export async function createCategory(body) {
     if (!foodTypeScope) {
         throw new ValidationError('Category diet type must be Veg or Non-Veg');
     }
+    const zoneId =
+        body.zoneId && String(body.zoneId).trim()
+            ? (() => {
+                const zid = String(body.zoneId).trim();
+                if (zid === 'global') return undefined;
+                if (!mongoose.Types.ObjectId.isValid(zid)) throw new ValidationError('Invalid zoneId');
+                return new mongoose.Types.ObjectId(zid);
+            })()
+            : undefined;
+
+    await ensureUniqueCategoryName(name, { restaurantId: null, zoneId });
+
     const doc = new FoodCategory({
         name,
         image: typeof body.image === 'string' ? body.image.trim() : '',
         type: typeof body.type === 'string' ? body.type.trim() : '',
         foodTypeScope,
-        zoneId:
-            body.zoneId && String(body.zoneId).trim()
-                ? (() => {
-                    const zid = String(body.zoneId).trim();
-                    if (zid === 'global') return undefined;
-                    if (!mongoose.Types.ObjectId.isValid(zid)) throw new ValidationError('Invalid zoneId');
-                    return new mongoose.Types.ObjectId(zid);
-                })()
-                : undefined,
+        zoneId,
         isActive: body.isActive !== false,
         sortOrder: Number.isFinite(Number(body.sortOrder)) ? Number(body.sortOrder) : 0,
         // Admin-created categories are globally available immediately.
@@ -3362,6 +3367,13 @@ export async function makeCategoryGlobal(id) {
     doc.rejectionReason = '';
     doc.globalizedAt = new Date();
     doc.approvedAt = doc.approvedAt || new Date();
+
+    await ensureUniqueCategoryName(doc.name, {
+        restaurantId: null,
+        zoneId: undefined,
+        excludeCategoryId: doc._id
+    });
+
     await doc.save();
     return doc.toObject();
 }
@@ -3411,6 +3423,13 @@ export async function updateCategory(id, body) {
     if (!doc.createdByRestaurantId && doc.restaurantId) {
         doc.createdByRestaurantId = doc.restaurantId;
     }
+
+    await ensureUniqueCategoryName(doc.name, {
+        restaurantId: doc.restaurantId || null,
+        zoneId: doc.zoneId || null,
+        excludeCategoryId: doc._id
+    });
+
     await doc.save();
 
     const nextIsActive = doc.isActive !== false;
