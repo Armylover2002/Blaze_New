@@ -33,23 +33,22 @@ const normalizeFoodType = (v) => {
 
 const getCreateFoodPricing = (body = {}) => {
     const variants = normalizeFoodVariantsInput(extractRawFoodVariants(body));
-    
-    // Prefer explicitly provided price/otherPrice from body, fallback to variant calculation
+
+    if (variants.length > 0) {
+        return {
+            price: getFoodDisplayPrice({ variants }),
+            otherPrice: getFoodDisplayOtherPrice({ variants }),
+            variants
+        };
+    }
+
     const bodyPrice = Number(body.price);
     const bodyOtherPrice = Number(body.otherPrice);
-    
-    const price = (Number.isFinite(bodyPrice) && bodyPrice > 0) 
-        ? bodyPrice 
-        : getFoodDisplayPrice({ variants });
-        
-    const otherPrice = (Number.isFinite(bodyOtherPrice) && bodyOtherPrice > 0)
-        ? bodyOtherPrice
-        : getFoodDisplayOtherPrice({ variants });
 
     return {
-        price,
-        otherPrice,
-        variants
+        price: Number.isFinite(bodyPrice) && bodyPrice > 0 ? bodyPrice : 0,
+        otherPrice: Number.isFinite(bodyOtherPrice) && bodyOtherPrice > 0 ? bodyOtherPrice : 0,
+        variants: []
     };
 };
 
@@ -66,23 +65,21 @@ const getUpdatedFoodPricing = (existing = {}, body = {}) => {
     const bodyPrice = Number(body.price);
     const bodyOtherPrice = Number(body.otherPrice);
 
-    if (Number.isFinite(bodyPrice) && bodyPrice > 0) {
-        update.price = bodyPrice;
-    } else if (variantsTouched) {
-        // Recalculate if variants changed and no explicit price provided
+    if (variantsTouched) {
         const variants = update.variants || [];
         if (variants.length > 0) {
             update.price = getFoodDisplayPrice({ variants });
-        }
-    }
-
-    if (Number.isFinite(bodyOtherPrice) && bodyOtherPrice > 0) {
-        update.otherPrice = bodyOtherPrice;
-    } else if (variantsTouched) {
-        // Recalculate if variants changed and no explicit otherPrice provided
-        const variants = update.variants || [];
-        if (variants.length > 0) {
             update.otherPrice = getFoodDisplayOtherPrice({ variants });
+        } else {
+            update.price = Number.isFinite(bodyPrice) && bodyPrice > 0 ? bodyPrice : 0;
+            update.otherPrice = Number.isFinite(bodyOtherPrice) && bodyOtherPrice > 0 ? bodyOtherPrice : 0;
+        }
+    } else {
+        if (Number.isFinite(bodyPrice) && bodyPrice > 0) {
+            update.price = bodyPrice;
+        }
+        if (Number.isFinite(bodyOtherPrice) && bodyOtherPrice > 0) {
+            update.otherPrice = bodyOtherPrice;
         }
     }
 

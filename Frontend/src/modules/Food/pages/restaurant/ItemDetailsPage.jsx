@@ -104,6 +104,8 @@ export default function ItemDetailsPage() {
   const [foodType, setFoodType] = useState("Veg")
   const [basePrice, setBasePrice] = useState("")
   const [otherPrice, setOtherPrice] = useState("")
+  const [itemHasVariants, setItemHasVariants] = useState(false)
+  const [variantChoiceMade, setVariantChoiceMade] = useState(id !== "new")
   const [variants, setVariants] = useState([])
   const [preparationTime, setPreparationTime] = useState("")
   const [gst, setGst] = useState("5.0")
@@ -265,6 +267,8 @@ export default function ItemDetailsPage() {
         if (draft.itemDescription) setItemDescription(draft.itemDescription)
         if (draft.foodType) setFoodType(draft.foodType)
         if (draft.basePrice) setBasePrice(draft.basePrice)
+        if (draft.itemHasVariants != null) setItemHasVariants(draft.itemHasVariants)
+        if (draft.itemHasVariants != null) setVariantChoiceMade(true)
         if (draft.variants) setVariants(draft.variants)
         if (draft.preparationTime) setPreparationTime(draft.preparationTime)
         if (draft.images) setImages(draft.images)
@@ -304,9 +308,12 @@ export default function ItemDetailsPage() {
     setItemDescription(item.description || "")
     setFoodType(item.foodType === "Veg" ? "Veg" : "Non-Veg")
     const itemVariants = getFoodVariants(item)
-    setVariants(itemVariants.map(createVariantDraft))
-    setBasePrice(itemVariants.length === 0 ? item.price?.toString() || "" : "")
-    setOtherPrice(itemVariants.length === 0 ? item.otherPrice?.toString() || "" : "")
+    const hasExistingVariants = itemVariants.length > 0
+    setItemHasVariants(hasExistingVariants)
+    setVariantChoiceMade(true)
+    setVariants(hasExistingVariants ? itemVariants.map(createVariantDraft) : [])
+    setBasePrice(!hasExistingVariants ? item.price?.toString() || "" : "")
+    setOtherPrice(!hasExistingVariants ? item.otherPrice?.toString() || "" : "")
     setPreparationTime(item.preparationTime || "")
     setGst(item.gst?.toString() || "5.0")
     setIsRecommended(item.isRecommended || false)
@@ -798,6 +805,10 @@ export default function ItemDetailsPage() {
   }
 
   const validateItemFormBeforeUpload = () => {
+    if (isNewItem && !variantChoiceMade) {
+      return { message: "Please choose whether this item has variants" }
+    }
+
     if (!itemName.trim()) {
       return { message: "Please enter an item name" }
     }
@@ -819,27 +830,33 @@ export default function ItemDetailsPage() {
       return { message: "Item description must be at least 5 characters" }
     }
 
-    const normalizedVariants = variants
-      .map((variant) => ({
-        persistedId: String(variant.persistedId || "").trim(),
-        name: String(variant.name || "").trim(),
-        unit: normalizeFoodVariantUnit(variant.unit),
-        price: Number(variant.price),
-        otherPrice: Number(variant.otherPrice) || 0,
-      }))
-      .filter((variant) => variant.name || variant.persistedId || variant.price)
+    const normalizedVariants = itemHasVariants
+      ? variants
+          .map((variant) => ({
+            persistedId: String(variant.persistedId || "").trim(),
+            name: String(variant.name || "").trim(),
+            unit: normalizeFoodVariantUnit(variant.unit),
+            price: Number(variant.price),
+            otherPrice: Number(variant.otherPrice) || 0,
+          }))
+          .filter((variant) => variant.name || variant.persistedId || variant.price)
+      : []
 
-    if (normalizedVariants.some((variant) => !variant.name)) {
-      return { message: "Each variant must have a name" }
-    }
-
-    if (normalizedVariants.some((variant) => !Number.isFinite(variant.price) || variant.price <= 0)) {
-      return { message: "Each variant price must be greater than 0" }
+    if (itemHasVariants) {
+      if (normalizedVariants.length === 0) {
+        return { message: "Please add at least one variant" }
+      }
+      if (normalizedVariants.some((variant) => !variant.name)) {
+        return { message: "Each variant must have a name" }
+      }
+      if (normalizedVariants.some((variant) => !Number.isFinite(variant.price) || variant.price <= 0)) {
+        return { message: "Each variant price must be greater than 0" }
+      }
     }
 
     const hasVariants = normalizedVariants.length > 0
     const parsedBasePrice = Number(basePrice)
-    if (!hasVariants && (!Number.isFinite(parsedBasePrice) || parsedBasePrice < 0)) {
+    if (!itemHasVariants && (!Number.isFinite(parsedBasePrice) || parsedBasePrice <= 0)) {
       return { message: "Please enter a valid base price" }
     }
 
@@ -961,8 +978,8 @@ export default function ItemDetailsPage() {
         const createRes = await restaurantAPI.createFood({
           name: itemName.trim(),
           description: itemDescription.trim(),
-          price: parsedBasePrice,
-          otherPrice: Number(otherPrice) || 0,
+          price: hasVariants ? 0 : parsedBasePrice,
+          otherPrice: hasVariants ? 0 : Number(otherPrice) || 0,
           variants: variantPayload,
           image: allImageUrls.length > 0 ? allImageUrls[0] : "",
           images: allImageUrls,
@@ -985,8 +1002,8 @@ export default function ItemDetailsPage() {
         await restaurantAPI.updateFood(itemId, {
           name: itemName.trim(),
           description: itemDescription.trim(),
-          price: parsedBasePrice,
-          otherPrice: Number(otherPrice) || 0,
+          price: hasVariants ? 0 : parsedBasePrice,
+          otherPrice: hasVariants ? 0 : Number(otherPrice) || 0,
           variants: variantPayload,
           image: allImageUrls.length > 0 ? allImageUrls[0] : "",
           images: allImageUrls,
@@ -1038,6 +1055,18 @@ export default function ItemDetailsPage() {
       }
     } finally {
       setUploadingImages(false)
+    }
+  }
+
+  const handleVariantChoice = (hasVariants) => {
+    setVariantChoiceMade(true)
+    setItemHasVariants(hasVariants)
+    if (hasVariants) {
+      setBasePrice("")
+      setOtherPrice("")
+      setVariants((prev) => (prev.length > 0 ? prev : [createVariantDraft()]))
+    } else {
+      setVariants([])
     }
   }
 
@@ -1215,6 +1244,37 @@ export default function ItemDetailsPage() {
       {/* Content */}
       <div className="flex-1 overflow-y-auto lg:py-6" style={{ paddingBottom: `${96 + keyboardInset}px` }}>
         <div className="lg:max-w-6xl lg:mx-auto lg:px-6">
+          {isNewItem && !variantChoiceMade ? (
+            <div className="p-4 lg:p-0">
+              <div className="lg:bg-white lg:rounded-2xl lg:border lg:border-slate-200 lg:shadow-sm lg:p-8">
+                <div className="max-w-lg mx-auto py-8 lg:py-12 text-center">
+                  <h2 className="text-xl font-bold text-gray-900 lg:text-2xl">
+                    Does this item have variants?
+                  </h2>
+                  <p className="mt-2 text-sm text-gray-500 leading-relaxed">
+                    Choose Yes if this item comes in sizes or portions like Half, Full, Small, or Large.
+                    Choose No for a single fixed price.
+                  </p>
+                  <div className="mt-8 flex flex-col sm:flex-row gap-3 justify-center">
+                    <button
+                      type="button"
+                      onClick={() => handleVariantChoice(false)}
+                      className="flex-1 sm:flex-none sm:min-w-[140px] px-6 py-3.5 rounded-xl text-sm font-semibold border-2 border-gray-200 bg-white text-gray-900 hover:border-gray-900 hover:bg-gray-50 transition-colors"
+                    >
+                      No
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleVariantChoice(true)}
+                      className="flex-1 sm:flex-none sm:min-w-[140px] px-6 py-3.5 rounded-xl text-sm font-semibold border-2 border-[#FF0000] bg-[#FF0000] text-white hover:bg-[#E64D02] transition-colors"
+                    >
+                      Yes
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : (
           <div className="lg:grid lg:grid-cols-[minmax(300px,380px)_minmax(0,1fr)] lg:gap-8 lg:items-start">
             <div className="lg:sticky lg:top-24">
         {!isNewItem && currentApprovalStatus === "rejected" && currentRejectionReason ? (
@@ -1397,6 +1457,46 @@ export default function ItemDetailsPage() {
         {/* Form Fields */}
         <div className="p-4 space-y-3 lg:p-0 lg:space-y-5">
           <div className="lg:bg-white lg:rounded-2xl lg:border lg:border-slate-200 lg:shadow-sm lg:p-6 lg:space-y-5">
+          {/* Variant type (shown after choice; editable on edit) */}
+          <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3">
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div>
+                <p className="text-sm font-medium text-gray-900">Item type</p>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  {itemHasVariants
+                    ? "This item has variants — pricing is set per variant only."
+                    : "This item has a single price — no variants."}
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleVariantChoice(false)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                    !itemHasVariants
+                      ? "border-gray-900 border-2 text-gray-900 bg-white"
+                      : "bg-white text-gray-600 hover:bg-gray-100 border border-gray-200"
+                  }`}
+                >
+                  {!itemHasVariants && <Check className="w-3.5 h-3.5" />}
+                  <span>No variants</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleVariantChoice(true)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                    itemHasVariants
+                      ? "border-gray-900 border-2 text-gray-900 bg-white"
+                      : "bg-white text-gray-600 hover:bg-gray-100 border border-gray-200"
+                  }`}
+                >
+                  {itemHasVariants && <Check className="w-3.5 h-3.5" />}
+                  <span>Has variants</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
           {/* Category Selector */}
           <div>
             <label className="block text-sm font-medium text-gray-900 mb-2">
@@ -1522,13 +1622,13 @@ export default function ItemDetailsPage() {
             </div>
           </div>
 
-          {/* Item Price */}
+          {/* Pricing */}
           <div>
             <label className="block text-sm font-medium text-gray-900 mb-2">
-              Item price
+              {itemHasVariants ? "Variants" : "Item price"}
             </label>
             <div className="space-y-3">
-              {variants.length === 0 ? (
+              {!itemHasVariants ? (
                 <div className="space-y-3">
                   <div className="relative">
                     <label className="block text-xs text-gray-600 mb-1">Base price</label>
@@ -1581,112 +1681,112 @@ export default function ItemDetailsPage() {
                   </div>
                 </div>
               ) : (
-                <div className="rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-700">
-                  Customers will see the lowest variant price first.
+                <div className="rounded-xl border border-gray-200 bg-white p-3 space-y-3">
+                  <div className="rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-700">
+                    Customers will see the lowest variant price on the menu.
+                  </div>
+
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-medium text-gray-900">Variants</p>
+                      <p className="text-xs text-gray-500">Add multiple names and prices like Half, Full, Small, Large.</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleAddVariant}
+                      className="inline-flex items-center gap-1 rounded-full border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-100"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      Add variant
+                    </button>
+                  </div>
+
+                  {variants.length > 0 ? (
+                    <div className="space-y-3">
+                      {variants.map((variant, index) => (
+                        <div key={variant.localId} className="grid grid-cols-[1fr_auto] gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3 lg:bg-white">
+                          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+                            <div>
+                              <label className="block text-xs text-gray-600 mb-1">Variant name</label>
+                              <input
+                                type="text"
+                                value={variant.name}
+                                onChange={(e) => handleVariantChange(variant.localId, "name", e.target.value)}
+                                placeholder={index === 0 ? "Full" : "Half"}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs text-gray-600 mb-1">Unit</label>
+                              <select
+                                value={variant.unit || DEFAULT_FOOD_VARIANT_UNIT}
+                                onChange={(e) => handleVariantChange(variant.localId, "unit", e.target.value)}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                              >
+                                {FOOD_VARIANT_UNITS.map((unit) => (
+                                  <option key={unit.value} value={unit.value}>
+                                    {unit.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                            <div>
+                              <label className="block text-xs text-gray-600 mb-1">Variant price</label>
+                              <div className="relative">
+                                <input
+                                  type="text"
+                                  value={variant.price}
+                                  onChange={(e) => {
+                                    const value = e.target.value.replace(/[\u20B9\s,]/g, '').replace(/[^0-9.]/g, '')
+                                    const parts = value.split('.')
+                                    const cleanedValue = parts.length > 2
+                                      ? parts[0] + '.' + parts.slice(1).join('')
+                                      : value
+                                    handleVariantChange(variant.localId, "price", cleanedValue)
+                                  }}
+                                  placeholder="Price"
+                                  className="w-full pl-8 pr-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                />
+                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-600">{"\u20B9"}</span>
+                              </div>
+                            </div>
+                            <div>
+                              <label className="block text-xs text-gray-600 mb-1">Other price</label>
+                              <div className="relative">
+                                <input
+                                  type="text"
+                                  value={variant.otherPrice}
+                                  onChange={(e) => {
+                                    const value = e.target.value.replace(/[\u20B9\s,]/g, '').replace(/[^0-9.]/g, '')
+                                    const parts = value.split('.')
+                                    const cleanedValue = parts.length > 2
+                                      ? parts[0] + '.' + parts.slice(1).join('')
+                                      : value
+                                    handleVariantChange(variant.localId, "otherPrice", cleanedValue)
+                                  }}
+                                  placeholder="Other"
+                                  className="w-full pl-8 pr-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                />
+                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-600">{"\u20B9"}</span>
+                              </div>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveVariant(variant.localId)}
+                            className="self-start rounded-full p-2 text-gray-500 hover:bg-white hover:text-red-500"
+                            aria-label="Remove variant"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-gray-500">Add at least one variant with name and price.</p>
+                  )}
                 </div>
               )}
-
-              <div className="rounded-xl border border-gray-200 bg-white p-3 space-y-3">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-medium text-gray-900">Variants</p>
-                    <p className="text-xs text-gray-500">Optional. Add multiple names and prices like Half, Full, Small, Large.</p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={handleAddVariant}
-                    className="inline-flex items-center gap-1 rounded-full border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-100"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    Add variant
-                  </button>
-                </div>
-
-                {variants.length > 0 ? (
-                  <div className="space-y-3">
-                    {variants.map((variant, index) => (
-                      <div key={variant.localId} className="grid grid-cols-[1fr_auto] gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3 lg:bg-white">
-                        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
-                          <div>
-                            <label className="block text-xs text-gray-600 mb-1">Variant name</label>
-                            <input
-                              type="text"
-                              value={variant.name}
-                              onChange={(e) => handleVariantChange(variant.localId, "name", e.target.value)}
-                              placeholder={index === 0 ? "Full" : "Half"}
-                              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-xs text-gray-600 mb-1">Unit</label>
-                            <select
-                              value={variant.unit || DEFAULT_FOOD_VARIANT_UNIT}
-                              onChange={(e) => handleVariantChange(variant.localId, "unit", e.target.value)}
-                              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                            >
-                              {FOOD_VARIANT_UNITS.map((unit) => (
-                                <option key={unit.value} value={unit.value}>
-                                  {unit.label}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                          <div>
-                            <label className="block text-xs text-gray-600 mb-1">Variant price</label>
-                            <div className="relative">
-                              <input
-                                type="text"
-                                value={variant.price}
-                                onChange={(e) => {
-                                  const value = e.target.value.replace(/[\u20B9\s,]/g, '').replace(/[^0-9.]/g, '')
-                                  const parts = value.split('.')
-                                  const cleanedValue = parts.length > 2
-                                    ? parts[0] + '.' + parts.slice(1).join('')
-                                    : value
-                                  handleVariantChange(variant.localId, "price", cleanedValue)
-                                }}
-                                placeholder="Price"
-                                className="w-full pl-8 pr-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                              />
-                              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-600">{"\u20B9"}</span>
-                            </div>
-                          </div>
-                          <div>
-                            <label className="block text-xs text-gray-600 mb-1">Other price</label>
-                            <div className="relative">
-                              <input
-                                type="text"
-                                value={variant.otherPrice}
-                                onChange={(e) => {
-                                  const value = e.target.value.replace(/[\u20B9\s,]/g, '').replace(/[^0-9.]/g, '')
-                                  const parts = value.split('.')
-                                  const cleanedValue = parts.length > 2
-                                    ? parts[0] + '.' + parts.slice(1).join('')
-                                    : value
-                                  handleVariantChange(variant.localId, "otherPrice", cleanedValue)
-                                }}
-                                placeholder="Other"
-                                className="w-full pl-8 pr-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                              />
-                              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-600">{"\u20B9"}</span>
-                            </div>
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveVariant(variant.localId)}
-                          className="self-start rounded-full p-2 text-gray-500 hover:bg-white hover:text-red-500"
-                          aria-label="Remove variant"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-xs text-gray-500">No variants added. This item will use the base price only.</p>
-                )}
-              </div>
 
               {/* Preparation Time */}
               <div className="relative">
@@ -1746,7 +1846,8 @@ export default function ItemDetailsPage() {
         </div>
           </div>
         </div>
-      </div>
+          )}
+        </div>
       </div>
 
       {/* Category Selection Popup */}
@@ -1843,6 +1944,7 @@ export default function ItemDetailsPage() {
 
 
       {/* Bottom Sticky Buttons */}
+      {(!isNewItem || variantChoiceMade) && (
       <div
         className="fixed left-0 right-0 bg-white border-t border-gray-200 z-40 lg:border-slate-200 lg:bg-white/95 lg:backdrop-blur"
         style={{ bottom: `${keyboardInset}px` }}
@@ -1858,8 +1960,8 @@ export default function ItemDetailsPage() {
           )}
           <button
             onClick={handleSave}
-            disabled={uploadingImages}
-            className={`${isNewItem ? "w-full lg:w-auto lg:min-w-[220px]" : "flex-1 lg:flex-none lg:min-w-[220px]"} py-3 px-4 rounded-lg text-sm font-semibold transition-colors flex items-center justify-center gap-2 ${!uploadingImages
+            disabled={uploadingImages || (isNewItem && !variantChoiceMade)}
+            className={`${isNewItem ? "w-full lg:w-auto lg:min-w-[220px]" : "flex-1 lg:flex-none lg:min-w-[220px]"} py-3 px-4 rounded-lg text-sm font-semibold transition-colors flex items-center justify-center gap-2 ${!uploadingImages && !(isNewItem && !variantChoiceMade)
               ? "bg-[#FF0000] text-white hover:bg-[#E64D02]"
               : "bg-gray-300 text-gray-500 cursor-not-allowed"
               }`}
@@ -1875,6 +1977,7 @@ export default function ItemDetailsPage() {
           </button>
         </div>
       </div>
+      )}
       {/* Photo Picker */}
       <ImageSourcePicker
         isOpen={isPhotoPickerOpen}
