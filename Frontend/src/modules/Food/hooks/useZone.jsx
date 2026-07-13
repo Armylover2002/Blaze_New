@@ -104,19 +104,11 @@ export function useZone(location) {
         err.response?.data?.message || err.message || "Failed to detect zone",
       );
 
-      // Try to use cached zone if available
-      const cachedZoneId = localStorage.getItem("userZoneId");
-      if (cachedZoneId) {
-        const cachedZone = localStorage.getItem("userZone");
-        setZoneId(cachedZoneId);
-        setZone(cachedZone ? JSON.parse(cachedZone) : null);
-        setZoneStatus("IN_SERVICE");
-      } else {
-        // Network/CORS/backend failures should not be treated as confirmed out-of-zone.
-        setZoneStatus("loading");
-        setZoneId(null);
-        setZone(null);
-      }
+      // Never assume in-service when detection fails — stale cache can be wrong
+      // if the user moved or zone boundaries changed.
+      setZoneStatus("loading");
+      setZoneId(null);
+      setZone(null);
     } finally {
       setLoading(false);
     }
@@ -139,6 +131,11 @@ export function useZone(location) {
       // Only detect zone if coordinates changed significantly
       if (coordsChanged) {
         prevCoordsRef.current = { latitude: lat, longitude: lng }
+        localStorage.removeItem("userZoneId");
+        localStorage.removeItem("userZone");
+        setZoneStatus("loading");
+        setZoneId(null);
+        setZone(null);
         if (debounceTimerRef.current) {
           clearTimeout(debounceTimerRef.current)
         }
@@ -147,18 +144,9 @@ export function useZone(location) {
         }, 350)
       }
     } else {
-      // Try to use cached zone if location not available
-      const cachedZoneId = localStorage.getItem("userZoneId");
-      if (cachedZoneId) {
-        const cachedZone = localStorage.getItem("userZone");
-        setZoneId(cachedZoneId);
-        setZone(cachedZone ? JSON.parse(cachedZone) : null);
-        setZoneStatus("IN_SERVICE");
-      } else {
-        setZoneStatus("OUT_OF_SERVICE");
-        setZoneId(null);
-        setZone(null);
-      }
+      setZoneStatus("loading");
+      setZoneId(null);
+      setZone(null);
     }
     return () => {
       if (debounceTimerRef.current) {
