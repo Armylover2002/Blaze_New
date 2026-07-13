@@ -29,7 +29,7 @@ import {
     mergeVehicleDocumentUploads,
 } from '../utils/deliveryPartnerUpload.helper.js';
 import {
-    createOnboardingSubmission
+    createOnboardingSubmission,
     ensureLegacySubmission,
     getLatestSubmissionForPartner,
     getLastRejectedSubmission,
