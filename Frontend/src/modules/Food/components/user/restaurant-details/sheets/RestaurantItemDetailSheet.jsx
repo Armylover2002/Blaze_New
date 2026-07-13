@@ -3,6 +3,7 @@ import { X, ChevronLeft, ChevronRight, Bookmark, Share2, Plus, Minus, Clock, Spa
 import { Button } from "@food/components/ui/button"
 import { RUPEE_SYMBOL } from "../restaurantDetailsUtils"
 import { getFoodDisplayPrice, getFoodVariants, hasFoodVariants } from "@food/utils/foodVariants"
+import ItemSlotAvailabilityNote from "@food/components/user/ItemSlotAvailabilityNote"
 import { normalizeFoodVariantUnit } from "@food/constants/foodVariantUnits"
 import BottomSheetPortal from "./BottomSheetPortal"
 
@@ -259,6 +260,7 @@ export default function RestaurantItemDetailSheet({
               {String(selectedItem.preparationTime).trim()}
             </span>
           ) : null}
+          <ItemSlotAvailabilityNote item={selectedItem} />
           {!itemHasVariants && (
             <PriceTag price={activePrice} otherPrice={activeOtherPrice} />
           )}

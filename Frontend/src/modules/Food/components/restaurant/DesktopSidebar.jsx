@@ -24,6 +24,7 @@ import {
   IndianRupee,
   Info,
   Compass,
+  Timer,
 } from "lucide-react";
 import { restaurantAPI } from "@food/api";
 import { getAppLogo, getCompanyName } from "@common/utils/businessSettings";
@@ -82,6 +83,7 @@ export default function DesktopSidebar() {
       items: [
         { name: "Menu inventory", path: "/food/restaurant/inventory", icon: Book },
         { name: "Menu categories", path: "/food/restaurant/menu-categories", icon: LayoutGrid },
+        { name: "Item slot timings", path: "/food/restaurant/item-slot-timings", icon: Timer },
         { name: "Create coupons", path: "/food/restaurant/create-coupons", icon: Gift },
       ],
     },

@@ -719,6 +719,7 @@ export default function ExploreMore() {
     { id: 2, label: "Outlet timings", icon: Clock, route: "/restaurant/outlet-timings" },
     { id: 3, label: "Dining Reservations", icon: Calendar, route: "/restaurant/reservations" },
     { id: 4, label: "Menu categories", icon: Settings, route: "/restaurant/menu-categories" },
+    { id: 6, label: "Item slot timings", icon: Clock, route: "/restaurant/item-slot-timings" },
     { id: 5, label: "Create Coupons", icon: Gift, route: "/restaurant/create-coupons" },
   ]
 

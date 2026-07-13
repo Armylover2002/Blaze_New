@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { restaurantAPI } from "@food/api";
 import { useCart } from "@food/context/CartContext";
 import RestaurantItemDetailSheet from "@food/components/user/restaurant-details/sheets/RestaurantItemDetailSheet";
+import ItemSlotAvailabilityNote from "@food/components/user/ItemSlotAvailabilityNote";
 import {
   buildCartLineId,
   getDefaultFoodVariant,
@@ -241,9 +242,10 @@ const RecommendedSection = memo(({ recommendedForYouRestaurants }) => {
               </div>
               <div className="p-3 flex flex-col flex-1">
                 <h4 className="font-bold text-sm text-[#1c1c1e] line-clamp-2">{product.name}</h4>
-                <p className="text-[10px] text-gray-500 mt-1 line-clamp-1 mb-auto">
+                <p className="text-[10px] text-gray-500 mt-1 line-clamp-1">
                   {product.restaurant}
                 </p>
+                <ItemSlotAvailabilityNote item={product} className="mt-1 mb-auto" />
                 <div className="flex justify-between items-center mt-3 shrink-0">
                   <span className="text-sm font-bold text-[#1c1c1e]">
                     {getFoodPriceLabel(product)}

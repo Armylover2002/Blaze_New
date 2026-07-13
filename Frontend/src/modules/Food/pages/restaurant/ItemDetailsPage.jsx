@@ -108,6 +108,8 @@ export default function ItemDetailsPage() {
   const [variantChoiceMade, setVariantChoiceMade] = useState(id !== "new")
   const [variants, setVariants] = useState([])
   const [preparationTime, setPreparationTime] = useState("")
+  const [itemSlotTimingId, setItemSlotTimingId] = useState("")
+  const [slotTimings, setSlotTimings] = useState([])
   const [gst, setGst] = useState("5.0")
   const [isRecommended, setIsRecommended] = useState(false)
   const [isInStock, setIsInStock] = useState(true)
@@ -162,6 +164,11 @@ export default function ItemDetailsPage() {
   const selectedCategory = useMemo(
     () => selectableCategories.find((cat) => String(cat.id) === String(selectedCategoryId || "")),
     [selectableCategories, selectedCategoryId],
+  )
+
+  const selectedAvailabilitySlot = useMemo(
+    () => slotTimings.find((slot) => String(slot.id) === String(itemSlotTimingId || "")) || null,
+    [slotTimings, itemSlotTimingId],
   )
 
   const showNonVegFoodType = canSelectNonVegFoodType({
@@ -282,6 +289,19 @@ export default function ItemDetailsPage() {
   }, [])
 
   useEffect(() => {
+    const fetchSlotTimings = async () => {
+      try {
+        const response = await restaurantAPI.getItemSlotTimings()
+        const slots = response?.data?.data?.slots || response?.data?.slots || []
+        setSlotTimings(Array.isArray(slots) ? slots : [])
+      } catch {
+        setSlotTimings([])
+      }
+    }
+    fetchSlotTimings()
+  }, [])
+
+  useEffect(() => {
     if (location.state?.focusCategory) {
       setIsCategoryPopupOpen(true)
     }
@@ -315,6 +335,7 @@ export default function ItemDetailsPage() {
     setBasePrice(!hasExistingVariants ? item.price?.toString() || "" : "")
     setOtherPrice(!hasExistingVariants ? item.otherPrice?.toString() || "" : "")
     setPreparationTime(item.preparationTime || "")
+    setItemSlotTimingId(String(item.itemSlotTimingId || item.itemSlotTiming?.id || ""))
     setGst(item.gst?.toString() || "5.0")
     setIsRecommended(item.isRecommended || false)
     setIsInStock(item.isAvailable !== false)
@@ -465,6 +486,19 @@ export default function ItemDetailsPage() {
 
     fetchCategories()
   }, [category, defaultCategory, defaultCategoryId, isNewItem, selectedCategoryId, categoriesRefreshKey])
+
+  useEffect(() => {
+    const fetchSlotTimings = async () => {
+      try {
+        const response = await restaurantAPI.getItemSlotTimings()
+        const slots = response?.data?.data?.slots || response?.data?.slots || []
+        setSlotTimings(Array.isArray(slots) ? slots : [])
+      } catch {
+        setSlotTimings([])
+      }
+    }
+    fetchSlotTimings()
+  }, [])
 
   // Keep focused form fields visible above mobile keyboard
   useEffect(() => {
@@ -986,6 +1020,7 @@ export default function ItemDetailsPage() {
           foodType: foodType,
           isAvailable: isInStock,
           preparationTime: preparationTime || "",
+          itemSlotTimingId: itemSlotTimingId || null,
           categoryId: categoryId || undefined,
           categoryName,
         })
@@ -1010,6 +1045,7 @@ export default function ItemDetailsPage() {
           foodType: foodType,
           isAvailable: isInStock,
           preparationTime: preparationTime || "",
+          itemSlotTimingId: itemSlotTimingId || null,
           categoryId: categoryId || undefined,
           categoryName,
         })
@@ -1787,6 +1823,41 @@ export default function ItemDetailsPage() {
                   )}
                 </div>
               )}
+
+              {/* Availability Slot */}
+              <div className="relative">
+                <label className="block text-xs text-gray-600 mb-1">Availability slot</label>
+                <div className="relative">
+                  <select
+                    value={itemSlotTimingId}
+                    onChange={(e) => setItemSlotTimingId(e.target.value)}
+                    className="w-full pl-4 pr-10 py-3 border border-gray-300 rounded-lg text-sm text-gray-900 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent appearance-none"
+                  >
+                    <option value="">None (Always available)</option>
+                    {slotTimings.map((slot) => (
+                      <option key={slot.id} value={slot.id}>
+                        {slot.name} ({slot.startTime} - {slot.endTime})
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-500 pointer-events-none" />
+                </div>
+                <p className="mt-1.5 text-xs leading-relaxed text-gray-500">
+                  {itemSlotTimingId ? (
+                    <>
+                      This item will only be visible to customers during the selected slot.
+                      {selectedAvailabilitySlot ? (
+                        <span className="block mt-0.5 font-medium text-gray-600">
+                          {selectedAvailabilitySlot.name} ({selectedAvailabilitySlot.startTime} -{" "}
+                          {selectedAvailabilitySlot.endTime})
+                        </span>
+                      ) : null}
+                    </>
+                  ) : (
+                    "No slot selected — this item will be visible to customers all the time."
+                  )}
+                </p>
+              </div>
 
               {/* Preparation Time */}
               <div className="relative">

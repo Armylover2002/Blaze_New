@@ -15,6 +15,7 @@ import {
     categoryAllowsFoodType,
     GLOBAL_CATEGORY_FILTER
 } from '../../shared/categoryWorkflow.js';
+import { resolveRestaurantItemSlotTimingId } from './itemSlotTiming.service.js';
 
 const toStr = (v) => (v != null ? String(v).trim() : '');
 const APPROVED_CATEGORY_FILTER = [
@@ -204,6 +205,7 @@ export async function createRestaurantFood(restaurantId, body = {}) {
         throw new ValidationError('Pure veg restaurants can only add veg items');
     }
     const preparationTime = toStr(body.preparationTime);
+    const itemSlotTimingId = await resolveRestaurantItemSlotTimingId(restaurantId, body.itemSlotTimingId);
     const { categoryObjectId, categoryName } = await resolveCategoryForRestaurant(context, { ...body, foodType });
 
     const doc = await FoodItem.create({
@@ -219,6 +221,7 @@ export async function createRestaurantFood(restaurantId, body = {}) {
         images,
         foodType,
         isAvailable,
+        itemSlotTimingId,
         preparationTime,
         approvalStatus: 'pending',
         requestedAt: new Date()
@@ -311,6 +314,9 @@ export async function updateRestaurantFood(restaurantId, foodId, body = {}) {
         update.isAvailable = nextIsAvailable;
     }
     if (body.preparationTime !== undefined) update.preparationTime = toStr(body.preparationTime);
+    if (body.itemSlotTimingId !== undefined) {
+        update.itemSlotTimingId = await resolveRestaurantItemSlotTimingId(restaurantId, body.itemSlotTimingId);
+    }
 
     const targetFoodType = body.foodType !== undefined ? normalizeFoodType(body.foodType) : normalizeFoodType(existing.foodType);
     if (context.pureVegRestaurant && targetFoodType !== 'Veg') {

@@ -1379,6 +1379,27 @@ export const restaurantAPI = {
     apiClient.delete(`/food/restaurant/categories/${String(id)}`, {
       contextModule: "restaurant",
     }),
+  /** Item slot timings (restaurant dashboard) */
+  getItemSlotTimings: () =>
+    apiClient.get("/food/restaurant/item-slot-timings", {
+      contextModule: "restaurant",
+    }),
+  getItemSlotTimingById: (id) =>
+    apiClient.get(`/food/restaurant/item-slot-timings/${String(id)}`, {
+      contextModule: "restaurant",
+    }),
+  createItemSlotTiming: (body) =>
+    apiClient.post("/food/restaurant/item-slot-timings", body ?? {}, {
+      contextModule: "restaurant",
+    }),
+  updateItemSlotTiming: (id, body) =>
+    apiClient.patch(`/food/restaurant/item-slot-timings/${String(id)}`, body ?? {}, {
+      contextModule: "restaurant",
+    }),
+  deleteItemSlotTiming: (id) =>
+    apiClient.delete(`/food/restaurant/item-slot-timings/${String(id)}`, {
+      contextModule: "restaurant",
+    }),
   /** Menu (restaurant dashboard) */
   getMenu: (params = {}) =>
     apiClient.get("/food/restaurant/menu", {
