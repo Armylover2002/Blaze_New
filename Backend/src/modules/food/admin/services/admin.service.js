@@ -4487,6 +4487,97 @@ export async function createAdminOffer(body) {
     return doc.toObject();
 }
 
+async function invalidateOffersCacheSafely(context) {
+    try {
+        const { invalidateCache } = await import('../../../../middleware/cache.js');
+        await invalidateCache('offers*');
+    } catch (err) {
+        console.error(`Failed to invalidate offers cache on ${context}:`, err);
+    }
+}
+
+/** End-of-day semantics: an offer is only expired once its endDate is before today. */
+function isOfferEndDateExpired(endDate, now = new Date()) {
+    if (!endDate) return false;
+    const startOfToday = new Date(now);
+    startOfToday.setHours(0, 0, 0, 0);
+    return new Date(endDate) < startOfToday;
+}
+
+export async function updateAdminOffer(id, body) {
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) return null;
+
+    const existing = await FoodOffer.findById(id).lean();
+    if (!existing) return null;
+
+    if (body.couponCode && body.couponCode !== existing.couponCode) {
+        const duplicate = await FoodOffer.findOne({
+            couponCode: body.couponCode,
+            _id: { $ne: existing._id },
+        }).select('_id').lean();
+        if (duplicate) {
+            throw new ValidationError('Coupon code already exists');
+        }
+    }
+
+    // Recompute lifecycle status from the new dates without overriding a manual pause.
+    let status = existing.status;
+    if (isOfferEndDateExpired(body.endDate)) {
+        status = 'inactive';
+    } else if (existing.status === 'inactive') {
+        status = 'active';
+    }
+
+    const updated = await FoodOffer.findByIdAndUpdate(
+        id,
+        {
+            $set: {
+                couponCode: body.couponCode,
+                discountType: body.discountType,
+                discountValue: body.discountValue,
+                customerScope: body.customerScope,
+                restaurantScope: body.restaurantScope,
+                restaurantId: body.restaurantScope === 'selected' ? body.restaurantId : null,
+                minOrderValue: body.minOrderValue ?? 0,
+                maxDiscount: body.maxDiscount ?? null,
+                usageLimit: body.usageLimit ?? null,
+                perUserLimit: body.perUserLimit ?? null,
+                startDate: body.startDate ?? null,
+                endDate: body.endDate ?? null,
+                isFirstOrderOnly: body.isFirstOrderOnly ?? false,
+                status,
+            },
+        },
+        { new: true }
+    ).lean();
+
+    await invalidateOffersCacheSafely('offer update');
+    return updated;
+}
+
+export async function updateAdminOfferStatus(id, status) {
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) return null;
+    if (!['active', 'paused', 'inactive'].includes(status)) {
+        throw new ValidationError('Status must be active, paused or inactive');
+    }
+
+    const existing = await FoodOffer.findById(id).lean();
+    if (!existing) return null;
+
+    if (status === 'active' && isOfferEndDateExpired(existing.endDate)) {
+        throw new ValidationError('Cannot activate an expired offer. Extend the end date first.');
+    }
+
+    const updated = await FoodOffer.findByIdAndUpdate(
+        id,
+        { $set: { status } },
+        { new: true }
+    ).lean();
+
+    await invalidateOffersCacheSafely('offer status update');
+    return updated;
+}
+
 export async function updateAdminOfferCartVisibility(offerId, itemId, showInCart) {
     if (!offerId || !mongoose.Types.ObjectId.isValid(offerId)) return null;
     if (!itemId) return null;
