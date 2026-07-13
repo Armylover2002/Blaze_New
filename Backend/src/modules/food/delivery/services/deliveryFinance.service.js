@@ -65,8 +65,8 @@ export const getDeliveryPartnerWalletEnhanced = async (deliveryPartnerId) => {
 
       for (const order of completedOrders) {
         if (!creditedOrderIds.has(String(order._id))) {
-          const riderEarning = order.riderEarning || order.pricing?.deliveryFee || 0;
-          const platformProfit = order.platformProfit || 0;
+          const riderEarning = Number(order.riderEarning || 0);
+          const platformProfit = Number(order.platformProfit || 0);
 
           if (riderEarning > 0) {
             await creditWallet({

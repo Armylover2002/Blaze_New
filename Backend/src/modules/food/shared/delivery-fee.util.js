@@ -1,6 +1,47 @@
 import { FoodFeeSettings } from '../admin/models/feeSettings.model.js';
+import { getRoadDistanceKmValue } from '../../../services/roadDistance.service.js';
+import {
+  calculateDistanceKm,
+  normalizeDeliveryAddress,
+  normalizeRestaurantLocation,
+  parseGeoPoint,
+} from './geo.utils.js';
 
 export const round2 = (value) => Math.round((Number(value) || 0) * 100) / 100;
+
+export function resolveRestaurantToUserDistanceKm(restaurant, address) {
+  const normalizedAddress = normalizeDeliveryAddress(address);
+  const normalizedRestaurant = restaurant
+    ? { ...restaurant, location: normalizeRestaurantLocation(restaurant.location) }
+    : restaurant;
+  const distanceKm = calculateDistanceKm(normalizedRestaurant, normalizedAddress);
+  return Number.isFinite(distanceKm) ? Number(distanceKm.toFixed(2)) : null;
+}
+
+/** Road/travel distance (same source as home & restaurant details pages). */
+export async function resolveRestaurantToUserRoadDistanceKm(restaurant, address) {
+  const normalizedAddress = normalizeDeliveryAddress(address);
+  const normalizedRestaurant = restaurant
+    ? { ...restaurant, location: normalizeRestaurantLocation(restaurant.location) }
+    : restaurant;
+
+  const from = parseGeoPoint(normalizedRestaurant);
+  const to = parseGeoPoint(normalizedAddress);
+  if (!from || !to) {
+    return resolveRestaurantToUserDistanceKm(restaurant, address);
+  }
+
+  try {
+    const distanceKm = await getRoadDistanceKmValue(from, to);
+    if (Number.isFinite(distanceKm) && distanceKm > 0) {
+      return Number(distanceKm.toFixed(2));
+    }
+  } catch {
+    // Fall through to straight-line estimate.
+  }
+
+  return resolveRestaurantToUserDistanceKm(restaurant, address);
+}
 
 function resolveBaseDeliveryFee(feeSettings = {}) {
   const ranges = Array.isArray(feeSettings.deliveryFeeRanges)
@@ -108,5 +149,5 @@ export function calculateRiderEarning(feeSettings = {}, distanceKm) {
     return 0;
   });
 
-  return Number.isFinite(earning) ? Math.round(earning) : 0;
+  return Number.isFinite(earning) ? round2(earning) : 0;
 }

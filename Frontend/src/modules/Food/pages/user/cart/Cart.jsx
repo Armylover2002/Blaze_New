@@ -24,8 +24,9 @@ import { getCompanyNameAsync } from "@common/utils/businessSettings"
 import { useCompanyName } from "@food/hooks/useCompanyName"
 import { getRestaurantAvailabilityStatus } from "@food/utils/restaurantAvailability"
 import useAppBackNavigation from "@food/hooks/useAppBackNavigation"
+import { getRoadDistanceKm } from "@/shared/services/roadDistance"
 import {
-  calculateDistanceKm,
+  parseGeoPoint,
   normalizeRestaurantLocation,
 } from "@food/utils/geo"
 import zoopSound from "@food/assets/audio/zomato_sms.mp3"
@@ -89,8 +90,7 @@ const CART_ORDER_NOTE_STORAGE_KEY = "food-cart-order-note-v1"
 
 const resolveFallbackDeliveryFee = ({
   feeSettings = {},
-  restaurantData = null,
-  defaultAddress = null,
+  distanceKm = null,
 }) => {
   const ranges = Array.isArray(feeSettings.deliveryFeeRanges)
     ? [...feeSettings.deliveryFeeRanges]
@@ -102,7 +102,6 @@ const resolveFallbackDeliveryFee = ({
   const flat = Number(feeSettings.deliveryFee ?? feeSettings.baseDeliveryFee)
   const hasPositiveFlat = Number.isFinite(flat) && flat > 0
 
-  const distanceKm = calculateDistanceKm(restaurantData, defaultAddress)
   if (Number.isFinite(distanceKm) && ranges.length > 0) {
     const sortedRanges = ranges.sort((a, b) => Number(a.min) - Number(b.min))
     for (let i = 0; i < sortedRanges.length; i += 1) {
@@ -298,6 +297,7 @@ export default function Cart() {
   const [loadingRestaurant, setLoadingRestaurant] = useState(false)
   const [pricing, setPricing] = useState(null)
   const [loadingPricing, setLoadingPricing] = useState(false)
+  const [roadDistanceKm, setRoadDistanceKm] = useState(null)
 
   // Addons state
   const [addons, setAddons] = useState([])
@@ -1091,8 +1091,48 @@ export default function Cart() {
     }
   }, [])
 
+  // Road distance (same as home & restaurant details pages)
+  useEffect(() => {
+    let cancelled = false
+
+    const fetchRoadDistance = async () => {
+      const restaurantPoint = parseGeoPoint(
+        normalizeRestaurantForPricing(restaurantData),
+      )
+      const userPoint = parseGeoPoint(defaultAddress)
+      if (!restaurantPoint || !userPoint) {
+        if (!cancelled) setRoadDistanceKm(null)
+        return
+      }
+
+      const distanceKm = await getRoadDistanceKm(
+        userPoint.lat,
+        userPoint.lng,
+        restaurantPoint.lat,
+        restaurantPoint.lng,
+      )
+      if (!cancelled && Number.isFinite(distanceKm)) {
+        setRoadDistanceKm(distanceKm)
+      }
+    }
+
+    if (restaurantData && defaultAddress && hasSavedAddress && !isQuickCart && !(hasQuickItems && hasFoodItems)) {
+      fetchRoadDistance()
+    } else if (!cancelled) {
+      setRoadDistanceKm(null)
+    }
+
+    return () => {
+      cancelled = true
+    }
+  }, [restaurantData, defaultAddress, hasSavedAddress, isQuickCart, hasQuickItems, hasFoodItems])
+
   // Prefer backend calculateOrder pricing; feeSettings is display fallback only
   const subtotal = pricing?.subtotal || cart.reduce((sum, item) => sum + (item.price || 0) * (item.quantity || 1), 0)
+  const resolvedDistanceKm =
+    pricing?.deliveryFeeBreakdown?.distanceKm ??
+    pricing?.deliveryDistanceKm ??
+    roadDistanceKm
   const fallbackDeliveryFee = (() => {
     if (appliedCoupon?.freeDelivery) {
       return 0
@@ -1100,8 +1140,7 @@ export default function Cart() {
 
     return resolveFallbackDeliveryFee({
       feeSettings,
-      restaurantData: normalizeRestaurantForPricing(restaurantData),
-      defaultAddress,
+      distanceKm: resolvedDistanceKm,
     })
   })()
   const baseComputedDeliveryFee =
@@ -1109,12 +1148,9 @@ export default function Cart() {
       ? Number(pricing.deliveryFee || 0)
       : fallbackDeliveryFee
   const deliveryFee = baseComputedDeliveryFee + (deliveryType === "fastest" ? 5 : 0)
-  const deliveryFeeBreakdown = pricing?.deliveryFeeBreakdown || null
-  const hasDistanceDeliveryBreakdown =
-    deliveryFeeBreakdown?.source === "distance" &&
-    Number.isFinite(Number(deliveryFeeBreakdown?.distanceKm))
+  const hasDistanceDeliveryBreakdown = Number.isFinite(Number(resolvedDistanceKm))
   const deliveryFeeBreakdownText = hasDistanceDeliveryBreakdown
-    ? `${Number(deliveryFeeBreakdown.distanceKm).toFixed(1)} km delivery`
+    ? `${Number(resolvedDistanceKm).toFixed(1)} km delivery`
     : null
   const platformFee = pricing?.platformFee ?? Number(feeSettings.platformFee || 0)
   const gstCharges = pricing?.tax ?? Math.round(subtotal * (Number(feeSettings.gstRate || 0) / 100))
@@ -2960,7 +2996,7 @@ export default function Cart() {
                     </div>
                     <div className="flex justify-between text-sm">
                       <span className="text-gray-600 dark:text-gray-400 border-b border-dashed border-gray-400 pb-[1px]">
-                        Delivery Fee {hasDistanceDeliveryBreakdown ? `| ${Number(deliveryFeeBreakdown.distanceKm).toFixed(1)} kms` : ""}
+                        Delivery Fee {hasDistanceDeliveryBreakdown ? `| ${Number(resolvedDistanceKm).toFixed(1)} kms` : ""}
                       </span>
                       <div className="text-right">
                         <span className={deliveryFee === 0 ? "text-[#FF0000] font-semibold" : "text-gray-800 dark:text-gray-200 font-medium"}>
