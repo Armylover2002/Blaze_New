@@ -226,8 +226,18 @@ const normalizeDeliveryAddress = (address) => {
   const label = ['Home', 'Office', 'Other'].includes(address.type) ? address.type : 'Other';
   const state = String(address.state || '').trim();
   const zipCode = String(address.zipCode || address.pincode || '').trim();
-  const lat = Number(address.location?.lat);
-  const lng = Number(address.location?.lng);
+  const lat = Number(
+    address.location?.lat ??
+      (Array.isArray(address.location?.coordinates)
+        ? address.location.coordinates[1]
+        : undefined),
+  );
+  const lng = Number(
+    address.location?.lng ??
+      (Array.isArray(address.location?.coordinates)
+        ? address.location.coordinates[0]
+        : undefined),
+  );
   const formattedAddress = [street, additionalDetails, city, state, zipCode]
     .map((part) => String(part || '').trim())
     .filter((part) => part && part.toUpperCase() !== 'NA')
@@ -483,6 +493,13 @@ export const placeOrder = async (req, res) => {
       items,
     });
     let deliveryAddress = normalizeDeliveryAddress(req.body?.address);
+    if (!deliveryAddress) {
+      return res.status(400).json({
+        success: false,
+        code: 'DELIVERY_ADDRESS_REQUIRED',
+        message: 'Delivery address is required',
+      });
+    }
 
     if (idQuery.userId) {
       const customerUser = await FoodUser.findById(idQuery.userId)
@@ -520,28 +537,43 @@ export const placeOrder = async (req, res) => {
       throw zoneErr;
     }
 
-    // Calculate precise distance between seller and delivery address
     const firstProduct = products[0];
     const sellerId = firstProduct?.sellerId;
     const seller = sellerId ? await Seller.findById(sellerId).select('location').lean() : null;
-
-    let distanceKm = 0.1; // Default fallback distance if coordinates are missing
-    let distanceEstimated = true;
-    if (seller && deliveryCoords) {
-      const sellerCoords = getSellerLocation(seller);
-      if (sellerCoords) {
-        const distanceResult = await roadDistanceDetails(
-          sellerCoords.lat,
-          sellerCoords.lng,
-          deliveryCoords.lat,
-          deliveryCoords.lng,
-        );
-        distanceKm = Number.isFinite(distanceResult?.distanceKm)
-          ? distanceResult.distanceKm
-          : 0.1;
-        distanceEstimated = Boolean(distanceResult?.estimated);
-      }
+    if (!seller) {
+      return res.status(400).json({
+        success: false,
+        code: 'SELLER_NOT_FOUND',
+        message: 'Seller could not be resolved for this order',
+      });
     }
+
+    const sellerCoords = getSellerLocation(seller);
+    if (!sellerCoords) {
+      return res.status(400).json({
+        success: false,
+        code: 'SELLER_LOCATION_REQUIRED',
+        message: 'Store location is not configured. Cannot calculate delivery distance.',
+      });
+    }
+
+    const distanceResult = await roadDistanceDetails(
+      sellerCoords.lat,
+      sellerCoords.lng,
+      deliveryCoords.lat,
+      deliveryCoords.lng,
+    );
+
+    if (!Number.isFinite(distanceResult?.distanceKm) || distanceResult.distanceKm < 0) {
+      return res.status(400).json({
+        success: false,
+        code: 'DISTANCE_UNAVAILABLE',
+        message: 'Unable to calculate delivery distance for this address',
+      });
+    }
+
+    const distanceKm = distanceResult.distanceKm;
+    const distanceEstimated = Boolean(distanceResult.estimated);
 
     const { pricing } = await calculateQuickPricing({
       subtotal,
