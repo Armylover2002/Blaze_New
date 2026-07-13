@@ -32,7 +32,6 @@ export const mapVehicle = (doc = {}) => {
     return {
         id: toId(doc),
         vehicleCode: doc.vehicleCode || '',
-        name: doc.name || '',
         category: doc.category || '',
         description: doc.description || '',
         iconUrl: doc.iconUrl || '',
@@ -46,13 +45,18 @@ export const mapVehicle = (doc = {}) => {
     };
 };
 
-export const mapPublicVehicle = (doc = {}) => ({
-    id: toId(doc),
-    name: doc.name || '',
-    iconUrl: doc.iconUrl || '',
-    maxWeight: Number(doc.maxWeight || 0),
-    description: doc.description || '',
-});
+export const mapPublicVehicle = (doc = {}) => {
+    const category = doc.category || '';
+    return {
+        id: toId(doc),
+        name: category,
+        category,
+        iconUrl: doc.iconUrl || '',
+        maxWeight: Number(doc.maxWeight || 0),
+        description: doc.description || '',
+        supportedServices: Array.isArray(doc.supportedServices) ? doc.supportedServices : [],
+    };
+};
 
 export const mapPricing = (doc = {}, vehicle = null) => ({
     id: toId(doc),
@@ -69,7 +73,6 @@ export const mapPricing = (doc = {}, vehicle = null) => ({
     pricingConfigured: true,
     vehicle: vehicle ? {
         id: toId(vehicle),
-        name: vehicle.name || '',
         category: vehicle.category || '',
         iconUrl: vehicle.iconUrl || '',
     } : null,
@@ -80,7 +83,6 @@ export const mapPricing = (doc = {}, vehicle = null) => ({
 export const mapVehiclePricingRow = (vehicleDoc = {}, pricingDoc = null) => {
     const vehicle = {
         id: toId(vehicleDoc),
-        name: vehicleDoc.name || '',
         category: vehicleDoc.category || '',
         iconUrl: vehicleDoc.iconUrl || '',
     };
@@ -100,7 +102,6 @@ export const mapVehiclePricingRow = (vehicleDoc = {}, pricingDoc = null) => {
             description: '',
             pricingConfigured: false,
             vehicle,
-            name: vehicle.name,
             category: vehicle.category,
             iconUrl: vehicle.iconUrl,
         };
@@ -120,7 +121,6 @@ export const mapVehiclePricingRow = (vehicleDoc = {}, pricingDoc = null) => {
         description: pricingDoc.description || '',
         pricingConfigured: true,
         vehicle,
-        name: vehicle.name,
         category: vehicle.category,
         iconUrl: vehicle.iconUrl,
         createdAt: pricingDoc.createdAt,
@@ -139,7 +139,6 @@ export const buildRelationMaps = (zones = [], vehicles = []) => {
     vehicles.forEach((vehicle) => {
         vehicleMap[toId(vehicle)] = {
             id: toId(vehicle),
-            name: vehicle.name || '',
             category: vehicle.category || '',
         };
     });
@@ -250,7 +249,7 @@ export const mapPublicBanner = (doc = {}) => {
 export const mapPublicCoupon = (doc = {}) => {
     let applicableVehicles = [];
     if (doc.vehicleIds && doc.vehicleIds.length > 0) {
-        applicableVehicles = doc.vehicleIds.map(v => (v.name || v)).filter(Boolean);
+        applicableVehicles = doc.vehicleIds.map(v => (v.category || v)).filter(Boolean);
     }
 
     return {

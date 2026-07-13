@@ -1,6 +1,8 @@
 import mongoose from 'mongoose';
 import { ValidationError, NotFoundError } from '../auth/errors.js';
 import { FoodNotification } from './models/notification.model.js';
+import { computeNotificationExpiresAt } from './utils/notificationTtl.js';
+import { bulkWriteInChunks } from './utils/bulkWriteChunks.js';
 
 const normalizePagination = ({ page = 1, limit = 20 } = {}) => {
     const nextPage = Math.max(1, Number(page) || 1);
@@ -27,6 +29,23 @@ const ensureObjectId = (value, fieldName) => {
     return new mongoose.Types.ObjectId(String(value));
 };
 
+/** Strip duplicated / PII profile fields from inbox metadata. */
+const sanitizeNotificationMetadata = (metadata = {}) => {
+    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+        return {};
+    }
+    const next = { ...metadata };
+    delete next.ownerLabel;
+    delete next.ownerSubLabel;
+    delete next.label;
+    delete next.subLabel;
+    delete next.phone;
+    delete next.email;
+    // broadcastId lives on the document root — do not keep a duplicate copy in metadata.
+    delete next.broadcastId;
+    return next;
+};
+
 export const resolveNotificationOwnerFromRequest = (user = {}) => {
     const ownerType = normalizeOwnerType(user?.role);
     const ownerId = user?.userId || user?._id || null;
@@ -41,34 +60,40 @@ export const resolveNotificationOwnerFromRequest = (user = {}) => {
     };
 };
 
-export const createInboxNotifications = async ({ notifications = [] } = {}) => {
+export const createInboxNotifications = async ({
+    notifications = [],
+    returnDocuments = true
+} = {}) => {
     const rows = Array.isArray(notifications)
         ? notifications.filter((item) => item?.ownerType && item?.ownerId && item?.title && item?.message)
         : [];
 
     if (!rows.length) return [];
 
+    const expiresAt = computeNotificationExpiresAt(new Date());
+
     const operations = rows.map((item) => {
-        const hasExplicitBroadcastId = item.broadcastId && mongoose.Types.ObjectId.isValid(String(item.broadcastId));
+        const hasExplicitBroadcastId =
+            item.broadcastId && mongoose.Types.ObjectId.isValid(String(item.broadcastId));
+        const trimmedLink = String(item.link || '').trim();
+        const trimmedCategory = String(item.category || '').trim();
+        const metadata = sanitizeNotificationMetadata(item.metadata);
         const payload = {
             ownerType: item.ownerType,
             ownerId: ensureObjectId(item.ownerId, 'ownerId'),
             title: String(item.title).trim(),
             message: String(item.message).trim(),
-            link: String(item.link || '').trim(),
-            category: String(item.category || 'broadcast').trim(),
             source: 'ADMIN_BROADCAST',
-            metadata: item.metadata && typeof item.metadata === 'object' ? item.metadata : {},
+            ...(trimmedLink ? { link: trimmedLink } : {}),
+            // Persist category only when explicitly provided (e.g. category/dining flows).
+            ...(trimmedCategory ? { category: trimmedCategory } : {}),
+            ...(Object.keys(metadata).length ? { metadata } : {})
         };
 
         if (hasExplicitBroadcastId) {
             payload.broadcastId = new mongoose.Types.ObjectId(String(item.broadcastId));
         } else {
-            // The existing collection has a unique compound index on
-            // { broadcastId, ownerType, ownerId }. For inbox-only notifications
-            // (like dining approval requests) we still need a unique ObjectId here,
-            // otherwise MongoDB treats the missing value as null inside that index
-            // and throws duplicate key errors on repeated inserts for the same owner.
+            // Unique compound index on { broadcastId, ownerType, ownerId } requires a value.
             payload.broadcastId = new mongoose.Types.ObjectId();
         }
 
@@ -94,7 +119,8 @@ export const createInboxNotifications = async ({ notifications = [] } = {}) => {
                     },
                     $setOnInsert: {
                         isRead: false,
-                        readAt: null
+                        readAt: null,
+                        expiresAt
                     }
                 },
                 upsert: true
@@ -102,7 +128,11 @@ export const createInboxNotifications = async ({ notifications = [] } = {}) => {
         };
     });
 
-    await FoodNotification.collection.bulkWrite(operations, { ordered: false });
+    await bulkWriteInChunks(FoodNotification.collection, operations, { ordered: false });
+
+    if (!returnDocuments) {
+        return [];
+    }
 
     const ids = rows
         .map((item) => item.broadcastId)
@@ -110,13 +140,22 @@ export const createInboxNotifications = async ({ notifications = [] } = {}) => {
         .map((value) => new mongoose.Types.ObjectId(String(value)));
 
     if (ids.length > 0) {
-        return FoodNotification.find({ broadcastId: { $in: ids } }).sort({ createdAt: -1 }).lean();
+        return FoodNotification.find({ broadcastId: { $in: ids } })
+            .select('-__v')
+            .sort({ createdAt: -1 })
+            .lean();
     }
 
     return [];
 };
 
-export const getInboxNotifications = async ({ ownerType, ownerId, page = 1, limit = 20, contextModule } = {}) => {
+export const getInboxNotifications = async ({
+    ownerType,
+    ownerId,
+    page = 1,
+    limit = 20,
+    contextModule
+} = {}) => {
     const normalizedOwnerType = normalizeOwnerType(contextModule || ownerType);
     const normalizedOwnerId = ensureObjectId(ownerId, 'ownerId');
     const { skip, ...meta } = normalizePagination({ page, limit });
@@ -129,6 +168,9 @@ export const getInboxNotifications = async ({ ownerType, ownerId, page = 1, limi
 
     const [items, total, unreadCount] = await Promise.all([
         FoodNotification.find(filter)
+            .select(
+                'ownerType ownerId title message link category source broadcastId metadata isRead readAt createdAt updatedAt'
+            )
             .sort({ createdAt: -1 })
             .skip(skip)
             .limit(meta.limit)
@@ -167,7 +209,11 @@ export const markNotificationAsRead = async ({ notificationId, ownerType, ownerI
             }
         },
         { new: true }
-    ).lean();
+    )
+        .select(
+            'ownerType ownerId title message link category source broadcastId metadata isRead readAt createdAt updatedAt'
+        )
+        .lean();
 
     if (!notification) {
         throw new NotFoundError('Notification not found');
@@ -192,7 +238,9 @@ export const dismissNotification = async ({ notificationId, ownerType, ownerId }
             }
         },
         { new: true }
-    ).lean();
+    )
+        .select('_id dismissedAt isRead readAt')
+        .lean();
 
     if (!notification) {
         throw new NotFoundError('Notification not found');

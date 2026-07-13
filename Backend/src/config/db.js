@@ -39,6 +39,45 @@ export const connectDB = async () => {
         const conn = await mongoose.connect(config.mongodbUri, MONGO_CONNECT_OPTIONS);
         logger.info(`MongoDB connected: ${conn.connection.host}`);
 
+        // Money-critical indexes (autoIndex is disabled). Fail startup if they cannot be created.
+        try {
+            const { validateDeliveryBonusStartup } = await import(
+                '../modules/food/admin/startup/bonusStartupValidator.js'
+            );
+            await validateDeliveryBonusStartup();
+        } catch (bonusIdxErr) {
+            logger.error(
+                `FATAL: Delivery bonus index ensure failed: ${bonusIdxErr.message}. Refusing to start.`
+            );
+            process.exit(1);
+        }
+
+        // Notification TTL + channel uniqueness (autoIndex is disabled). Fail startup if unverified.
+        try {
+            const { validateNotificationStartup } = await import(
+                '../core/notifications/startup/notificationStartupValidator.js'
+            );
+            await validateNotificationStartup();
+        } catch (notificationIdxErr) {
+            logger.error(
+                `FATAL: Notification index ensure failed: ${notificationIdxErr.message}. Refusing to start.`
+            );
+            process.exit(1);
+        }
+
+        // Delivery onboarding submission history indexes (unique versioning).
+        try {
+            const { validateDeliveryOnboardingStartup } = await import(
+                '../modules/food/delivery/database/deliveryOnboardingIndexManager.js'
+            );
+            await validateDeliveryOnboardingStartup();
+        } catch (onboardingIdxErr) {
+            logger.error(
+                `FATAL: Delivery onboarding index ensure failed: ${onboardingIdxErr.message}. Refusing to start.`
+            );
+            process.exit(1);
+        }
+
         // Programmatically inspect and drop legacy non-sparse index to prevent duplicate null key errors
         try {
             const db = conn.connection.db;

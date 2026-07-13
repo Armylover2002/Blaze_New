@@ -273,7 +273,7 @@ export async function hydrateDriverVehiclesFromCatalog(partner) {
 
     const catalog = catalogIds.length
         ? await PorterVehicle.find({ _id: { $in: catalogIds }, isDeleted: { $ne: true } })
-            .select({ name: 1, vehicleCode: 1, supportedServices: 1, icon: 1 })
+            .select({ category: 1, vehicleCode: 1, supportedServices: 1, iconUrl: 1, icon: 1 })
             .lean()
         : [];
 
@@ -286,7 +286,7 @@ export async function hydrateDriverVehiclesFromCatalog(partner) {
             id: String(id),
             porterVehicleId: v.porterVehicleId ? String(v.porterVehicleId) : null,
             vehicleCode: v.vehicleCode || v.vehicleType || cat?.vehicleCode || '',
-            vehicleName: v.vehicleName || cat?.name || 'Vehicle',
+            vehicleName: v.vehicleName || cat?.category || cat?.name || 'Vehicle',
             vehicleNumber: v.vehicleNumber || '',
             model: v.model || '',
             supportedServices: Array.isArray(v.supportedServices) && v.supportedServices.length
@@ -295,6 +295,7 @@ export async function hydrateDriverVehiclesFromCatalog(partner) {
             status: v.status || 'active',
             isDefault: Boolean(v.isDefault),
             iconUrl: cat?.iconUrl || cat?.icon || null,
+            category: cat?.category || '',
         };
     });
 }

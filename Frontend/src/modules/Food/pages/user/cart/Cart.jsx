@@ -1797,7 +1797,12 @@ export default function Cart() {
         paymentMethod: orderPayload.paymentMethod
       });
 
-      // Check wallet balance if wallet payment selected
+      if (!isUserCodAllowed && selectedPaymentMethod === "cash") {
+        toast.error("Cash on delivery is not available for your account")
+        setIsPlacingOrder(false)
+        return
+      }
+
       if (selectedPaymentMethod === "wallet" && walletBalance < total) {
         toast.error(`Insufficient wallet balance. Required: ${RUPEE_SYMBOL}${total.toFixed(0)}, Available: ${RUPEE_SYMBOL}${walletBalance.toFixed(0)}`)
         setIsPlacingOrder(false)

@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, useMemo, useCallback } from "react"
-import { authAPI, userAPI } from "@food/api"
+import { authAPI, userAPI, invalidateUserMeCache } from "@food/api"
 import { clearUserSession } from "@food/utils/auth"
 import {
   getCachedUserProfile,
@@ -163,11 +163,14 @@ export function ProfileProvider({ children }) {
 
   // Fetch user profile and addresses from API on mount and when authentication changes
   useEffect(() => {
+    let cancelled = false
+
     const fetchUserProfile = async (forceRefresh = false) => {
       // Check if user is authenticated
       const isAuthenticated = Boolean(getUserSessionToken())
       
       if (!isAuthenticated) {
+        if (cancelled) return
         setUserProfile(null)
         setAddresses([])
         setPaymentMethods([])
@@ -185,25 +188,39 @@ export function ProfileProvider({ children }) {
 
       const cachedProfile = forceRefresh ? null : getCachedUserProfile()
       const cachedAddresses = forceRefresh ? null : getCachedUserAddresses()
-      if (cachedProfile) {
+      if (cachedProfile && !cancelled) {
         setUserProfile(cachedProfile)
       }
-      if (cachedAddresses) {
+      if (cachedAddresses && !cancelled) {
         setAddresses(dedupeAddressesByLabel(cachedAddresses))
       }
       if (cachedProfile && cachedAddresses) {
-        setLoading(false)
+        if (!cancelled) setLoading(false)
+        // Background refresh so admin COD / status changes are not stuck behind cache.
+        invalidateUserMeCache()
+        authAPI.getCurrentUser()
+          .then((response) => {
+            if (cancelled) return
+            const userData = response?.data?.data?.user || response?.data?.user || response?.data
+            if (userData) {
+              setUserProfile(userData)
+              setCachedUserProfile(userData)
+              localStorage.setItem("user_user", JSON.stringify(userData))
+              localStorage.setItem("userProfile", JSON.stringify(userData))
+            }
+          })
+          .catch(() => {})
         return
       }
 
       try {
-        if (!cachedProfile) setLoading(true)
+        if (!cachedProfile && !cancelled) setLoading(true)
 
         if (!cachedProfile) {
           const response = await authAPI.getCurrentUser()
           const userData = response?.data?.data?.user || response?.data?.user || response?.data
 
-          if (userData) {
+          if (userData && !cancelled) {
             setUserProfile(userData)
             setCachedUserProfile(userData)
             localStorage.setItem("user_user", JSON.stringify(userData))
@@ -216,15 +233,17 @@ export function ProfileProvider({ children }) {
             const addressesResponse = await userAPI.getAddresses()
             const addressesData = addressesResponse?.data?.data?.addresses || addressesResponse?.data?.addresses || []
             const normalizedAddresses = dedupeAddressesByLabel(addressesData)
-            setAddresses(normalizedAddresses)
-            setCachedUserAddresses(normalizedAddresses)
-            localStorage.setItem("userAddresses", JSON.stringify(normalizedAddresses))
+            if (!cancelled) {
+              setAddresses(normalizedAddresses)
+              setCachedUserAddresses(normalizedAddresses)
+              localStorage.setItem("userAddresses", JSON.stringify(normalizedAddresses))
+            }
           } catch (addressError) {
             debugError("Error fetching addresses:", addressError)
             const saved = localStorage.getItem("userAddresses")
             if (saved) {
               try {
-                setAddresses(dedupeAddressesByLabel(JSON.parse(saved)))
+                if (!cancelled) setAddresses(dedupeAddressesByLabel(JSON.parse(saved)))
               } catch (e) {
                 debugError("Error parsing saved addresses:", e)
               }
@@ -236,13 +255,13 @@ export function ProfileProvider({ children }) {
         const saved = localStorage.getItem("userAddresses")
         if (saved) {
           try {
-            setAddresses(dedupeAddressesByLabel(JSON.parse(saved)))
+            if (!cancelled) setAddresses(dedupeAddressesByLabel(JSON.parse(saved)))
           } catch (e) {
             debugError("Error parsing saved addresses:", e)
           }
         }
       } finally {
-        setLoading(false)
+        if (!cancelled) setLoading(false)
       }
     }
 
@@ -250,6 +269,7 @@ export function ProfileProvider({ children }) {
     
     // Listen for auth changes
     const handleAuthChange = () => {
+      invalidateUserMeCache()
       invalidateUserSessionCache()
       fetchUserProfile(true)
     }
@@ -257,6 +277,7 @@ export function ProfileProvider({ children }) {
     window.addEventListener("userAuthChanged", handleAuthChange)
     
     return () => {
+      cancelled = true
       window.removeEventListener("userAuthChanged", handleAuthChange)
     }
   }, [])

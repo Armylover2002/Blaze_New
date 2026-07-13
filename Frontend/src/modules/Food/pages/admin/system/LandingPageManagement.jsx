@@ -113,13 +113,10 @@ export default function LandingPageManagement() {
   const diningBannersFileInputRef = useRef(null)
 
   // Settings
-  const [settings, setSettings] = useState({ exploreMoreHeading: "Explore More", recommendedRestaurantIds: [], headerVideoUrl: "" })
+  const [settings, setSettings] = useState({ exploreMoreHeading: "Explore More", recommendedRestaurantIds: [] })
   const [settingsLoading, setSettingsLoading] = useState(true)
   const [settingsSaving, setSettingsSaving] = useState(false)
-  const [headerVideoUploading, setHeaderVideoUploading] = useState(false)
-  const [headerVideoRemoving, setHeaderVideoRemoving] = useState(false)
   const [recommendedSearchQuery, setRecommendedSearchQuery] = useState("")
-  const headerVideoInputRef = useRef(null)
 
   const [allRestaurants, setAllRestaurants] = useState([])
   const [restaurantsLoading, setRestaurantsLoading] = useState(false)
@@ -133,13 +130,6 @@ export default function LandingPageManagement() {
   // Common
   const [error, setError] = useState(null)
   const [success, setSuccess] = useState(null)
-
-  // Restaurant Selection Modal for Banner Advertising
-  const [showRestaurantModal, setShowRestaurantModal] = useState(false)
-  const [selectedBannerId, setSelectedBannerId] = useState(null)
-  const [selectedRestaurantIds, setSelectedRestaurantIds] = useState([])
-  const [restaurantSearchQuery, setRestaurantSearchQuery] = useState("")
-  const [linkingRestaurants, setLinkingRestaurants] = useState(false)
 
   // Helper function to filter out token-related errors
   const setErrorSafely = (errorMessage) => {
@@ -342,7 +332,6 @@ export default function LandingPageManagement() {
   }
 
   const handleDeleteBanner = async (id) => {
-    if (!window.confirm('Are you sure you want to delete this hero banner?')) return
     try {
       setBannersDeleting(id)
       setError(null)
@@ -423,54 +412,6 @@ export default function LandingPageManagement() {
       setBannerZoneSavingId(null)
     }
   }
-
-  // Handle restaurant selection for banner advertising
-  const handleLinkRestaurants = async () => {
-    if (!selectedBannerId) return
-
-    try {
-      setLinkingRestaurants(true)
-      setError(null)
-      setSuccess(null)
-
-      const response = await api.patch(
-        `/food/hero-banners/${selectedBannerId}/link-restaurants`,
-        { restaurantIds: selectedRestaurantIds },
-        getAuthConfig()
-      )
-
-      if (response.data.success) {
-        setSuccess('Restaurants linked to banner successfully!')
-        setShowRestaurantModal(false)
-        setSelectedBannerId(null)
-        setSelectedRestaurantIds([])
-        setRestaurantSearchQuery("")
-        await fetchBanners()
-        setTimeout(() => setSuccess(null), 3000)
-      }
-    } catch (err) {
-      setErrorSafely(err.response?.data?.message || 'Failed to link restaurants to banner.')
-    } finally {
-      setLinkingRestaurants(false)
-    }
-  }
-
-  const toggleRestaurantSelection = (restaurantId) => {
-    setSelectedRestaurantIds(prev => {
-      if (prev.includes(restaurantId)) {
-        return prev.filter(id => id !== restaurantId)
-      } else {
-        return [...prev, restaurantId]
-      }
-    })
-  }
-
-  const filteredRestaurantsForModal = allRestaurants.filter(restaurant => {
-    if (!restaurantSearchQuery.trim()) return true
-    const query = restaurantSearchQuery.toLowerCase()
-    return restaurant.name?.toLowerCase().includes(query) ||
-      restaurant.restaurantId?.toLowerCase().includes(query)
-  })
 
   const filteredRestaurantsForRecommended = useMemo(() => {
     const query = recommendedSearchQuery.trim().toLowerCase()
@@ -656,7 +597,6 @@ export default function LandingPageManagement() {
   }
 
   const handleDeleteCategory = async (id) => {
-    if (!window.confirm('Are you sure you want to delete this category?')) return
     try {
       setCategoriesDeleting(id)
       setError(null)
@@ -755,9 +695,7 @@ export default function LandingPageManagement() {
       formData.append('image', file)
       formData.append('label', exploreMoreLabel.trim())
       formData.append('link', exploreMoreLink.trim())
-      const response = await api.post('/food/hero-banners/landing/explore-more', formData, getAuthConfig({
-        headers: { 'Content-Type': 'multipart/form-data' },
-      }))
+      const response = await api.post('/food/hero-banners/landing/explore-more', formData, getAuthConfig())
       if (response.data.success) {
         setSuccess('Explore more item created successfully!')
         setExploreMoreLabel("")
@@ -774,7 +712,6 @@ export default function LandingPageManagement() {
   }
 
   const handleDeleteExploreMore = async (id) => {
-    if (!window.confirm('Are you sure you want to delete this explore more item?')) return
     try {
       setExploreMoreDeleting(id)
       setError(null)
@@ -825,16 +762,12 @@ export default function LandingPageManagement() {
 
       if (existingItem) {
         // Update existing
-        res = await api.patch(`/food/hero-banners/landing/explore-more/${existingItem._id}`, formData, getAuthConfig({
-          headers: { 'Content-Type': 'multipart/form-data' }
-        }))
+        res = await api.patch(`/food/hero-banners/landing/explore-more/${existingItem._id}`, formData, getAuthConfig())
       } else {
         // Create new
         formData.append('label', label)
         formData.append('link', link)
-        res = await api.post('/food/hero-banners/landing/explore-more', formData, getAuthConfig({
-          headers: { 'Content-Type': 'multipart/form-data' }
-        }))
+        res = await api.post('/food/hero-banners/landing/explore-more', formData, getAuthConfig())
       }
 
       if (res.data?.success) {
@@ -944,7 +877,6 @@ export default function LandingPageManagement() {
   }
 
   const handleDeleteUnder250Banner = async (id) => {
-    if (!window.confirm('Are you sure you want to delete this under 250 banner?')) return
     try {
       setUnder250BannersDeleting(id)
       setError(null)
@@ -1067,7 +999,6 @@ export default function LandingPageManagement() {
   }
 
   const handleDeleteDiningBanner = async (id) => {
-    if (!window.confirm('Are you sure you want to delete this dining banner?')) return
     try {
       setDiningBannersDeleting(id)
       setError(null)
@@ -1128,14 +1059,13 @@ export default function LandingPageManagement() {
         const nextSettings = response.data.data?.settings || response.data.data || {}
         setSettings({
           exploreMoreHeading: nextSettings.exploreMoreHeading || "Explore More",
-          recommendedRestaurantIds: Array.isArray(nextSettings.recommendedRestaurantIds) ? nextSettings.recommendedRestaurantIds : [],
-          headerVideoUrl: nextSettings.headerVideoUrl || ""
+          recommendedRestaurantIds: Array.isArray(nextSettings.recommendedRestaurantIds) ? nextSettings.recommendedRestaurantIds : []
         })
       }
     } catch (err) {
       // Silently handle 401/404 errors - endpoints may not exist yet, use default settings
       if (err.response?.status === 401 || err.response?.status === 404) {
-        setSettings({ exploreMoreHeading: "Explore More", recommendedRestaurantIds: [], headerVideoUrl: "" }) // Use default settings
+        setSettings({ exploreMoreHeading: "Explore More", recommendedRestaurantIds: [] }) // Use default settings
         setError(null) // Clear any previous error
       } else {
         // Filter out token-related errors
@@ -1161,7 +1091,6 @@ export default function LandingPageManagement() {
         setSettings((prev) => ({
           ...prev,
           exploreMoreHeading: savedSettings.exploreMoreHeading || prev.exploreMoreHeading,
-          headerVideoUrl: typeof savedSettings.headerVideoUrl === 'string' ? savedSettings.headerVideoUrl : prev.headerVideoUrl,
           recommendedRestaurantIds: Array.isArray(savedSettings.recommendedRestaurantIds)
             ? savedSettings.recommendedRestaurantIds
             : prev.recommendedRestaurantIds
@@ -1194,61 +1123,6 @@ export default function LandingPageManagement() {
     }
   }
 
-  const handleHeaderVideoFileSelect = async (e) => {
-    const file = e.target?.files?.[0]
-    if (!file) return
-
-    if (!file.type?.startsWith('video/')) {
-      setErrorSafely('Please select a valid video file.')
-      e.target.value = ''
-      return
-    }
-
-    try {
-      setHeaderVideoUploading(true)
-      setError(null)
-      setSuccess(null)
-
-      const formData = new FormData()
-      formData.append('video', file)
-
-      const response = await api.post('/food/hero-banners/landing/settings/header-video', formData, getAuthConfig())
-      if (response.data.success) {
-        const savedSettings = response.data.data?.settings || response.data.data || {}
-        setSettings((prev) => ({
-          ...prev,
-          headerVideoUrl: savedSettings.headerVideoUrl || ""
-        }))
-        setSuccess('Header video uploaded successfully!')
-        setTimeout(() => setSuccess(null), 3000)
-      }
-    } catch (err) {
-      setErrorSafely(err.response?.data?.message || 'Failed to upload header video.')
-    } finally {
-      if (e.target) e.target.value = ''
-      setHeaderVideoUploading(false)
-    }
-  }
-
-  const handleRemoveHeaderVideo = async () => {
-    if (!window.confirm('Remove the current homepage header video?')) return
-
-    try {
-      setHeaderVideoRemoving(true)
-      setError(null)
-      setSuccess(null)
-      const response = await api.delete('/food/hero-banners/landing/settings/header-video', getAuthConfig())
-      if (response.data.success) {
-        setSettings((prev) => ({ ...prev, headerVideoUrl: "" }))
-        setSuccess('Header video removed successfully!')
-        setTimeout(() => setSuccess(null), 3000)
-      }
-    } catch (err) {
-      setErrorSafely(err.response?.data?.message || 'Failed to remove header video.')
-    } finally {
-      setHeaderVideoRemoving(false)
-    }
-  }
 
   // ==================== ALL RESTAURANTS ====================
   const fetchAllRestaurants = async () => {
@@ -1322,7 +1196,6 @@ export default function LandingPageManagement() {
     }
   }
   const handleDeleteGourmetRestaurant = async (id) => {
-    if (!window.confirm('Are you sure you want to remove this restaurant from Gourmet?')) return
     try {
       setGourmetDeleting(id)
       setError(null)
@@ -1378,7 +1251,6 @@ export default function LandingPageManagement() {
     { id: 'banners', label: 'Hero Banners', icon: ImageIcon },
     { id: 'under-250', label: '250 Banner', icon: Tag },
     { id: 'dining', label: 'Dining', icon: UtensilsCrossed },
-    { id: 'homepage-video', label: 'Homepage Video', icon: Layout },
     { id: 'explore-more', label: 'Explore More', icon: Layout },
   ]
 
@@ -1461,7 +1333,7 @@ export default function LandingPageManagement() {
                 <input
                   ref={bannersFileInputRef}
                   type="file"
-                  accept="image/*"
+                  accept="image/png, image/jpeg, image/webp"
                   multiple
                   onChange={handleBannerFileSelect}
                   className="hidden"
@@ -1541,17 +1413,6 @@ export default function LandingPageManagement() {
                             </button>
                           </div>
                           <div className="flex items-center gap-2 flex-wrap">
-                            <button
-                              onClick={() => {
-                                setSelectedBannerId(banner._id)
-                                setSelectedRestaurantIds(banner.linkedRestaurants?.map(r => r._id || r) || [])
-                                setShowRestaurantModal(true)
-                              }}
-                              className="px-3 py-1.5 rounded text-sm font-medium bg-blue-100 text-blue-800 hover:bg-blue-200 flex items-center gap-1"
-                            >
-                              <Megaphone className="w-4 h-4" />
-                              Advertise
-                            </button>
                             <button onClick={() => handleToggleBannerStatus(banner._id, banner.isActive)} className={`px-3 py-1.5 rounded text-sm font-medium ${banner.isActive ? 'bg-yellow-100 text-yellow-800' : 'bg-green-100 text-green-800'}`}>
                               {banner.isActive ? 'Deactivate' : 'Activate'}
                             </button>
@@ -1560,23 +1421,6 @@ export default function LandingPageManagement() {
                             </button>
                           </div>
                         </div>
-                        {banner.linkedRestaurants && banner.linkedRestaurants.length > 0 && (
-                          <div className="mt-2 pt-2 border-t border-slate-200">
-                            <p className="text-xs text-slate-600 mb-1">Linked Restaurants ({banner.linkedRestaurants.length}):</p>
-                            <div className="flex flex-wrap gap-1">
-                              {banner.linkedRestaurants.slice(0, 3).map((restaurant) => (
-                                <span key={restaurant._id || restaurant} className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded text-xs">
-                                  {restaurant.name || 'Restaurant'}
-                                </span>
-                              ))}
-                              {banner.linkedRestaurants.length > 3 && (
-                                <span className="px-2 py-0.5 bg-slate-100 text-slate-600 rounded text-xs">
-                                  +{banner.linkedRestaurants.length - 3} more
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        )}
                         <div className="mt-3 border-t border-slate-200 pt-3">
                           <div className="mb-2 flex items-center justify-between gap-3">
                             <div>
@@ -1656,7 +1500,7 @@ export default function LandingPageManagement() {
                 <input
                   ref={under250BannersFileInputRef}
                   type="file"
-                  accept="image/*"
+                  accept="image/png, image/jpeg, image/webp"
                   multiple
                   onChange={handleUnder250BannerFileSelect}
                   className="hidden"
@@ -1772,7 +1616,7 @@ export default function LandingPageManagement() {
                 <input
                   ref={diningBannersFileInputRef}
                   type="file"
-                  accept="image/*"
+                  accept="image/png, image/jpeg, image/webp"
                   multiple
                   onChange={handleDiningBannerFileSelect}
                   className="hidden"
@@ -1867,83 +1711,6 @@ export default function LandingPageManagement() {
           </>
         )}
 
-        {/* Homepage Video Tab */}
-        {activeTab === 'homepage-video' && (
-          <>
-            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-              <div className="flex items-center justify-between gap-3 mb-4">
-                <div>
-                  <h2 className="text-lg font-bold text-slate-900">Homepage Video</h2>
-                  <p className="text-sm text-slate-500 mt-1">
-                    Upload the video shown in the food homepage header.
-                  </p>
-                </div>
-                <input
-                  ref={headerVideoInputRef}
-                  type="file"
-                  accept="video/*"
-                  className="hidden"
-                  onChange={handleHeaderVideoFileSelect}
-                />
-                <Button
-                  type="button"
-                  onClick={() => headerVideoInputRef.current?.click()}
-                  disabled={headerVideoUploading || settingsLoading}
-                  className="bg-blue-500 hover:bg-blue-600 text-white"
-                >
-                  {headerVideoUploading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Upload className="w-4 h-4 mr-2" />}
-                  Upload Video
-                </Button>
-              </div>
-
-              {settingsLoading ? (
-                <div className="flex items-center justify-center py-10">
-                  <Loader2 className="w-6 h-6 text-blue-600 animate-spin" />
-                </div>
-              ) : settings.headerVideoUrl ? (
-                <div className="space-y-4">
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                    <video
-                      src={settings.headerVideoUrl}
-                      controls
-                      muted
-                      playsInline
-                      className="w-full max-w-md rounded-lg border border-slate-200 bg-black"
-                    />
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => headerVideoInputRef.current?.click()}
-                      disabled={headerVideoUploading}
-                    >
-                      Replace Video
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={handleRemoveHeaderVideo}
-                      disabled={headerVideoRemoving}
-                      className="text-red-600 border-red-200 hover:bg-red-50"
-                    >
-                      {headerVideoRemoving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Trash2 className="w-4 h-4 mr-2" />}
-                      Remove Video
-                    </Button>
-                  </div>
-                </div>
-              ) : (
-                <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center">
-                  <AlertCircle className="w-8 h-8 text-slate-400 mx-auto mb-3" />
-                  <p className="text-slate-700 font-medium">No homepage video uploaded yet.</p>
-                  <p className="text-sm text-slate-500 mt-1">
-                    The app will keep using the default bundled video until you upload one here.
-                  </p>
-                </div>
-              )}
-            </div>
-          </>
-        )}
 
         {/* Explore More Tab */}
         {activeTab === 'explore-more' && (
@@ -2106,10 +1873,11 @@ export default function LandingPageManagement() {
                             type="file"
                             id={`file-${item.id}`}
                             className="hidden"
-                            accept="image/*"
+                            accept="image/png, image/jpeg, image/webp"
                             onChange={(e) => {
                               if (e.target.files?.[0]) {
                                 handleIconUpdate(e.target.files[0], item.label, item.link, item.id)
+                                e.target.value = ''
                               }
                             }}
                             disabled={exploreIconsUploading[item.id]}
@@ -2236,181 +2004,6 @@ export default function LandingPageManagement() {
             )}
           </>
         )}
-
-        {/* Restaurant Selection Modal */}
-        <Dialog open={showRestaurantModal} onOpenChange={setShowRestaurantModal}>
-          <DialogContent className="max-w-4xl max-h-[85vh] overflow-hidden flex flex-col p-0">
-            <DialogHeader className="px-6 pt-6 pb-4 border-b border-slate-200">
-              <DialogTitle className="text-2xl font-bold text-slate-900">Select Restaurants to Link with Banner</DialogTitle>
-              <DialogDescription className="text-slate-600 mt-2">
-                Select restaurants that will be linked to this banner. When users click on this banner, they will be redirected to the selected restaurants.
-              </DialogDescription>
-            </DialogHeader>
-
-            <div className="flex-1 overflow-hidden flex flex-col">
-              {/* Search Bar and Selected Count */}
-              <div className="px-6 pt-4 pb-3 space-y-3 bg-slate-50 border-b border-slate-200">
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-slate-400" />
-                  <Input
-                    type="text"
-                    placeholder="Search restaurants by name or ID..."
-                    value={restaurantSearchQuery}
-                    onChange={(e) => setRestaurantSearchQuery(e.target.value)}
-                    className="pl-10 h-11 bg-white border-slate-300 focus:border-blue-500 focus:ring-blue-500"
-                  />
-                </div>
-                {selectedRestaurantIds.length > 0 && (
-                  <div className="flex items-center gap-2">
-                    <div className="px-3 py-1.5 bg-blue-100 text-blue-700 rounded-lg text-sm font-medium">
-                      {selectedRestaurantIds.length} restaurant{selectedRestaurantIds.length > 1 ? 's' : ''} selected
-                    </div>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setSelectedRestaurantIds([])}
-                      className="text-xs text-slate-600 hover:text-slate-900"
-                    >
-                      Clear selection
-                    </Button>
-                  </div>
-                )}
-              </div>
-
-              {/* Restaurant List */}
-              <div className="flex-1 overflow-y-auto bg-white">
-                {restaurantsLoading ? (
-                  <div className="flex flex-col items-center justify-center py-16">
-                    <Loader2 className="w-10 h-10 text-blue-600 animate-spin mb-3" />
-                    <p className="text-slate-500">Loading restaurants...</p>
-                  </div>
-                ) : filteredRestaurantsForModal.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center py-16 text-center px-6">
-                    <ImageIcon className="w-16 h-16 text-slate-300 mb-4" />
-                    <p className="text-slate-600 font-medium mb-1">No restaurants found</p>
-                    <p className="text-sm text-slate-500">
-                      {restaurantSearchQuery ? 'Try a different search term' : 'No restaurants available'}
-                    </p>
-                  </div>
-                ) : (
-                  <div className="divide-y divide-slate-100">
-                    {filteredRestaurantsForModal.map((restaurant) => {
-                      const isSelected = selectedRestaurantIds.includes(restaurant._id)
-                      const profileImageUrl = restaurant.profileImage?.url || restaurant.profileImage || null
-
-                      return (
-                        <div
-                          key={restaurant._id}
-                          className={`px-6 py-4 transition-all cursor-pointer ${isSelected
-                            ? 'bg-blue-50 border-l-4 border-l-blue-500'
-                            : 'hover:bg-slate-50'
-                            }`}
-                          onClick={() => toggleRestaurantSelection(restaurant._id)}
-                        >
-                          <div className="flex items-center gap-4">
-                            <div className="flex-shrink-0">
-                              <Checkbox
-                                checked={isSelected}
-                                onCheckedChange={() => toggleRestaurantSelection(restaurant._id)}
-                                onClick={(e) => e.stopPropagation()}
-                                className="w-5 h-5"
-                              />
-                            </div>
-
-                            {/* Restaurant Image */}
-                            <div className="flex-shrink-0">
-                              {profileImageUrl ? (
-                                <img
-                                  src={profileImageUrl}
-                                  alt={restaurant.name}
-                                  className="w-16 h-16 rounded-xl object-cover border-2 border-slate-200"
-                                  onError={(e) => {
-                                    e.target.style.display = 'none'
-                                    e.target.nextSibling.style.display = 'flex'
-                                  }}
-                                />
-                              ) : null}
-                              <div
-                                className={`w-16 h-16 rounded-xl bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white font-bold text-lg ${profileImageUrl ? 'hidden' : 'flex'
-                                  }`}
-                              >
-                                {restaurant.name?.charAt(0)?.toUpperCase() || 'R'}
-                              </div>
-                            </div>
-
-                            {/* Restaurant Info */}
-                            <div className="flex-1 min-w-0">
-                              <h3 className={`font-semibold text-base mb-1 ${isSelected ? 'text-blue-900' : 'text-slate-900'
-                                }`}>
-                                {restaurant.name || 'Unnamed Restaurant'}
-                              </h3>
-                              <p className="text-sm text-slate-500 truncate">
-                                ID {formatRestaurantId(restaurant)}
-                              </p>
-                              {restaurant.rating && (
-                                <div className="flex items-center gap-1 mt-1">
-                                  <span className="text-xs text-slate-400">?</span>
-                                  <span className="text-xs text-slate-600">{restaurant.rating}</span>
-                                </div>
-                              )}
-                            </div>
-
-                            {/* Selected Indicator */}
-                            {isSelected && (
-                              <div className="flex-shrink-0">
-                                <div className="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center">
-                                  <CheckCircle2 className="w-5 h-5 text-white" />
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                )}
-              </div>
-
-              {/* Action Buttons */}
-              <div className="flex items-center justify-between gap-3 px-6 py-4 bg-slate-50 border-t border-slate-200">
-                <div className="text-sm text-slate-600">
-                  {filteredRestaurantsForModal.length} restaurant{filteredRestaurantsForModal.length !== 1 ? 's' : ''} available
-                </div>
-                <div className="flex items-center gap-3">
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      setShowRestaurantModal(false)
-                      setSelectedBannerId(null)
-                      setSelectedRestaurantIds([])
-                      setRestaurantSearchQuery("")
-                    }}
-                    className="px-6"
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    onClick={handleLinkRestaurants}
-                    disabled={linkingRestaurants || selectedRestaurantIds.length === 0}
-                    className="bg-blue-600 hover:bg-blue-700 text-white px-6 min-w-[140px]"
-                  >
-                    {linkingRestaurants ? (
-                      <>
-                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                        Linking...
-                      </>
-                    ) : (
-                      <>
-                        <Megaphone className="w-4 h-4 mr-2" />
-                        Link {selectedRestaurantIds.length > 0 ? `(${selectedRestaurantIds.length})` : ''} Restaurant{selectedRestaurantIds.length !== 1 ? 's' : ''}
-                      </>
-                    )}
-                  </Button>
-                </div>
-              </div>
-            </div>
-          </DialogContent>
-        </Dialog>
 
       </div >
     </div >

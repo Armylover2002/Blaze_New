@@ -2,6 +2,19 @@ import axiosInstance from '@core/api/axios';
 
 const unwrap = (response) => response?.data?.data ?? response?.data ?? response;
 
+const createGetDedupe = (requestFn) => {
+  let inFlight = null;
+  return (...args) => {
+    if (inFlight) return inFlight;
+    inFlight = Promise.resolve()
+      .then(() => requestFn(...args))
+      .finally(() => {
+        inFlight = null;
+      });
+    return inFlight;
+  };
+};
+
 const porterDriverApi = {
   getVehicles: () => axiosInstance.get('/porter/driver/vehicles').then((response) => {
     const data = unwrap(response);
@@ -16,9 +29,13 @@ const porterDriverApi = {
     .patch('/porter/driver/vehicles/active', { vehicleId })
     .then(unwrap),
 
-  getAvailableOrders: () => axiosInstance.get('/porter/driver/orders/available').then(unwrap),
+  getAvailableOrders: createGetDedupe(() =>
+    axiosInstance.get('/porter/driver/orders/available').then(unwrap),
+  ),
 
-  getActiveOrder: () => axiosInstance.get('/porter/driver/orders/active').then(unwrap),
+  getActiveOrder: createGetDedupe(() =>
+    axiosInstance.get('/porter/driver/orders/active').then(unwrap),
+  ),
 
   acceptOrder: (orderId) => axiosInstance.post(`/porter/driver/orders/${orderId}/accept`).then(unwrap),
 

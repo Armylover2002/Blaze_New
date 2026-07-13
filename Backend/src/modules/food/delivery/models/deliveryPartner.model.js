@@ -174,6 +174,18 @@ const deliveryPartnerSchema = new mongoose.Schema(
             isDefault: { type: Boolean, default: false },
         }],
         activeVehicleId: { type: String, trim: true, default: null },
+        /** Points at the latest onboarding submission (history lives in submissions collection). */
+        latestSubmissionId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'FoodDeliveryPartnerSubmission',
+            default: null,
+            index: true
+        },
+        currentSubmissionNumber: {
+            type: Number,
+            default: 0,
+            min: 0
+        },
     },
     {
         collection: 'food_delivery_partners',

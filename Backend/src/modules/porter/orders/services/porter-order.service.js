@@ -92,7 +92,7 @@ export async function createPorterOrder(userId, dto, performer = null) {
         delivery: dto.delivery,
         parcel: dto.parcel || {},
         vehicleId: pricingResult.vehicle.id,
-        vehicleName: pricingResult.vehicle.name,
+        vehicleName: pricingResult.vehicle.category,
         zoneId: pricingResult.zoneId ? new mongoose.Types.ObjectId(pricingResult.zoneId) : null,
         route: {
             distanceKm: pricingResult.route.distanceKm,

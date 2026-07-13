@@ -115,7 +115,7 @@ export default function FareEstimate() {
         </div>
         <div className="flex items-center gap-3">
           <span className="text-lg">{vehicle?.icon}</span>
-          <p className="text-[13px] font-medium text-gray-900">{vehicle?.name}</p>
+          <p className="text-[13px] font-medium text-gray-900">{vehicle?.category}</p>
         </div>
         {parcel.receiverName && (
           <div className="border-t border-gray-100 pt-2 mt-2">
@@ -288,7 +288,7 @@ export default function FareEstimate() {
                 stage: "searching_partner",
                 pickup,
                 delivery,
-                vehicle: vehicle?.name,
+                vehicle: vehicle?.category,
                 total: order.pricing?.total ?? total,
                 scheduledAt: finalOrder.scheduledAt || scheduledAt || null,
                 createdAt: order.createdAt || new Date().toISOString(),

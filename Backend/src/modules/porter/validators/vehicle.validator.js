@@ -5,7 +5,6 @@ import { ValidationError } from '../../../core/auth/errors.js';
 const allowedCategories = ['bike', 'electric_bike', 'scooter', 'electric_scooter', 'bicycle', 'mini_truck', 'pickup', 'van', 'tempo', 'truck'];
 
 const vehicleBodySchema = z.object({
-    name: z.string().min(1, 'Vehicle name is required').max(120),
     category: z.enum(allowedCategories, {
         errorMap: () => ({ message: 'Invalid category' })
     }),
@@ -41,7 +40,6 @@ export const validateCreateVehicleDto = (body = {}) => {
     }
     return {
         ...result.data,
-        name: result.data.name.trim(),
         category: result.data.category.trim(),
         iconUrl: (result.data.iconUrl || '').trim(),
         description: (result.data.description || '').trim(),
@@ -68,7 +66,6 @@ export const validateUpdateVehicleDto = (body = {}) => {
         throw new ValidationError(partial.error.errors[0].message);
     }
     const data = { ...partial.data };
-    if (data.name !== undefined) data.name = data.name.trim();
     if (data.category !== undefined) data.category = data.category.trim();
     if (data.iconUrl !== undefined) data.iconUrl = data.iconUrl.trim();
     if (data.description !== undefined) data.description = data.description.trim();

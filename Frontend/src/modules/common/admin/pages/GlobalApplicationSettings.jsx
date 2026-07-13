@@ -188,9 +188,13 @@ const GlobalApplicationSettings = () => {
   }, []);
 
   const handleChange = (name, value) => {
+    let finalValue = value;
+    if (name === 'phoneNumber') {
+      finalValue = value.replace(/\D/g, "").slice(0, 10);
+    }
     setFormData(prev => ({
       ...prev,
-      [name]: value
+      [name]: finalValue
     }));
   };
 

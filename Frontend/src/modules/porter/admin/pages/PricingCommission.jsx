@@ -38,7 +38,7 @@ function formatCommission(row) {
   return `${row.commissionValue}%`;
 }
 
-const VehicleIcon = ({ src, name }) => {
+const VehicleIcon = ({ src, category }) => {
   const [error, setError] = useState(false);
   const isValidUrl = src && src !== "null" && src !== "undefined";
 
@@ -53,7 +53,7 @@ const VehicleIcon = ({ src, name }) => {
   return (
     <img 
       src={src} 
-      alt={name} 
+      alt={category} 
       className="h-14 w-14 rounded-md object-contain bg-gray-50 border p-1 drop-shadow-sm"
       onError={() => setError(true)}
     />
@@ -193,8 +193,8 @@ const PricingCommission = () => {
       await porterAdminApi.upsertVehiclePricing(form.vehicleId, payload);
 
       const row = rows.find((r) => getVehicleId(r) === form.vehicleId);
-      const vehicleName = row?.name || row?.vehicle?.name || "vehicle";
-      toast.success(`Pricing ${editingVehicleId ? "updated" : "added"} for ${vehicleName}`);
+      const displayCategory = row?.category || row?.vehicle?.category || "vehicle";
+      toast.success(`Pricing ${editingVehicleId ? "updated" : "added"} for ${displayCategory}`);
 
       closeForm();
       await fetchPricingList();
@@ -208,8 +208,8 @@ const PricingCommission = () => {
 
   const handleDelete = async (row) => {
     const vehicleId = getVehicleId(row);
-    const name = row.name || row.vehicle?.name || "vehicle";
-    if (!window.confirm(`Remove pricing for ${name}?`)) return;
+    const displayCategory = row?.category || row?.vehicle?.category || "vehicle";
+    if (!window.confirm(`Remove pricing for ${displayCategory}?`)) return;
 
     try {
       await porterAdminApi.clearVehiclePricing(vehicleId);
@@ -231,10 +231,9 @@ const PricingCommission = () => {
   const columns = [
     {
       key: "iconUrl", header: "",
-      cell: (row) => <VehicleIcon src={row.iconUrl || row.icon} name={row.name} />
+      cell: (row) => <VehicleIcon src={row.iconUrl || row.icon} category={row.category} />
     },
-    { key: "name", header: "Vehicle Name", cell: (row) => <span className="font-semibold">{row.name}</span> },
-    { key: "category", header: "Category" },
+    { key: "category", header: "Category", cell: (row) => <span className="font-semibold">{row.category}</span> },
     {
       key: "basePrice", header: "Base Price",
       cell: (row) => isPricingConfigured(row) ? formatCurrency(row.basePrice) : NOT_CONFIGURED,
@@ -332,7 +331,7 @@ const PricingCommission = () => {
                   {dialogRows.map((r) => {
                     const id = getVehicleId(r);
                     return (
-                      <option key={id} value={id}>{r.name} — {r.category}</option>
+                      <option key={id} value={id}>{r.category}</option>
                     );
                   })}
                 </select>

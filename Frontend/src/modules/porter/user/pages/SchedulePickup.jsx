@@ -157,7 +157,7 @@ export default function SchedulePickup() {
   const summaryWeight = Number(parcel?.weightKg || activeShipment?.parcel?.weightKg || 0)
     * Number(parcel?.quantity || activeShipment?.parcel?.quantity || 1);
   const summaryParcelName = parcel?.parcelName || activeShipment?.parcel?.parcelName || "";
-  const summaryVehicle = vehicle?.name || activeShipment?.vehicleName || activeShipment?.vehicle;
+  const summaryVehicle = vehicle?.category || activeShipment?.vehicleCategory || activeShipment?.vehicle;
   const summaryFare = total ?? activeShipment?.total ?? activeShipment?.pricing?.total;
   const summaryDistance = distanceText
     || (distanceKm != null ? `${Number(distanceKm).toFixed(1)} km` : null)
@@ -181,7 +181,7 @@ export default function SchedulePickup() {
         navigate(getPorterParcelDetailsPath());
         return false;
       }
-      if (!vehicle?.id && !vehicle?.name) {
+      if (!vehicle?.id && !vehicle?.category) {
         toast.error("Please select a vehicle first");
         navigate(getPorterVehiclePath());
         return false;

@@ -6,12 +6,18 @@ export const listHeroBanners = async () => {
     return FoodHeroBanner.find().sort({ sortOrder: 1, createdAt: -1 }).lean();
 };
 
+const getNextSortOrder = async () => {
+    const last = await FoodHeroBanner.findOne().sort({ sortOrder: -1 }).select('sortOrder').lean();
+    return (last?.sortOrder ?? -1) + 1;
+};
+
 export const createHeroBannersFromFiles = async (files, meta = {}) => {
     if (!files || !files.length) {
         return [];
     }
 
     const results = [];
+    let currentSortOrder = typeof meta.sortOrder === 'number' ? meta.sortOrder : await getNextSortOrder();
 
     for (const file of files) {
         try {
@@ -24,8 +30,7 @@ export const createHeroBannersFromFiles = async (files, meta = {}) => {
                 ctaText: meta.ctaText,
                 ctaLink: meta.ctaLink,
                 zoneId: typeof meta.zoneId === 'string' ? meta.zoneId.trim() : '',
-                linkedRestaurantIds: meta.linkedRestaurantIds || [],
-                sortOrder: meta.sortOrder ?? 0,
+                sortOrder: currentSortOrder++,
                 isActive: true
             });
 

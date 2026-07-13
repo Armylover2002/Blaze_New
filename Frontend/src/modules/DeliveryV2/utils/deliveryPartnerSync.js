@@ -8,6 +8,34 @@ export const isApprovedVehicle = (vehicle) => {
 export const getApprovedVehicles = (vehicles = []) =>
   (Array.isArray(vehicles) ? vehicles : []).filter(isApprovedVehicle);
 
+/** Resolve a human-readable vehicle label from mapped or raw partner vehicle shapes. */
+export const getVehicleDisplayName = (vehicle) => {
+  if (!vehicle || typeof vehicle !== 'object') return 'Vehicle';
+  const master = vehicle.master || {};
+  const name =
+    master.name ||
+    master.category ||
+    vehicle.vehicleName ||
+    vehicle.name ||
+    vehicle.category ||
+    vehicle.vehicleCode ||
+    '';
+  const trimmed = String(name).trim();
+  return trimmed || 'Vehicle';
+};
+
+export const getVehicleIconUrl = (vehicle) => {
+  if (!vehicle || typeof vehicle !== 'object') return null;
+  const master = vehicle.master || {};
+  // Catalog type icon only — ignore uploaded vehiclePhoto documents.
+  return (
+    master.iconUrl ||
+    master.image ||
+    vehicle.iconUrl ||
+    null
+  );
+};
+
 export const extractPartnerFromMeResponse = (response) => {
   const root = response?.data?.data ?? response?.data ?? response ?? {};
   return root.user || root.profile || root.deliveryPartner || root;

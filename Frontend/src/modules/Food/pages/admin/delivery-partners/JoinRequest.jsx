@@ -59,8 +59,15 @@ export default function JoinRequest() {
       setLoading(true)
       setError(null)
 
+      const statusMap = {
+        pending: "pending",
+        denied: "denied",
+        rejected: "denied",
+        approved: "approved",
+        reapplied: "reapplied",
+      }
       const params = {
-        status: activeTab === "pending" ? "pending" : "denied",
+        status: statusMap[activeTab] || "pending",
         page: 1,
         limit: 1000,
       }
@@ -194,10 +201,15 @@ export default function JoinRequest() {
   const handleView = async (request) => {
     try {
       setLoading(true)
-      const response = await adminAPI.getDeliveryPartnerById(request._id)
-      
-      if (response.data && response.data.success) {
-        setViewDetails(response.data.data.delivery)
+      const [detailRes, historyRes] = await Promise.all([
+        adminAPI.getDeliveryPartnerById(request._id),
+        adminAPI.getDeliveryPartnerSubmissions(request._id).catch(() => null),
+      ])
+
+      if (detailRes.data && detailRes.data.success) {
+        const delivery = detailRes.data.data.delivery || {}
+        const timeline = historyRes?.data?.data?.timeline || historyRes?.data?.data?.submissions || []
+        setViewDetails({ ...delivery, onboardingTimeline: timeline })
         setIsViewOpen(true)
       } else {
         toast.error("Failed to load details")
@@ -251,27 +263,25 @@ export default function JoinRequest() {
           </div>
 
           {/* Tabs */}
-          <div className="flex items-center gap-2 border-b border-slate-200 mb-6">
-            <button
-              onClick={() => handleTabChange("pending")}
-              className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-                activeTab === "pending"
-                  ? "border-blue-600 text-blue-600"
-                  : "border-transparent text-slate-600 hover:text-slate-900"
-              }`}
-            >
-              Pending Delivery Man
-            </button>
-            <button
-              onClick={() => handleTabChange("denied")}
-              className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-                activeTab === "denied"
-                  ? "border-blue-600 text-blue-600"
-                  : "border-transparent text-slate-600 hover:text-slate-900"
-              }`}
-            >
-              Denied Deliveryman
-            </button>
+          <div className="flex items-center gap-2 border-b border-slate-200 mb-6 overflow-x-auto">
+            {[
+              { key: "pending", label: "Pending" },
+              { key: "reapplied", label: "Reapplied" },
+              { key: "denied", label: "Rejected" },
+              { key: "approved", label: "Approved" },
+            ].map((tab) => (
+              <button
+                key={tab.key}
+                onClick={() => handleTabChange(tab.key)}
+                className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
+                  activeTab === tab.key
+                    ? "border-blue-600 text-blue-600"
+                    : "border-transparent text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
           </div>
 
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4">
@@ -456,12 +466,21 @@ export default function JoinRequest() {
                             <span className={`px-3 py-1 rounded-full text-xs font-medium inline-block w-fit ${
                               request.status === "Pending" || request.status === "pending"
                                 ? "bg-blue-100 text-blue-700"
-                                : request.status === "Denied" || request.status === "denied" || request.status === "blocked"
+                                : request.status === "Denied" || request.status === "denied" || request.status === "blocked" || request.status === "rejected"
                                 ? "bg-red-100 text-red-700"
+                                : request.status === "approved"
+                                ? "bg-emerald-100 text-emerald-700"
                                 : "bg-green-100 text-green-700"
                             }`}>
-                              {request.status === "blocked" || request.status === "Blocked" || request.status === "Denied" || request.status === "denied" ? "Rejected" : request.status}
+                              {request.status === "blocked" || request.status === "Blocked" || request.status === "Denied" || request.status === "denied" || request.status === "rejected"
+                                ? "Rejected"
+                                : request.status}
                             </span>
+                            {request.isReapplied && (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-800 w-fit">
+                                Reapplied · #{request.submissionNumber || "?"} · {request.submissionType === "edit_existing" ? "Edited" : request.submissionType === "new_onboarding" ? "Fresh" : "Resubmit"}
+                              </span>
+                            )}
                             {request.rejectionReason && (
                               <span className="text-xs text-red-600 italic max-w-[200px] truncate" title={request.rejectionReason}>
                                 {request.rejectionReason}
@@ -478,7 +497,7 @@ export default function JoinRequest() {
                             >
                               <Eye className="w-4 h-4" />
                             </button>
-                            {activeTab === "pending" && (
+                            {(activeTab === "pending" || activeTab === "reapplied") && (
                               <>
                                 <button
                                   onClick={() => handleApprove(request)}
@@ -603,9 +622,9 @@ export default function JoinRequest() {
                 {/* Profile Image & Basic Info */}
                 <div className="flex items-start gap-6 pb-6 border-b border-slate-200">
                   <div className="flex-shrink-0">
-                    {viewDetails.profileImage?.url ? (
+                    {viewDetails.profileImage?.url || viewDetails.profilePhoto ? (
                       <img 
-                        src={viewDetails.profileImage.url} 
+                        src={viewDetails.profileImage?.url || viewDetails.profilePhoto} 
                         alt={viewDetails.name}
                         className="w-24 h-24 rounded-full object-cover border-2 border-slate-200"
                       />
@@ -643,38 +662,14 @@ export default function JoinRequest() {
                       <span className={`inline-block px-2 py-1 rounded-full text-xs font-medium mt-1 ${
                         viewDetails.status === 'pending' ? 'bg-blue-100 text-blue-700' :
                         viewDetails.status === 'approved' || viewDetails.status === 'active' ? 'bg-green-100 text-green-700' :
-                        viewDetails.status === 'blocked' ? 'bg-red-100 text-red-700' :
+                        viewDetails.status === 'blocked' || viewDetails.status === 'rejected' || viewDetails.status === 'denied' ? 'bg-red-100 text-red-700' :
                         'bg-slate-100 text-slate-700'
                       }`}>
-                        {viewDetails.status === 'blocked' ? 'Rejected' : (viewDetails.status?.charAt(0).toUpperCase() + viewDetails.status?.slice(1) || "N/A")}
+                        {viewDetails.status === 'blocked' || viewDetails.status === 'denied'
+                          ? 'Rejected'
+                          : (viewDetails.status?.charAt(0).toUpperCase() + viewDetails.status?.slice(1) || "N/A")}
                       </span>
                     </div>
-                    {viewDetails.rejectionReason && (
-                      <div className="col-span-2">
-                        <label className="text-xs font-semibold text-slate-500 uppercase text-red-600">Rejection Reason</label>
-                        <div className="bg-red-50 border border-red-200 rounded-lg p-3 mt-1">
-                          <p className="text-sm text-red-700 whitespace-pre-wrap">{viewDetails.rejectionReason}</p>
-                        </div>
-                      </div>
-                    )}
-                    {viewDetails.approvedBy && (
-                      <div className="col-span-2 p-3 bg-emerald-50 rounded-lg border border-emerald-200">
-                        <p className="text-xs font-semibold text-emerald-700 mb-1">Approved By</p>
-                        <p className="text-sm text-emerald-900 font-medium">{viewDetails.approvedBy.name}</p>
-                        {viewDetails.approvedBy.email && <p className="text-xs text-emerald-600">{viewDetails.approvedBy.email}</p>}
-                        {viewDetails.approvedBy.roleName && <p className="text-xs text-emerald-600">Role: {viewDetails.approvedBy.roleName}</p>}
-                        {viewDetails.approvedBy.actionAt && <p className="text-xs text-emerald-500 mt-1">{new Date(viewDetails.approvedBy.actionAt).toLocaleString()}</p>}
-                      </div>
-                    )}
-                    {viewDetails.rejectedBy && (
-                      <div className="col-span-2 p-3 bg-rose-50 rounded-lg border border-rose-200">
-                        <p className="text-xs font-semibold text-rose-700 mb-1">Rejected By</p>
-                        <p className="text-sm text-rose-900 font-medium">{viewDetails.rejectedBy.name}</p>
-                        {viewDetails.rejectedBy.email && <p className="text-xs text-rose-600">{viewDetails.rejectedBy.email}</p>}
-                        {viewDetails.rejectedBy.roleName && <p className="text-xs text-rose-600">Role: {viewDetails.rejectedBy.roleName}</p>}
-                        {viewDetails.rejectedBy.actionAt && <p className="text-xs text-rose-500 mt-1">{new Date(viewDetails.rejectedBy.actionAt).toLocaleString()}</p>}
-                      </div>
-                    )}
                     {viewDetails.dateOfBirth && (
                       <div>
                         <label className="text-xs font-semibold text-slate-500 uppercase flex items-center gap-1">
@@ -755,17 +750,25 @@ export default function JoinRequest() {
                   </div>
                 )}
 
-                {/* Multi-Vehicle Details */}
+                {/* Multi-Vehicle Details (source of truth for modern partners) */}
                 {viewDetails.driverVehicles && viewDetails.driverVehicles.length > 0 && (
                   <div className="pb-6 border-b border-slate-200">
                     <h3 className="text-sm font-bold text-slate-900 mb-3 flex items-center gap-2">
-                      <Bike className="w-4 h-4" /> Vehicles List
+                      <Bike className="w-4 h-4" /> Vehicles
                     </h3>
                     <div className="space-y-4">
-                      {viewDetails.driverVehicles.map((v, idx) => (
+                      {viewDetails.driverVehicles.map((v, idx) => {
+                        const hasPhotos = Boolean(v.vehiclePhoto || v.rcPhoto || v.insurancePhoto)
+                        return (
                         <div key={v.id || idx} className="bg-slate-50 p-4 rounded-lg border border-slate-200">
                           <h4 className="font-semibold text-slate-800 text-sm mb-3">Vehicle {idx + 1}: {v.vehicleName || v.vehicleCode || 'N/A'}</h4>
                           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                            {(v.vehicleCode || v.vehicleType) && (
+                              <div>
+                                <label className="text-xs font-semibold text-slate-500 uppercase">Type</label>
+                                <p className="text-sm text-slate-900 mt-1 capitalize">{v.vehicleCode || v.vehicleType}</p>
+                              </div>
+                            )}
                             {v.vehicleNumber && (
                               <div>
                                 <label className="text-xs font-semibold text-slate-500 uppercase">Number</label>
@@ -792,7 +795,7 @@ export default function JoinRequest() {
                             )}
                           </div>
                           
-                          {/* Multi-Vehicle Photos */}
+                          {hasPhotos ? (
                           <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-4">
                             {v.vehiclePhoto && (
                               <div>
@@ -819,14 +822,16 @@ export default function JoinRequest() {
                               </div>
                             )}
                           </div>
+                          ) : null}
                         </div>
-                      ))}
+                        )
+                      })}
                     </div>
                   </div>
                 )}
 
-                {/* Legacy Single Vehicle Details */}
-                {viewDetails.vehicle && (
+                {/* Legacy single-vehicle block — only when driverVehicles is absent */}
+                {!(viewDetails.driverVehicles && viewDetails.driverVehicles.length > 0) && viewDetails.vehicle && (
                   <div className="pb-6 border-b border-slate-200">
                     <h3 className="text-sm font-bold text-slate-900 mb-3 flex items-center gap-2">
                       <Bike className="w-4 h-4" /> Vehicle Details
@@ -838,7 +843,7 @@ export default function JoinRequest() {
                           <p className="text-sm text-slate-900 mt-1">{viewDetails.vehicle.brand}</p>
                         </div>
                       )}
-                      {viewDetails.vehicle.model && (
+                      {viewDetails.vehicle.model && viewDetails.vehicle.model !== viewDetails.vehicle.brand && (
                         <div>
                           <label className="text-xs font-semibold text-slate-500 uppercase">Model</label>
                           <p className="text-sm text-slate-900 mt-1">{viewDetails.vehicle.model}</p>
@@ -880,8 +885,8 @@ export default function JoinRequest() {
                   </div>
                 )}
 
-                {/* Documents */}
-                {viewDetails.documents && (
+                {/* Documents — only when at least one identity document exists */}
+                {viewDetails.documents && (viewDetails.documents.aadhar || viewDetails.documents.pan || viewDetails.documents.drivingLicense || viewDetails.documents.vehicleRC) && (
                   <div className="pb-6 border-b border-slate-200">
                     <h3 className="text-sm font-bold text-slate-900 mb-3 flex items-center gap-2">
                       <FileCheck className="w-4 h-4" /> Documents
@@ -1020,22 +1025,6 @@ export default function JoinRequest() {
 
                 {/* Additional Info */}
                 <div className="grid grid-cols-2 gap-4">
-                  {viewDetails.signupMethod && (
-                    <div>
-                      <label className="text-xs font-semibold text-slate-500 uppercase">Signup Method</label>
-                      <p className="text-sm text-slate-900 mt-1 capitalize">{viewDetails.signupMethod}</p>
-                    </div>
-                  )}
-                  {viewDetails.phoneVerified !== undefined && (
-                    <div>
-                      <label className="text-xs font-semibold text-slate-500 uppercase">Phone Verified</label>
-                      <span className={`inline-block px-2 py-1 rounded-full text-xs font-medium mt-1 ${
-                        viewDetails.phoneVerified ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
-                      }`}>
-                        {viewDetails.phoneVerified ? 'Verified' : 'Not Verified'}
-                      </span>
-                    </div>
-                  )}
                   {viewDetails.createdAt && (
                     <div>
                       <label className="text-xs font-semibold text-slate-500 uppercase">Joined Date</label>
@@ -1044,15 +1033,52 @@ export default function JoinRequest() {
                       </p>
                     </div>
                   )}
-                  {viewDetails.verifiedAt && (
+                  {(viewDetails.approvedAt || viewDetails.verifiedAt) && (
                     <div>
-                      <label className="text-xs font-semibold text-slate-500 uppercase">Verified At</label>
+                      <label className="text-xs font-semibold text-slate-500 uppercase">Approved At</label>
                       <p className="text-sm text-slate-900 mt-1">
-                        {new Date(viewDetails.verifiedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                        {new Date(viewDetails.approvedAt || viewDetails.verifiedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
                       </p>
                     </div>
                   )}
                 </div>
+                {Array.isArray(viewDetails.onboardingTimeline) && viewDetails.onboardingTimeline.length > 0 && (
+                  <div className="pt-6 border-t border-slate-200">
+                    <p className="text-xs font-semibold text-slate-500 uppercase mb-3">Onboarding History</p>
+                    <div className="space-y-3">
+                      {viewDetails.onboardingTimeline.map((item) => (
+                        <div
+                          key={String(item.submissionId || item.submissionNumber)}
+                          className="rounded-xl border border-slate-200 bg-slate-50 p-3"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-sm font-semibold text-slate-900">
+                              Submission #{item.submissionNumber} · {item.submissionType || "initial"}
+                            </p>
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase ${
+                              item.status === "approved"
+                                ? "bg-emerald-100 text-emerald-700"
+                                : item.status === "rejected"
+                                ? "bg-rose-100 text-rose-700"
+                                : "bg-blue-100 text-blue-700"
+                            }`}>
+                              {item.status}
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-500 mt-1">
+                            Submitted: {item.submittedAt ? new Date(item.submittedAt).toLocaleString() : "N/A"}
+                            {item.reviewedAt ? ` · Reviewed: ${new Date(item.reviewedAt).toLocaleString()}` : ""}
+                          </p>
+                          {item.rejectionReason && (
+                            <p className="text-xs text-rose-700 mt-2 whitespace-pre-wrap">
+                              Reason: {item.rejectionReason}
+                            </p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <ApprovalAuditCard
                   className="pt-6 border-t border-slate-200"
                   approvedBy={viewDetails.approvedBy}

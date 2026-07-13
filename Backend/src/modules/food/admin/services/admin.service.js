@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import { ValidationError } from '../../../../core/auth/errors.js';
+import { ValidationError, ConflictError } from '../../../../core/auth/errors.js';
 import { assertNoZoneOverlap } from '../../../../utils/zoneOverlap.js';
 import { FoodRestaurant } from '../../restaurant/models/restaurant.model.js';
 import { validateRestaurantPhoneUniqueness, normalizeRestaurantPhone } from '../../restaurant/services/restaurant.service.js';
@@ -12,12 +12,17 @@ import { FoodItem } from '../models/food.model.js';
 import { FoodOffer } from '../models/offer.model.js';
 import { FoodOfferUsage } from '../models/offerUsage.model.js';
 import { DeliveryBonusTransaction } from '../models/deliveryBonusTransaction.model.js';
+import { DeliveryBonusAuditLog } from '../models/deliveryBonusAuditLog.model.js';
+import { DeliveryBonusIdempotency } from '../models/deliveryBonusIdempotency.model.js';
+import { buildBonusRequestHash } from '../utils/bonusRequestHash.js';
+import { ensureDeliveryBonusIdempotencyIndexes } from '../database/bonusIndexManager.js';
 import { FoodEarningAddon } from '../models/earningAddon.model.js';
 import { FoodEarningAddonHistory } from '../models/earningAddonHistory.model.js';
 import { FoodDeliveryCommissionRule } from '../models/deliveryCommissionRule.model.js';
 import { FoodFeeSettings } from '../models/feeSettings.model.js';
 import { FeedbackExperience } from '../models/feedbackExperience.model.js';
 import { FoodUser } from '../../../../core/users/user.model.js';
+import { FoodAdmin } from '../../../../core/admin/admin.model.js';
 import { FoodRefreshToken } from '../../../../core/refreshTokens/refreshToken.model.js';
 import { FoodDeliveryCashLimit } from '../models/deliveryCashLimit.model.js';
 import { FoodDeliveryEmergencyHelp } from '../models/deliveryEmergencyHelp.model.js';
@@ -71,6 +76,8 @@ import {
     DASHBOARD_STATS_CACHE_TTL_MS,
     invalidateDashboardStatsCache
 } from '../utils/dashboardStatsCache.js';
+import { sendNotificationToOwner } from '../../../../core/notifications/firebase.service.js';
+import { resolveActionPerformerSnapshot } from '../../../../core/utils/performer.js';
 
 const parseBooleanLike = (value, fieldName) => {
     if (typeof value === 'boolean') return value;
@@ -1460,23 +1467,32 @@ export async function getTaxReportDetail(restaurantId, query = {}) {
 // ----- Customers / Users (admin) -----
 const FOOD_CUSTOMER_ORDER_TYPES = ['food', 'mixed'];
 
-async function getEligibleFoodCustomerIds() {
-    const ids = await FoodOrder.distinct('userId', {
-        userId: { $exists: true, $ne: null },
-        orderType: { $in: FOOD_CUSTOMER_ORDER_TYPES },
-    });
+const sanitizeProfileImageUrl = (s) => {
+    if (!s) return '';
+    const str = String(s).trim();
+    return str.replace(/^`+|`+$/g, '').trim();
+};
 
-    return ids.filter((id) => mongoose.Types.ObjectId.isValid(id));
-}
+const mapCustomerListItem = (u, stats = { totalOrder: 0, totalOrderAmount: 0 }) => ({
+    id: u._id,
+    _id: u._id,
+    name: u.name || 'Unnamed',
+    email: u.email || '',
+    phone: u.phone || '',
+    profileImage: sanitizeProfileImageUrl(u.profileImage || ''),
+    countryCode: u.countryCode || '+91',
+    status: u.isActive !== false,
+    isActive: u.isActive !== false,
+    isCodAllowed: u.isCodAllowed !== false,
+    isVerified: u.isVerified === true,
+    totalOrder: Number(stats.totalOrder || 0),
+    totalOrderAmount: Number(stats.totalOrderAmount || 0),
+    joiningDate: u.createdAt,
+    createdAt: u.createdAt
+});
 
-export async function getCustomers(query = {}) {
-    const limit = Math.min(Math.max(parseInt(query.limit, 10) || 50, 1), 1000);
-    const page = Math.max(parseInt(query.page, 10) || 1, 1);
-    const skip = (page - 1) * limit;
-
-    const filter = {
-        role: 'USER',
-    };
+function buildCustomerListFilter(query = {}) {
+    const filter = { role: 'USER' };
 
     if (query.status) {
         if (String(query.status) === 'active') filter.isActive = true;
@@ -1496,7 +1512,7 @@ export async function getCustomers(query = {}) {
 
     if (query.search && String(query.search).trim()) {
         const raw = String(query.search).trim().slice(0, 80);
-        const term = raw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const term = escapeRegex(raw);
         filter.$or = [
             { name: { $regex: term, $options: 'i' } },
             { email: { $regex: term, $options: 'i' } },
@@ -1504,77 +1520,171 @@ export async function getCustomers(query = {}) {
         ];
     }
 
-    const sort = {};
+    return filter;
+}
+
+function parseDayBounds(dateStr) {
+    const d = new Date(String(dateStr));
+    if (Number.isNaN(d.getTime())) return null;
+    const start = new Date(d);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(d);
+    end.setHours(23, 59, 59, 999);
+    return { start, end };
+}
+
+export async function getCustomers(query = {}) {
+    const limit = Math.min(Math.max(parseInt(query.limit, 10) || 50, 1), 1000);
+    const page = Math.max(parseInt(query.page, 10) || 1, 1);
+    const skip = (page - 1) * limit;
+
+    const filter = buildCustomerListFilter(query);
+
+    if (query.orderDate && String(query.orderDate).trim()) {
+        const bounds = parseDayBounds(String(query.orderDate).trim());
+        if (bounds) {
+            const orderUserIds = await FoodOrder.distinct('userId', {
+                userId: { $exists: true, $ne: null },
+                orderType: { $in: FOOD_CUSTOMER_ORDER_TYPES },
+                createdAt: { $gte: bounds.start, $lte: bounds.end }
+            });
+            const validIds = orderUserIds.filter((id) => mongoose.Types.ObjectId.isValid(id));
+            filter._id = { $in: validIds };
+        }
+    }
+
     const sortBy = String(query.sortBy || '').trim();
-    if (sortBy === 'name-asc') sort.name = 1;
-    else if (sortBy === 'name-desc') sort.name = -1;
-    else sort.createdAt = -1;
+    const needsOrderSort = sortBy === 'orders-asc' || sortBy === 'orders-desc';
 
-    const [docs, total] = await Promise.all([
-        FoodUser.find(filter)
-            .sort(sort)
-            .skip(skip)
-            .limit(limit)
-            .select('name email phone countryCode isVerified isActive isCodAllowed createdAt profileImage')
-            .lean(),
-        FoodUser.countDocuments(filter)
-    ]);
+    let customers = [];
+    let total = 0;
 
-    const sanitizeUrl = (s) => {
-        if (!s) return '';
-        const str = String(s).trim();
-        return str.replace(/^`+|`+$/g, '').trim();
-    };
+    if (needsOrderSort) {
+        const orderSortDir = sortBy === 'orders-asc' ? 1 : -1;
 
-    const userIds = docs.map((u) => u._id).filter(Boolean);
-    const orderStats = userIds.length > 0
-        ? await FoodOrder.aggregate([
-            {
-                $match: {
-                    userId: { $in: userIds },
-                    orderType: { $in: FOOD_CUSTOMER_ORDER_TYPES }
+        // Aggregate orders first (one scan/group), then rank filtered users, paginate, then lookup page customers.
+        const orderMatch = {
+            userId: { $exists: true, $ne: null },
+            orderType: { $in: FOOD_CUSTOMER_ORDER_TYPES }
+        };
+        if (filter._id?.$in) {
+            orderMatch.userId = { $in: filter._id.$in };
+        }
+
+        const [orderStats, matchingUsers] = await Promise.all([
+            FoodOrder.aggregate([
+                { $match: orderMatch },
+                {
+                    $group: {
+                        _id: '$userId',
+                        totalOrder: { $sum: 1 },
+                        totalOrderAmount: { $sum: { $ifNull: ['$pricing.total', 0] } }
+                    }
                 }
-            },
-            {
-                $group: {
-                    _id: '$userId',
-                    totalOrder: { $sum: 1 },
-                    totalOrderAmount: { $sum: { $ifNull: ['$pricing.total', 0] } }
+            ]),
+            FoodUser.find(filter).select('_id createdAt').lean()
+        ]);
+
+        const orderStatsMap = new Map(
+            orderStats.map((x) => [
+                String(x._id),
+                {
+                    totalOrder: Number(x.totalOrder || 0),
+                    totalOrderAmount: Number(x.totalOrderAmount || 0)
                 }
-            }
-        ])
-        : [];
+            ])
+        );
 
-    const orderStatsMap = new Map(
-        orderStats.map((x) => [
-            String(x._id),
-            {
-                totalOrder: Number(x.totalOrder || 0),
-                totalOrderAmount: Number(x.totalOrderAmount || 0)
-            }
-        ])
-    );
+        const ranked = matchingUsers
+            .map((u) => {
+                const stats = orderStatsMap.get(String(u._id)) || { totalOrder: 0, totalOrderAmount: 0 };
+                return {
+                    _id: u._id,
+                    createdAt: u.createdAt,
+                    totalOrder: stats.totalOrder,
+                    totalOrderAmount: stats.totalOrderAmount
+                };
+            })
+            .sort((a, b) => {
+                if (a.totalOrder !== b.totalOrder) {
+                    return orderSortDir === 1
+                        ? a.totalOrder - b.totalOrder
+                        : b.totalOrder - a.totalOrder;
+                }
+                return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+            });
 
-    let customers = docs.map((u) => {
-        const stats = orderStatsMap.get(String(u._id)) || { totalOrder: 0, totalOrderAmount: 0 };
-        return ({
-            id: u._id,
-            _id: u._id,
-            name: u.name || 'Unnamed',
-            email: u.email || '',
-            phone: u.phone || '',
-            profileImage: sanitizeUrl(u.profileImage || ''),
-            countryCode: u.countryCode || '+91',
-            status: u.isActive !== false,
-            isActive: u.isActive !== false,
-            isCodAllowed: u.isCodAllowed !== false,
-            isVerified: u.isVerified === true,
-            totalOrder: stats.totalOrder,
-            totalOrderAmount: stats.totalOrderAmount,
-            joiningDate: u.createdAt,
-            createdAt: u.createdAt
-        });
-    });
+        total = ranked.length;
+        const pageRows = ranked.slice(skip, skip + limit);
+        const pageIds = pageRows.map((r) => r._id);
+
+        const docs = pageIds.length
+            ? await FoodUser.find({ _id: { $in: pageIds } })
+                .select('name email phone countryCode isVerified isActive isCodAllowed createdAt profileImage')
+                .lean()
+            : [];
+
+        const docMap = new Map(docs.map((d) => [String(d._id), d]));
+        customers = pageRows
+            .map((row) => {
+                const u = docMap.get(String(row._id));
+                if (!u) return null;
+                return mapCustomerListItem(u, {
+                    totalOrder: row.totalOrder,
+                    totalOrderAmount: row.totalOrderAmount
+                });
+            })
+            .filter(Boolean);
+    } else {
+        const sort = {};
+        if (sortBy === 'name-asc') sort.name = 1;
+        else if (sortBy === 'name-desc') sort.name = -1;
+        else sort.createdAt = -1;
+
+        const [docs, count] = await Promise.all([
+            FoodUser.find(filter)
+                .sort(sort)
+                .skip(skip)
+                .limit(limit)
+                .select('name email phone countryCode isVerified isActive isCodAllowed createdAt profileImage')
+                .lean(),
+            FoodUser.countDocuments(filter)
+        ]);
+        total = count;
+
+        const userIds = docs.map((u) => u._id).filter(Boolean);
+        const orderStats = userIds.length > 0
+            ? await FoodOrder.aggregate([
+                {
+                    $match: {
+                        userId: { $in: userIds },
+                        orderType: { $in: FOOD_CUSTOMER_ORDER_TYPES }
+                    }
+                },
+                {
+                    $group: {
+                        _id: '$userId',
+                        totalOrder: { $sum: 1 },
+                        totalOrderAmount: { $sum: { $ifNull: ['$pricing.total', 0] } }
+                    }
+                }
+            ])
+            : [];
+
+        const orderStatsMap = new Map(
+            orderStats.map((x) => [
+                String(x._id),
+                {
+                    totalOrder: Number(x.totalOrder || 0),
+                    totalOrderAmount: Number(x.totalOrderAmount || 0)
+                }
+            ])
+        );
+
+        customers = docs.map((u) =>
+            mapCustomerListItem(u, orderStatsMap.get(String(u._id)) || { totalOrder: 0, totalOrderAmount: 0 })
+        );
+    }
 
     const chooseFirst = parseInt(query.chooseFirst, 10);
     if (Number.isFinite(chooseFirst) && chooseFirst > 0) {
@@ -1590,45 +1700,63 @@ export async function getCustomerById(id) {
     const customerObjectId = new mongoose.Types.ObjectId(id);
     const u = await FoodUser.findById(id).select('-__v').lean();
     if (!u) return null;
-    const orderStats = await FoodOrder.aggregate([
-        {
-            $match: {
-                userId: customerObjectId,
-                orderType: { $in: FOOD_CUSTOMER_ORDER_TYPES },
+
+    const [orderStats, recentOrders] = await Promise.all([
+        FoodOrder.aggregate([
+            {
+                $match: {
+                    userId: customerObjectId,
+                    orderType: { $in: FOOD_CUSTOMER_ORDER_TYPES },
+                }
+            },
+            {
+                $group: {
+                    _id: '$userId',
+                    totalOrders: { $sum: 1 },
+                    totalOrderAmount: { $sum: { $ifNull: ['$pricing.total', 0] } }
+                }
             }
-        },
-        {
-            $group: {
-                _id: '$userId',
-                totalOrders: { $sum: 1 },
-                totalOrderAmount: { $sum: { $ifNull: ['$pricing.total', 0] } }
-            }
-        }
+        ]),
+        FoodOrder.find({
+            userId: customerObjectId,
+            orderType: { $in: FOOD_CUSTOMER_ORDER_TYPES }
+        })
+            .sort({ createdAt: -1 })
+            .limit(10)
+            .select('orderId orderStatus pricing.total createdAt payment.method')
+            .lean()
     ]);
+
     const stats = orderStats?.[0] || {};
-    const sanitizeUrl = (s) => {
-        if (!s) return '';
-        const str = String(s).trim();
-        return str.replace(/^`+|`+$/g, '').trim();
-    };
     return {
         id: u._id,
         _id: u._id,
         name: u.name || 'Unnamed',
         email: u.email || '',
         phone: u.phone || '',
-        profileImage: sanitizeUrl(u.profileImage || ''),
+        profileImage: sanitizeProfileImageUrl(u.profileImage || ''),
         countryCode: u.countryCode || '+91',
         status: u.isActive !== false,
         isActive: u.isActive !== false,
         isCodAllowed: u.isCodAllowed !== false,
         isVerified: u.isVerified === true,
+        phoneVerified: u.isVerified === true,
+        gender: u.gender || '',
+        dateOfBirth: u.dateOfBirth || null,
+        addresses: Array.isArray(u.addresses) ? u.addresses : [],
         totalOrders: Number(stats.totalOrders || 0),
         totalOrder: Number(stats.totalOrders || 0),
         totalOrderAmount: Number(stats.totalOrderAmount || 0),
         joiningDate: u.createdAt,
         createdAt: u.createdAt,
-        updatedAt: u.updatedAt
+        updatedAt: u.updatedAt,
+        recentOrders: (recentOrders || []).map((o) => ({
+            orderId: o.orderId,
+            orderStatus: o.orderStatus,
+            pricing: { total: o.pricing?.total ?? 0 },
+            createdAt: o.createdAt,
+            payment: { method: o.payment?.method || null }
+        }))
     };
 }
 
@@ -1644,8 +1772,8 @@ export async function updateCustomerStatus(id, isActive) {
         updateFields['deletionRequest.status'] = 'none';
     }
 
-    const updatedDoc = await FoodUser.findByIdAndUpdate(
-        id,
+    const updatedDoc = await FoodUser.findOneAndUpdate(
+        { _id: id, role: 'USER' },
         { $set: updateFields },
         { new: true }
     );
@@ -1654,19 +1782,21 @@ export async function updateCustomerStatus(id, isActive) {
     if (updated.isActive === false) {
         await FoodRefreshToken.deleteMany({ userId: updated._id });
     }
-    return updated;
+    // Same sanitized list shape as getCustomers / COD toggle (no fcmTokens / raw dump).
+    return mapCustomerListItem(updated);
 }
 
 export async function updateCustomerCodAccess(id, isCodAllowed) {
     if (!id || !mongoose.Types.ObjectId.isValid(id)) return null;
 
-    const updatedDoc = await FoodUser.findByIdAndUpdate(
-        id,
+    const updatedDoc = await FoodUser.findOneAndUpdate(
+        { _id: id, role: 'USER' },
         { $set: { isCodAllowed: Boolean(isCodAllowed) } },
         { new: true }
     );
     if (!updatedDoc) return null;
-    return updatedDoc.toObject();
+    // Return the same sanitized list shape used by getCustomers (no fcmTokens / raw dump).
+    return mapCustomerListItem(updatedDoc.toObject());
 }
 
 export async function bulkUpdateCustomersCodAccess(ids = [], isCodAllowed) {
@@ -1685,7 +1815,7 @@ export async function bulkUpdateCustomersCodAccess(ids = [], isCodAllowed) {
     const objectIds = normalizedIds.map((id) => new mongoose.Types.ObjectId(id));
 
     const result = await FoodUser.updateMany(
-        { _id: { $in: objectIds } },
+        { _id: { $in: objectIds }, role: 'USER' },
         { $set: { isCodAllowed: Boolean(isCodAllowed) } }
     );
 
@@ -1694,6 +1824,116 @@ export async function bulkUpdateCustomersCodAccess(ids = [], isCodAllowed) {
         modified: Number(result.modifiedCount || 0),
     };
 }
+
+const mapUserTicket = (t) => {
+    if (!t) return null;
+    const user =
+        t.userId && typeof t.userId === 'object' && t.userId !== null
+            ? {
+                _id: t.userId._id,
+                name: t.userId.name || '',
+                phone: t.userId.phone || '',
+                email: t.userId.email || ''
+            }
+            : null;
+    const userId =
+        t.userId && typeof t.userId === 'object' && t.userId !== null ? String(t.userId._id) : String(t.userId);
+
+    let restaurantDoc = null;
+    if (t.restaurantId && typeof t.restaurantId === 'object' && t.restaurantId !== null) {
+        restaurantDoc = t.restaurantId;
+    } else if (t.orderId && typeof t.orderId === 'object' && t.orderId !== null) {
+        const rid = t.orderId.restaurantId;
+        if (rid && typeof rid === 'object' && rid !== null) {
+            restaurantDoc = rid;
+        }
+    }
+
+    const restaurant =
+        restaurantDoc && typeof restaurantDoc === 'object'
+            ? {
+                _id: restaurantDoc._id,
+                name: restaurantDoc.restaurantName || '',
+                city: restaurantDoc.city || '',
+                area: restaurantDoc.area || ''
+            }
+            : null;
+
+    const restaurantId =
+        restaurant && restaurant._id
+            ? String(restaurant._id)
+            : t.restaurantId
+                ? String(t.restaurantId)
+                : t.orderId && typeof t.orderId === 'object' && t.orderId !== null && t.orderId.restaurantId
+                    ? String(t.orderId.restaurantId)
+                    : null;
+
+    const restaurantName = restaurant ? restaurant.name : '';
+
+    return {
+        _id: t._id,
+        source: 'user',
+        userId,
+        type: t.type,
+        orderId: t.orderId || null,
+        restaurantId,
+        issueType: t.issueType,
+        description: t.description,
+        status: t.status,
+        adminResponse: t.adminResponse,
+        createdAt: t.createdAt,
+        updatedAt: t.updatedAt,
+        user,
+        restaurant,
+        restaurantName
+    };
+};
+
+const mapRestaurantTicket = (t) => {
+    if (!t) return null;
+    const restaurant =
+        t.restaurantId && typeof t.restaurantId === 'object'
+            ? {
+                _id: t.restaurantId._id,
+                name: t.restaurantId.restaurantName || '',
+                city: t.restaurantId.city || '',
+                area: t.restaurantId.area || ''
+            }
+            : null;
+    const restaurantId =
+        restaurant && restaurant._id ? String(restaurant._id) : t.restaurantId ? String(t.restaurantId) : null;
+    return {
+        _id: t._id,
+        source: 'restaurant',
+        userId: null,
+        type: 'restaurant-support',
+        category: t.category || 'other',
+        orderId: null,
+        orderRef: t.orderRef || '',
+        restaurantId,
+        issueType: t.issueType,
+        subject: t.subject || '',
+        description: t.description,
+        priority: t.priority || 'medium',
+        status: t.status,
+        adminResponse: t.adminResponse,
+        createdAt: t.createdAt,
+        updatedAt: t.updatedAt,
+        user: null,
+        restaurant,
+        restaurantName: restaurant ? restaurant.name : ''
+    };
+};
+
+const populateUserTicketQuery = (q) =>
+    q
+        .populate('userId', 'name phone email')
+        .populate('restaurantId', 'restaurantName city area')
+        .populate({
+            path: 'orderId',
+            select: 'restaurantId',
+            populate: { path: 'restaurantId', select: 'restaurantName city area' }
+        });
 
 export async function getSupportTickets(query = {}) {
     const limit = Math.min(Math.max(parseInt(query.limit, 10) || 50, 1), 1000);
@@ -1715,10 +1955,26 @@ export async function getSupportTickets(query = {}) {
         restaurantFilter.category = String(query.category);
     }
 
+    if (query.fromDate) {
+        const from = new Date(query.fromDate);
+        if (!Number.isNaN(from.getTime())) {
+            userFilter.createdAt = { ...(userFilter.createdAt || {}), $gte: from };
+            restaurantFilter.createdAt = { ...(restaurantFilter.createdAt || {}), $gte: from };
+        }
+    }
+    if (query.toDate) {
+        const to = new Date(query.toDate);
+        if (!Number.isNaN(to.getTime())) {
+            to.setHours(23, 59, 59, 999);
+            userFilter.createdAt = { ...(userFilter.createdAt || {}), $lte: to };
+            restaurantFilter.createdAt = { ...(restaurantFilter.createdAt || {}), $lte: to };
+        }
+    }
+
     const userSearchOr = [];
     const restaurantSearchOr = [];
     if (search) {
-        const searchRegex = new RegExp(search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+        const searchRegex = new RegExp(escapeRegex(search), 'i');
         userSearchOr.push(
             { issueType: searchRegex },
             { description: searchRegex }
@@ -1752,164 +2008,217 @@ export async function getSupportTickets(query = {}) {
     const shouldFetchUser = source === 'all' || source === 'user';
     const shouldFetchRestaurant = source === 'all' || source === 'restaurant';
 
-    const [userList, userTotal, restaurantList, restaurantTotal] = await Promise.all([
-        shouldFetchUser
-            ? FoodSupportTicket.find(userFilter)
-                .sort({ createdAt: -1 })
-                .skip(source === 'all' ? 0 : skip)
-                .limit(source === 'all' ? limit * page : limit)
-                .populate('userId', 'name phone email')
-                .populate('restaurantId', 'restaurantName city area')
-                .populate({
-                    path: 'orderId',
-                    select: 'restaurantId',
-                    populate: { path: 'restaurantId', select: 'restaurantName city area' }
-                })
-                .lean()
-            : Promise.resolve([]),
-        shouldFetchUser ? FoodSupportTicket.countDocuments(userFilter) : Promise.resolve(0),
-        shouldFetchRestaurant
-            ? FoodRestaurantSupportTicket.find(restaurantFilter)
-                .sort({ createdAt: -1 })
-                .skip(source === 'all' ? 0 : skip)
-                .limit(source === 'all' ? limit * page : limit)
-                .populate('restaurantId', 'restaurantName city area')
-                .lean()
-            : Promise.resolve([]),
-        shouldFetchRestaurant ? FoodRestaurantSupportTicket.countDocuments(restaurantFilter) : Promise.resolve(0)
-    ]);
+    // Status breakdown must honor the same filters as the list (including status).
+    const countForStatus = (Model, baseFilter, status) => {
+        if (baseFilter.status && baseFilter.status !== status) return Promise.resolve(0);
+        return Model.countDocuments({ ...baseFilter, status });
+    };
 
-    const mappedUserTickets = userList.map((t) => {
-        const user =
-            t.userId && typeof t.userId === 'object' && t.userId !== null
-                ? {
-                    _id: t.userId._id,
-                    name: t.userId.name || '',
-                    phone: t.userId.phone || '',
-                    email: t.userId.email || ''
-                }
-                : null;
-        const userId =
-            t.userId && typeof t.userId === 'object' && t.userId !== null ? String(t.userId._id) : String(t.userId);
+    const countPromises = [];
+    if (shouldFetchUser) {
+        countPromises.push(
+            FoodSupportTicket.countDocuments(userFilter),
+            countForStatus(FoodSupportTicket, userFilter, 'open'),
+            countForStatus(FoodSupportTicket, userFilter, 'in-progress'),
+            countForStatus(FoodSupportTicket, userFilter, 'resolved')
+        );
+    } else {
+        countPromises.push(Promise.resolve(0), Promise.resolve(0), Promise.resolve(0), Promise.resolve(0));
+    }
+    if (shouldFetchRestaurant) {
+        countPromises.push(
+            FoodRestaurantSupportTicket.countDocuments(restaurantFilter),
+            countForStatus(FoodRestaurantSupportTicket, restaurantFilter, 'open'),
+            countForStatus(FoodRestaurantSupportTicket, restaurantFilter, 'in-progress'),
+            countForStatus(FoodRestaurantSupportTicket, restaurantFilter, 'resolved')
+        );
+    } else {
+        countPromises.push(Promise.resolve(0), Promise.resolve(0), Promise.resolve(0), Promise.resolve(0));
+    }
 
-        let restaurantDoc = null;
-        if (t.restaurantId && typeof t.restaurantId === 'object' && t.restaurantId !== null) {
-            restaurantDoc = t.restaurantId;
-        } else if (t.orderId && typeof t.orderId === 'object' && t.orderId !== null) {
-            const rid = t.orderId.restaurantId;
-            if (rid && typeof rid === 'object' && rid !== null) {
-                restaurantDoc = rid;
-            }
-        }
+    const [
+        userTotalFiltered,
+        userOpen,
+        userInProgress,
+        userResolved,
+        restaurantTotalFiltered,
+        restaurantOpen,
+        restaurantInProgress,
+        restaurantResolved
+    ] = await Promise.all(countPromises);
 
-        const restaurant =
-            restaurantDoc && typeof restaurantDoc === 'object'
-                ? {
-                    _id: restaurantDoc._id,
-                    name: restaurantDoc.restaurantName || '',
-                    city: restaurantDoc.city || '',
-                    area: restaurantDoc.area || ''
-                }
-                : null;
-
-        const restaurantId =
-            restaurant && restaurant._id
-                ? String(restaurant._id)
-                : t.restaurantId
-                    ? String(t.restaurantId)
-                    : t.orderId && typeof t.orderId === 'object' && t.orderId !== null && t.orderId.restaurantId
-                        ? String(t.orderId.restaurantId)
-                        : null;
-
-        const restaurantName = restaurant ? restaurant.name : '';
-
-        return {
-            _id: t._id,
-            source: 'user',
-            userId,
-            type: t.type,
-            orderId: t.orderId || null,
-            restaurantId,
-            issueType: t.issueType,
-            description: t.description,
-            status: t.status,
-            adminResponse: t.adminResponse,
-            createdAt: t.createdAt,
-            updatedAt: t.updatedAt,
-            user,
-            restaurant,
-            restaurantName
-        };
-    });
-
-    const mappedRestaurantTickets = restaurantList.map((t) => {
-        const restaurant =
-            t.restaurantId && typeof t.restaurantId === 'object'
-                ? {
-                    _id: t.restaurantId._id,
-                    name: t.restaurantId.restaurantName || '',
-                    city: t.restaurantId.city || '',
-                    area: t.restaurantId.area || ''
-                }
-                : null;
-        const restaurantId =
-            restaurant && restaurant._id ? String(restaurant._id) : t.restaurantId ? String(t.restaurantId) : null;
-        return {
-            _id: t._id,
-            source: 'restaurant',
-            userId: null,
-            type: 'restaurant-support',
-            category: t.category || 'other',
-            orderId: null,
-            orderRef: t.orderRef || '',
-            restaurantId,
-            issueType: t.issueType,
-            subject: t.subject || '',
-            description: t.description,
-            priority: t.priority || 'medium',
-            status: t.status,
-            adminResponse: t.adminResponse,
-            createdAt: t.createdAt,
-            updatedAt: t.updatedAt,
-            user: null,
-            restaurant,
-            restaurantName: restaurant ? restaurant.name : ''
-        };
-    });
+    const counts = {
+        total: Number(userTotalFiltered || 0) + Number(restaurantTotalFiltered || 0),
+        open: Number(userOpen || 0) + Number(restaurantOpen || 0),
+        inProgress: Number(userInProgress || 0) + Number(restaurantInProgress || 0),
+        resolved: Number(userResolved || 0) + Number(restaurantResolved || 0)
+    };
 
     let tickets = [];
     let total = 0;
+
     if (source === 'user') {
-        tickets = mappedUserTickets;
-        total = userTotal;
+        const [userList] = await Promise.all([
+            populateUserTicketQuery(
+                FoodSupportTicket.find(userFilter).sort({ createdAt: -1 }).skip(skip).limit(limit)
+            ).lean()
+        ]);
+        tickets = userList.map(mapUserTicket).filter(Boolean);
+        total = userTotalFiltered;
     } else if (source === 'restaurant') {
-        tickets = mappedRestaurantTickets;
-        total = restaurantTotal;
+        const restaurantList = await FoodRestaurantSupportTicket.find(restaurantFilter)
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(limit)
+            .populate('restaurantId', 'restaurantName city area')
+            .lean();
+        tickets = restaurantList.map(mapRestaurantTicket).filter(Boolean);
+        total = restaurantTotalFiltered;
     } else {
-        const merged = [...mappedUserTickets, ...mappedRestaurantTickets].sort(
-            (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-        );
-        tickets = merged.slice(skip, skip + limit);
-        total = userTotal + restaurantTotal;
+        const [aggResult] = await FoodSupportTicket.aggregate([
+            { $match: userFilter },
+            { $project: { _id: 1, createdAt: 1, source: { $literal: 'user' } } },
+            {
+                $unionWith: {
+                    coll: 'food_restaurant_support_tickets',
+                    pipeline: [
+                        { $match: restaurantFilter },
+                        { $project: { _id: 1, createdAt: 1, source: { $literal: 'restaurant' } } }
+                    ]
+                }
+            },
+            { $sort: { createdAt: -1 } },
+            {
+                $facet: {
+                    metadata: [{ $count: 'total' }],
+                    data: [{ $skip: skip }, { $limit: limit }]
+                }
+            }
+        ]);
+
+        total = Number(aggResult?.metadata?.[0]?.total || 0);
+        const pageRows = aggResult?.data || [];
+        const userIds = pageRows.filter((r) => r.source === 'user').map((r) => r._id);
+        const restaurantIds = pageRows.filter((r) => r.source === 'restaurant').map((r) => r._id);
+
+        const [userDocs, restaurantDocs] = await Promise.all([
+            userIds.length
+                ? populateUserTicketQuery(FoodSupportTicket.find({ _id: { $in: userIds } })).lean()
+                : Promise.resolve([]),
+            restaurantIds.length
+                ? FoodRestaurantSupportTicket.find({ _id: { $in: restaurantIds } })
+                    .populate('restaurantId', 'restaurantName city area')
+                    .lean()
+                : Promise.resolve([])
+        ]);
+
+        const userMap = new Map(userDocs.map((d) => [String(d._id), d]));
+        const restaurantMap = new Map(restaurantDocs.map((d) => [String(d._id), d]));
+
+        tickets = pageRows
+            .map((row) => {
+                if (row.source === 'user') return mapUserTicket(userMap.get(String(row._id)));
+                return mapRestaurantTicket(restaurantMap.get(String(row._id)));
+            })
+            .filter(Boolean);
     }
 
-    return { tickets, total, page, limit };
+    return { tickets, total, page, limit, counts };
 }
 
 export async function updateSupportTicket(id, body = {}) {
     if (!id || !mongoose.Types.ObjectId.isValid(id)) return null;
-    const source = String(body.source || 'user').toLowerCase();
+    const preferredSource = String(body.source || 'user').toLowerCase() === 'restaurant' ? 'restaurant' : 'user';
     const set = {};
+
     if (body.status && ['open', 'in-progress', 'resolved'].includes(String(body.status))) {
         set.status = String(body.status);
     }
+
     if (typeof body.adminResponse === 'string') {
-        set.adminResponse = body.adminResponse;
+        const trimmed = body.adminResponse.trim();
+        if (!trimmed) {
+            if (!set.status) return { error: 'empty_response' };
+        } else {
+            if (trimmed.length > 5000) {
+                throw new ValidationError('adminResponse must be at most 5000 characters');
+            }
+            set.adminResponse = trimmed;
+        }
     }
-    if (!Object.keys(set).length) return null;
-    const model = source === 'restaurant' ? FoodRestaurantSupportTicket : FoodSupportTicket;
-    const updated = await model.findByIdAndUpdate(id, { $set: set }, { new: true }).lean();
-    return updated || null;
+
+    if (!Object.keys(set).length) return { error: 'empty_patch' };
+
+    const historyEntry = {
+        status: set.status,
+        adminResponse: set.adminResponse,
+        adminId: body.adminId && mongoose.Types.ObjectId.isValid(body.adminId) ? body.adminId : null,
+        adminName: typeof body.adminName === 'string' ? body.adminName.slice(0, 120) : '',
+        at: new Date()
+    };
+
+    if (set.adminResponse !== undefined) {
+        set.respondedAt = historyEntry.at;
+    }
+
+    const updateOps = {
+        $set: set,
+        $push: { responseHistory: historyEntry }
+    };
+
+    const preferredModel = preferredSource === 'restaurant' ? FoodRestaurantSupportTicket : FoodSupportTicket;
+    const fallbackModel = preferredSource === 'restaurant' ? FoodSupportTicket : FoodRestaurantSupportTicket;
+    const fallbackSource = preferredSource === 'restaurant' ? 'user' : 'restaurant';
+
+    let ticket = await preferredModel.findByIdAndUpdate(id, updateOps, { new: true }).lean();
+    let resolvedSource = preferredSource;
+
+    if (!ticket) {
+        ticket = await fallbackModel.findByIdAndUpdate(id, updateOps, { new: true }).lean();
+        resolvedSource = fallbackSource;
+    }
+
+    if (!ticket) return null;
+
+    if (set.adminResponse !== undefined || set.status !== undefined) {
+        try {
+            if (resolvedSource === 'user' && ticket.userId) {
+                const statusLabel = set.status || ticket.status || 'updated';
+                const bodyText = set.adminResponse
+                    ? String(set.adminResponse).slice(0, 200)
+                    : `Your support ticket status is now ${statusLabel}.`;
+                await sendNotificationToOwner({
+                    ownerType: 'USER',
+                    ownerId: ticket.userId,
+                    payload: {
+                        title: 'Support ticket update',
+                        body: bodyText,
+                        data: {
+                            type: 'support_ticket',
+                            ticketId: String(ticket._id),
+                            status: String(statusLabel)
+                        }
+                    }
+                });
+            }
+        } catch (err) {
+            console.warn('Support ticket notification failed:', err?.message || err);
+        }
+    }
+
+    // Return the same mapped shape as the listing API
+    let mappedTicket = null;
+    if (resolvedSource === 'user') {
+        const populated = await populateUserTicketQuery(FoodSupportTicket.findById(ticket._id)).lean();
+        mappedTicket = mapUserTicket(populated);
+    } else {
+        const populated = await FoodRestaurantSupportTicket.findById(ticket._id)
+            .populate('restaurantId', 'restaurantName city area')
+            .lean();
+        mappedTicket = mapRestaurantTicket(populated);
+    }
+
+    return { ticket: mappedTicket, source: resolvedSource };
 }
 
 // ----- Delivery Boy Commission Rule (admin) -----
@@ -4347,9 +4656,15 @@ export async function expireExpiredOffers() {
 export async function getDeliveryJoinRequests(query) {
     const { status = 'pending', page = 1, limit = 1000, search, zone, vehicleType } = query;
     const filter = {};
-    if (status === 'pending') filter.status = 'pending';
-    else if (status === 'denied' || status === 'rejected') filter.status = 'rejected';
-    else filter.status = status;
+    const requestedStatus = String(status || 'pending').trim().toLowerCase();
+
+    if (requestedStatus === 'pending') filter.status = 'pending';
+    else if (requestedStatus === 'denied' || requestedStatus === 'rejected') filter.status = 'rejected';
+    else if (requestedStatus === 'approved') filter.status = 'approved';
+    else if (requestedStatus === 'reapplied') filter.status = 'pending';
+    else if (requestedStatus === 'all') {
+        /* no status filter */
+    } else filter.status = requestedStatus;
 
     const andParts = [];
     if (search && typeof search === 'string' && search.trim()) {
@@ -4363,40 +4678,99 @@ export async function getDeliveryJoinRequests(query) {
         });
     }
 
-    // We will do zone filtering in memory since we need to match against polygon zones
-    // but we can still apply other filters in DB
     if (andParts.length) filter.$and = andParts;
     if (vehicleType && vehicleType.trim()) {
-        filter.vehicleType = { $regex: vehicleType.trim(), $options: 'i' };
+        // Prefer driverVehicles (source of truth); keep legacy vehicleType for older docs.
+        const term = vehicleType.trim();
+        const vehicleMatch = {
+            $or: [
+                { vehicleType: { $regex: term, $options: 'i' } },
+                { vehicleName: { $regex: term, $options: 'i' } },
+                { 'driverVehicles.vehicleCode': { $regex: term, $options: 'i' } },
+                { 'driverVehicles.vehicleName': { $regex: term, $options: 'i' } }
+            ]
+        };
+        if (filter.$and) filter.$and.push(vehicleMatch);
+        else filter.$and = [vehicleMatch];
     }
 
     const skip = Math.max(0, (Number(page) || 1) - 1) * Math.max(1, Math.min(1000, Number(limit) || 100));
     const limitNum = Math.max(1, Math.min(1000, Number(limit) || 100));
 
     const list = await FoodDeliveryPartner.find(filter)
-        .sort({ createdAt: -1 })
+        .sort({ updatedAt: -1, createdAt: -1 })
         .lean();
 
-    // Fetch all active zones for detection
+    const { FoodDeliveryPartnerSubmission } = await import(
+        '../../delivery/models/deliveryPartnerSubmission.model.js'
+    );
+
+    const partnerIds = list.map((doc) => doc._id);
+    const latestSubs = partnerIds.length
+        ? await FoodDeliveryPartnerSubmission.find({
+            partnerId: { $in: partnerIds }
+        })
+            .sort({ submissionNumber: -1 })
+            .lean()
+        : [];
+
+    const latestByPartner = new Map();
+    const rejectedPrior = new Set();
+    for (const sub of latestSubs) {
+        const key = String(sub.partnerId);
+        if (!latestByPartner.has(key)) {
+            latestByPartner.set(key, sub);
+        }
+        if (sub.status === 'rejected') {
+            rejectedPrior.add(key);
+        }
+    }
+
     const zones = await FoodZone.find({ isActive: true }).lean();
 
     let requests = list.map((doc) => {
         const detectedZone = detectZoneFromPartner(doc, zones);
+        const key = String(doc._id);
+        const latest = latestByPartner.get(key);
+        const isReapplied =
+            doc.status === 'pending' &&
+            (rejectedPrior.has(key) || Number(doc.currentSubmissionNumber || 0) > 1);
 
         return {
             ...doc,
-            detectedZoneName: detectedZone || doc.city || doc.state || 'N/A'
+            detectedZoneName: detectedZone || doc.city || doc.state || 'N/A',
+            isReapplied,
+            submissionType: latest?.submissionType || (doc.currentSubmissionNumber > 1 ? 'edit_existing' : 'initial'),
+            submissionNumber: latest?.submissionNumber || doc.currentSubmissionNumber || 1,
+            latestSubmissionId: doc.latestSubmissionId || latest?._id || null
         };
     });
 
-    // Apply zone filter if present
-    if (zone && zone.trim()) {
-        const zTerm = zone.trim().toLowerCase();
-        requests = requests.filter(r => r.detectedZoneName.toLowerCase().includes(zTerm));
+    if (requestedStatus === 'pending') {
+        requests = requests.filter((r) => !r.isReapplied);
+    }
+    if (requestedStatus === 'reapplied') {
+        requests = requests.filter((r) => r.isReapplied);
     }
 
-    // Pagination
+    if (zone && zone.trim()) {
+        const zTerm = zone.trim().toLowerCase();
+        requests = requests.filter((r) => r.detectedZoneName.toLowerCase().includes(zTerm));
+    }
+
     const totalCount = requests.length;
+    const resolveListVehicleType = (doc) => {
+        if (doc.vehicleType) return doc.vehicleType;
+        const vehicles = Array.isArray(doc.driverVehicles) ? doc.driverVehicles : [];
+        if (!vehicles.length) return '';
+        const activeId = doc.activeVehicleId ? String(doc.activeVehicleId) : null;
+        const active =
+            (activeId &&
+                vehicles.find((v) => String(v?.id || v?._id || '') === activeId)) ||
+            vehicles.find((v) => v?.isDefault) ||
+            vehicles[0];
+        return active?.vehicleCode || active?.vehicleName || '';
+    };
     const paginatedRequests = requests.slice(skip, skip + limitNum).map((doc, index) => ({
         _id: doc._id,
         sl: skip + index + 1,
@@ -4405,15 +4779,76 @@ export async function getDeliveryJoinRequests(query) {
         phone: doc.phone || '',
         city: doc.city || '',
         zone: doc.detectedZoneName,
-        vehicleType: doc.vehicleType || '',
+        vehicleType: resolveListVehicleType(doc),
         driverVehicles: doc.driverVehicles || [],
         status: doc.status === 'rejected' ? 'denied' : doc.status,
+        isReapplied: Boolean(doc.isReapplied),
+        submissionType: doc.submissionType,
+        submissionNumber: doc.submissionNumber,
         rejectionReason: doc.rejectionReason || undefined,
+        rejectedAt: doc.rejectedAt || undefined,
+        approvedAt: doc.approvedAt || undefined,
         profilePhoto: doc.profilePhoto || null,
-        profileImage: doc.profilePhoto ? { url: doc.profilePhoto } : null
+        profileImage: doc.profilePhoto ? { url: doc.profilePhoto } : null,
+        updatedAt: doc.updatedAt,
+        createdAt: doc.createdAt
     }));
 
     return { requests: paginatedRequests, total: totalCount };
+}
+
+export async function getDeliveryPartnerSubmissions(partnerId) {
+    if (!partnerId || !mongoose.Types.ObjectId.isValid(String(partnerId))) {
+        return null;
+    }
+    const partner = await FoodDeliveryPartner.findById(partnerId)
+        .select('_id name phone status latestSubmissionId currentSubmissionNumber rejectionReason rejectedAt approvedAt')
+        .lean();
+    if (!partner) return null;
+
+    const { listPartnerSubmissions, ensureLegacySubmission } = await import(
+        '../../delivery/services/deliveryPartnerSubmission.service.js'
+    );
+
+    // Ensure at least one submission exists for legacy partners when admin opens history.
+    const partnerDoc = await FoodDeliveryPartner.findById(partnerId);
+    if (partnerDoc) {
+        await ensureLegacySubmission(partnerDoc);
+    }
+
+    const submissions = await listPartnerSubmissions(partnerId);
+    const timeline = submissions.map((sub) => ({
+        submissionId: sub._id,
+        submissionNumber: sub.submissionNumber,
+        status: sub.status,
+        submissionType: sub.submissionType,
+        submittedAt: sub.submittedAt,
+        reviewedAt: sub.reviewedAt,
+        rejectionReason: sub.rejectionReason || null,
+        approvedBy: sub.approvedBy || null,
+        rejectedBy: sub.rejectedBy || null,
+        previousSubmissionId: sub.previousSubmissionId || null,
+        snapshotSummary: {
+            name: sub.snapshot?.name || '',
+            phone: sub.snapshot?.phone || '',
+            vehicleCount: Array.isArray(sub.snapshot?.driverVehicles)
+                ? sub.snapshot.driverVehicles.length
+                : 0
+        }
+    }));
+
+    return {
+        partner: {
+            _id: partner._id,
+            name: partner.name,
+            phone: partner.phone,
+            status: partner.status,
+            latestSubmissionId: partner.latestSubmissionId,
+            currentSubmissionNumber: partner.currentSubmissionNumber
+        },
+        timeline,
+        submissions: timeline
+    };
 }
 
 export function getDeliveryWalletsStub() {
@@ -4598,68 +5033,236 @@ function generateBonusTransactionId() {
     return `BON-${n}${r}`;
 }
 
-export async function getDeliveryPartnerBonusTransactions(query = {}) {
-    const { page = 1, limit = 1000, search } = query;
-    const filter = {};
+function buildDeliveryIdStr(partnerId) {
+    if (!partnerId) return null;
+    return `DP-${String(partnerId).slice(-8).toUpperCase()}`;
+}
 
-    // For search (name/phone/email/transactionId) we do a two-step lookup to keep it simple.
-    if (search && typeof search === 'string' && search.trim()) {
-        const term = search.trim();
-        const partnerIds = await FoodDeliveryPartner.find({
-            $or: [
-                { name: { $regex: term, $options: 'i' } },
-                { phone: { $regex: term, $options: 'i' } },
-                { email: { $regex: term, $options: 'i' } }
-            ]
-        }).select('_id').lean();
+function mapBonusTransactionRow(t, sl) {
+    const partner = t.deliveryPartnerId && typeof t.deliveryPartnerId === 'object' ? t.deliveryPartnerId : null;
+    const partnerId = partner?._id
+        ? String(partner._id)
+        : t.deliveryPartnerId
+            ? String(t.deliveryPartnerId)
+            : null;
+    const admin = t.createdByAdminId && typeof t.createdByAdminId === 'object' ? t.createdByAdminId : null;
+
+    return {
+        sl,
+        transactionId: t.transactionId,
+        deliveryId: t.deliveryIdStr || (partnerId ? buildDeliveryIdStr(partnerId) : null),
+        deliveryPartner: t.deliveryPartnerName || partner?.name || '',
+        amount: t.amount,
+        reference: t.reference || null,
+        previousBalance: t.previousBalance ?? 0,
+        updatedBalance: t.updatedBalance ?? 0,
+        createdBy: t.createdByName || admin?.name || 'Admin',
+        createdAt: t.createdAt
+    };
+}
+
+async function buildBonusTransactionResponse(
+    createdTransaction,
+    partner,
+    previousWalletBalance,
+    updatedWalletBalance,
+    meta = {}
+) {
+    const partnerIdStr = String(partner._id);
+    const deliveryId = buildDeliveryIdStr(partnerIdStr);
+    const transactionObj =
+        typeof createdTransaction.toObject === 'function'
+            ? createdTransaction.toObject()
+            : createdTransaction;
+
+    return {
+        transaction: {
+            transactionId: transactionObj.transactionId,
+            amount: transactionObj.amount,
+            reference: transactionObj.reference,
+            previousBalance: transactionObj.previousBalance,
+            updatedBalance: transactionObj.updatedBalance,
+            createdAt: transactionObj.createdAt
+        },
+        deliveryPartner: {
+            id: partnerIdStr,
+            deliveryId,
+            name: partner.name
+        },
+        previousWalletBalance,
+        updatedWalletBalance,
+        idempotentReplay: Boolean(meta.idempotentReplay)
+    };
+}
+
+function isDuplicateKeyError(error) {
+    if (!error) return false;
+    if (error.code === 11000 || error.code === 11001) return true;
+    const msg = String(error.message || error.errmsg || '');
+    if (/E11000|duplicate key/i.test(msg)) return true;
+    if (Array.isArray(error.writeErrors) && error.writeErrors.some((e) => e?.code === 11000)) {
+        return true;
+    }
+    if (error.cause) return isDuplicateKeyError(error.cause);
+    return false;
+}
+
+async function assertIdempotencyRequestHashMatch(storedHash, incomingHash, claimFields = null) {
+    let expected = storedHash;
+    if (!expected && claimFields) {
+        expected = buildBonusRequestHash({
+            deliveryPartnerId: claimFields.deliveryPartnerId,
+            amount: claimFields.amount,
+            reference: claimFields.reference
+        });
+    }
+    if (!expected || expected !== incomingHash) {
+        throw new ConflictError(
+            'Idempotency key already used with different request payload.'
+        );
+    }
+}
+
+async function loadIdempotentBonusResponse(idempotencyKey, requestHash) {
+    const claim = await DeliveryBonusIdempotency.findOne({ key: idempotencyKey }).lean();
+    if (!claim || String(claim.transactionId || '').startsWith('PENDING')) return null;
+
+    await assertIdempotencyRequestHashMatch(claim.requestHash, requestHash, claim);
+
+    const partner =
+        (await FoodDeliveryPartner.findById(claim.deliveryPartnerId).select('_id name').lean()) || {
+            _id: claim.deliveryPartnerId,
+            name: claim.deliveryPartnerName
+        };
+
+    return buildBonusTransactionResponse(
+        {
+            transactionId: claim.transactionId,
+            amount: claim.amount,
+            reference: claim.reference,
+            previousBalance: claim.previousBalance,
+            updatedBalance: claim.updatedBalance,
+            createdAt: claim.createdAt
+        },
+        partner,
+        claim.previousBalance,
+        claim.updatedBalance,
+        { idempotentReplay: true }
+    );
+}
+
+export async function getDeliveryPartnerBonusTransactions(query = {}) {
+    const page = Math.max(1, Number(query.page) || 1);
+    let limitRaw = query.limit != null ? Number(query.limit) : 20;
+    if (!Number.isFinite(limitRaw) || limitRaw < 1) limitRaw = 20;
+    if (limitRaw > 100) {
+        throw new ValidationError('limit cannot exceed 100');
+    }
+    const limitNum = Math.floor(limitRaw);
+
+    const filter = {};
+    const searchTerm =
+        query.search && typeof query.search === 'string' ? query.search.trim().slice(0, 100) : '';
+
+    if (searchTerm) {
+        const term = escapeRegex(searchTerm);
+        const regex = { $regex: term, $options: 'i' };
+
+        const [partnerIds, adminIds] = await Promise.all([
+            FoodDeliveryPartner.find({
+                $or: [{ name: regex }, { phone: regex }, { email: regex }]
+            })
+                .select('_id')
+                .lean(),
+            FoodAdmin.find({ name: regex }).select('_id').lean()
+        ]);
+
         filter.$or = [
-            { transactionId: { $regex: term, $options: 'i' } },
-            { deliveryPartnerId: { $in: partnerIds.map((p) => p._id) } }
+            { transactionId: regex },
+            { reference: regex },
+            { deliveryPartnerName: regex },
+            { deliveryIdStr: regex },
+            { createdByName: regex },
+            { deliveryPartnerId: { $in: partnerIds.map((p) => p._id) } },
+            { createdByAdminId: { $in: adminIds.map((a) => a._id) } }
         ];
     }
 
-    const skip = Math.max(0, (Number(page) || 1) - 1) * Math.max(1, Math.min(1000, Number(limit) || 100));
-    const limitNum = Math.max(1, Math.min(1000, Number(limit) || 100));
+    const skip = (page - 1) * limitNum;
 
     const [list, total] = await Promise.all([
         DeliveryBonusTransaction.find(filter)
-            .sort({ createdAt: -1 })
+            .sort({ createdAt: -1, _id: -1 })
             .skip(skip)
             .limit(limitNum)
-            .populate({ path: 'deliveryPartnerId', select: 'name phone email' })
+            .select(
+                'transactionId amount reference previousBalance updatedBalance createdAt deliveryPartnerId deliveryPartnerName deliveryIdStr createdByAdminId createdByName'
+            )
+            .populate({ path: 'deliveryPartnerId', select: 'name' })
+            .populate({ path: 'createdByAdminId', select: 'name' })
             .lean(),
         DeliveryBonusTransaction.countDocuments(filter)
     ]);
 
-    const transactions = list.map((t, index) => {
-        const partner = t.deliveryPartnerId;
-        const partnerId = partner?._id ? String(partner._id) : null;
-        return {
-            sl: skip + index + 1,
-            transactionId: t.transactionId,
-            deliveryPartnerId: partnerId,
-            deliveryId: partnerId ? `DP-${partnerId.slice(-8).toUpperCase()}` : null,
-            deliveryman: partner?.name || '',
-            amount: t.amount,
-            bonus: t.amount, // legacy compatibility
-            reference: t.reference || '',
-            createdAt: t.createdAt
-        };
-    });
+    const pages = Math.ceil(total / limitNum) || 1;
+    const transactions = list.map((t, index) => mapBonusTransactionRow(t, skip + index + 1));
 
     return {
         transactions,
         pagination: {
-            page: Number(page) || 1,
+            page,
             limit: limitNum,
             total,
-            pages: Math.ceil(total / limitNum) || 1
+            pages,
+            hasNextPage: page < pages,
+            hasPreviousPage: page > 1
         }
     };
 }
 
-export async function addDeliveryPartnerBonus(body, adminUser) {
-    const partner = await FoodDeliveryPartner.findById(body.deliveryPartnerId).lean();
+export async function addDeliveryPartnerBonus(body, adminUser, reqInfo = {}) {
+    const {
+        ipAddress = null,
+        userAgent = null,
+        requestId = null
+    } = reqInfo;
+
+    // Resolve from body OR reqInfo — HTTP controller sets both.
+    const idempotencyKey =
+        (body?.idempotencyKey && String(body.idempotencyKey).trim()) ||
+        (reqInfo?.idempotencyKey && String(reqInfo.idempotencyKey).trim()) ||
+        null;
+
+    const amount = Number(body.amount);
+    if (!Number.isInteger(amount) || amount < 1) {
+        throw new ValidationError('Invalid bonus amount. Must be a positive integer.');
+    }
+    if (!idempotencyKey || idempotencyKey.length < 8) {
+        throw new ValidationError('idempotencyKey is required');
+    }
+
+    const requestHash = buildBonusRequestHash({
+        deliveryPartnerId: body.deliveryPartnerId,
+        amount,
+        reference: body.reference || null
+    });
+
+    // autoIndex is disabled in production — create unique indexes explicitly.
+    await ensureDeliveryBonusIdempotencyIndexes();
+
+    // Fast path: completed claim + matching hash → never touch wallet again.
+    const existingReplay = await loadIdempotentBonusResponse(idempotencyKey, requestHash);
+    if (existingReplay) {
+        return existingReplay;
+    }
+
+    const performer = adminUser
+        ? await resolveActionPerformerSnapshot(adminUser)
+        : { userId: null, name: 'System', role: 'SYSTEM', roleName: 'System' };
+
+    const partner = await FoodDeliveryPartner.findById(body.deliveryPartnerId)
+        .select('_id name status')
+        .lean();
     if (!partner) {
         throw new ValidationError('Delivery partner not found');
     }
@@ -4667,33 +5270,233 @@ export async function addDeliveryPartnerBonus(body, adminUser) {
         throw new ValidationError('Delivery partner must be approved');
     }
 
-    let transactionId = generateBonusTransactionId();
-    let exists = await DeliveryBonusTransaction.findOne({ transactionId }).lean();
-    while (exists) {
-        transactionId = generateBonusTransactionId();
-        exists = await DeliveryBonusTransaction.findOne({ transactionId }).lean();
-    }
+    const deliveryIdStr = buildDeliveryIdStr(partner._id);
+    const adminRole = performer.roleName || performer.role || 'Admin';
+    const adminName = performer.name || 'Admin';
 
-    const created = await DeliveryBonusTransaction.create({
-        deliveryPartnerId: body.deliveryPartnerId,
-        transactionId,
-        amount: body.amount,
-        reference: body.reference || '',
-        createdByAdminId: adminUser?._id
-    });
+    const session = await mongoose.startSession();
+    session.startTransaction();
 
-    const bonusAmount = Math.max(0, Number(body.amount) || 0);
-    if (bonusAmount > 0) {
-        await FoodDeliveryWallet.findOneAndUpdate(
+    let previousWalletBalance = 0;
+    let updatedWalletBalance = 0;
+    let createdTransaction = null;
+    let transactionId;
+
+    try {
+        // STEP 1 — Claim unique idempotency key BEFORE any wallet mutation.
+        // Concurrent duplicates fail here on unique index, not after credit.
+        try {
+            await DeliveryBonusIdempotency.create(
+                [
+                    {
+                        key: idempotencyKey,
+                        requestHash,
+                        status: 'completed',
+                        transactionId: `PENDING:${idempotencyKey}`.slice(0, 120),
+                        deliveryPartnerId: body.deliveryPartnerId,
+                        deliveryPartnerName: partner.name || '',
+                        amount,
+                        reference: body.reference || null,
+                        previousBalance: 0,
+                        updatedBalance: 0,
+                        requestId: requestId || null
+                    }
+                ],
+                { session }
+            );
+        } catch (claimErr) {
+            if (isDuplicateKeyError(claimErr)) {
+                await session.abortTransaction();
+                // Winner may still be committing — poll briefly for completed snapshot.
+                for (let attempt = 0; attempt < 12; attempt += 1) {
+                    // eslint-disable-next-line no-await-in-loop
+                    const replay = await loadIdempotentBonusResponse(idempotencyKey, requestHash);
+                    if (replay) return replay;
+                    // eslint-disable-next-line no-await-in-loop
+                    const existingTxn = await DeliveryBonusTransaction.findOne({ idempotencyKey }).lean();
+                    if (existingTxn) {
+                        await assertIdempotencyRequestHashMatch(
+                            null,
+                            requestHash,
+                            {
+                                deliveryPartnerId: existingTxn.deliveryPartnerId,
+                                amount: existingTxn.amount,
+                                reference: existingTxn.reference
+                            }
+                        );
+                        return buildBonusTransactionResponse(
+                            existingTxn,
+                            partner,
+                            existingTxn.previousBalance,
+                            existingTxn.updatedBalance,
+                            { idempotentReplay: true }
+                        );
+                    }
+                    // eslint-disable-next-line no-await-in-loop
+                    await new Promise((r) => setTimeout(r, 40 * (attempt + 1)));
+                }
+                throw new ValidationError('Duplicate bonus request (idempotency key already used)');
+            }
+            throw claimErr;
+        }
+
+        let attempts = 0;
+        do {
+            transactionId = generateBonusTransactionId();
+            attempts += 1;
+            // eslint-disable-next-line no-await-in-loop
+            const clash = await DeliveryBonusTransaction.findOne({ transactionId })
+                .session(session)
+                .select('_id')
+                .lean();
+            if (!clash) break;
+            if (attempts >= 5) {
+                throw new Error('Failed to allocate unique bonus transaction id');
+            }
+        } while (true);
+
+        // STEP 2 — Credit wallet only after unique claim succeeded.
+        const updatedWallet = await FoodDeliveryWallet.findOneAndUpdate(
             { deliveryPartnerId: body.deliveryPartnerId },
             {
                 $inc: {
-                    balance: bonusAmount,
-                    totalBonus: bonusAmount
+                    balance: amount,
+                    totalBonus: amount
+                },
+                $setOnInsert: {
+                    deliveryPartnerId: body.deliveryPartnerId,
+                    totalEarnings: 0,
+                    totalSettled: 0,
+                    totalDeliveries: 0,
+                    cashInHand: 0,
+                    lockedAmount: 0,
+                    subscriptionBalance: 0
                 }
             },
-            { upsert: true }
+            { new: true, upsert: true, session }
         );
+
+        updatedWalletBalance = Number(updatedWallet.balance);
+        previousWalletBalance = updatedWalletBalance - amount;
+
+        if (
+            !Number.isFinite(updatedWalletBalance) ||
+            !Number.isFinite(previousWalletBalance) ||
+            previousWalletBalance < 0 ||
+            previousWalletBalance + amount !== updatedWalletBalance
+        ) {
+            throw new Error('Wallet balance integrity check failed; transaction rolled back');
+        }
+
+        // STEP 3 — Persist bonus ledger + audit.
+        createdTransaction = await DeliveryBonusTransaction.create(
+            [
+                {
+                    deliveryPartnerId: body.deliveryPartnerId,
+                    deliveryPartnerName: partner.name || '',
+                    deliveryIdStr,
+                    transactionId,
+                    amount,
+                    reference: body.reference || null,
+                    previousBalance: previousWalletBalance,
+                    updatedBalance: updatedWalletBalance,
+                    createdByAdminId: performer.userId,
+                    createdByName: adminName,
+                    adminRole,
+                    idempotencyKey,
+                    requestId: requestId || null,
+                    ipAddress,
+                    userAgent
+                }
+            ],
+            { session }
+        );
+        createdTransaction = createdTransaction[0];
+
+        if (
+            createdTransaction.previousBalance + createdTransaction.amount !==
+                createdTransaction.updatedBalance ||
+            createdTransaction.updatedBalance !== updatedWalletBalance
+        ) {
+            throw new Error('Bonus ledger mismatch; transaction rolled back');
+        }
+
+        await DeliveryBonusAuditLog.create(
+            [
+                {
+                    adminId: performer.userId,
+                    adminName,
+                    adminRole,
+                    deliveryPartnerId: partner._id,
+                    deliveryPartnerName: partner.name,
+                    deliveryPartnerIdStr: deliveryIdStr,
+                    bonusAmount: amount,
+                    reference: body.reference || null,
+                    previousBalance: previousWalletBalance,
+                    updatedBalance: updatedWalletBalance,
+                    transactionId,
+                    requestId: requestId || null,
+                    idempotencyKey,
+                    ipAddress,
+                    userAgent
+                }
+            ],
+            { session }
+        );
+
+        // STEP 4 — Finalize idempotency snapshot for replays.
+        await DeliveryBonusIdempotency.updateOne(
+            { key: idempotencyKey },
+            {
+                $set: {
+                    status: 'completed',
+                    requestHash,
+                    transactionId,
+                    previousBalance: previousWalletBalance,
+                    updatedBalance: updatedWalletBalance,
+                    amount,
+                    reference: body.reference || null,
+                    deliveryPartnerName: partner.name || '',
+                    requestId: requestId || null
+                }
+            },
+            { session }
+        );
+
+        await session.commitTransaction();
+    } catch (error) {
+        try {
+            await session.abortTransaction();
+        } catch {
+            // already aborted
+        }
+
+        if (isDuplicateKeyError(error)) {
+            const replay = await loadIdempotentBonusResponse(idempotencyKey, requestHash);
+            if (replay) return replay;
+            const existingTxn = await DeliveryBonusTransaction.findOne({ idempotencyKey }).lean();
+            if (existingTxn) {
+                await assertIdempotencyRequestHashMatch(
+                    null,
+                    requestHash,
+                    {
+                        deliveryPartnerId: existingTxn.deliveryPartnerId,
+                        amount: existingTxn.amount,
+                        reference: existingTxn.reference
+                    }
+                );
+                return buildBonusTransactionResponse(
+                    existingTxn,
+                    partner,
+                    existingTxn.previousBalance,
+                    existingTxn.updatedBalance,
+                    { idempotentReplay: true }
+                );
+            }
+        }
+        throw error;
+    } finally {
+        session.endSession();
     }
 
     try {
@@ -4701,13 +5504,13 @@ export async function addDeliveryPartnerBonus(body, adminUser) {
         await notifyOwnerSafely(
             { ownerType: 'DELIVERY_PARTNER', ownerId: body.deliveryPartnerId },
             {
-                title: 'Bonus Credited! 🎉',
-                body: `You have received a bonus of \u20B9${body.amount}. ${body.reference || 'Great job!'}`,
+                title: 'Bonus Credited',
+                body: `You have received a bonus of \u20B9${amount}. ${body.reference || 'Great job!'}`,
                 image: 'https://i.ibb.co/3m2Yh7r/Appzeto-Brand-Image.png',
                 data: {
                     type: 'bonus_credited',
-                    amount: String(body.amount),
-                    transactionId: created.transactionId
+                    amount: String(amount),
+                    transactionId: createdTransaction.transactionId
                 }
             }
         );
@@ -4715,7 +5518,13 @@ export async function addDeliveryPartnerBonus(body, adminUser) {
         console.error('Failed to send bonus notification:', e);
     }
 
-    return created.toObject();
+    return buildBonusTransactionResponse(
+        createdTransaction,
+        partner,
+        previousWalletBalance,
+        updatedWalletBalance,
+        { idempotentReplay: false }
+    );
 }
 
 // ----- Delivery Earnings (admin) -----
@@ -5202,7 +6011,12 @@ export async function getDeliveryPartnerById(id) {
             pan: (partner.panPhoto || partner.panNumber)
                 ? { number: partner.panNumber || null, document: partner.panPhoto || null }
                 : null,
-            drivingLicense: partner.drivingLicensePhoto ? { document: partner.drivingLicensePhoto } : null,
+            drivingLicense: (partner.drivingLicensePhoto || partner.drivingLicenseNumber)
+                ? {
+                    number: partner.drivingLicenseNumber || null,
+                    document: partner.drivingLicensePhoto || null
+                }
+                : null,
             bankDetails:
                 partner.bankAccountHolderName || partner.bankAccountNumber || partner.bankIfscCode || partner.bankName
                     ? {
@@ -5299,15 +6113,44 @@ export async function getDeliverymanReviews(query = {}) {
 export async function approveDeliveryPartner(id, performer = null) {
     const partner = await FoodDeliveryPartner.findById(id);
     if (!partner) return null;
+
+    if (partner.status === 'approved') {
+        throw new ConflictError('Delivery partner is already approved');
+    }
+    if (partner.status !== 'pending') {
+        throw new ValidationError('Only pending onboarding applications can be approved');
+    }
+
+    const { ensureLegacySubmission } = await import(
+        '../../delivery/services/deliveryPartnerSubmission.service.js'
+    );
+    const { FoodDeliveryPartnerSubmission } = await import(
+        '../../delivery/models/deliveryPartnerSubmission.model.js'
+    );
+    await ensureLegacySubmission(partner);
+
     partner.status = 'approved';
     partner.isActive = true;
     partner.approvedAt = new Date();
     partner.rejectedAt = undefined;
     partner.rejectionReason = undefined;
+    partner.rejectedBy = undefined;
     partner.approvedBy = performer;
     const { activateDriverVehiclesOnPartnerApproval } = await import('../../../porter/orders/services/porter-driver-vehicle.service.js');
     await activateDriverVehiclesOnPartnerApproval(partner);
     await partner.save();
+
+    if (partner.latestSubmissionId) {
+        await FoodDeliveryPartnerSubmission.findByIdAndUpdate(partner.latestSubmissionId, {
+            $set: {
+                status: 'approved',
+                reviewedAt: new Date(),
+                approvedBy: performer,
+                rejectionReason: null,
+                rejectedBy: null
+            }
+        });
+    }
 
     try {
         const { notifyOwnerSafely } = await import('../../../../core/notifications/firebase.service.js');
@@ -5385,7 +6228,8 @@ export async function approveDeliveryPartner(id, performer = null) {
                             {
                                 deliveryPartnerId: String(log.referrerId),
                                 amount: referrerReward,
-                                reference: referrerBonusRef
+                                reference: referrerBonusRef,
+                                idempotencyKey: referrerBonusRef
                             },
                             null
                         )
@@ -5395,7 +6239,8 @@ export async function approveDeliveryPartner(id, performer = null) {
                             {
                                 deliveryPartnerId: String(partner._id),
                                 amount: refereeReward,
-                                reference: refereeBonusRef
+                                reference: refereeBonusRef,
+                                idempotencyKey: refereeBonusRef
                             },
                             null
                         )
@@ -5424,20 +6269,67 @@ export async function approveDeliveryPartner(id, performer = null) {
 
 export async function rejectDeliveryPartner(id, reason, performer = null) {
     if (!id || !mongoose.Types.ObjectId.isValid(id)) return null;
-    const updated = await FoodDeliveryPartner.findByIdAndUpdate(
-        id,
-        {
+
+    const rejectionReason = typeof reason === 'string' ? reason.trim() : '';
+    if (!rejectionReason) {
+        throw new ValidationError('Rejection reason is required');
+    }
+
+    const partner = await FoodDeliveryPartner.findById(id);
+    if (!partner) return null;
+
+    if (partner.status === 'rejected') {
+        throw new ConflictError('Delivery partner application is already rejected');
+    }
+    if (partner.status === 'approved') {
+        throw new ConflictError('Approved delivery partners cannot be rejected via onboarding reject. Deactivate instead.');
+    }
+    if (partner.status !== 'pending') {
+        throw new ValidationError('Only pending onboarding applications can be rejected');
+    }
+
+    const { ensureLegacySubmission } = await import(
+        '../../delivery/services/deliveryPartnerSubmission.service.js'
+    );
+    const { FoodDeliveryPartnerSubmission } = await import(
+        '../../delivery/models/deliveryPartnerSubmission.model.js'
+    );
+    const { FoodRefreshToken } = await import('../../../../core/refreshTokens/refreshToken.model.js');
+
+    await ensureLegacySubmission(partner);
+
+    const reviewedAt = new Date();
+    partner.status = 'rejected';
+    partner.isActive = false;
+    partner.rejectedAt = reviewedAt;
+    partner.rejectionReason = rejectionReason;
+    partner.approvedAt = undefined;
+    partner.approvedBy = undefined;
+    partner.rejectedBy = performer;
+    partner.availabilityStatus = 'offline';
+    await partner.save();
+
+    if (partner.latestSubmissionId) {
+        await FoodDeliveryPartnerSubmission.findByIdAndUpdate(partner.latestSubmissionId, {
             $set: {
                 status: 'rejected',
-                isActive: false,
-                rejectedAt: new Date(),
-                rejectionReason: typeof reason === 'string' ? reason.trim() : undefined,
-                approvedAt: null,
-                rejectedBy: performer
+                reviewedAt,
+                rejectionReason,
+                rejectedBy: performer,
+                approvedBy: null
             }
-        },
-        { new: true }
-    ).lean();
+        });
+    }
+
+    await Promise.all([
+        FoodRefreshToken.deleteMany({ userId: partner._id }),
+        FoodDeliveryPartner.updateOne(
+            { _id: partner._id },
+            { $set: { fcmTokens: partner.fcmTokens || [], fcmTokenMobile: partner.fcmTokenMobile || [] } }
+        )
+    ]);
+
+    const updated = partner.toObject();
 
     if (updated) {
         try {
@@ -5446,12 +6338,12 @@ export async function rejectDeliveryPartner(id, reason, performer = null) {
                 { ownerType: 'DELIVERY_PARTNER', ownerId: updated._id },
                 {
                     title: 'Onboarding Update 📋',
-                    body: `Your application to join as a delivery partner was rejected. Reason: ${reason || 'Incomplete documents'}.`,
+                    body: `Your application to join as a delivery partner was rejected. Reason: ${rejectionReason}.`,
                     image: 'https://i.ibb.co/3m2Yh7r/Appzeto-Brand-Image.png',
                     data: {
                         type: 'onboarding_rejected',
                         partnerId: String(updated._id),
-                        reason: reason || ''
+                        reason: rejectionReason
                     }
                 }
             );
@@ -5892,6 +6784,7 @@ export async function getSidebarBadges() {
             pendingRestaurantWithdrawals,
             pendingDeliveryWithdrawals,
             openUserSupportTickets,
+            openRestaurantSupportTickets,
             openDeliverySupportTickets,
             pendingEarningAddons,
             pendingSafetyReports,
@@ -5906,7 +6799,8 @@ export async function getSidebarBadges() {
             FoodOrder.countDocuments({ paymentMethod: 'offline_payment', orderStatus: { $in: ['created', 'placed'] } }),
             FoodRestaurantWithdrawal.countDocuments({ status: 'pending' }),
             FoodDeliveryWithdrawal.countDocuments({ status: 'pending' }),
-            FoodSupportTicket.countDocuments({ status: 'open', userId: { $exists: true }, restaurantId: { $exists: false } }),
+            FoodSupportTicket.countDocuments({ status: 'open' }),
+            FoodRestaurantSupportTicket.countDocuments({ status: 'open' }),
             DeliverySupportTicket.countDocuments({ status: 'open' }),
             FoodEarningAddonHistory.countDocuments({ status: 'pending' }),
             FoodSafetyEmergencyReport.countDocuments({ status: 'pending' }),
@@ -5923,7 +6817,7 @@ export async function getSidebarBadges() {
             offlinePayments: pendingOfflinePayments,
             restaurantWithdrawals: pendingRestaurantWithdrawals,
             deliveryWithdrawals: pendingDeliveryWithdrawals,
-            userSupportTickets: openUserSupportTickets,
+            userSupportTickets: openUserSupportTickets + openRestaurantSupportTickets,
             deliverySupportTickets: openDeliverySupportTickets,
             earningAddons: pendingEarningAddons,
             safetyReports: pendingSafetyReports,

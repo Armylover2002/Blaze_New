@@ -104,7 +104,7 @@ const formatZoneLabel = (zoneIds = [], zoneOptions = []) => {
 const formatVehicleLabel = (vehicleIds = [], vehicleOptions = []) => {
   if (!vehicleIds.length) return "All Vehicles";
   return vehicleIds
-    .map((id) => vehicleOptions.find((v) => v.id === id)?.name || id)
+    .map((id) => vehicleOptions.find((v) => v.id === id)?.category || id)
     .join(", ");
 };
 
@@ -155,7 +155,6 @@ const Coupons = () => {
         setZoneOptions((zones || []).map((z) => ({ id: z.id, name: z.name })));
         setVehicleOptions((vehicles || []).map((v) => ({
           id: v.id,
-          name: v.name,
           category: v.category,
         })));
       })
@@ -233,7 +232,7 @@ const Coupons = () => {
     }
     if (!next.vehicleIds.length && row.vehicles?.length) {
       next.vehicleIds = row.vehicles
-        .map((vehicle) => vehicle.id || vehicleOptions.find((option) => option.name === vehicle.name)?.id)
+        .map((vehicle) => vehicle.id || vehicleOptions.find((option) => option.category === vehicle.category)?.id)
         .filter(Boolean);
     }
     return next;
@@ -553,7 +552,7 @@ const Coupons = () => {
                               : "border-gray-200 bg-white text-gray-600 hover:border-gray-300")
                           }
                         >
-                          {vehicle.name}
+                          {vehicle.category}
                         </button>
                       );
                     })}
@@ -605,7 +604,7 @@ const Coupons = () => {
                 <div><p className="text-xs text-muted-foreground">Discount</p><p className="font-semibold">{detail.discountType === "percentage" ? `${detail.discountValue}%` : formatCurrency(detail.discountValue)}</p></div>
                 <div><p className="text-xs text-muted-foreground">Used / Limit</p><p className="font-semibold">{detail.usedCount} / {detail.maxUses}</p></div>
                 <div><p className="text-xs text-muted-foreground">Zones</p><p className="font-semibold">{detail.zones?.length ? detail.zones.map((z) => z.name).join(", ") : "All Zones"}</p></div>
-                <div><p className="text-xs text-muted-foreground">Vehicles</p><p className="font-semibold">{detail.vehicles?.length ? detail.vehicles.map((v) => v.name).join(", ") : "All Vehicles"}</p></div>
+                <div><p className="text-xs text-muted-foreground">Vehicles</p><p className="font-semibold">{detail.vehicles?.length ? detail.vehicles.map((v) => v.category).join(", ") : "All Vehicles"}</p></div>
                 <div><p className="text-xs text-muted-foreground">Campaign Revenue</p><p className="font-semibold">{formatCurrency(detail.campaignRevenue)}</p></div>
                 <div><p className="text-xs text-muted-foreground">Total Discount Given</p><p className="font-semibold">{formatCurrency(detail.totalDiscountGiven)}</p></div>
               </div>
