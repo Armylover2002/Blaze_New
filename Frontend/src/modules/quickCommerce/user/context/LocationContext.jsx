@@ -15,6 +15,19 @@ const LocationContext = createContext(undefined);
 // who previously only had the default/static location cached.
 const STORAGE_KEY = "location_v2";
 
+const EMPTY_LOCATION = {
+  name: "Select delivery location",
+  time: "",
+  city: "",
+  state: "",
+  pincode: "",
+  latitude: null,
+  longitude: null,
+};
+
+const hasValidCoordinates = (location) =>
+  Number.isFinite(location?.latitude) && Number.isFinite(location?.longitude);
+
 const normalizeAddressLabel = (label = "") => {
   const normalized = String(label || "").trim().toLowerCase();
   if (normalized === "home") return "Home";
@@ -78,16 +91,7 @@ const mapSharedAddress = (addr = {}, idx = 0, profile = {}) => {
 
 export const LocationProvider = ({ children }) => {
   const { user, isAuthenticated } = useAuth();
-  // Default location (used until we can resolve a better one)
-  const [currentLocation, setCurrentLocation] = useState({
-    name: "214, Rajshri Palace Colony, Pipliyahana, Indore, Madhya Pradesh 452018, India",
-    time: "12-15 mins",
-    city: "Indore",
-    state: "Madhya Pradesh",
-    pincode: "452018",
-    latitude: 22.711140989838025,
-    longitude: 75.9001552518043,
-  });
+  const [currentLocation, setCurrentLocation] = useState(EMPTY_LOCATION);
 
   // Address list for drawer UI – will be hydrated from profile API.
   const [savedAddresses, setSavedAddresses] = useState([]);
@@ -114,17 +118,20 @@ export const LocationProvider = ({ children }) => {
 
     if (persist && typeof window !== "undefined") {
       try {
-        const payload = {
-          address: newLoc.name,
-          city: newLoc.city,
-          state: newLoc.state,
-          pincode: newLoc.pincode,
-          latitude: newLoc.latitude,
-          longitude: newLoc.longitude,
-          // Internal app properties
-          time: newLoc.time,
-        };
-        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+        if (hasValidCoordinates(newLoc)) {
+          const payload = {
+            address: newLoc.name,
+            city: newLoc.city,
+            state: newLoc.state,
+            pincode: newLoc.pincode,
+            latitude: newLoc.latitude,
+            longitude: newLoc.longitude,
+            time: newLoc.time,
+          };
+          window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+        } else {
+          window.localStorage.removeItem(STORAGE_KEY);
+        }
       } catch {
         // ignore storage errors
       }
@@ -169,9 +176,9 @@ export const LocationProvider = ({ children }) => {
           const fallbackFromCoords = (latitude, longitude) => ({
             name: `Lat ${Number(latitude).toFixed(5)}, Lng ${Number(longitude).toFixed(5)}`,
             time: "12-15 mins",
-            city: currentLocation?.city || "Indore",
-            state: currentLocation?.state || "Madhya Pradesh",
-            pincode: currentLocation?.pincode || "452018",
+            city: "",
+            state: "",
+            pincode: "",
             latitude,
             longitude,
           });
@@ -311,26 +318,26 @@ export const LocationProvider = ({ children }) => {
       if (raw) {
         const parsed = JSON.parse(raw);
         const addressName = parsed.address || parsed.name;
-        if (parsed && addressName) {
+        if (
+          parsed &&
+          addressName &&
+          hasValidCoordinates(parsed)
+        ) {
           updateLocation(
             {
               name: addressName,
               time: parsed.time || "12-15 mins",
-              city: parsed.city,
-              state: parsed.state,
-              pincode: parsed.pincode,
+              city: parsed.city || "",
+              state: parsed.state || "",
+              pincode: parsed.pincode || "",
               latitude: parsed.latitude,
               longitude: parsed.longitude,
             },
             { persist: false, updateSavedHome: false },
           );
+        } else {
+          window.localStorage.removeItem(STORAGE_KEY);
         }
-      } else {
-        // If no location is stored, persist the default one immediately
-        updateLocation(currentLocation, {
-          persist: true,
-          updateSavedHome: false,
-        });
       }
     } catch {
       // ignore parse errors
@@ -390,14 +397,14 @@ export const LocationProvider = ({ children }) => {
     const applyExternalLocationUpdate = (event) => {
       try {
         const nextLocation = event?.detail?.location || JSON.parse(localStorage.getItem("userLocation") || "null");
-        if (nextLocation && typeof nextLocation === "object") {
+        if (nextLocation && typeof nextLocation === "object" && hasValidCoordinates(nextLocation)) {
           updateLocation(
             {
               name: nextLocation.formattedAddress || nextLocation.address || `Lat ${Number(nextLocation.latitude).toFixed(5)}, Lng ${Number(nextLocation.longitude).toFixed(5)}`,
               time: "12-15 mins",
-              city: nextLocation.city || "Indore",
-              state: nextLocation.state || "Madhya Pradesh",
-              pincode: nextLocation.pincode || "452018",
+              city: nextLocation.city || "",
+              state: nextLocation.state || "",
+              pincode: nextLocation.pincode || "",
               latitude: nextLocation.latitude,
               longitude: nextLocation.longitude,
             },
@@ -419,6 +426,7 @@ export const LocationProvider = ({ children }) => {
     <LocationContext.Provider
       value={{
         currentLocation,
+        hasValidLocation: hasValidCoordinates(currentLocation),
         savedAddresses,
         updateLocation,
         addAddress,
