@@ -192,11 +192,6 @@ router.patch('/delivery/wallets', checkPermission('food::deliveryman_management:
 router.get('/delivery/bonus-transactions', checkPermission('food::deliveryman_management::deliveryman::bonus', 'view'), adminController.getDeliveryPartnerBonusTransactions);
 router.get('/delivery/earnings', checkPermission('food::deliveryman_management::deliveryman::earnings', 'view'), adminController.getDeliveryEarnings);
 router.post('/delivery/bonus', checkPermission('food::deliveryman_management::deliveryman::bonus', 'create'), adminController.addDeliveryPartnerBonus);
-router.get('/delivery/commission-rules', checkPermission('food::deliveryman_management::commission', 'view'), adminController.getDeliveryCommissionRules);
-router.post('/delivery/commission-rules', checkPermission('food::deliveryman_management::commission', 'create'), adminController.createDeliveryCommissionRule);
-router.patch('/delivery/commission-rules/:id', checkPermission('food::deliveryman_management::commission', 'edit'), adminController.updateDeliveryCommissionRule);
-router.delete('/delivery/commission-rules/:id', checkPermission('food::deliveryman_management::commission', 'delete'), adminController.deleteDeliveryCommissionRule);
-router.patch('/delivery/commission-rules/:id/status', checkPermission('food::deliveryman_management::commission', 'edit'), adminController.toggleDeliveryCommissionRuleStatus);
 router.get('/delivery/reviews', checkPermission('food::deliveryman_management::deliveryman::reviews', 'view'), adminController.getDeliverymanReviews);
 router.get('/contact-messages', checkPermission('food::help_support::user_feedback', 'view'), adminController.getContactMessages);
 router.get('/delivery/earning-addons', checkPermission('food::deliveryman_management::deliveryman::earning_addon', 'view'), adminController.getEarningAddons);

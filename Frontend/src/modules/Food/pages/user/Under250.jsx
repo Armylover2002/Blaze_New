@@ -15,6 +15,7 @@ import Under250DesktopHero from "@food/components/user/under-250/Under250Desktop
 import offerImage from "@food/assets/offerimage.png"
 import AddToCartAnimation from "@food/components/user/AddToCartAnimation"
 import OptimizedImage from "@food/components/OptimizedImage"
+import ItemSlotAvailabilityNote from "@food/components/user/ItemSlotAvailabilityNote"
 import api from "@food/api"
 import { restaurantAPI, adminAPI } from "@food/api"
 import { isModuleAuthenticated } from "@food/utils/auth"
@@ -1117,6 +1118,7 @@ export default function Under250() {
                                   1 x {item.name}
                                 </span>
                               </div>
+                              <ItemSlotAvailabilityNote item={item} className="mb-1.5 md:mb-2" />
                               <div className="flex items-center justify-between">
                                 <div>
                                   <p className="text-base md:text-lg lg:text-xl xl:text-2xl font-bold text-gray-900 dark:text-white">

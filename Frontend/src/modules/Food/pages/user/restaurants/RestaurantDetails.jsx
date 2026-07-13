@@ -1256,6 +1256,17 @@ function RestaurantDetailsContent() {
     }
   }
 
+  const handleDishIncrease = (item, quantity, event) => {
+    if (shouldShowGrayscale) return
+    if (hasFoodVariants(item) && quantity === 0) {
+      setSelectedItem(item)
+      setSelectedItemImageIndex(0)
+      setShowItemDetail(true)
+      return
+    }
+    updateItemQuantity(item, quantity > 0 ? quantity + 1 : 1, event)
+  }
+
   const isRecommendedSection = (section) => {
     const sectionName = section?.name || section?.title || ""
     if (typeof sectionName !== "string") return false
@@ -2022,7 +2033,7 @@ function RestaurantDetailsContent() {
         }}
         onIncrease={(e) => {
           e.stopPropagation()
-          if (!shouldShowGrayscale) updateItemQuantity(item, quantity > 0 ? quantity + 1 : 1, e)
+          handleDishIncrease(item, quantity, e)
         }}
       />
     )

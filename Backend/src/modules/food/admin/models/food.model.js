@@ -25,6 +25,7 @@ const foodSchema = new mongoose.Schema(
         images: { type: [String], default: [] },
         foodType: { type: String, enum: ['Veg', 'Non-Veg'], default: 'Non-Veg' },
         isAvailable: { type: Boolean, default: true, index: true },
+        itemSlotTimingId: { type: mongoose.Schema.Types.ObjectId, ref: 'ItemSlotTiming', default: null, index: true },
         preparationTime: { type: String, trim: true, default: '' },
         approvalStatus: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'approved', index: true },
         rejectionReason: { type: String, trim: true, default: '' },

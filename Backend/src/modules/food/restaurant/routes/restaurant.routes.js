@@ -51,6 +51,13 @@ import {
     updateRestaurantFoodController
 } from '../controllers/restaurantFood.controller.js';
 import {
+    createItemSlotTimingController,
+    deleteItemSlotTimingController,
+    getItemSlotTimingByIdController,
+    listItemSlotTimingsController,
+    updateItemSlotTimingController
+} from '../controllers/itemSlotTiming.controller.js';
+import {
     listAddonsController,
     createAddonController,
     updateAddonController,
@@ -208,6 +215,25 @@ router.get('/categories/:id/status', authMiddleware, requireRestaurant, getCateg
 router.post('/categories', authMiddleware, requireRestaurant, invalidateCategoryCacheMiddleware, createCategoryController);
 router.patch('/categories/:id', authMiddleware, requireRestaurant, invalidateCategoryCacheMiddleware, updateCategoryController);
 router.delete('/categories/:id', authMiddleware, requireRestaurant, invalidateCategoryCacheMiddleware, deleteCategoryController);
+
+// Item slot timings (restaurant dashboard)
+router.get('/item-slot-timings', authMiddleware, requireRestaurant, listItemSlotTimingsController);
+router.get('/item-slot-timings/:id', authMiddleware, requireRestaurant, getItemSlotTimingByIdController);
+router.post('/item-slot-timings', authMiddleware, requireRestaurant, async (req, res, next) => {
+    await invalidateCache('restaurant_menu:*');
+    await invalidateCache('restaurant_menus_batch:*');
+    next();
+}, createItemSlotTimingController);
+router.patch('/item-slot-timings/:id', authMiddleware, requireRestaurant, async (req, res, next) => {
+    await invalidateCache('restaurant_menu:*');
+    await invalidateCache('restaurant_menus_batch:*');
+    next();
+}, updateItemSlotTimingController);
+router.delete('/item-slot-timings/:id', authMiddleware, requireRestaurant, async (req, res, next) => {
+    await invalidateCache('restaurant_menu:*');
+    await invalidateCache('restaurant_menus_batch:*');
+    next();
+}, deleteItemSlotTimingController);
 
 // Menu (restaurant dashboard) - only fields needed by UI
 router.get('/menu', authMiddleware, requireRestaurant, getMenuController);

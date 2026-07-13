@@ -185,7 +185,6 @@ export const adminSidebarMenu = [
       { type: "link", label: "Cash Pay Requests", permissionKey: "settlement", path: "/admin/food/cash-pay-requests", icon: "ClipboardCheck" },
       { type: "link", label: "Delivery Withdrawal", permissionKey: "withdrawal", path: "/admin/food/delivery-withdrawal", icon: "Wallet" },
       { type: "link", label: "Delivery boy Wallet", permissionKey: "wallet", path: "/admin/food/delivery-boy-wallet", icon: "PiggyBank" },
-      { type: "link", label: "Delivery Boy Commission", permissionKey: "commission", path: "/admin/food/delivery-boy-commission", icon: "IndianRupee " },
       { type: "link", label: "Delivery Emergency Help", permissionKey: "emergency_help", path: "/admin/food/delivery-emergency-help", icon: "Phone" },
       { type: "link", label: "Delivery Support Tickets", permissionKey: "support_tickets", path: "/admin/food/delivery-support-tickets", icon: "MessageSquare" },
       {

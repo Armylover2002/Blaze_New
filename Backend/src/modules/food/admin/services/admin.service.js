@@ -2344,12 +2344,12 @@ export async function toggleDeliveryCommissionRuleStatus(id, status) {
 
 // ----- Fee Settings (admin) -----
 export async function getFeeSettings() {
-    const doc = await FoodFeeSettings.findOne({ isActive: true }).sort({ createdAt: -1 }).lean();
+    const doc = await FoodFeeSettings.findOne({ isActive: { $ne: false } }).sort({ createdAt: -1 }).lean();
     return { feeSettings: doc || null };
 }
 
 export async function upsertFeeSettings(body) {
-    const existing = await FoodFeeSettings.findOne({ isActive: true }).sort({ createdAt: -1 });
+    const existing = await FoodFeeSettings.findOne({ isActive: { $ne: false } }).sort({ createdAt: -1 });
     if (existing) {
         const $set = {};
         const $unset = {};

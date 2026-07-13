@@ -21,14 +21,16 @@ import {
 import {
     calculateDistanceKm,
     normalizeDeliveryAddress as normalizeDeliveryAddressGeo,
+    normalizeRestaurantLocation,
 } from '../../shared/geo.utils.js';
 import {
     hasDeliveryFeeRanges,
     resolveUserDeliveryFee,
     calculateRiderEarning,
+    resolveRestaurantToUserDistanceKm,
+    resolveRestaurantToUserRoadDistanceKm,
 } from '../../shared/delivery-fee.util.js';
 import { FoodItem } from '../../admin/models/food.model.js';
-import { FoodDeliveryCommissionRule } from '../../admin/models/deliveryCommissionRule.model.js';
 import {
   sendNotificationToOwner,
   sendNotificationToOwners,
@@ -675,9 +677,9 @@ function normalizeFoodFeeSettings(feeDoc = null) {
   return feeSettings;
 }
 
-function applyRangeBasedFoodDeliveryPricing({ feeSettings, subtotal, address, restaurant }) {
-  const normalizedAddress = normalizeDeliveryAddressGeo(address);
-  const distanceKm = calculateDistanceKm(restaurant, normalizedAddress) ?? 0;
+async function applyRangeBasedFoodDeliveryPricing({ feeSettings, subtotal, address, restaurant }) {
+  const distanceKm =
+    (await resolveRestaurantToUserRoadDistanceKm(restaurant, address)) ?? 0;
   const deliveryFeeResult = resolveUserDeliveryFee(feeSettings, { subtotal, distanceKm });
   const deliveryFee = roundCurrency(deliveryFeeResult.deliveryFee);
 
@@ -982,7 +984,7 @@ async function evaluateCombinedPickupEligibility(pickupPoints = [], deliveryAddr
   }
 
   // Fetch dynamic settings
-  const feeDoc = await FoodFeeSettings.findOne({ isActive: true }).sort({ createdAt: -1 }).lean();
+  const feeDoc = await FoodFeeSettings.findOne({ isActive: { $ne: false } }).sort({ createdAt: -1 }).lean();
   const distLimit = feeDoc?.mixedOrderDistanceLimit ?? 2;
   const angleLimit = feeDoc?.mixedOrderAngleLimit ?? 35;
 
@@ -2226,7 +2228,7 @@ export async function calculateOrder(userId, dto) {
   );
 
   // Fee settings (admin-configured). Use safe fallbacks for dev if not configured.
-  const feeDoc = await FoodFeeSettings.findOne({ isActive: true })
+  const feeDoc = await FoodFeeSettings.findOne({ isActive: { $ne: false } })
     .sort({ createdAt: -1 })
     .lean();
   const feeSettings = normalizeFoodFeeSettings(feeDoc);
@@ -2251,9 +2253,26 @@ export async function calculateOrder(userId, dto) {
         };
 
   if (orderType === "quick") {
+    const quickSourceId = items.find((item) => item.type === "quick")?.sourceId;
+    const quickSource = quickSourceId ? sourceMap.get(String(quickSourceId)) : null;
     const packagingFee = 0;
     const platformFee = feeSettings.platformFee;
-    const deliveryFee = feeSettings.deliveryFee;
+    let deliveryFee = feeSettings.deliveryFee;
+    let deliveryDistanceKm = null;
+    let deliveryFeeBreakdown = null;
+
+    if (hasDeliveryFeeRanges(feeSettings) && quickSource) {
+      const rangePricing = await applyRangeBasedFoodDeliveryPricing({
+        feeSettings,
+        subtotal,
+        address: trustedDeliveryAddress,
+        restaurant: quickSource,
+      });
+      deliveryFee = rangePricing.deliveryFee;
+      deliveryDistanceKm = rangePricing.deliveryDistanceKm;
+      deliveryFeeBreakdown = rangePricing.deliveryFeeBreakdown;
+    }
+
     const gstRate = feeSettings.gstRate;
     const tax =
       Number.isFinite(gstRate) && gstRate > 0
@@ -2271,6 +2290,8 @@ export async function calculateOrder(userId, dto) {
         tax,
         packagingFee,
         deliveryFee,
+        deliveryDistanceKm,
+        deliveryFeeBreakdown,
         platformFee,
         discount,
         total,
@@ -2322,10 +2343,10 @@ export async function calculateOrder(userId, dto) {
 
   if (orderType === "food") {
     if (hasDeliveryFeeRanges(feeSettings)) {
-      const rangePricing = applyRangeBasedFoodDeliveryPricing({
+      const rangePricing = await applyRangeBasedFoodDeliveryPricing({
         feeSettings,
         subtotal,
-        address: dto.address,
+        address: trustedDeliveryAddress,
         restaurant: primaryRestaurant,
       });
       deliveryFee = rangePricing.deliveryFee;
@@ -2338,8 +2359,10 @@ export async function calculateOrder(userId, dto) {
       deliverySponsorType = rangePricing.deliverySponsorType;
       deliveryFeeBreakdown = rangePricing.deliveryFeeBreakdown;
     } else {
-      const userPoint = getPointLatLng(dto.address?.location);
-      const restaurantPoint = getPointLatLng(primaryRestaurant?.location);
+      const userPoint = getPointLatLng(trustedDeliveryAddress?.location);
+      const restaurantPoint = getPointLatLng(
+        normalizeRestaurantLocation(primaryRestaurant?.location),
+      );
       const distanceKm =
         userPoint && restaurantPoint
           ? haversineKm(
@@ -2365,7 +2388,7 @@ export async function calculateOrder(userId, dto) {
     }
   } else {
     if (hasDeliveryFeeRanges(feeSettings)) {
-      const rangePricing = applyRangeBasedFoodDeliveryPricing({
+      const rangePricing = await applyRangeBasedFoodDeliveryPricing({
         feeSettings,
         subtotal,
         address: trustedDeliveryAddress,
@@ -2382,7 +2405,9 @@ export async function calculateOrder(userId, dto) {
       deliveryFeeBreakdown = rangePricing.deliveryFeeBreakdown;
     } else {
       const userPoint = getPointLatLng(trustedDeliveryAddress?.location);
-      const restaurantPoint = getPointLatLng(primaryRestaurant?.location);
+      const restaurantPoint = getPointLatLng(
+        normalizeRestaurantLocation(primaryRestaurant?.location),
+      );
       const distanceKm =
         userPoint && restaurantPoint
           ? await roadDistanceKm(
@@ -2778,51 +2803,34 @@ export async function createOrder(userId, dto) {
   };
 
   let distanceKm = null;
-  const feeDocForRider = await FoodFeeSettings.findOne({ isActive: true })
+  const feeDocForRider = await FoodFeeSettings.findOne({ isActive: { $ne: false } })
     .sort({ createdAt: -1 })
     .lean();
   const feeSettingsForRider = normalizeFoodFeeSettings(feeDocForRider);
 
-  if (orderType === "food" || orderType === "mixed") {
-    const normalizedAddress = normalizeDeliveryAddressGeo(dto.address);
-    distanceKm = calculateDistanceKm(primaryRestaurant, normalizedAddress);
-    if (!Number.isFinite(distanceKm)) {
-      console.warn(
-        `Food order ${orderId}: distance not available, rider earning set to 0`,
-      );
-      distanceKm = null;
-    }
-  }
   if (
     (orderType === "food" || orderType === "mixed") &&
-    primaryRestaurant?.location?.coordinates?.length === 2 &&
-    dto.address?.location?.coordinates?.length === 2
+    normalizedPricing.deliveryDistanceKm == null
   ) {
-    const [rLng, rLat] = primaryRestaurant.location.coordinates;
-    const [dLng, dLat] = dto.address.location.coordinates;
-    const d = await roadDistanceKm(rLat, rLng, dLat, dLng);
-    distanceKm = Number.isFinite(d) ? d : null;
-  } else if (orderType === "food" || orderType === "mixed") {
-    console.warn(
-      `Food order ${orderId}: distance not available, rider earning set to 0`,
+    distanceKm = await resolveRestaurantToUserRoadDistanceKm(
+      primaryRestaurant,
+      deliveryAddress,
     );
-  }
-  if (normalizedPricing.deliveryDistanceKm == null && Number.isFinite(distanceKm)) {
-    normalizedPricing.deliveryDistanceKm = Number(distanceKm.toFixed(2));
+    if (Number.isFinite(distanceKm)) {
+      normalizedPricing.deliveryDistanceKm = distanceKm;
+    }
   }
 
   const riderDistanceKm =
     normalizedPricing.deliveryDistanceKm ?? distanceKm ?? null;
   const riderEarning =
     orderType === "food" || orderType === "quick" || orderType === "mixed"
-      ? hasDeliveryFeeRanges(feeSettingsForRider)
-        ? calculateRiderEarning(feeSettingsForRider, riderDistanceKm)
-        : await foodTransactionService.getRiderEarning(riderDistanceKm)
+      ? calculateRiderEarning(feeSettingsForRider, riderDistanceKm)
       : 0;
 
   const activeFeeSettings =
     orderType === "mixed" && dispatchStrategy === "express_split"
-      ? await FoodFeeSettings.findOne({ isActive: true })
+      ? await FoodFeeSettings.findOne({ isActive: { $ne: false } })
           .sort({ createdAt: -1 })
           .lean()
       : null;
@@ -2851,33 +2859,45 @@ export async function createOrder(userId, dto) {
       riderEarning,
   );
 
+  const dispatchLegs = await Promise.all(
+    pickupPoints.map(async (point) => {
+      const legSource = sourceMap.get(String(point.sourceId)) || primaryRestaurant;
+      const legDistanceKm =
+        dispatchStrategy === "express_split"
+          ? (await resolveRestaurantToUserRoadDistanceKm(legSource, deliveryAddress)) ??
+            riderDistanceKm
+          : riderDistanceKm;
+      const legRiderEarning =
+        dispatchStrategy === "express_split"
+          ? calculateRiderEarning(feeSettingsForRider, legDistanceKm)
+          : 0;
+
+      return {
+        legId: `${point.pickupType}:${point.sourceId}`,
+        pickupType: point.pickupType,
+        sourceId: point.sourceId,
+        sourceName: point.sourceName || "",
+        deliveryFee:
+          dispatchStrategy === "express_split"
+            ? point.pickupType === "quick"
+              ? quickLegDeliveryFee
+              : foodLegDeliveryFee
+            : 0,
+        riderEarning: legRiderEarning,
+        assignedAt: null,
+        deliveryPartnerId: null,
+        partnerCandidates: [],
+      };
+    }),
+  );
+
   const dispatchPlan = {
     strategy: dispatchStrategy,
     combinedPickupEligible: combinedPickup.eligible,
     pickupDistanceKm: combinedPickup.pickupDistanceKm,
     sameDirection: combinedPickup.sameDirection,
     reason: combinedPickup.reason,
-    legs: pickupPoints.map((point) => ({
-      legId: `${point.pickupType}:${point.sourceId}`,
-      pickupType: point.pickupType,
-      sourceId: point.sourceId,
-      sourceName: point.sourceName || "",
-      deliveryFee:
-        dispatchStrategy === "express_split"
-          ? point.pickupType === "quick"
-            ? quickLegDeliveryFee
-            : foodLegDeliveryFee
-          : 0,
-      riderEarning:
-        dispatchStrategy === "express_split"
-          ? point.pickupType === "quick"
-            ? quickLegDeliveryFee
-            : foodLegDeliveryFee
-          : 0,
-      assignedAt: null,
-      deliveryPartnerId: null,
-      partnerCandidates: [],
-    })),
+    legs: dispatchLegs,
   };
 
   await populateDispatchLegPartnerCandidates(dispatchPlan, pickupPoints);
@@ -4914,7 +4934,10 @@ export async function completeDelivery(orderId, deliveryPartnerId, body = {}) {
       deliveryPartnerId,
       payMethod,
       prevPayStatus,
-      paymentStatus: order.payment?.status
+      paymentStatus: order.payment?.status,
+      riderEarning: Number(order.riderEarning || 0),
+      platformProfit: Number(order.platformProfit || 0),
+      paymentMethod: payMethod,
   });
   return sanitizeOrderForExternal(order);
 }

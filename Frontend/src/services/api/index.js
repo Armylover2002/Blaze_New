@@ -963,32 +963,6 @@ export const adminAPI = {
       contextModule: "admin",
     }),
 
-  /** Delivery Boy Commission Rules (admin) */
-  getCommissionRules: () =>
-    apiClient.get("/food/admin/delivery/commission-rules", {
-      contextModule: "admin",
-    }),
-  createCommissionRule: (body) =>
-    apiClient.post("/food/admin/delivery/commission-rules", body ?? {}, {
-      contextModule: "admin",
-    }),
-  updateCommissionRule: (id, body) =>
-    apiClient.patch(
-      `/food/admin/delivery/commission-rules/${String(id)}`,
-      body ?? {},
-      { contextModule: "admin" },
-    ),
-  deleteCommissionRule: (id) =>
-    apiClient.delete(`/food/admin/delivery/commission-rules/${String(id)}`, {
-      contextModule: "admin",
-    }),
-  toggleCommissionRuleStatus: (id, status) =>
-    apiClient.patch(
-      `/food/admin/delivery/commission-rules/${String(id)}/status`,
-      { status: Boolean(status) },
-      { contextModule: "admin" },
-    ),
-
   /** Fee Settings (admin) */
   getFeeSettings: () =>
     apiClient.get("/food/admin/fee-settings", { contextModule: "admin" }),
@@ -1348,6 +1322,27 @@ export const restaurantAPI = {
     }),
   deleteCategory: (id) =>
     apiClient.delete(`/food/restaurant/categories/${String(id)}`, {
+      contextModule: "restaurant",
+    }),
+  /** Item slot timings (restaurant dashboard) */
+  getItemSlotTimings: () =>
+    apiClient.get("/food/restaurant/item-slot-timings", {
+      contextModule: "restaurant",
+    }),
+  getItemSlotTimingById: (id) =>
+    apiClient.get(`/food/restaurant/item-slot-timings/${String(id)}`, {
+      contextModule: "restaurant",
+    }),
+  createItemSlotTiming: (body) =>
+    apiClient.post("/food/restaurant/item-slot-timings", body ?? {}, {
+      contextModule: "restaurant",
+    }),
+  updateItemSlotTiming: (id, body) =>
+    apiClient.patch(`/food/restaurant/item-slot-timings/${String(id)}`, body ?? {}, {
+      contextModule: "restaurant",
+    }),
+  deleteItemSlotTiming: (id) =>
+    apiClient.delete(`/food/restaurant/item-slot-timings/${String(id)}`, {
       contextModule: "restaurant",
     }),
   /** Menu (restaurant dashboard) */
