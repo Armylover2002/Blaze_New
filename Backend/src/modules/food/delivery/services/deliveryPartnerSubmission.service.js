@@ -1,10 +1,6 @@
 import mongoose from 'mongoose';
 import { FoodDeliveryPartnerSubmission } from '../models/deliveryPartnerSubmission.model.js';
 
-/**
- * Derive legacy top-level vehicle fields from driverVehicles (source of truth).
- * Keeps admin filters / older readers consistent without duplicating conflicting values.
- */
 export const syncLegacyVehicleFieldsFromDriverVehicles = (partner = {}) => {
     const vehicles = Array.isArray(partner.driverVehicles) ? partner.driverVehicles : [];
     if (!vehicles.length) return partner;
