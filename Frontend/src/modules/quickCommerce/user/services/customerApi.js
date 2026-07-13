@@ -120,6 +120,11 @@ export const customerApi = {
       `/quick-commerce/location/geocode?address=${encodeURIComponent(address)}`,
       withQuickSession()
     ),
+  reverseGeocode: (lat, lng) =>
+    axiosInstance.get(
+      `/quick-commerce/location/reverse-geocode?lat=${encodeURIComponent(lat)}&lng=${encodeURIComponent(lng)}`,
+      withQuickSession()
+    ),
 
   getWishlist: (params) => quickGetWithDedupe("/quick-commerce/wishlist", params),
   addToWishlist: (data) => {

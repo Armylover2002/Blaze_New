@@ -1,4 +1,27 @@
+import axios from 'axios';
+import { config } from '../../../config/env.js';
 import { getRoadDistanceKm, getRoadDistancesFromOrigin } from '../../../services/roadDistance.service.js';
+
+const MAPS_TIMEOUT_MS = 8000;
+
+const getMapsApiKey = () =>
+  config.googleMapsApiKey ||
+  process.env.GOOGLE_MAPS_API_KEY ||
+  process.env.GOOGLE_MAP_API_KEY ||
+  '';
+
+const mapAddressComponents = (components = []) => {
+  const get = (type) => {
+    const c = components.find((x) => x.types?.includes(type));
+    return c ? c.long_name : '';
+  };
+  const country = get('country');
+  const state = get('administrative_area_level_1');
+  const city = get('locality') || get('administrative_area_level_2') || get('sublocality');
+  const area = get('sublocality') || get('neighborhood') || '';
+  const pincode = get('postal_code');
+  return { country, state, city, area, pincode };
+};
 
 const toFinite = (value) => {
   const n = Number(value);
@@ -37,6 +60,67 @@ export const getDistance = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: err?.message || 'Failed to calculate distance',
+    });
+  }
+};
+
+export const reverseGeocode = async (req, res) => {
+  try {
+    const lat = toFinite(req.query.lat ?? req.query.latitude);
+    const lng = toFinite(req.query.lng ?? req.query.longitude);
+
+    if (lat === null || lng === null) {
+      return res.status(400).json({
+        success: false,
+        message: 'lat and lng are required',
+      });
+    }
+
+    const apiKey = getMapsApiKey();
+    if (!apiKey) {
+      return res.status(503).json({
+        success: false,
+        message: 'Maps API key not configured on server',
+      });
+    }
+
+    const { data } = await axios.get(
+      `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${apiKey}&language=en`,
+      { timeout: MAPS_TIMEOUT_MS },
+    );
+
+    if (data.status === 'ZERO_RESULTS') {
+      return res.status(404).json({
+        success: false,
+        message: 'Address not found for coordinates',
+      });
+    }
+
+    if (data.status !== 'OK' || !data.results?.[0]) {
+      return res.status(502).json({
+        success: false,
+        message: data.error_message || `Maps API error: ${data.status || 'UNKNOWN'}`,
+      });
+    }
+
+    const first = data.results[0];
+    const components = mapAddressComponents(first.address_components || []);
+
+    return res.json({
+      success: true,
+      data: {
+        formattedAddress: first.formatted_address,
+        placeId: first.place_id,
+        addressComponents: first.address_components || [],
+        latitude: lat,
+        longitude: lng,
+        ...components,
+      },
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      message: err?.message || 'Failed to reverse geocode coordinates',
     });
   }
 };

@@ -183,84 +183,22 @@ export const LocationProvider = ({ children }) => {
             // even if reverse geocoding fails (key missing / quota / restrictions).
             let liveLocation = fallbackFromCoords(latitude, longitude);
 
-            const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
-
-            if (apiKey) {
-              const params = new URLSearchParams({
-                latlng: `${latitude},${longitude}`,
-                key: apiKey,
-              });
-
-              const response = await fetch(
-                `https://maps.googleapis.com/maps/api/geocode/json?${params.toString()}`,
-              );
-
-              if (!response.ok) {
-                throw new Error("Failed to fetch address from Google Maps");
+            try {
+              const response = await customerApi.reverseGeocode(latitude, longitude);
+              const geo = response?.data?.data;
+              if (geo?.formattedAddress) {
+                liveLocation = {
+                  name: geo.formattedAddress,
+                  time: "12-15 mins",
+                  city: geo.city || liveLocation.city,
+                  state: geo.state || liveLocation.state,
+                  pincode: geo.pincode || liveLocation.pincode,
+                  latitude,
+                  longitude,
+                };
               }
-
-              const data = await response.json();
-
-              // Handle Google Geocoding API error responses
-              if (data.status === "REQUEST_DENIED") {
-                const msg =
-                  data.error_message ||
-                  "Geocoding API rejected (check API key restrictions)";
-                throw new Error(msg);
-              }
-              if (data.status === "OVER_QUERY_LIMIT") {
-                throw new Error("Geocoding API quota exceeded");
-              }
-              if (!data.results || data.results.length === 0) {
-                throw new Error(
-                  data.error_message || "No address found for current location",
-                );
-              }
-
-              const components = data.results[0].address_components || [];
-
-              const getComponent = (types) =>
-                components.find((c) => types.every((t) => c.types.includes(t)))
-                  ?.long_name;
-
-              // Build address from components to match: "214, Rajshri Palace Colony, Pipliyahana, Indore, Madhya Pradesh 452018, India"
-              const premise = getComponent(["premise"]);
-              const neighborhood = getComponent(["neighborhood"]);
-              const sublocality = getComponent([
-                "sublocality_level_1",
-                "sublocality",
-              ]);
-              const locality = getComponent(["locality"]);
-              const state = getComponent(["administrative_area_level_1"]);
-              const pincode = getComponent(["postal_code"]);
-              const country = getComponent(["country"]);
-
-              const displayParts = [];
-              if (premise) displayParts.push(premise);
-              if (neighborhood) displayParts.push(neighborhood);
-              if (sublocality && sublocality !== neighborhood)
-                displayParts.push(sublocality);
-              if (locality) displayParts.push(locality);
-
-              let statePincode = "";
-              if (state) statePincode += state;
-              if (pincode) statePincode += (statePincode ? " " : "") + pincode;
-              if (statePincode) displayParts.push(statePincode);
-
-              if (country) displayParts.push(country);
-
-              const friendlyName =
-                displayParts.join(", ") || data.results[0].formatted_address;
-
-              liveLocation = {
-                name: friendlyName,
-                time: "12-15 mins",
-                city: locality || liveLocation.city,
-                state: state || liveLocation.state,
-                pincode: pincode || liveLocation.pincode,
-                latitude: latitude,
-                longitude: longitude,
-              };
+            } catch (geocodeErr) {
+              console.warn("Reverse geocode failed, using coordinates only:", geocodeErr?.message);
             }
 
             updateLocation(liveLocation, {
