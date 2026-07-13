@@ -4,7 +4,6 @@ import deliveryRoutes from '../modules/food/delivery/routes/delivery.routes.js';
 import restaurantRoutes from '../modules/food/restaurant/routes/restaurant.routes.js';
 import mediaRoutes from '../modules/media/routes/media.routes.js';
 import landingRoutes from '../modules/food/landing/routes/landing.routes.js';
-import { getPublicDiningCategories, getPublicDiningRestaurants } from '../modules/food/dining/controllers/diningPublic.controller.js';
 import uploadRoutes from '../modules/uploads/routes/upload.routes.js';
 import restaurantAdminRoutes from '../modules/food/admin/routes/admin.routes.js';
 import userRoutes from '../modules/food/user/routes/user.routes.js';
@@ -51,8 +50,6 @@ router.use('/v1/food/subscriptions', requireEnabledModule('food'), subscriptionR
 // Landing & hero-banners for Food user app (paths start with /food/hero-banners/...)
 router.use('/v1/food', requireEnabledModule('food'), landingRoutes);
 router.use('/v1/food/search', requireEnabledModule('food'), searchRoutes);
-router.get('/v1/food/dining/categories/public', requireEnabledModule('food'), getPublicDiningCategories);
-router.get('/v1/food/dining/restaurants/public', requireEnabledModule('food'), getPublicDiningRestaurants);
 router.use('/v1/uploads', uploadRoutes);
 
 // Mark business-settings/public as truly public (must be before protected admin block)

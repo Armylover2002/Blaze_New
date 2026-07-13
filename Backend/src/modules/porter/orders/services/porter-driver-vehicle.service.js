@@ -27,12 +27,25 @@ export function mapDriverVehicleForClient(vehicle, catalog = null) {
     const supportedServices = Array.isArray(vehicle.supportedServices) && vehicle.supportedServices.length
         ? vehicle.supportedServices
         : (cat.supportedServices || []);
+    const displayName =
+        vehicle.vehicleName ||
+        cat.category ||
+        cat.name ||
+        vehicle.category ||
+        vehicle.vehicleCode ||
+        'Vehicle';
+    // Prefer admin catalog icon (type icon). Do not use uploaded vehiclePhoto docs as the card icon.
+    const iconUrl =
+        cat.iconUrl ||
+        cat.icon ||
+        vehicle.iconUrl ||
+        null;
 
     return {
         id: String(vehicle.id || vehicle._id || ''),
         vehicleId: String(vehicle.id || vehicle._id || ''),
         porterVehicleId: vehicle.porterVehicleId ? String(vehicle.porterVehicleId) : null,
-        vehicleName: vehicle.vehicleName || cat.name || 'Vehicle',
+        vehicleName: displayName,
         vehicleCode: vehicle.vehicleCode || vehicle.vehicleType || cat.vehicleCode || '',
         vehicleNumber: vehicle.vehicleNumber || '',
         registrationNumber: vehicle.vehicleNumber || vehicle.registrationNumber || '',
@@ -42,10 +55,12 @@ export function mapDriverVehicleForClient(vehicle, catalog = null) {
         verificationStatus: mapVehicleStatusLabel(status),
         isDefault: Boolean(vehicle.isDefault),
         isDispatchEligible: isDriverVehicleDispatchEligible({ ...vehicle, status }),
-        iconUrl: cat.iconUrl || cat.icon || vehicle.vehiclePhoto || null,
+        iconUrl,
         master: {
-            name: vehicle.vehicleName || cat.name || 'Vehicle',
-            image: cat.iconUrl || cat.icon || vehicle.vehiclePhoto || null,
+            name: displayName,
+            category: cat.category || vehicle.category || '',
+            image: iconUrl,
+            iconUrl,
             supportedServices,
             vehicleCode: vehicle.vehicleCode || cat.vehicleCode || '',
         },
@@ -112,7 +127,7 @@ export async function enrichDriverVehiclesFromSignupPayload(payload) {
 
     const catalog = catalogIds.length
         ? await PorterVehicle.find({ _id: { $in: catalogIds }, isDeleted: { $ne: true } })
-            .select({ name: 1, vehicleCode: 1, supportedServices: 1, iconUrl: 1, icon: 1 })
+            .select({ category: 1, vehicleCode: 1, supportedServices: 1, iconUrl: 1, icon: 1 })
             .lean()
         : [];
 
@@ -122,7 +137,7 @@ export async function enrichDriverVehiclesFromSignupPayload(payload) {
         const cat = v.porterVehicleId ? catalogMap.get(String(v.porterVehicleId)) : null;
         return {
             ...v,
-            vehicleName: v.vehicleName || cat?.name || v.vehicleName,
+            vehicleName: v.vehicleName || cat?.category || cat?.name || v.vehicleName,
             vehicleCode: v.vehicleCode || cat?.vehicleCode || v.vehicleCode,
             supportedServices: v.supportedServices?.length
                 ? v.supportedServices

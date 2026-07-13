@@ -288,7 +288,7 @@ export const enrichPorterDeliveryOrder = (order = {}) => {
     receiverPhone: order.receiverPhone || order.parcel?.receiverPhone || "",
     pickupAddress: order.pickupAddress || order.pickup?.address || "",
     dropAddress: order.dropAddress || order.delivery?.address || "",
-    vehicleName: order.vehicleName || order.vehicle?.name || "",
+    vehicleName: order.vehicleName || order.vehicle?.category || "",
     parcelWeight: order.parcel?.weightKg != null
       ? Number(order.parcel.weightKg) * Math.max(1, Number(order.parcel?.quantity || 1))
       : order.parcelWeight,

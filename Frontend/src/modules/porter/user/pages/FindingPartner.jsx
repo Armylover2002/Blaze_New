@@ -210,7 +210,7 @@ export default function FindingPartner() {
             {submitting ? "Confirming your booking…" : "Searching for delivery partner"}
           </h2>
           <p className="mt-1 text-center text-[13px] text-gray-500">
-            Finding the best partner for your {vehicle?.name || "delivery"} shipment
+            Finding the best partner for your {vehicle?.category || "delivery"} shipment
           </p>
           <div className="mt-4 flex items-center justify-center gap-2">
             {[0, 1, 2].map((i) => (

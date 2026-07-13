@@ -34,13 +34,21 @@ const getProfileEndpoint = (role) => {
 };
 
 export const AuthProvider = ({ children }) => {
-    // Current role based on URL
+    // Current role based on URL (align with RouteGuard MODULE_ROUTES)
     const getCurrentRoleFromUrl = (path) => {
         if (path.startsWith('/seller')) return 'seller';
         if (path.startsWith('/admin')) return 'admin';
-        if (path.startsWith('/delivery')) return 'delivery';
+        if (path.startsWith('/food/delivery') || path.startsWith('/delivery')) return 'delivery';
         return 'customer';
     };
+
+    const isPublicAuthPath = (path) =>
+        path.includes('/auth/') ||
+        path.includes('/login') ||
+        path.includes('/signup') ||
+        path.includes('/otp') ||
+        path.includes('/verification') ||
+        path.includes('/welcome');
 
     const getSafeToken = (key) => {
         const val = localStorage.getItem(ROLE_STORAGE_KEYS[key]);
@@ -127,9 +135,17 @@ export const AuthProvider = ({ children }) => {
         };
     }, []);
 
-    // Fetch user profile on mount or token change
+    // Fetch user profile on mount or token change.
+    // Skip on public auth/signup pages so leftover tokens from other modules
+    // (or pending delivery signup without tokens) do not trigger /auth/me errors.
     useEffect(() => {
         const fetchProfile = async () => {
+            if (isPublicAuthPath(currentPath)) {
+                setUser(null);
+                setIsLoading(false);
+                return;
+            }
+
             if (token) {
                 setIsLoading(true);
                 try {
@@ -159,7 +175,7 @@ export const AuthProvider = ({ children }) => {
         };
 
         fetchProfile();
-    }, [token, currentRole]);
+    }, [token, currentRole, currentPath]);
 
     const login = (userData) => {
         const role = userData.role?.toLowerCase() || 'customer';

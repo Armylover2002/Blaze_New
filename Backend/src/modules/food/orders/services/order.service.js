@@ -2406,6 +2406,31 @@ export async function calculateOrder(userId, dto) {
       deliveryDistanceKm = deliveryPricing.deliveryDistanceKm;
       deliverySponsorType = deliveryPricing.deliverySponsorType;
     }
+      const userPoint = getPointLatLng(trustedDeliveryAddress?.location);
+      const restaurantPoint = getPointLatLng(primaryRestaurant?.location);
+      const distanceKm =
+        userPoint && restaurantPoint
+          ? await roadDistanceKm(
+              restaurantPoint.lat,
+              restaurantPoint.lng,
+              userPoint.lat,
+              userPoint.lng,
+            )
+          : 0;
+      const deliveryPricing = calculateFoodDeliveryPricing({
+        subtotal,
+        distanceKm,
+        feeSettings,
+      });
+      deliveryFee = deliveryPricing.deliveryFee;
+      totalDeliveryFee = deliveryPricing.totalDeliveryFee;
+      userDeliveryFee = deliveryPricing.userDeliveryFee;
+      restaurantDeliveryFee = deliveryPricing.restaurantDeliveryFee;
+      sponsoredDelivery = deliveryPricing.sponsoredDelivery;
+      sponsoredKm = deliveryPricing.sponsoredKm;
+      deliveryDistanceKm = deliveryPricing.deliveryDistanceKm;
+      deliverySponsorType = deliveryPricing.deliverySponsorType;
+    }
   }
 
   const quickFeeDoc = (orderType === "mixed")
@@ -2625,6 +2650,17 @@ export async function createOrder(userId, dto) {
     throw new ValidationError(paymentCheck.message);
   }
 
+  // Enforce admin COD access flag — UI hide alone is not sufficient (API bypass).
+  if (isCash) {
+    const orderingUser = await FoodUser.findById(userId).select("isCodAllowed isActive").lean();
+    if (!orderingUser || orderingUser.isActive === false) {
+      throw new ForbiddenError("User account is deactivated");
+    }
+    if (orderingUser.isCodAllowed === false) {
+      throw new ForbiddenError("Cash on Delivery is not available for this account");
+    }
+  }
+
   const pickupPoints = buildPickupPointsFromItems(items, sourceMap);
   const combinedPickup = await resolveDispatchPlanMeta(
     orderType,
@@ -2780,6 +2816,24 @@ export async function createOrder(userId, dto) {
         `Food order ${orderId}: distance not available, rider earning set to 0`,
       );
       distanceKm = null;
+    }
+  }
+  if (
+    (orderType === "food" || orderType === "mixed") &&
+    primaryRestaurant?.location?.coordinates?.length === 2 &&
+    dto.address?.location?.coordinates?.length === 2
+  ) {
+    const [rLng, rLat] = primaryRestaurant.location.coordinates;
+    const [dLng, dLat] = dto.address.location.coordinates;
+    const d = await roadDistanceKm(rLat, rLng, dLat, dLng);
+    distanceKm = Number.isFinite(d) ? d : null;
+  } else if (orderType === "food" || orderType === "mixed") {
+    console.warn(
+      `Food order ${orderId}: distance not available, rider earning set to 0`,
+    );
+  }
+  if (normalizedPricing.deliveryDistanceKm == null && Number.isFinite(distanceKm)) {
+    normalizedPricing.deliveryDistanceKm = Number(distanceKm.toFixed(2));
     }
     if (
       primaryRestaurant?.location?.coordinates?.length === 2 &&

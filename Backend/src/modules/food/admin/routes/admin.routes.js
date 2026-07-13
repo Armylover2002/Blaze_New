@@ -11,7 +11,6 @@ import * as subscriptionPlanController from '../controllers/subscriptionPlan.con
 import * as feedbackExperienceController from '../controllers/feedbackExperience.controller.js';
 import * as notificationBroadcastController from '../controllers/notificationBroadcast.controller.js';
 import * as notificationChannelController from '../controllers/notificationChannel.controller.js';
-import * as diningAdminController from '../../dining/controllers/diningAdmin.controller.js';
 import * as orderController from '../../orders/controllers/order.controller.js';
 import { getAdminPageController, upsertAdminPageController } from '../controllers/pageContent.controller.js';
 import * as employeeController from '../controllers/employee.controller.js';
@@ -187,6 +186,7 @@ router.patch('/delivery/cash-pay-requests/:id', checkPermission('food::deliverym
 
 // ----- Delivery partners & general -----
 router.get('/delivery/join-requests', checkPermission('food::deliveryman_management::deliveryman::join_request', 'view'), adminController.getDeliveryJoinRequests);
+router.get('/delivery/:id/submissions', checkPermission('food::deliveryman_management::deliveryman::join_request', 'view'), adminController.getDeliveryPartnerSubmissions);
 router.get('/delivery/wallets', checkPermission('food::deliveryman_management::wallet', 'view'), adminController.getDeliveryWallets);
 router.patch('/delivery/wallets', checkPermission('food::deliveryman_management::wallet', 'edit'), adminController.updateDeliveryBoyWallet);
 router.get('/delivery/bonus-transactions', checkPermission('food::deliveryman_management::deliveryman::bonus', 'view'), adminController.getDeliveryPartnerBonusTransactions);
@@ -229,14 +229,6 @@ router.post('/zone-hubs', checkPermission('food::restaurant_management::zone_set
 router.get('/zone-hubs/cod-verification', checkPermission('food::restaurant_management::zone_setup', 'view'), adminController.getAdminCODVerifications);
 router.post('/zone-hubs/cod-verification/:id/action', checkPermission('food::restaurant_management::zone_setup', 'edit'), adminController.settleCODVerification);
 
-
-// ----- Dining -----
-router.get('/dining/categories', checkPermission('food::dining_management::banners', 'view'), diningAdminController.getDiningCategories);
-router.post('/dining/categories', checkPermission('food::dining_management::banners', 'create'), diningAdminController.createDiningCategory);
-router.patch('/dining/categories/:id', checkPermission('food::dining_management::banners', 'edit'), diningAdminController.updateDiningCategory);
-router.delete('/dining/categories/:id', checkPermission('food::dining_management::banners', 'delete'), diningAdminController.deleteDiningCategory);
-router.get('/dining/restaurants', checkPermission('food::dining_management::list', 'view'), diningAdminController.getDiningRestaurants);
-router.patch('/dining/restaurants/:restaurantId', checkPermission('food::dining_management::list', 'edit'), diningAdminController.updateDiningRestaurant);
 
 // ----- Orders -----
 router.get('/orders', checkPermission('food::order_management::orders', 'view'), orderController.listOrdersAdminController);

@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { computeNotificationExpiresAt } from '../utils/notificationTtl.js';
 
 const notificationSchema = new mongoose.Schema(
     {
@@ -25,8 +26,8 @@ const notificationSchema = new mongoose.Schema(
         },
         link: {
             type: String,
-            default: '',
             trim: true
+            // No default — omit field when empty (APIs treat missing as '').
         },
         category: {
             type: String,
@@ -62,6 +63,12 @@ const notificationSchema = new mongoose.Schema(
             type: Date,
             default: null,
             index: true
+        },
+        /** Mongo TTL field — documents removed when expiresAt <= now (expireAfterSeconds: 0). */
+        expiresAt: {
+            type: Date,
+            required: true,
+            index: true
         }
     },
     {
@@ -70,8 +77,16 @@ const notificationSchema = new mongoose.Schema(
     }
 );
 
+notificationSchema.pre('validate', function setExpiresAt(next) {
+    if (!this.expiresAt) {
+        this.expiresAt = computeNotificationExpiresAt(this.createdAt || new Date());
+    }
+    next();
+});
+
 notificationSchema.index({ ownerType: 1, ownerId: 1, createdAt: -1 });
 notificationSchema.index({ ownerType: 1, ownerId: 1, isRead: 1, dismissedAt: 1 });
 notificationSchema.index({ broadcastId: 1, ownerType: 1, ownerId: 1 }, { unique: true, sparse: true });
+notificationSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0, name: 'expiresAt_1' });
 
 export const FoodNotification = mongoose.model('FoodNotification', notificationSchema);

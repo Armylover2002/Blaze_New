@@ -29,7 +29,7 @@ export default function SupportInfoPage() {
     <AnimatedPage>
       <div className="min-h-screen bg-gray-50 pb-10">
         <div className="sticky top-0 z-20 bg-white border-b border-gray-200 px-4 py-3 flex items-center gap-3">
-          <Link to="/food/user/help" className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors">
+          <Link to="/food/user/profile/support" className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors">
             <ArrowLeft className="w-5 h-5 text-gray-600" />
           </Link>
           <h1 className="text-lg font-bold text-gray-900">Support</h1>

@@ -7,9 +7,13 @@ import {
 
 export const createBroadcastNotificationController = async (req, res) => {
     try {
+        const debug =
+            String(req.query?.debug || '').trim() === 'true' ||
+            process.env.NODE_ENV === 'development';
         const data = await createBroadcastNotification({
             body: req.body,
-            adminId: req.user?.userId
+            adminId: req.user?.userId,
+            includeRecipientDetails: debug
         });
         return sendResponse(res, 201, 'Broadcast notification created successfully', data);
     } catch (error) {

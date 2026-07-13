@@ -363,6 +363,7 @@ const ensureRoleSettings = async (role) => {
     }
 
     // Backfill newly introduced default topics (e.g. admin_broadcast) without wiping saved flags.
+    // Only used by Notification Channel Settings APIs — never by broadcast send.
     const existingKeys = new Set((doc.topics || []).map((item) => item.key));
     const missing = cloneDefaultTopics(normalizedRole).filter((item) => !existingKeys.has(item.key));
     if (missing.length > 0) {
@@ -370,6 +371,29 @@ const ensureRoleSettings = async (role) => {
         await doc.save();
     }
     return doc;
+};
+
+/**
+ * Startup-only: create missing role docs. Never updates existing docs (no topic backfill, no updatedAt).
+ * Idempotent under concurrent boots (duplicate key → skip).
+ */
+export const seedMissingNotificationChannelRoles = async () => {
+    let created = 0;
+    for (const role of VALID_ROLES) {
+        const exists = await NotificationChannelSettings.exists({ role });
+        if (exists) continue;
+        try {
+            await NotificationChannelSettings.create({
+                role,
+                topics: cloneDefaultTopics(role)
+            });
+            created += 1;
+        } catch (err) {
+            if (err?.code === 11000) continue;
+            throw err;
+        }
+    }
+    return created;
 };
 
 const serializeRoleDoc = (doc) => ({
@@ -473,10 +497,11 @@ export const updateNotificationChannelsBulk = async ({ role, topics = [] } = {})
 };
 
 /**
- * Check whether a delivery channel is enabled for a role/topic.
+ * Read-only check whether a delivery channel is enabled for a role/topic.
  * Defaults to enabled when config is missing so existing flows keep working.
+ * NEVER writes to the database!
  */
-export const isNotificationChannelEnabled = async ({
+export const isNotificationChannelEnabledReadOnly = async ({
     role,
     ownerType,
     topicKey = 'admin_broadcast',
@@ -491,7 +516,21 @@ export const isNotificationChannelEnabled = async ({
         null;
     if (!resolvedRole || !VALID_ROLES.has(resolvedRole)) return true;
 
-    const doc = await ensureRoleSettings(resolvedRole);
+    // Read-only: just findOne without creating or updating!
+    const doc = await NotificationChannelSettings.findOne({ role: resolvedRole }).lean();
+    if (!doc) {
+        // If no doc exists, use default topics in-memory, no DB write!
+        const defaultTopics = DEFAULT_TOPICS[resolvedRole] || [];
+        const topic = defaultTopics.find((item) => item.key === String(topicKey || '').trim());
+        if (!topic) return true;
+        
+        if (normalizedChannel === 'push' && topic.pushAvailable === false) return false;
+        if (normalizedChannel === 'mail' && topic.mailAvailable === false) return false;
+        if (normalizedChannel === 'sms' && topic.smsAvailable === false) return false;
+
+        return Boolean(topic.channels?.[normalizedChannel]);
+    }
+
     const topic = (doc.topics || []).find((item) => item.key === String(topicKey || '').trim());
     if (!topic) return true;
 
@@ -518,7 +557,7 @@ export const filterTargetsByChannel = async ({
         if (!enabledByOwnerType.has(ownerType)) {
             enabledByOwnerType.set(
                 ownerType,
-                await isNotificationChannelEnabled({
+                await isNotificationChannelEnabledReadOnly({
                     ownerType,
                     topicKey,
                     channel
@@ -531,4 +570,82 @@ export const filterTargetsByChannel = async ({
     }
 
     return filtered;
+};
+
+/**
+ * Preload inApp/push flags for owner types (one DB read per role).
+ * Used by streaming broadcast so each batch can partition without re-querying.
+ */
+export const getTopicChannelFlagsByOwnerTypes = async ({
+    ownerTypes = ['USER', 'RESTAURANT', 'SELLER', 'DELIVERY_PARTNER'],
+    topicKey = 'admin_broadcast'
+} = {}) => {
+    const flagsByOwnerType = new Map();
+    const topic = String(topicKey || '').trim();
+    const types = Array.isArray(ownerTypes) ? ownerTypes : [];
+
+    for (const raw of types) {
+        const ownerType = String(raw || '').trim().toUpperCase();
+        if (!ownerType || flagsByOwnerType.has(ownerType)) continue;
+
+        const resolvedRole = OWNER_TYPE_TO_ROLE[ownerType] || null;
+        let inApp = true;
+        let push = true;
+
+        if (resolvedRole && VALID_ROLES.has(resolvedRole)) {
+            const doc = await NotificationChannelSettings.findOne({ role: resolvedRole }).lean();
+            const topicRow = doc
+                ? (doc.topics || []).find((item) => item.key === topic)
+                : (DEFAULT_TOPICS[resolvedRole] || []).find((item) => item.key === topic);
+
+            if (topicRow) {
+                inApp = topicRow.channels?.inApp !== false;
+                push =
+                    topicRow.pushAvailable === false
+                        ? false
+                        : Boolean(topicRow.channels?.push);
+            }
+        }
+
+        flagsByOwnerType.set(ownerType, { inApp, push });
+    }
+
+    return flagsByOwnerType;
+};
+
+/**
+ * One pass over targets: resolve each ownerType's channel doc once, then split inApp vs push.
+ * Read-only — never writes food_notification_channels.
+ */
+export const partitionTargetsByChannels = async ({
+    targets = [],
+    topicKey = 'admin_broadcast'
+} = {}) => {
+    const rows = Array.isArray(targets) ? targets : [];
+    if (!rows.length) {
+        return { inAppTargets: [], pushTargets: [] };
+    }
+
+    const flagsByOwnerType = await getTopicChannelFlagsByOwnerTypes({
+        ownerTypes: [
+            ...new Set(
+                rows
+                    .map((t) => String(t?.ownerType || '').trim().toUpperCase())
+                    .filter(Boolean)
+            )
+        ],
+        topicKey
+    });
+
+    const inAppTargets = [];
+    const pushTargets = [];
+
+    for (const target of rows) {
+        const ownerType = String(target?.ownerType || '').trim().toUpperCase();
+        const flags = flagsByOwnerType.get(ownerType) || { inApp: true, push: true };
+        if (flags.inApp) inAppTargets.push(target);
+        if (flags.push) pushTargets.push(target);
+    }
+
+    return { inAppTargets, pushTargets };
 };

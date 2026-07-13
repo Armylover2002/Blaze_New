@@ -198,6 +198,8 @@ const userSchema = new mongoose.Schema(
 userSchema.index({ phone: 1 }, { unique: true, sparse: true });
 userSchema.index({ email: 1 }, { unique: true, sparse: true });
 userSchema.index({ 'addresses.location': '2dsphere' });
+userSchema.index({ role: 1, createdAt: -1 });
+userSchema.index({ role: 1, isActive: 1, createdAt: -1 });
 
 export const FoodUser = mongoose.model('FoodUser', userSchema, 'common_users');
 

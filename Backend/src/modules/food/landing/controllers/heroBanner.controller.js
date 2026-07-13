@@ -96,4 +96,3 @@ export const updateHeroBannerController = async (req, res, next) => {
         next(error);
     }
 };
-

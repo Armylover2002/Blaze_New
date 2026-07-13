@@ -13,21 +13,11 @@ function RedirectWithState({ to }) {
 
 // Home & Discovery
 const Home = lazy(() => import("../../pages/user/Home"))
-const Dining = lazy(() => import("@food/pages/user/Dining"))
-const DiningCategory = lazy(() => import("@food/pages/user/DiningCategory"))
-const DiningExplore50 = lazy(() => import("@food/pages/user/DiningExplore50"))
-const DiningExploreNear = lazy(() => import("@food/pages/user/DiningExploreNear"))
-const Coffee = lazy(() => import("@food/pages/user/Coffee"))
 const Under250 = lazy(() => import("@food/pages/user/Under250"))
 const Categories = lazy(() => import("@food/pages/user/Categories"))
 const CategoryPage = lazy(() => import("@food/pages/user/CategoryPage"))
 const Restaurants = lazy(() => import("@food/pages/user/restaurants/Restaurants"))
 const RestaurantDetails = lazy(() => import("@food/pages/user/restaurants/RestaurantDetails"))
-const DiningRestaurantDetails = lazy(() => import("@food/pages/user/dining/DiningRestaurantDetails"))
-const TableBooking = lazy(() => import("@food/pages/user/dining/TableBooking"))
-const TableBookingConfirmation = lazy(() => import("@food/pages/user/dining/TableBookingConfirmation"))
-const TableBookingSuccess = lazy(() => import("@food/pages/user/dining/TableBookingSuccess"))
-const MyBookings = lazy(() => import("@food/pages/user/dining/MyBookings"))
 const SearchResults = lazy(() => import("@food/pages/user/search/ProfessionalSearch"))
 const ProductDetail = lazy(() => import("@food/pages/user/ProductDetail"))
 
@@ -76,9 +66,6 @@ const SignIn = lazy(() => import("@food/pages/user/auth/SignIn"))
 const OTP = lazy(() => import("@food/pages/user/auth/OTP"))
 const AuthCallback = lazy(() => import("@food/pages/user/auth/AuthCallback"))
 
-// Help
-const Help = lazy(() => import("@food/pages/user/help/Help"))
-const OrderHelp = lazy(() => import("@food/pages/user/help/OrderHelp"))
 const SupportInfo = lazy(() => import("@food/pages/user/profile/SupportInfo"))
 
 // Notifications
@@ -99,24 +86,6 @@ export default function UserRouter() {
           {/* Home & Discovery */}
           <Route path="" element={<Home />} />
           <Route path="quick" element={<Navigate to="/quick" replace />} />
-          <Route path="dining" element={<Dining />} />
-          <Route path="dining/restaurants" element={<Navigate to="/food/user/dining" replace />} />
-          <Route path="dining/:category" element={<DiningCategory />} />
-          <Route path="dining/explore/upto50" element={<DiningExplore50 />} />
-          <Route path="dining/explore/near-rated" element={<DiningExploreNear />} />
-          <Route path="dining/coffee" element={<Coffee />} />
-          <Route path="dining/:diningType/:slug" element={<DiningRestaurantDetails />} />
-          <Route path="dining/book/:slug" element={<TableBooking />} />
-          <Route path="dining/book-confirmation" element={<TableBookingConfirmation />} />
-          <Route path="dining/book-success" element={<TableBookingSuccess />} />
-          <Route
-            path="bookings"
-            element={
-              <ProtectedRoute requiredRole="user" loginPath="/user/auth/login">
-                <MyBookings />
-              </ProtectedRoute>
-            }
-          />
           <Route path="under-250" element={<Under250 />} />
           <Route path="categories" element={<Categories />} />
           <Route path="category/:category" element={<CategoryPage />} />
@@ -299,10 +268,9 @@ export default function UserRouter() {
           <Route path="auth/otp" element={<OTP />} />
           <Route path="auth/callback" element={<AuthCallback />} />
 
-          {/* Help */}
-          <Route path="help" element={<Help />} />
+          <Route path="help" element={<Navigate to="/food/user/profile/support" replace />} />
+          <Route path="help/*" element={<Navigate to="/food/user/profile/support" replace />} />
           <Route path="support" element={<SupportInfo />} />
-          <Route path="help/orders/:orderId" element={<OrderHelp />} />
 
           {/* Notifications - Protected (user auth) */}
           <Route

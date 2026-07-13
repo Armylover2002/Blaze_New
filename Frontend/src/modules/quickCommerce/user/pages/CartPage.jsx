@@ -29,6 +29,7 @@ import { useLocation as useAppLocation } from '../context/LocationContext';
 import LocationDrawer from '../components/shared/LocationDrawer';
 import PharmacyMetaLines from '../components/pharmacy/PharmacyMetaLines';
 import { getVariantDisplayLabel } from '../components/pharmacy/pharmacyProductMeta';
+import { getRoadDistanceKm } from '@/shared/services/roadDistance';
 
 // ─── Pure helpers (outside component — no closure allocation on each render) ──
 

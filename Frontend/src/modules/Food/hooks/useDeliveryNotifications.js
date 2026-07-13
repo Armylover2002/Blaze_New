@@ -7,7 +7,65 @@ import originalSound from '@food/assets/audio/original.mp3';
 import { dispatchNotificationInboxRefresh } from '@food/hooks/useNotificationInbox';
 import { useDeliveryStore } from '@/modules/DeliveryV2/store/useDeliveryStore';
 import { isPorterParcelTrip, enrichPorterDeliveryOrder } from '@/modules/DeliveryV2/utils/orderRouting';
-import porterDriverApi from '@/modules/porter/driver/services/driverApi';
+import {
+  requestRecovery,
+  updateSyncPolicy,
+  invalidateRecoveryCache,
+} from '@/modules/DeliveryV2/services/deliveryOrderSync';
+
+/** StrictMode-safe shared socket: remount within same tick does not tear down. */
+let sharedDeliverySocket = null;
+let sharedDeliverySocketKey = null;
+let sharedDeliverySocketOwners = 0;
+let sharedDeliverySocketReleaseTimer = null;
+/** True only after a real disconnect — gates reconnect recovery (not initial connect). */
+let pendingRecoveryAfterDisconnect = false;
+
+function acquireSharedDeliverySocket(key, createFn) {
+  if (sharedDeliverySocketReleaseTimer) {
+    clearTimeout(sharedDeliverySocketReleaseTimer);
+    sharedDeliverySocketReleaseTimer = null;
+  }
+  if (sharedDeliverySocket && sharedDeliverySocketKey === key) {
+    sharedDeliverySocketOwners += 1;
+    return { socket: sharedDeliverySocket, reused: true };
+  }
+  if (sharedDeliverySocket) {
+    try {
+      sharedDeliverySocket.removeAllListeners();
+      sharedDeliverySocket.disconnect();
+    } catch {
+      // ignore
+    }
+    sharedDeliverySocket = null;
+    sharedDeliverySocketKey = null;
+    sharedDeliverySocketOwners = 0;
+  }
+  sharedDeliverySocket = createFn();
+  sharedDeliverySocketKey = key;
+  sharedDeliverySocketOwners = 1;
+  return { socket: sharedDeliverySocket, reused: false };
+}
+
+function releaseSharedDeliverySocket(socket) {
+  if (!socket || socket !== sharedDeliverySocket) return;
+  sharedDeliverySocketOwners = Math.max(0, sharedDeliverySocketOwners - 1);
+  if (sharedDeliverySocketOwners > 0) return;
+  sharedDeliverySocketReleaseTimer = setTimeout(() => {
+    sharedDeliverySocketReleaseTimer = null;
+    if (sharedDeliverySocketOwners > 0) return;
+    if (sharedDeliverySocket) {
+      try {
+        sharedDeliverySocket.removeAllListeners();
+        sharedDeliverySocket.disconnect();
+      } catch {
+        // ignore
+      }
+      sharedDeliverySocket = null;
+      sharedDeliverySocketKey = null;
+    }
+  }, 0);
+}
 
 const shouldLogDeliverySocket = () => {
   if (typeof window === 'undefined') return import.meta.env.DEV;
@@ -267,8 +325,15 @@ export const useDeliveryNotifications = () => {
   const [isConnected, setIsConnected] = useState(false);
   const [deliveryPartnerId, setDeliveryPartnerId] = useState(null);
   const [forcedOfflineEvent, setForcedOfflineEvent] = useState(null);
-  const activeVehicleId = useDeliveryStore(state => state.activeVehicleId);
   const joinedDeliveryRoomRef = useRef(null);
+  // Keep latest handlers in refs so the socket effect only depends on auth identity.
+  const recoverDeliveryStateRef = useRef(null);
+  const joinDeliveryRoomRef = useRef(null);
+  const handleIncomingOrderAlertRef = useRef(null);
+  const playNotificationSoundRef = useRef(null);
+  const showBackgroundOrderNotificationRef = useRef(null);
+  const startAlertLoopRef = useRef(null);
+  const stopAlertLoopRef = useRef(null);
   const ALERT_LOOP_INTERVAL_MS = 4500;
   const ALERT_LOOP_MAX_MS = 120000;
   const ALERT_DEDUPE_MS = 15000;
@@ -452,96 +517,50 @@ export const useDeliveryNotifications = () => {
     }
   }, [playNotificationSound, showBackgroundOrderNotification, startAlertLoop]);
 
-  const recoverDeliveryState = useCallback(async () => {
+  const recoverDeliveryState = useCallback(async (reason = 'reconnect') => {
     if (!deliveryPartnerId) return;
 
     try {
-      const porterActiveResult = await porterDriverApi.getActiveOrder().catch(() => null);
-      const porterOrder = porterActiveResult?.order || porterActiveResult;
-      if (porterOrder?.id || porterOrder?.orderId) {
-        const enriched = enrichPorterDeliveryOrder(porterOrder);
-        debugLog('Recovered active Porter parcel trip after reconnect/focus:', enriched);
-        setOrderStatusUpdate({
-          ...enriched,
-          documentType: 'porter_order',
-          module: 'parcel',
-          recoverySource: 'porter_reconnect',
-        });
-        return;
-      }
+      const result = await requestRecovery(reason);
+      if (!result || result.type === 'error' || result.type === 'skipped') return;
 
-      const [availableResult, currentTripResult] = await Promise.allSettled([
-        deliveryAPI.getOrders({ limit: 20, page: 1 }),
-        deliveryAPI.getCurrentDelivery(),
-      ]);
-
-      const currentTrip =
-        currentTripResult.status === 'fulfilled'
-          ? currentTripResult.value?.data?.data ??
-            currentTripResult.value?.data ??
-            null
-          : null;
-
-      if (currentTrip) {
-        if (isPorterParcelTrip(currentTrip)) {
-          debugLog('Ignoring Porter payload from Food current delivery API during recovery');
-        } else {
-          debugLog('Recovered current delivery trip after reconnect/focus:', currentTrip);
+      if (result.type === 'active') {
+        const porterOrder = result.porterOrder;
+        if (porterOrder?.id || porterOrder?.orderId) {
+          const enriched = enrichPorterDeliveryOrder(porterOrder);
+          debugLog('Recovered active Porter parcel trip after reconnect:', enriched);
           setOrderStatusUpdate({
-            ...currentTrip,
-            recoverySource: 'delivery_reconnect',
+            ...enriched,
+            documentType: 'porter_order',
+            module: 'parcel',
+            recoverySource: 'porter_reconnect',
           });
           return;
         }
-      }
 
-      const porterAvailableResult = await porterDriverApi.getAvailableOrders().catch(() => null);
-      const porterOffers = Array.isArray(porterAvailableResult?.orders)
-        ? porterAvailableResult.orders
-        : Array.isArray(porterAvailableResult)
-          ? porterAvailableResult
-          : [];
-      const recoverablePorterOrder = porterOffers.find((order) => isPorterParcelTrip(order));
-      if (recoverablePorterOrder && !activeOrderRef.current) {
-        const enriched = enrichPorterDeliveryOrder(recoverablePorterOrder);
-        debugLog('Recovered available Porter parcel order after reconnect/focus:', enriched);
-        setNewOrder(enriched);
-        handleIncomingOrderAlert(enriched);
+        const currentTrip = result.foodCurrent;
+        if (currentTrip) {
+          if (isPorterParcelTrip(currentTrip)) {
+            debugLog('Ignoring Porter payload from Food current delivery API during recovery');
+          } else {
+            debugLog('Recovered current delivery trip after reconnect:', currentTrip);
+            setOrderStatusUpdate({
+              ...currentTrip,
+              recoverySource: 'delivery_reconnect',
+            });
+          }
+        }
         return;
       }
 
-      const availablePayload =
-        availableResult.status === 'fulfilled'
-          ? availableResult.value?.data?.data ??
-            availableResult.value?.data ??
-            {}
-          : {};
-      const availableOrders = Array.isArray(availablePayload?.docs)
-        ? availablePayload.docs
-        : Array.isArray(availablePayload?.items)
-          ? availablePayload.items
-          : Array.isArray(availablePayload)
-            ? availablePayload
-            : [];
-
-      const recoverableOrder = availableOrders.find((order) => {
-        if (isPorterParcelTrip(order)) return false;
-        const dispatchStatus = order?.dispatch?.status;
-        return (
-          ['unassigned', 'assigned'].includes(dispatchStatus) &&
-          ['preparing', 'ready_for_pickup'].includes(order?.orderStatus)
-        );
-      });
-
-      if (recoverableOrder && !activeOrderRef.current) {
-        debugLog('Recovered available delivery order after reconnect/focus:', recoverableOrder);
-        setNewOrder(recoverableOrder);
-        handleIncomingOrderAlert(recoverableOrder);
+      // Available offers are owned by the poller — recovery no longer returns type 'available'.
+      if (result.type === 'idle') {
+        debugLog('Recovery idle — available poller owns offer fetches');
       }
     } catch (error) {
       debugWarn('Delivery recovery sync failed:', error?.message || error);
     }
-  }, [deliveryPartnerId, handleIncomingOrderAlert]);
+  }, [deliveryPartnerId]);
 
   const joinDeliveryRoomIfPossible = useCallback(() => {
     if (!socketRef.current?.connected || !deliveryPartnerId) {
@@ -559,7 +578,18 @@ export const useDeliveryNotifications = () => {
     socketRef.current.emit('join-delivery', deliveryPartnerId);
     joinedDeliveryRoomRef.current = deliveryPartnerId;
     return true;
-  }, [deliveryPartnerId, activeVehicleId]);
+  }, [deliveryPartnerId]);
+
+  // Keep refs current without putting handlers in the socket effect dependency list.
+  useEffect(() => {
+    recoverDeliveryStateRef.current = recoverDeliveryState;
+    joinDeliveryRoomRef.current = joinDeliveryRoomIfPossible;
+    handleIncomingOrderAlertRef.current = handleIncomingOrderAlert;
+    playNotificationSoundRef.current = playNotificationSound;
+    showBackgroundOrderNotificationRef.current = showBackgroundOrderNotification;
+    startAlertLoopRef.current = startAlertLoop;
+    stopAlertLoopRef.current = stopAlertLoop;
+  });
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -789,16 +819,19 @@ export const useDeliveryNotifications = () => {
     fetchDeliveryPartnerId();
   }, []);
 
-  // Socket connection effect (no backend when API_BASE_URL is empty)
+  // Socket connection effect — reconnect only when auth / partner identity changes.
+  // activeVehicleId and volatile handlers are intentionally excluded from deps.
   useEffect(() => {
+    if (!deliveryPartnerId) {
+      return;
+    }
+
     if (!API_BASE_URL || !String(API_BASE_URL).trim()) {
       setIsConnected(false);
       return;
     }
 
     // IMPORTANT: Socket.IO server is on the origin (not /api/v1).
-    // Our API baseURL is typically like: http://localhost:5000/api/v1
-    // So for sockets we always connect to: http://localhost:5000
     let backendUrl = API_BASE_URL;
     try {
       const base =
@@ -807,7 +840,6 @@ export const useDeliveryNotifications = () => {
           : (typeof window !== 'undefined' ? window.location.origin : undefined);
       backendUrl = new URL(backendUrl, base).origin;
     } catch {
-      // best-effort fallback: strip common API prefixes
       backendUrl = String(backendUrl || "")
         .replace(/\/api\/v\d+\/?$/i, "")
         .replace(/\/api\/?$/i, "")
@@ -817,109 +849,120 @@ export const useDeliveryNotifications = () => {
         backendUrl = window.location.origin;
       }
     }
-    
-    // Backend uses default namespace; rooms handle role separation.
+
     const socketUrl = `${backendUrl}`;
-    
+
     debugLog('?? Attempting to connect to Delivery Socket.IO:', socketUrl);
-    debugLog('?? Backend URL:', backendUrl);
-    debugLog('?? API_BASE_URL:', API_BASE_URL);
     debugLog('?? Delivery Partner ID:', deliveryPartnerId);
-    debugLog('?? Environment: (ui-only mode)');
-    
-    // Block localhost only in production builds. In dev, localhost is expected.
+
     if (import.meta.env.PROD && backendUrl.includes('localhost')) {
       debugError('? CRITICAL: Trying to connect Socket.IO to localhost in production!');
-      debugError('?? Current socketUrl:', socketUrl);
-      debugError('?? Current API_BASE_URL:', API_BASE_URL);
       setIsConnected(false);
       return;
     }
-    
-    // Validate backend URL format
+
     if (!backendUrl || !backendUrl.startsWith('http')) {
       debugError('? CRITICAL: Invalid backend URL format:', backendUrl);
-      debugError('?? API_BASE_URL:', API_BASE_URL);
-      debugError('?? Expected format: https://your-domain.com or ');
-      return; // Don't try to connect with invalid URL
+      return;
     }
-    
-    // Validate socket URL format
+
     try {
-      new URL(socketUrl); // This will throw if URL is invalid
+      new URL(socketUrl);
     } catch (urlError) {
-      debugError('? CRITICAL: Invalid Socket.IO URL:', socketUrl);
-      debugError('?? URL validation error:', urlError.message);
-      debugError('?? Backend URL:', backendUrl);
-      debugError('?? API_BASE_URL:', API_BASE_URL);
-      return; // Don't try to connect with invalid URL
+      debugError('? CRITICAL: Invalid Socket.IO URL:', socketUrl, urlError.message);
+      return;
     }
 
     const token = localStorage.getItem('delivery_accessToken') || localStorage.getItem('accessToken');
     const tokenPreview = token ? `${String(token).slice(0, 12)}...` : null;
+    // Snapshot vehicle id at connect time only — must not be an effect dependency.
+    const vehicleIdAtConnect = useDeliveryStore.getState().activeVehicleId;
+
     debugLog('Preparing socket auth payload', {
       tokenPresent: Boolean(token),
       tokenPreview,
       deliveryPartnerId,
-      activeVehicleId,
+      activeVehicleId: vehicleIdAtConnect,
       socketUrl,
     });
 
-    socketRef.current = io(socketUrl, {
-      path: '/socket.io/',
-      transports: ['polling', 'websocket'], // Allow both
-      reconnection: true,
-      reconnectionDelay: 1000,
-      reconnectionDelayMax: 5000,
-      reconnectionAttempts: Infinity,
-      timeout: 20000,
-      auth: {
-        token: token || ""
-      },
-      query: { 
-        ...(token ? { token } : {}),
-        ...(activeVehicleId ? { activeVehicleId } : {})
-      },
-    });
+    const socketKey = `${socketUrl}|${deliveryPartnerId || 'pending'}|${token ? 'authed' : 'anon'}`;
 
-    debugLog('Socket.IO client created', {
-      socketUrl,
-      path: '/socket.io/',
-      transports: ['polling', 'websocket'],
-      tokenPresent: Boolean(token),
-      tokenPreview,
-      deliveryPartnerId,
-    });
+    const { socket, reused } = acquireSharedDeliverySocket(socketKey, () =>
+      io(socketUrl, {
+        path: '/socket.io/',
+        transports: ['polling', 'websocket'],
+        reconnection: true,
+        reconnectionDelay: 1000,
+        reconnectionDelayMax: 5000,
+        reconnectionAttempts: Infinity,
+        timeout: 20000,
+        auth: {
+          token: token || "",
+        },
+        query: {
+          ...(token ? { token } : {}),
+          ...(vehicleIdAtConnect ? { activeVehicleId: vehicleIdAtConnect } : {}),
+        },
+      })
+    );
 
-    socketRef.current.on('connect', () => {
+    socketRef.current = socket;
+    if (reused) {
+      debugLog('Reusing shared delivery socket (StrictMode / remount safe)', {
+        socketId: socket.id,
+        connected: socket.connected,
+      });
+      // Drop prior effect listeners before re-binding (connection stays up).
+      socket.removeAllListeners();
+      if (socket.connected) {
+        setIsConnected(true);
+        updateSyncPolicy({ isSocketConnected: true });
+      }
+    } else {
+      debugLog('Socket.IO client created', {
+        socketUrl,
+        tokenPresent: Boolean(token),
+        deliveryPartnerId,
+      });
+    }
+
+    socket.on('connect', () => {
       debugLog('Socket connected', {
         socketId: socketRef.current?.id,
         deliveryPartnerId,
         transport: socketRef.current?.io?.engine?.transport?.name || 'unknown',
+        pendingRecoveryAfterDisconnect,
       });
       setIsConnected(true);
+      updateSyncPolicy({ isSocketConnected: true });
 
       joinedDeliveryRoomRef.current = null;
-      if (!joinDeliveryRoomIfPossible()) {
+      if (!joinDeliveryRoomRef.current?.()) {
         debugLog('Socket connected before deliveryPartnerId was ready; waiting to join room.');
       }
       debugLog('Requesting resync after connect', {
         deliveryPartnerId,
         socketId: socketRef.current?.id,
       });
-      socketRef.current.emit('resync');
-      void recoverDeliveryState();
+      socket.emit('resync');
+
+      // Initial connect: coldStart owns active-trip restore. Recover only after a real disconnect.
+      if (pendingRecoveryAfterDisconnect) {
+        pendingRecoveryAfterDisconnect = false;
+        void recoverDeliveryStateRef.current?.('reconnect');
+      }
     });
 
-    socketRef.current.on('delivery-room-joined', (data) => {
+    socket.on('delivery-room-joined', (data) => {
       debugLog('Delivery room joined successfully', data);
     });
 
-    socketRef.current.on('resync_complete', (data) => {
+    socket.on('resync_complete', (data) => {
       debugLog('Resync completed', data);
     });
 
-    socketRef.current.on('connect_error', (error) => {
+    socket.on('connect_error', (error) => {
       debugError('Socket connection error', {
         message: error?.message,
         type: error?.type,
@@ -934,23 +977,27 @@ export const useDeliveryNotifications = () => {
         transport: socketRef.current?.io?.engine?.transport?.name || 'unknown',
       });
       setIsConnected(false);
+      updateSyncPolicy({ isSocketConnected: false });
     });
 
-    socketRef.current.on('disconnect', (reason) => {
+    socket.on('disconnect', (reason) => {
       debugWarn('Socket disconnected', {
         reason,
         socketId: socketRef.current?.id,
         deliveryPartnerId,
       });
       setIsConnected(false);
+      updateSyncPolicy({ isSocketConnected: false });
       joinedDeliveryRoomRef.current = null;
-      
+      pendingRecoveryAfterDisconnect = true;
+      invalidateRecoveryCache('disconnect');
+
       if (reason === 'io server disconnect') {
-        socketRef.current.connect();
+        socket.connect();
       }
     });
 
-    socketRef.current.on('reconnect_attempt', (attemptNumber) => {
+    socket.on('reconnect_attempt', (attemptNumber) => {
       debugWarn('Reconnection attempt', {
         attemptNumber,
         socketUrl,
@@ -958,7 +1005,7 @@ export const useDeliveryNotifications = () => {
       });
     });
 
-    socketRef.current.on('reconnect', (attemptNumber) => {
+    socket.on('reconnect', (attemptNumber) => {
       debugLog('Socket reconnected', {
         attemptNumber,
         socketId: socketRef.current?.id,
@@ -966,14 +1013,21 @@ export const useDeliveryNotifications = () => {
         transport: socketRef.current?.io?.engine?.transport?.name || 'unknown',
       });
       setIsConnected(true);
+      updateSyncPolicy({ isSocketConnected: true });
 
       joinedDeliveryRoomRef.current = null;
-      joinDeliveryRoomIfPossible();
-      socketRef.current.emit('resync');
-      void recoverDeliveryState();
+      joinDeliveryRoomRef.current?.();
+      socket.emit('resync');
+
+      // Same gate as connect — only after an actual disconnect (avoid double recovery).
+      if (pendingRecoveryAfterDisconnect) {
+        pendingRecoveryAfterDisconnect = false;
+        invalidateRecoveryCache('reconnect');
+        void recoverDeliveryStateRef.current?.('reconnect');
+      }
     });
 
-    socketRef.current.on('new_order', (orderData) => {
+    socket.on('new_order', (orderData) => {
       if (isPorterParcelTrip(orderData)) {
         debugLog('Ignoring Porter payload on Food new_order channel', orderData);
         return;
@@ -987,11 +1041,10 @@ export const useDeliveryNotifications = () => {
         dispatchStatus: orderData?.dispatch?.status,
       });
       setNewOrder(orderData);
-      handleIncomingOrderAlert(orderData);
+      handleIncomingOrderAlertRef.current?.(orderData);
     });
 
-    // Listen for priority-based order notifications (new_order_available)
-    socketRef.current.on('new_order_available', (orderData) => {
+    socket.on('new_order_available', (orderData) => {
       if (isPorterParcelTrip(orderData)) {
         debugLog('Ignoring Porter payload on Food new_order_available channel', orderData);
         return;
@@ -1005,12 +1058,11 @@ export const useDeliveryNotifications = () => {
         phase: orderData?.phase || 'unknown',
         dispatchStatus: orderData?.dispatch?.status,
       });
-      // Treat it the same as new_order for now - delivery boy can accept it
       setNewOrder(orderData);
-      handleIncomingOrderAlert(orderData);
+      handleIncomingOrderAlertRef.current?.(orderData);
     });
 
-    socketRef.current.on('porter_order_available', (orderData) => {
+    socket.on('porter_order_available', (orderData) => {
       if (!isActionableDeliveryOffer(orderData)) {
         debugLog('Ignoring non-actionable porter_order_available event', orderData);
         return;
@@ -1024,10 +1076,10 @@ export const useDeliveryNotifications = () => {
         documentType: 'porter_order',
       });
       setNewOrder(enriched);
-      handleIncomingOrderAlert(enriched);
+      handleIncomingOrderAlertRef.current?.(enriched);
     });
 
-    socketRef.current.on('porter_play_notification_sound', (data) => {
+    socket.on('porter_play_notification_sound', (data) => {
       const normalizedData = {
         orderId: data?.orderId,
         orderMongoId: data?.orderMongoId || data?.orderId,
@@ -1035,10 +1087,11 @@ export const useDeliveryNotifications = () => {
         module: 'parcel',
         ...data,
       };
-      handleIncomingOrderAlert(normalizedData);
+      handleIncomingOrderAlertRef.current?.(normalizedData);
     });
 
-    socketRef.current.on('porter_order_status', (statusData) => {
+    socket.on('porter_order_status', (statusData) => {
+      invalidateRecoveryCache('order-status');
       setOrderStatusUpdate(enrichPorterDeliveryOrder({
         ...statusData,
         documentType: 'porter_order',
@@ -1046,7 +1099,8 @@ export const useDeliveryNotifications = () => {
       }));
     });
 
-    socketRef.current.on('porter_order_cancelled', (statusData) => {
+    socket.on('porter_order_cancelled', (statusData) => {
+      invalidateRecoveryCache('order-status');
       setOrderStatusUpdate({
         ...enrichPorterDeliveryOrder({
           ...statusData,
@@ -1057,7 +1111,7 @@ export const useDeliveryNotifications = () => {
       });
     });
 
-    socketRef.current.on('play_notification_sound', (data) => {
+    socket.on('play_notification_sound', (data) => {
       const normalizedData = {
         orderId: data?.orderId || data?.order_id,
         orderMongoId: data?.orderMongoId || data?.order_mongo_id,
@@ -1084,26 +1138,26 @@ export const useDeliveryNotifications = () => {
         orderId: normalizedData?.orderId || normalizedData?.orderMongoId || normalizedData?.order_id,
       });
 
-      // Force immediate buzz for valid notification events, even if dedupe would skip.
       activeOrderRef.current = normalizedData || { id: Date.now() };
-      playNotificationSound(normalizedData);
-      startAlertLoop(playNotificationSound);
+      playNotificationSoundRef.current?.(normalizedData);
+      startAlertLoopRef.current?.(playNotificationSoundRef.current);
       if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
-        showBackgroundOrderNotification(normalizedData);
+        showBackgroundOrderNotificationRef.current?.(normalizedData);
       }
-      handleIncomingOrderAlert(normalizedData);
+      handleIncomingOrderAlertRef.current?.(normalizedData);
     });
 
-    socketRef.current.on('order_ready', (orderData) => {
+    socket.on('order_ready', (orderData) => {
       debugLog('order_ready received via socket', {
         orderId: orderData?.orderId || orderData?.orderMongoId || orderData?._id,
       });
       setOrderReady(orderData);
-      playNotificationSound(orderData);
+      playNotificationSoundRef.current?.(orderData);
     });
 
-    socketRef.current.on('order_status_update', (statusData) => {
+    socket.on('order_status_update', (statusData) => {
       debugLog('?? Delivery order status update received via socket:', statusData);
+      invalidateRecoveryCache('order-status');
       const statusOrderId = String(
         statusData?.orderId || statusData?.orderMongoId || ''
       ).trim();
@@ -1116,70 +1170,72 @@ export const useDeliveryNotifications = () => {
         statusKey &&
         statusKey === activeKey
       ) {
-        stopAlertLoop();
+        stopAlertLoopRef.current?.();
         activeOrderRef.current = null;
         setNewOrder(null);
       }
       setOrderStatusUpdate(statusData || null);
     });
 
-    socketRef.current.on('order_cancelled', (statusData) => {
+    socket.on('order_cancelled', (statusData) => {
       debugLog('?? Delivery order cancelled event received via socket:', statusData);
+      invalidateRecoveryCache('order-status');
       setOrderStatusUpdate({
         ...(statusData || {}),
         status: 'cancelled'
       });
     });
 
-    socketRef.current.on('order_deleted', (statusData) => {
+    socket.on('order_deleted', (statusData) => {
       debugLog('?? Delivery order deleted event received via socket:', statusData);
+      invalidateRecoveryCache('order-status');
       setOrderStatusUpdate({
         ...(statusData || {}),
         status: 'deleted'
       });
     });
 
-    socketRef.current.on('order_reassigned_elsewhere', (data) => {
+    socket.on('order_reassigned_elsewhere', (data) => {
       debugLog('?? Order reassigned to another partner:', data);
+      invalidateRecoveryCache('order-status');
       const eventKey = getOrderAlertKey(data || {});
       const activeKey = getOrderAlertKey(activeOrderRef.current || {});
       if (eventKey && eventKey === activeKey) {
         debugLog('?? Removing reassigned order from local state');
-        stopAlertLoop();
+        stopAlertLoopRef.current?.();
         activeOrderRef.current = null;
         setNewOrder(null);
       }
     });
 
-    socketRef.current.on('forced_offline', (data) => {
+    socket.on('forced_offline', (data) => {
       debugLog('?? Forced offline received via socket:', data);
       setForcedOfflineEvent(data || { reason: 'UNKNOWN' });
-      playNotificationSound();
+      playNotificationSoundRef.current?.();
     });
 
-    socketRef.current.on('order_claimed', (data) => {
+    socket.on('order_claimed', (data) => {
       debugLog('?? Order claimed by another partner:', data);
+      invalidateRecoveryCache('order-status');
       const eventKey = getOrderAlertKey(data || {});
       const activeKey = getOrderAlertKey(activeOrderRef.current || {});
       if (eventKey && eventKey === activeKey) {
-        stopAlertLoop();
+        stopAlertLoopRef.current?.();
         activeOrderRef.current = null;
         setNewOrder(null);
       }
     });
 
-    socketRef.current.on('admin_notification', (payload) => {
+    socket.on('admin_notification', (payload) => {
       debugLog('Admin broadcast received via socket', payload);
       dispatchNotificationInboxRefresh();
     });
 
-    // Auth change/refresh listeners
     const handleAuthChange = () => {
       const newToken = localStorage.getItem('delivery_accessToken') || localStorage.getItem('accessToken');
       if (socketRef.current && newToken) {
         debugLog('?? Auth changed, updating socket token');
         socketRef.current.auth.token = newToken;
-        // Only reconnect if not already connecting/connected or if token changed significantly
         if (!socketRef.current.connected) {
           socketRef.current.connect();
         }
@@ -1196,36 +1252,35 @@ export const useDeliveryNotifications = () => {
       }
     };
 
-    const handleWindowFocus = () => {
-      void recoverDeliveryState();
-    };
-
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        void recoverDeliveryState();
-      }
-    };
+    // Focus must NOT trigger recovery — coldStart + reconnect-after-disconnect + refreshActiveTrip cover it.
 
     window.addEventListener('deliveryAuthChanged', handleAuthChange);
     window.addEventListener('authRefreshed', handleAuthRefreshed);
-    window.addEventListener('focus', handleWindowFocus);
-    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    // If we reused an already-connected socket, still join once (no recovery).
+    if (reused && socket.connected) {
+      joinDeliveryRoomRef.current?.();
+    }
 
     return () => {
-      debugLog('? Cleaning up socket connection...');
-      stopAlertLoop();
+      debugLog('? Releasing socket ownership (StrictMode-safe)...');
+      stopAlertLoopRef.current?.();
       joinedDeliveryRoomRef.current = null;
       window.removeEventListener('deliveryAuthChanged', handleAuthChange);
       window.removeEventListener('authRefreshed', handleAuthRefreshed);
-      window.removeEventListener('focus', handleWindowFocus);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      if (socketRef.current) {
-        socketRef.current.removeAllListeners();
-        socketRef.current.disconnect();
+      // Detach listeners immediately so an unmounted owner cannot receive events;
+      // connection teardown is deferred for StrictMode remount reuse.
+      try {
+        socket.removeAllListeners();
+      } catch {
+        // ignore
+      }
+      releaseSharedDeliverySocket(socket);
+      if (socketRef.current === socket) {
         socketRef.current = null;
       }
     };
-  }, [deliveryPartnerId, activeVehicleId, handleIncomingOrderAlert, joinDeliveryRoomIfPossible, playNotificationSound, recoverDeliveryState, showBackgroundOrderNotification, startAlertLoop, stopAlertLoop]);
+  }, [deliveryPartnerId]);
 
   useEffect(() => {
     if (!deliveryPartnerId) {
@@ -1241,9 +1296,10 @@ export const useDeliveryNotifications = () => {
         socketId: socketRef.current?.id,
       });
       socketRef.current.emit('resync');
-      void recoverDeliveryState();
+      // Recovery is owned by the socket connect/reconnect handlers (forced).
+      // Avoid a second forced recovery when partner id lands on an already-connected socket.
     }
-  }, [deliveryPartnerId, joinDeliveryRoomIfPossible, recoverDeliveryState]);
+  }, [deliveryPartnerId, joinDeliveryRoomIfPossible]);
 
   // Helper functions
   const clearNewOrder = () => {

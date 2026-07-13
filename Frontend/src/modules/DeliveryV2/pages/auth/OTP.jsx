@@ -235,9 +235,42 @@ export default function DeliveryOTP() {
         sessionStorage.removeItem("deliveryAuthData")
         setIsLoading(false)
         setError("")
-        setPendingMessage(data.message || "Your account is pending admin verification. You will be notified once approved.")
+        setPendingMessage(data.message || "Your onboarding request is under review. Your documents are currently being verified. You will receive approval once reviewed by admin.")
         setIsRejected(data.isRejected || false)
         setRejectionReason(data.rejectionReason || "")
+
+        if (data.isRejected) {
+          const rejectionContext = {
+            rejectionReason: data.rejectionReason || "",
+            rejectedAt: data.rejectedAt || null,
+            rejectedBy: data.rejectedBy || null,
+            partnerId: data.partnerId || null,
+            phone: data.phone || phone,
+            latestSubmissionId: data.latestSubmissionId || null,
+            rejectedSubmission: data.rejectedSubmission || null,
+          }
+          sessionStorage.setItem(
+            "deliveryRejectionContext",
+            JSON.stringify(rejectionContext)
+          )
+          navigate("/food/delivery/onboarding/rejected", {
+            replace: true,
+            state: { rejection: rejectionContext },
+          })
+        } else {
+          // Pending (not rejected): dedicated verification screen — no JWT.
+          const digits = String(phone || "").replace(/\D/g, "").slice(-10)
+          if (digits) {
+            sessionStorage.setItem("deliveryPendingPhone", digits)
+          }
+          navigate("/food/delivery/verification", {
+            replace: true,
+            state: {
+              phone: digits || phone,
+              message: data.message || "",
+            },
+          })
+        }
         return
       }
 

@@ -101,11 +101,33 @@ export const api = {
 let userMeInFlight = null;
 let userMeCached = null;
 let userMeCacheTime = 0;
+let userMeCacheToken = null;
 const USER_ME_CACHE_MS = 60 * 1000;
+
+const getUserAccessToken = () =>
+  (typeof localStorage !== "undefined" &&
+    (localStorage.getItem("user_accessToken") ||
+      localStorage.getItem("auth_customer") ||
+      localStorage.getItem("accessToken"))) ||
+  null;
+
+/** Clear /me cache on logout or account switch so COD / profile flags cannot leak across sessions. */
+export const invalidateUserMeCache = () => {
+  userMeCached = null;
+  userMeCacheTime = 0;
+  userMeCacheToken = null;
+  userMeInFlight = null;
+};
 
 const getUserMeOnce = () => {
   const now = Date.now();
-  if (userMeCached && now - userMeCacheTime < USER_ME_CACHE_MS) {
+  const token = getUserAccessToken();
+  if (
+    userMeCached &&
+    userMeCacheToken === token &&
+    token &&
+    now - userMeCacheTime < USER_ME_CACHE_MS
+  ) {
     return Promise.resolve(userMeCached);
   }
   if (!userMeInFlight) {
@@ -114,6 +136,7 @@ const getUserMeOnce = () => {
       .then((res) => {
         userMeCached = res;
         userMeCacheTime = Date.now();
+        userMeCacheToken = getUserAccessToken();
         return res;
       })
       .finally(() => {
@@ -319,6 +342,10 @@ export const adminAPI = {
       params,
       contextModule: "admin",
     }),
+  getDeliveryPartnerSubmissions: (id) =>
+    apiClient.get(`/food/admin/delivery/${id}/submissions`, {
+      contextModule: "admin",
+    }),
   /** List approved delivery partners (Deliveryman List page) */
   getDeliveryPartners: (params) =>
     apiClient.get("/food/admin/delivery/partners", {
@@ -471,35 +498,6 @@ export const adminAPI = {
   /** Categories (admin) */
   getCategories: (params = {}) =>
     apiClient.get("/food/admin/categories", { params, contextModule: "admin" }),
-  /** Dining categories (admin) */
-  getDiningCategories: (params = {}) =>
-    apiClient.get("/food/admin/dining/categories", {
-      params,
-      contextModule: "admin",
-    }),
-  createDiningCategory: (body) =>
-    apiClient.post("/food/admin/dining/categories", body ?? {}, {
-      contextModule: "admin",
-    }),
-  updateDiningCategory: (id, body) =>
-    apiClient.patch(`/food/admin/dining/categories/${String(id)}`, body ?? {}, {
-      contextModule: "admin",
-    }),
-  deleteDiningCategory: (id) =>
-    apiClient.delete(`/food/admin/dining/categories/${String(id)}`, {
-      contextModule: "admin",
-    }),
-  getDiningRestaurants: (params = {}) =>
-    apiClient.get("/food/admin/dining/restaurants", {
-      params,
-      contextModule: "admin",
-    }),
-  updateRestaurantDiningSettings: (restaurantId, body) =>
-    apiClient.patch(
-      `/food/admin/dining/restaurants/${String(restaurantId)}`,
-      body ?? {},
-      { contextModule: "admin" },
-    ),
   createCategory: (body) =>
     apiClient.post("/food/admin/categories", body ?? {}, {
       contextModule: "admin",
@@ -659,6 +657,8 @@ export const adminAPI = {
       },
       { contextModule: "admin" },
     ),
+  /** Alias — same as supportAPI.getSupportTicketsAdmin */
+  getSupportTicketsAdmin: (params = {}) => supportAPI.getSupportTicketsAdmin(params),
   /** Orders (admin) – list, get by id, assign delivery partner */
   getOrders: (params = {}) =>
     apiClient.get("/food/admin/orders", {
@@ -824,7 +824,11 @@ export const adminAPI = {
   /** Delivery Partner Bonus (admin) */
   getDeliveryPartnerBonusTransactions: (params = {}) =>
     apiClient.get("/food/admin/delivery/bonus-transactions", {
-      params,
+      params: {
+        page: params.page ?? 1,
+        limit: Math.min(Number(params.limit) || 20, 100),
+        ...(params.search ? { search: String(params.search).trim() } : {}),
+      },
       contextModule: "admin",
     }),
   /** Delivery Earnings (admin) */
@@ -833,15 +837,21 @@ export const adminAPI = {
       params,
       contextModule: "admin",
     }),
-  addDeliveryPartnerBonus: (deliveryPartnerId, amount, reference = "") =>
+  addDeliveryPartnerBonus: (deliveryPartnerId, amount, reference = "", idempotencyKey = null) =>
     apiClient.post(
       "/food/admin/delivery/bonus",
       {
         deliveryPartnerId: String(deliveryPartnerId),
         amount: Number(amount),
         reference: String(reference || ""),
+        ...(idempotencyKey ? { idempotencyKey: String(idempotencyKey) } : {}),
       },
-      { contextModule: "admin" },
+      {
+        contextModule: "admin",
+        headers: idempotencyKey
+          ? { "Idempotency-Key": String(idempotencyKey) }
+          : undefined,
+      },
     ),
 
   /** Earning Addon Offers (admin) */
@@ -1187,16 +1197,6 @@ export const restaurantAPI = {
       })
       .then((res) => {
         // Keep cache coherent to avoid an immediate refetch storm.
-        restaurantCurrentCached = res;
-        restaurantCurrentCacheTime = Date.now();
-        return res;
-      }),
-  updateDiningSettings: (body) =>
-    apiClient
-      .patch("/food/restaurant/dining-settings", body ?? {}, {
-        contextModule: "restaurant",
-      })
-      .then((res) => {
         restaurantCurrentCached = res;
         restaurantCurrentCacheTime = Date.now();
         return res;
@@ -2117,6 +2117,23 @@ export const deliveryAPI = {
       return inFlight;
     };
   })(),
+  /** Public catalog of active vehicles for delivery signup. */
+  getSignupVehicles: (() => {
+    let inFlight = null;
+    return () => {
+      // Dedupe concurrent calls only — always hit network so admin adds appear immediately.
+      if (inFlight) return inFlight;
+      inFlight = apiClient
+        .get("/food/delivery/signup/vehicles", {
+          contextModule: "delivery",
+          params: { _ts: Date.now() },
+        })
+        .finally(() => {
+          inFlight = null;
+        });
+      return inFlight;
+    };
+  })(),
   setActiveVehicle: (vehicleId) => {
     deliveryMeCached = null;
     deliveryMeCacheTime = 0;
@@ -2229,8 +2246,19 @@ export const deliveryAPI = {
       return p;
     };
   })(),
-  /** GET /food/delivery/current - fallback for some UI hooks */
-  getCurrentDelivery: () => apiClient.get("/food/delivery/orders/current", { contextModule: "delivery" }),
+  /** GET /food/delivery/orders/current — in-flight dedupe for sync/recovery overlap. */
+  getCurrentDelivery: (() => {
+    let inFlight = null;
+    return () => {
+      if (inFlight) return inFlight;
+      inFlight = apiClient
+        .get("/food/delivery/orders/current", { contextModule: "delivery" })
+        .finally(() => {
+          inFlight = null;
+        });
+      return inFlight;
+    };
+  })(),
   acceptOrder: (orderId, body = {}) =>
     apiClient.patch(
       `/food/delivery/orders/${String(orderId)}/accept`,
@@ -2924,376 +2952,6 @@ export const orderAPI = {
     ),
 };
 
-const DINING_BOOKINGS_STORAGE_KEY = "food_dining_bookings_v1";
-
-const safeJsonParse = (value, fallback) => {
-  try {
-    return JSON.parse(value);
-  } catch {
-    return fallback;
-  }
-};
-
-const getStoredBookings = () => {
-  if (typeof localStorage === "undefined") return [];
-  const parsed = safeJsonParse(
-    localStorage.getItem(DINING_BOOKINGS_STORAGE_KEY) || "[]",
-    [],
-  );
-  return Array.isArray(parsed) ? parsed : [];
-};
-
-const saveStoredBookings = (bookings) => {
-  if (typeof localStorage === "undefined") return;
-  localStorage.setItem(
-    DINING_BOOKINGS_STORAGE_KEY,
-    JSON.stringify(Array.isArray(bookings) ? bookings : []),
-  );
-};
-
-const getStoredModuleUser = (module) => {
-  if (typeof localStorage === "undefined") return null;
-  const parsed = safeJsonParse(
-    localStorage.getItem(`${module}_user`) || "null",
-    null,
-  );
-  return parsed && typeof parsed === "object" ? parsed : null;
-};
-
-const normalizeName = (restaurant) =>
-  restaurant?.name || restaurant?.restaurantName || "Restaurant";
-
-const normalizeRestaurantShape = (restaurant) => {
-  if (!restaurant || typeof restaurant !== "object") return null;
-  return {
-    _id: restaurant?._id || restaurant?.id || null,
-    id: restaurant?.id || restaurant?._id || null,
-    restaurantId: restaurant?.restaurantId || restaurant?._id || restaurant?.id || null,
-    restaurantNameNormalized:
-      restaurant?.restaurantNameNormalized || restaurant?.slug || "",
-    slug: restaurant?.slug || "",
-    name: normalizeName(restaurant),
-    restaurantName: restaurant?.restaurantName || normalizeName(restaurant),
-    profileImage: restaurant?.profileImage || null,
-    coverImages: Array.isArray(restaurant?.coverImages)
-      ? restaurant.coverImages
-      : [],
-    menuImages: Array.isArray(restaurant?.menuImages) ? restaurant.menuImages : [],
-    image:
-      restaurant?.coverImages?.[0]?.url ||
-      restaurant?.coverImages?.[0] ||
-      restaurant?.menuImages?.[0]?.url ||
-      restaurant?.menuImages?.[0] ||
-      restaurant?.image ||
-      restaurant?.profileImage?.url ||
-      (typeof restaurant?.profileImage === "string"
-        ? restaurant.profileImage
-        : ""),
-    location: restaurant?.location || null,
-  };
-};
-
-const collectRestaurantBookingKeys = (restaurantCandidate) => {
-  if (!restaurantCandidate) return [];
-
-  const raw =
-    typeof restaurantCandidate === "object"
-      ? restaurantCandidate
-      : { _id: restaurantCandidate, id: restaurantCandidate, restaurantId: restaurantCandidate };
-
-  const values = [
-    raw?._id,
-    raw?.id,
-    raw?.restaurantId,
-    raw?.slug,
-    raw?.restaurantNameNormalized,
-    raw?.restaurant?._id,
-    raw?.restaurant?.id,
-    raw?.restaurant?.restaurantId,
-    raw?.restaurant?.slug,
-    raw?.restaurant?.restaurantNameNormalized,
-  ];
-
-  return Array.from(
-    new Set(
-      values
-        .map((value) => String(value || "").trim())
-        .filter(Boolean),
-    ),
-  );
-};
-
-const buildLocalBookingId = () =>
-  `dbook_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-
-const buildDisplayBookingId = () => `TB${Date.now().toString().slice(-8)}`;
-
-const getCurrentUserForBookings = async () => {
-  const storedUser = getStoredModuleUser("user");
-  if (storedUser) return storedUser;
-
-  try {
-    const me = await getUserMeOnce();
-    return me?.data?.data?.user || me?.data?.user || me?.data?.data || null;
-  } catch {
-    return null;
-  }
-};
-
-const normalizeBookingUser = (candidate) => {
-  if (!candidate || typeof candidate !== "object") return null;
-  const name = String(candidate?.name || candidate?.fullName || "").trim();
-  const phone = String(
-    candidate?.phone || candidate?.mobile || candidate?.phoneNumber || "",
-  ).trim();
-  const email = String(candidate?.email || "").trim();
-
-  return {
-    _id: candidate?._id || candidate?.id || null,
-    id: candidate?.id || candidate?._id || null,
-    name,
-    phone,
-    email,
-  };
-};
-
-const byLatest = (a, b) =>
-  new Date(b?.createdAt || b?.date || 0).getTime() -
-  new Date(a?.createdAt || a?.date || 0).getTime();
-
-export const diningAPI = {
-  getCategories: (params = {}) =>
-    apiClient.get("/food/dining/categories/public", { params }),
-  getRestaurants: (params = {}) => {
-    const normalizedParams = { ...(params || {}) };
-    if (!normalizedParams.zoneId && typeof window !== "undefined") {
-      const storedZoneId = window.localStorage?.getItem("userZoneId");
-      if (storedZoneId) {
-        normalizedParams.zoneId = storedZoneId;
-      }
-    }
-    return apiClient.get("/food/dining/restaurants/public", {
-      params: normalizedParams,
-    });
-  },
-  getHeroBanners: () => apiClient.get("/food/hero-banners/dining/public"),
-  getRestaurantBySlug: (slug) =>
-    apiClient.get(`/food/restaurant/restaurants/${String(slug)}`),
-  getOfferBanners: () => Promise.resolve({ data: { success: true, data: [] } }),
-  getStories: () => Promise.resolve({ data: { success: true, data: [] } }),
-  getBankOffers: () => Promise.resolve({ data: { success: true, data: [] } }),
-  getBookings: async () => {
-    const bookings = getStoredBookings();
-    const user = await getCurrentUserForBookings();
-
-    const userId = user?._id || user?.id || null;
-    const userPhone = String(user?.phone || "").trim();
-    const userEmail = String(user?.email || "")
-      .trim()
-      .toLowerCase();
-
-    const filtered = bookings
-      .filter((booking) => {
-        if (userId) {
-          return (
-            String(booking?.userId || "") === String(userId) ||
-            String(booking?.user?._id || booking?.user?.id || "") ===
-              String(userId)
-          );
-        }
-
-        if (userPhone) {
-          return String(booking?.user?.phone || "").trim() === userPhone;
-        }
-
-        if (userEmail) {
-          return (
-            String(booking?.user?.email || "")
-              .trim()
-              .toLowerCase() === userEmail
-          );
-        }
-
-        return false;
-      })
-      .sort(byLatest);
-
-    return Promise.resolve({ data: { success: true, data: filtered } });
-  },
-  getRestaurantBookings: (restaurantRef) => {
-    const keys = collectRestaurantBookingKeys(restaurantRef);
-    const bookings = getStoredBookings();
-
-    const filtered = bookings
-      .filter((booking) => {
-        if (keys.length === 0) return false;
-        const bookingKeys = collectRestaurantBookingKeys({
-          restaurantId: booking?.restaurantId,
-          ...(booking?.restaurant && typeof booking.restaurant === "object"
-            ? booking.restaurant
-            : {}),
-        });
-        return bookingKeys.some((value) => keys.includes(value));
-      })
-      .sort(byLatest);
-
-    return Promise.resolve({ data: { success: true, data: filtered } });
-  },
-  updateBookingStatusRestaurant: (bookingId, status) => {
-    const id = String(bookingId || "").trim();
-    const nextStatus = String(status || "")
-      .trim()
-      .toLowerCase();
-    const bookings = getStoredBookings();
-
-    const next = bookings.map((booking) => {
-      const bookingKey = String(booking?._id || booking?.id || "");
-      if (bookingKey !== id) return booking;
-      return {
-        ...booking,
-        status: nextStatus || booking?.status || "confirmed",
-        updatedAt: new Date().toISOString(),
-      };
-    });
-
-    saveStoredBookings(next);
-    const updated =
-      next.find(
-        (booking) => String(booking?._id || booking?.id || "") === id,
-      ) || null;
-
-    return Promise.resolve({
-      data: { success: Boolean(updated), data: updated },
-    });
-  },
-  createReview: (payload = {}) => {
-    const bookingId = String(payload?.bookingId || "").trim();
-    if (!bookingId) {
-      return Promise.resolve({
-        data: { success: false, message: "bookingId is required", data: null },
-      });
-    }
-
-    const bookings = getStoredBookings();
-    const next = bookings.map((booking) => {
-      const bookingKey = String(booking?._id || booking?.id || "");
-      if (bookingKey !== bookingId) return booking;
-      return {
-        ...booking,
-        review: {
-          rating: Number(payload?.rating || 0),
-          comment: String(payload?.comment || "").trim(),
-          createdAt: new Date().toISOString(),
-        },
-        updatedAt: new Date().toISOString(),
-      };
-    });
-
-    saveStoredBookings(next);
-    const updated =
-      next.find(
-        (booking) => String(booking?._id || booking?.id || "") === bookingId,
-      ) || null;
-
-    return Promise.resolve({
-      data: { success: Boolean(updated), data: updated },
-    });
-  },
-  createBooking: async (payload = {}) => {
-    const restaurantId = String(
-      payload?.restaurant ||
-        payload?.restaurantId ||
-        payload?.restaurantRef?._id ||
-        payload?.restaurantRef?.id ||
-        payload?.restaurantRef?.restaurant?._id ||
-        payload?.restaurantRef?.restaurant?.id ||
-        payload?.restaurant?._id ||
-        payload?.restaurant?.id ||
-        "",
-    ).trim();
-
-    if (!restaurantId) {
-      return Promise.resolve({
-        data: {
-          success: false,
-          message: "Restaurant is required",
-          data: null,
-        },
-      });
-    }
-
-    let restaurantData =
-      normalizeRestaurantShape(payload?.restaurantRef) ||
-      normalizeRestaurantShape(payload?.restaurant?.restaurant) ||
-      normalizeRestaurantShape(payload?.restaurant);
-    if (!restaurantData) {
-      try {
-        const restaurantRes = await apiClient.get(
-          `/food/restaurant/restaurants/${String(restaurantId)}`,
-        );
-        const rawRestaurant =
-          restaurantRes?.data?.data?.restaurant ||
-          restaurantRes?.data?.data ||
-          null;
-        restaurantData = normalizeRestaurantShape(rawRestaurant);
-      } catch {
-        restaurantData = {
-          _id: restaurantId,
-          id: restaurantId,
-          name: "Restaurant",
-          restaurantName: "Restaurant",
-          profileImage: null,
-          image: "",
-          location: null,
-          slug: "",
-        };
-      }
-    }
-
-    const payloadUser = normalizeBookingUser(payload?.userRef || payload?.user);
-    const resolvedUser =
-      payloadUser ||
-      normalizeBookingUser(await getCurrentUserForBookings()) ||
-      null;
-    const nowIso = new Date().toISOString();
-    const localBookingId = buildLocalBookingId();
-
-    const booking = {
-      _id: localBookingId,
-      id: localBookingId,
-      bookingId: buildDisplayBookingId(),
-      restaurantId,
-      restaurant: restaurantData,
-      userId: resolvedUser?._id || resolvedUser?.id || null,
-      user: {
-        _id: resolvedUser?._id || resolvedUser?.id || null,
-        id: resolvedUser?.id || resolvedUser?._id || null,
-        name: resolvedUser?.name || "Guest",
-        phone: resolvedUser?.phone || "",
-        email: resolvedUser?.email || "",
-      },
-      guests: Math.max(1, Number(payload?.guests) || 1),
-      date: new Date(payload?.date || nowIso).toISOString(),
-      timeSlot: String(payload?.timeSlot || "").trim(),
-      specialRequest: String(payload?.specialRequest || "").trim(),
-      status: "pending",
-      createdAt: nowIso,
-      updatedAt: nowIso,
-    };
-
-    const bookings = getStoredBookings();
-    const next = [booking, ...bookings].sort(byLatest);
-    saveStoredBookings(next);
-
-    return Promise.resolve({
-      data: {
-        success: true,
-        message: "Booking created successfully",
-        data: booking,
-      },
-    });
-  },
-};
 export const mediaAPI = {
   getSharedMedia: (params = {}) =>
     apiClient.get("/media/shared", { params, contextModule: "restaurant" }),

@@ -4,7 +4,7 @@ import { CheckCircle2, Truck } from 'lucide-react';
 import { useDeliveryStore } from '@/modules/DeliveryV2/store/useDeliveryStore';
 import { deliveryAPI } from '@food/api';
 import { toast } from 'sonner';
-import { getApprovedVehicles, extractVehiclePayload } from '@/modules/DeliveryV2/utils/deliveryPartnerSync';
+import { getApprovedVehicles, extractVehiclePayload, getVehicleDisplayName, getVehicleIconUrl } from '@/modules/DeliveryV2/utils/deliveryPartnerSync';
 
 const SERVICE_LABELS = {
   food: 'Food',
@@ -104,6 +104,8 @@ export default function VehicleSwitcherSheet({
               const isActive = vId === activeVehicleId;
               const master = vehicle.master || vehicle;
               const services = vehicle.supportedServices || master.supportedServices || [];
+              const displayName = getVehicleDisplayName(vehicle);
+              const iconSrc = getVehicleIconUrl(vehicle);
 
               return (
                 <button
@@ -114,15 +116,15 @@ export default function VehicleSwitcherSheet({
                 >
                   <div className="flex items-center gap-4">
                     <div className="w-12 h-12 bg-white/10 rounded-xl flex items-center justify-center shrink-0 overflow-hidden">
-                      {master.image || vehicle.iconUrl ? (
-                        <img src={master.image || vehicle.iconUrl} alt="" className="w-8 h-8 object-contain" />
+                      {iconSrc ? (
+                        <img src={iconSrc} alt={displayName} className="w-8 h-8 object-contain" />
                       ) : (
                         <Truck className="w-6 h-6 text-white/50" />
                       )}
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between mb-1 gap-2">
-                        <h3 className="text-white font-bold truncate">{master.name || vehicle.vehicleName || 'Vehicle'}</h3>
+                        <h3 className="text-white font-bold truncate capitalize">{displayName}</h3>
                         <div className="flex items-center gap-1 shrink-0">
                           {vehicle.isDefault && (
                             <span className="text-[9px] bg-blue-500/20 text-blue-300 px-1.5 py-0.5 rounded font-bold uppercase">Default</span>

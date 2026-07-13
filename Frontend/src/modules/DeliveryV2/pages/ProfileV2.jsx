@@ -18,6 +18,7 @@ import {
 import { deliveryAPI } from "@food/api"
 import { toast } from "sonner"
 import { clearModuleAuth } from "@food/utils/auth"
+import { stopAllSync } from "@/modules/DeliveryV2/services/deliveryOrderSync"
 import VehicleSwitcherSheet from '@/modules/DeliveryV2/components/modals/VehicleSwitcherSheet'
 
 /**
@@ -87,6 +88,7 @@ export const ProfileV2 = () => {
     } catch (error) {}
     clearModuleAuth("delivery")
     localStorage.removeItem("app:isOnline")
+    stopAllSync()
     toast.success("Logged out successfully")
     navigate("/food/delivery/login", { replace: true })
     setLogoutSubmitting(false)
@@ -99,6 +101,7 @@ export const ProfileV2 = () => {
       await deliveryAPI.deleteAccount()
       clearModuleAuth("delivery")
       localStorage.removeItem("app:isOnline")
+      stopAllSync()
       toast.success("Account deleted successfully")
       navigate("/food/delivery/login", { replace: true })
     } catch (error) {

@@ -6,14 +6,7 @@ const foodLandingSettingsSchema = new mongoose.Schema(
             type: String,
             default: 'Explore more'
         },
-        headerVideoUrl: {
-            type: String,
-            default: ''
-        },
-        headerVideoPublicId: {
-            type: String,
-            default: ''
-        },
+
         recommendedRestaurantIds: {
             type: [mongoose.Schema.Types.ObjectId],
             ref: 'FoodRestaurant',
@@ -24,10 +17,6 @@ const foodLandingSettingsSchema = new mongoose.Schema(
             default: true
         },
         showUnder250: {
-            type: Boolean,
-            default: true
-        },
-        showDining: {
             type: Boolean,
             default: true
         },
