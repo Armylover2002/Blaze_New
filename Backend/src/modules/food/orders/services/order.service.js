@@ -2972,19 +2972,43 @@ export async function createOrder(userId, dto) {
   }
 
   if (isWallet) {
+    const walletAmount = Number(normalizedPricing.total || 0);
     await deductWalletBalance(
       userId,
-      Number(normalizedPricing.total || 0),
+      walletAmount,
       "Food order payment",
       {
-        orderId,
+        orderId: String(order._id),
+        orderReadableId: orderId,
         source: "food_order_payment",
         orderType,
       },
     );
+    try {
+      await order.save();
+    } catch (saveErr) {
+      // Compensate: money was taken but order did not persist.
+      try {
+        await refundWalletBalance(
+          userId,
+          walletAmount,
+          "Order create compensation",
+          {
+            orderId: String(order._id),
+            orderReadableId: orderId,
+            source: "order_save_compensation",
+          },
+        );
+      } catch (refundErr) {
+        logger.error(
+          `Wallet compensation failed after order save error for ${orderId}: ${refundErr?.message || refundErr}`,
+        );
+      }
+      throw saveErr;
+    }
+  } else {
+    await order.save();
   }
-
-  await order.save();
 
   await foodTransactionService.createInitialTransaction(order);
   const sellerOrders = hasQuickItems
@@ -3312,10 +3336,56 @@ export async function cancelOrder(orderId, userId, reason, refundTo) {
   const isOnlinePaid =
     ["razorpay", "razorpay_qr"].includes(paymentMethod) &&
     (order.payment.status === "paid" || order.payment.status === "refunded");
+  const isWalletPaid =
+    paymentMethod === "wallet" &&
+    String(order.payment?.status || "").trim().toLowerCase() === "paid" &&
+    String(order.payment?.refund?.status || "").trim().toLowerCase() !== "processed";
   const requestedRefundMethod =
     refundTo === "wallet" || refundTo === "gateway" ? refundTo : "gateway";
 
-  if (isOnlinePaid) {
+  // Wallet-paid orders: refund immediately on user cancel (idempotent by orderId).
+  if (isWalletPaid) {
+    const totalAmount = Number(order.pricing?.total || 0);
+    if (Number.isFinite(totalAmount) && totalAmount > 0 && order.userId) {
+      try {
+        await refundWalletBalance(
+          order.userId,
+          totalAmount,
+          "Order refund",
+          {
+            orderId: String(order._id),
+            orderReadableId: String(order.orderId || ""),
+            source: "user_cancel_refund",
+          },
+        );
+        order.payment.status = "refunded";
+        order.payment.refund = {
+          status: "processed",
+          amount: totalAmount,
+          refundId: `wallet_refund_${order._id}`,
+          requestedMethod: "wallet",
+          processedMethod: "wallet",
+          requestedAt: new Date(),
+          requestedByUser: true,
+          reason: reason || "",
+          processedAt: new Date(),
+        };
+      } catch (err) {
+        logger.warn(
+          `Wallet refund failed on user cancel for Order ${orderId}: ${err?.message || err}`,
+        );
+        order.payment.refund = {
+          status: "failed",
+          amount: totalAmount,
+          requestedMethod: "wallet",
+          processedMethod: "wallet",
+          requestedAt: new Date(),
+          requestedByUser: true,
+          reason: reason || "",
+        };
+      }
+    }
+  } else if (isOnlinePaid) {
     order.payment.refund = {
       ...(order.payment.refund || {}),
       status: "pending",
@@ -3876,49 +3946,88 @@ export async function updateOrderStatusRestaurant(
         to: orderStatus
     });
 
-    // ✅ NEW: Automated Razorpay Refund on Restaurant Cancel
-    // Triggers if the restaurant sets status to a cancelled state (e.g., cancelled_by_restaurant)
+    // Automated refund on restaurant cancel (Razorpay + wallet), before ledger sync.
     const isCancellationStatus = String(orderStatus).includes("cancel") || isTerminalCancelStatus(orderStatus);
     if (
       isCancellationStatus &&
       order.payment?.status === "paid" &&
-      order.payment?.method === "razorpay" &&
-      order.payment?.razorpay?.paymentId &&
       (!order.payment?.refund || order.payment?.refund?.status !== "processed")
     ) {
-      try {
-        const refundResult = await initiateRazorpayRefund(
-          order.payment.razorpay.paymentId,
-          order.pricing?.total || 0
-        );
+      const cancelPayMethod = String(order.payment?.method || "").trim().toLowerCase();
+      const cancelRefundAmount = Number(order.pricing?.total || 0);
 
-        if (refundResult.success) {
+      if (cancelPayMethod === "wallet" && cancelRefundAmount > 0 && order.userId) {
+        try {
+          await refundWalletBalance(
+            order.userId,
+            cancelRefundAmount,
+            "Order refund",
+            {
+              orderId: String(order._id),
+              orderReadableId: String(order.orderId || ""),
+              source: "restaurant_cancel_refund",
+            },
+          );
           order.payment = order.payment || {};
           order.payment.status = "refunded";
           order.payment.refund = {
             status: "processed",
-            amount: order.pricing?.total || 0,
-            refundId: refundResult.refundId,
-            processedAt: new Date()
+            amount: cancelRefundAmount,
+            refundId: `wallet_refund_${order._id}`,
+            requestedMethod: "wallet",
+            processedMethod: "wallet",
+            requestedAt: new Date(),
+            requestedByUser: false,
+            reason: String(reason || ""),
+            processedAt: new Date(),
           };
-        } else {
-          // Record failure so admin knows a manual refund might be needed
+        } catch (err) {
+          console.error(`Automated wallet refund failed for Order ${orderId} (Restaurant Cancel):`, err);
           order.payment = order.payment || {};
           order.payment.refund = {
             status: "failed",
-            amount: order.pricing?.total || 0
+            amount: cancelRefundAmount,
+            requestedMethod: "wallet",
+            processedMethod: "wallet",
           };
         }
-      } catch (err) {
-        console.error(`Automated refund failed for Order ${orderId} (Restaurant Cancel):`, err);
-        order.payment = order.payment || {};
-        order.payment.refund = {
-          status: "failed",
-          amount: order.pricing?.total || 0,
-        };
+        await order.save();
+      } else if (
+        cancelPayMethod === "razorpay" &&
+        order.payment?.razorpay?.paymentId
+      ) {
+        try {
+          const refundResult = await initiateRazorpayRefund(
+            order.payment.razorpay.paymentId,
+            cancelRefundAmount
+          );
+
+          if (refundResult.success) {
+            order.payment = order.payment || {};
+            order.payment.status = "refunded";
+            order.payment.refund = {
+              status: "processed",
+              amount: cancelRefundAmount,
+              refundId: refundResult.refundId,
+              processedAt: new Date()
+            };
+          } else {
+            order.payment = order.payment || {};
+            order.payment.refund = {
+              status: "failed",
+              amount: cancelRefundAmount
+            };
+          }
+        } catch (err) {
+          console.error(`Automated refund failed for Order ${orderId} (Restaurant Cancel):`, err);
+          order.payment = order.payment || {};
+          order.payment.refund = {
+            status: "failed",
+            amount: cancelRefundAmount,
+          };
+        }
+        await order.save();
       }
-      // Re-save order with updated payment status
-      await order.save();
     }
 
     // Remove cancelled orders from restaurant payout eligibility (never leave as captured).
@@ -4035,13 +4144,14 @@ export async function updateOrderStatusAdmin(orderId, adminId, orderStatus, reas
             orderId: String(order._id),
             orderReadableId: String(order.orderId || ""),
             source: "admin_auto_refund",
+            refundTransactionId: `wallet_refund_${String(order._id)}_full`,
           },
         );
         order.payment.status = "refunded";
         order.payment.refund = {
           status: "processed",
           amount: totalAmount,
-          refundId: `wallet_refund_${Date.now()}`,
+          refundId: `wallet_refund_${String(order._id)}_full`,
           requestedMethod: "wallet",
           processedMethod: "wallet",
           requestedAt: new Date(),

@@ -7355,6 +7355,7 @@ export async function processRefund(orderId, refundAmount, refundTo) {
     const processedAt = new Date();
 
     if (normalizedRefundMethod === 'wallet') {
+        const refundTransactionId = `wallet_refund_${String(order._id)}_${normalizedAmount.toFixed(2)}`;
         await refundWalletBalance(
             order.userId,
             normalizedAmount,
@@ -7362,7 +7363,8 @@ export async function processRefund(orderId, refundAmount, refundTo) {
             {
                 orderId: String(order._id),
                 orderReadableId: String(order.orderId || ''),
-                source: 'admin_manual_refund'
+                source: 'admin_manual_refund',
+                refundTransactionId,
             }
         );
 
@@ -7370,7 +7372,7 @@ export async function processRefund(orderId, refundAmount, refundTo) {
         order.payment.refund = {
             status: 'processed',
             amount: normalizedAmount,
-            refundId: `wallet_refund_${Date.now()}`,
+            refundId: refundTransactionId,
             requestedMethod: requestedRefundMethod || normalizedRefundMethod,
             processedMethod: 'wallet',
             requestedAt: existingRefund?.requestedAt || processedAt,
