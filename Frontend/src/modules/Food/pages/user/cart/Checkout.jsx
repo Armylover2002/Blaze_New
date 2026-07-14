@@ -86,15 +86,16 @@ export default function Checkout() {
       setDiscount(0)
       return
     }
-    let calculated = 0
-    if (appliedCoupon.discountPercentage) {
-      calculated = Math.floor(subtotal * (Number(appliedCoupon.discountPercentage) / 100))
-    } else {
-      calculated = Math.floor(appliedCoupon.discount || 0)
+    // Do not invent caps — prefer server-computed discount when present; else show 0 until recalculated.
+    const serverDiscount = Number(appliedCoupon.serverDiscount)
+    if (Number.isFinite(serverDiscount) && serverDiscount >= 0) {
+      setDiscount(Math.min(subtotal, serverDiscount))
+      return
     }
-    setDiscount(Math.min(subtotal, calculated))
+    setDiscount(0)
   }, [appliedCoupon, subtotal])
 
+  // Legacy demo checkout: totals are display-only. Live cart uses server calculateOrder.
   const total = Math.max(0, subtotal + deliveryFee + tax - discount)
   const otherPlatformSavings = Math.max(0, otherPlatformSubtotal - subtotal)
 

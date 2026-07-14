@@ -786,6 +786,7 @@ function normalizeFoodFeeSettings(feeDoc = null) {
     perKmCharge: 10,
     sponsorRules: [],
     platformFee: 5,
+    packagingFee: 0,
     gstRate: 5,
     mixedOrderDistanceLimit: 2,
     mixedOrderAngleLimit: 35,
@@ -813,6 +814,12 @@ function normalizeFoodFeeSettings(feeDoc = null) {
   feeSettings.platformFee = Number(
     feeSettings.platformFee ?? defaultFeeSettings.platformFee,
   );
+  feeSettings.packagingFee = Number(
+    feeSettings.packagingFee ?? defaultFeeSettings.packagingFee,
+  );
+  if (!Number.isFinite(feeSettings.packagingFee) || feeSettings.packagingFee < 0) {
+    feeSettings.packagingFee = 0;
+  }
   feeSettings.gstRate = Number(feeSettings.gstRate ?? defaultFeeSettings.gstRate);
   feeSettings.mixedOrderDistanceLimit = Number(
     feeSettings.mixedOrderDistanceLimit ?? defaultFeeSettings.mixedOrderDistanceLimit,
@@ -2411,7 +2418,7 @@ export async function calculateOrder(userId, dto) {
   if (orderType === "quick") {
     const quickSourceId = items.find((item) => item.type === "quick")?.sourceId;
     const quickSource = quickSourceId ? sourceMap.get(String(quickSourceId)) : null;
-    const packagingFee = 0;
+    const packagingFee = roundCurrency(Number(feeSettings.packagingFee || 0));
     const platformFee = feeSettings.platformFee;
     let deliveryFee = feeSettings.deliveryFee;
     let deliveryDistanceKm = null;
@@ -2484,7 +2491,7 @@ export async function calculateOrder(userId, dto) {
     );
   }
 
-  const packagingFee = 0;
+  const packagingFee = roundCurrency(Number(feeSettings.packagingFee || 0));
   const platformFee = feeSettings.platformFee;
 
   let deliveryFee = 0;
@@ -3582,7 +3589,11 @@ export async function cancelOrder(orderId, userId, reason, refundTo) {
     try {
       const refundResult = await initiateRazorpayRefund(
         order.payment.razorpay.paymentId,
-        order.pricing.total
+        order.pricing.total,
+        {
+          idempotencyKey: `food_refund_${String(order._id)}_user_cancel`,
+          notes: { orderId: String(order.orderId || order._id), source: 'user_cancel' },
+        },
       );
 
       if (refundResult.success) {
@@ -4167,7 +4178,11 @@ export async function updateOrderStatusRestaurant(
         try {
           const refundResult = await initiateRazorpayRefund(
             order.payment.razorpay.paymentId,
-            cancelRefundAmount
+            cancelRefundAmount,
+            {
+              idempotencyKey: `food_refund_${String(order._id)}_rest_cancel_${Math.round(Number(cancelRefundAmount) * 100)}`,
+              notes: { orderId: String(order.orderId || order._id), source: 'restaurant_cancel' },
+            },
           );
 
           if (refundResult.success) {
@@ -4337,6 +4352,10 @@ export async function updateOrderStatusAdmin(orderId, adminId, orderStatus, reas
         const refundResult = await initiateRazorpayRefund(
           order.payment.razorpay.paymentId,
           totalAmount,
+          {
+            idempotencyKey: `food_refund_${String(order._id)}_admin_full_${Math.round(Number(totalAmount) * 100)}`,
+            notes: { orderId: String(order.orderId || order._id), source: 'admin_cancel' },
+          },
         );
 
         if (refundResult?.success) {
@@ -5196,6 +5215,8 @@ export async function completeDelivery(orderId, deliveryPartnerId, body = {}) {
   }
 
   order.orderStatus = "delivered";
+  order.financialsLocked = true;
+  order.financialsLockedAt = order.financialsLockedAt || new Date();
   // Mark COD / unpaid collection as paid on delivery; prepaid stays paid/refunded as-is.
   if (!["paid", "refunded"].includes(String(order.payment?.status || "").trim().toLowerCase())) {
     order.payment.status = "paid";
@@ -5329,6 +5350,10 @@ export async function updateOrderStatusDelivery(orderId, deliveryPartnerId, orde
     if (order.dispatch.deliveryPartnerId?.toString() !== deliveryPartnerId.toString()) throw new ForbiddenError('Not your order');
     const from = order.orderStatus;
     order.orderStatus = orderStatus;
+    if (String(orderStatus).toLowerCase() === 'delivered') {
+        order.financialsLocked = true;
+        order.financialsLockedAt = order.financialsLockedAt || new Date();
+    }
     pushStatusHistory(order, { byRole: 'DELIVERY_PARTNER', byId: deliveryPartnerId, from, to: orderStatus });
     await order.save();
     if (String(orderStatus).toLowerCase() === 'delivered') {
@@ -5362,6 +5387,12 @@ export async function createCollectQr(
     throw new ForbiddenError("Not your order");
   if (order.payment.method !== "cash" && order.payment.status === "paid")
     throw new ValidationError("Order already paid");
+  if (
+    order.financialsLocked ||
+    String(order.orderStatus || "").toLowerCase() === "delivered"
+  ) {
+    throw new ValidationError("Order financials are locked after delivery");
+  }
   const amountDue = order.payment.amountDue ?? order.pricing?.total ?? 0;
   if (amountDue < 1) throw new ValidationError("No amount due");
 
@@ -5380,19 +5411,30 @@ export async function createCollectQr(
     customerPhone: customerInfo.phone || user.phone,
   });
 
-  await FoodOrder.findByIdAndUpdate(order._id, {
-    $set: {
-      "payment.method": "razorpay_qr",
-      "payment.status": "pending_qr",
-      "payment.qr": {
-        paymentLinkId: link.id,
-        shortUrl: link.short_url,
-        imageUrl: link.short_url,
-        status: link.status || "created",
-        expiresAt: link.expire_by ? new Date(link.expire_by * 1000) : null,
+  // Conditional update so concurrent delivery finish cannot rewrite locked financials.
+  const qrWrite = await FoodOrder.updateOne(
+    {
+      _id: order._id,
+      financialsLocked: { $ne: true },
+      orderStatus: { $ne: "delivered" },
+    },
+    {
+      $set: {
+        "payment.method": "razorpay_qr",
+        "payment.status": "pending_qr",
+        "payment.qr": {
+          paymentLinkId: link.id,
+          shortUrl: link.short_url,
+          imageUrl: link.short_url,
+          status: link.status || "created",
+          expiresAt: link.expire_by ? new Date(link.expire_by * 1000) : null,
+        },
       },
     },
-  });
+  );
+  if (!qrWrite?.modifiedCount) {
+    throw new ValidationError("Order financials are locked after delivery");
+  }
 
     const updated = await FoodOrder.findById(order._id).select('orderId restaurantId userId riderEarning payment pricing').lean();
     if (updated) {

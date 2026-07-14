@@ -385,6 +385,9 @@ const orderSchema = new mongoose.Schema(
         scheduledAt: { type: Date, default: null },
         riderEarning: { type: Number, default: 0, min: 0 },
         platformProfit: { type: Number, default: 0, min: 0 },
+        /** After delivery/capture, money snapshot must not be rewritten — use refund/ledger paths. */
+        financialsLocked: { type: Boolean, default: false, index: true },
+        financialsLockedAt: { type: Date, default: null },
         /** Plain 4-digit OTP for handover; cleared after successful verify (never expose to partner in API responses). */
         deliveryOtp: { type: String, default: '', select: false },
         deliveryVerification: {
@@ -412,6 +415,45 @@ orderSchema.index({ 'dispatch.deliveryPartnerId': 1, orderStatus: 1 });
 orderSchema.index({ 'dispatch.status': 1, orderStatus: 1 });
 orderSchema.index({ 'payment.status': 1, createdAt: -1 });
 orderSchema.index({ 'payment.method': 1, createdAt: -1 });
+
+const LOCKED_MONEY_PATHS = [
+    'pricing.subtotal',
+    'pricing.tax',
+    'pricing.packagingFee',
+    'pricing.deliveryFee',
+    'pricing.totalDeliveryFee',
+    'pricing.userDeliveryFee',
+    'pricing.restaurantDeliveryFee',
+    'pricing.platformFee',
+    'pricing.discount',
+    'pricing.restaurantCommissionPercentage',
+    'pricing.restaurantCommission',
+    'pricing.total',
+    'pricing.currency',
+    'pricing.couponCode',
+    'pricing.appliedCoupon',
+    'pricing.referralDiscount',
+    'riderEarning',
+    'platformProfit',
+    'payment.method',
+    'payment.amountDue',
+];
+
+orderSchema.pre('save', function blockLockedFinancialMutations(next) {
+    if (this.isNew || !this.financialsLocked) return next();
+    // Allow the save that first engages the lock (delivery / capture).
+    if (this.isModified('financialsLocked')) return next();
+
+    const blocked = LOCKED_MONEY_PATHS.filter((path) => this.isModified(path));
+    if (blocked.length) {
+        return next(
+            new Error(
+                `Order financial fields are locked after delivery/capture (${blocked.join(', ')})`,
+            ),
+        );
+    }
+    return next();
+});
 
 export const FoodOrder = mongoose.model('FoodOrder', orderSchema, 'food_orders');
 

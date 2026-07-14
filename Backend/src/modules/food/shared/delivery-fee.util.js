@@ -98,6 +98,7 @@ export async function loadActiveFeeSettings() {
       deliveryFee: 0,
       deliveryFeeRanges: [],
       platformFee: 0,
+      packagingFee: 0,
       gstRate: 0,
     }
   );

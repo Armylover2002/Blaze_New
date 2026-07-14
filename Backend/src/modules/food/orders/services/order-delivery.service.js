@@ -906,6 +906,8 @@ export async function completeDelivery(orderId, deliveryPartnerId, body = {}) {
   }
 
   order.orderStatus = 'delivered';
+  order.financialsLocked = true;
+  order.financialsLockedAt = order.financialsLockedAt || new Date();
   // COD must be marked paid on delivery so cash/accounting stays consistent.
   const methodLower = String(payMethod || '').toLowerCase();
   if (

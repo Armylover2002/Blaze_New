@@ -2389,6 +2389,9 @@ export async function upsertFeeSettings(body) {
         if (body.platformFee === null) $unset.platformFee = 1;
         else if (body.platformFee !== undefined) $set.platformFee = body.platformFee;
 
+        if (body.packagingFee === null) $unset.packagingFee = 1;
+        else if (body.packagingFee !== undefined) $set.packagingFee = body.packagingFee;
+
         if (body.gstRate === null) $unset.gstRate = 1;
         else if (body.gstRate !== undefined) $set.gstRate = body.gstRate;
         if (body.mixedOrderDistanceLimit !== undefined) $set.mixedOrderDistanceLimit = body.mixedOrderDistanceLimit;
@@ -2422,6 +2425,7 @@ export async function upsertFeeSettings(body) {
     if (body.sponsorRules !== undefined) payload.sponsorRules = body.sponsorRules ?? [];
     if (body.deliveryDistanceSlabs !== undefined) payload.deliveryDistanceSlabs = body.deliveryDistanceSlabs ?? [];
     if (body.platformFee !== undefined && body.platformFee !== null) payload.platformFee = body.platformFee;
+    if (body.packagingFee !== undefined && body.packagingFee !== null) payload.packagingFee = body.packagingFee;
     if (body.gstRate !== undefined && body.gstRate !== null) payload.gstRate = body.gstRate;
     if (body.mixedOrderDistanceLimit !== undefined) payload.mixedOrderDistanceLimit = body.mixedOrderDistanceLimit;
     if (body.mixedOrderAngleLimit !== undefined) payload.mixedOrderAngleLimit = body.mixedOrderAngleLimit;
@@ -7386,7 +7390,13 @@ export async function processRefund(orderId, refundAmount, refundTo) {
             throw new ValidationError('Original payment reference not found for this online order');
         }
 
-        const refundResult = await initiateRazorpayRefund(paymentId, normalizedAmount);
+        const refundResult = await initiateRazorpayRefund(paymentId, normalizedAmount, {
+            idempotencyKey: `food_refund_${String(order._id)}_admin_${Math.round(Number(normalizedAmount) * 100)}`,
+            notes: {
+                orderId: String(order.orderId || order._id),
+                source: 'admin_process_refund',
+            },
+        });
         if (!refundResult?.success) {
             order.payment.refund = {
                 status: 'failed',
