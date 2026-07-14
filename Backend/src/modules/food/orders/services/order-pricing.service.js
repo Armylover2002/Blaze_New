@@ -4,6 +4,7 @@ import { ValidationError } from '../../../../core/auth/errors.js';
 import { resolveRestaurantCommissionPercentage } from '../../constants/commission.constants.js';
 import { roadDistanceKm } from './order.helpers.js';
 import { resolveRestaurantObjectId, validateAndApplyCoupon } from '../../shared/coupon.util.js';
+import { resolveDiscountSplitByCoupon } from '../../shared/discountSplit.util.js';
 
 function roundCurrency(value) {
   const num = Number(value);
@@ -221,7 +222,23 @@ export async function calculateOrderPricing(userId, dto) {
   const commissionPercentage = resolveRestaurantCommissionPercentage(
     restaurant?.commissionPercentage,
   );
-  const restaurantCommission = roundCurrency(subtotal * (commissionPercentage / 100));
+  // Commission on food GMV after restaurant-borne discount (not full pre-discount subtotal).
+  let restaurantDiscountShareForCommission = 0;
+  if (discount > 0) {
+    const split = await resolveDiscountSplitByCoupon({
+      couponCode: appliedCoupon?.code || codeRaw || "",
+      discount,
+      couponSource: appliedCoupon?.source,
+    });
+    restaurantDiscountShareForCommission = Math.max(
+      0,
+      Number(split.restaurantDiscountShare || 0),
+    );
+  }
+  const commissionBase = Math.max(0, subtotal - restaurantDiscountShareForCommission);
+  const restaurantCommission = roundCurrency(
+    commissionBase * (commissionPercentage / 100),
+  );
 
   return {
     pricing: {

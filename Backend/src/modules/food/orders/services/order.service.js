@@ -31,6 +31,9 @@ import {
     resolveRestaurantToUserRoadDistanceKm,
 } from '../../shared/delivery-fee.util.js';
 import { FoodItem } from '../../admin/models/food.model.js';
+import { FoodAddon } from '../../restaurant/models/foodAddon.model.js';
+import { SellerProduct } from '../../../quick-commerce/seller/models/sellerProduct.model.js';
+import { resolveDiscountSplitByCoupon } from '../../shared/discountSplit.util.js';
 import {
   sendNotificationToOwner,
   sendNotificationToOwners,
@@ -474,6 +477,30 @@ function normalizeOrderItems(items = [], fallbackOrderType = "food") {
   });
 }
 
+function resolveQuickUnitPrice(product, variantId) {
+  if (variantId) {
+    const variant = (Array.isArray(product?.variants) ? product.variants : []).find(
+      (entry) => String(entry?._id || "") === String(variantId).trim(),
+    );
+    if (!variant) {
+      throw new ValidationError("Selected quick product variant is unavailable");
+    }
+    const sale = Number(variant.salePrice || 0);
+    const base = Number(variant.price || 0);
+    return {
+      unitPrice: sale > 0 ? sale : base,
+      variantName: variant.name || "",
+    };
+  }
+  const sale = Number(product?.salePrice || 0);
+  const base = Number(product?.price || 0);
+  return { unitPrice: sale > 0 ? sale : base, variantName: "" };
+}
+
+/**
+ * Overwrite food line prices from FoodItem, then FoodAddon for remaining IDs.
+ * Never trusts client-provided food/addon prices.
+ */
 async function applyServerFoodItemPricing(items = [], sourceMap = new Map()) {
   const foodItems = (Array.isArray(items) ? items : []).filter((item) => item?.type === "food");
   if (!foodItems.length) return;
@@ -489,8 +516,9 @@ async function applyServerFoodItemPricing(items = [], sourceMap = new Map()) {
     throw new ValidationError("Invalid food item selection");
   }
 
+  const objectIds = itemIds.map((id) => new mongoose.Types.ObjectId(id));
   const foodDocs = await FoodItem.find({
-    _id: { $in: itemIds.map((id) => new mongoose.Types.ObjectId(id)) },
+    _id: { $in: objectIds },
     approvalStatus: "approved",
     isAvailable: true,
   })
@@ -498,41 +526,145 @@ async function applyServerFoodItemPricing(items = [], sourceMap = new Map()) {
     .lean();
   const foodById = new Map(foodDocs.map((doc) => [String(doc._id), doc]));
 
+  const missingIds = itemIds.filter((id) => !foodById.has(id));
+  const addonDocs = missingIds.length
+    ? await FoodAddon.find({
+        _id: { $in: missingIds.map((id) => new mongoose.Types.ObjectId(id)) },
+        approvalStatus: "approved",
+        isAvailable: true,
+        isDeleted: { $ne: true },
+        published: { $ne: null },
+      })
+        .select("restaurantId published draft")
+        .lean()
+    : [];
+  const addonById = new Map(addonDocs.map((doc) => [String(doc._id), doc]));
+
   for (const item of foodItems) {
     const itemId = String(item?.itemId || "").trim();
+    const source = sourceMap.get(String(item.sourceId));
+    const expectedRestaurantId = String(source?.sourceId || "").trim();
+
     const foodDoc = foodById.get(itemId);
-    if (!foodDoc) {
+    if (foodDoc) {
+      const docRestaurantId = String(foodDoc.restaurantId || "").trim();
+      if (!expectedRestaurantId || expectedRestaurantId !== docRestaurantId) {
+        throw new ValidationError("Food item does not belong to selected restaurant");
+      }
+
+      let unitPrice = Number(foodDoc.price || 0);
+      if (item?.variantId) {
+        const variantId = String(item.variantId).trim();
+        const variant = (Array.isArray(foodDoc.variants) ? foodDoc.variants : []).find(
+          (entry) => String(entry?._id || "") === variantId,
+        );
+        if (!variant) {
+          throw new ValidationError("Selected food variant is unavailable");
+        }
+        unitPrice = Number(variant.price || 0);
+        item.variantName = variant.name || item.variantName || "";
+        item.variantPrice = unitPrice;
+      }
+
+      item.price = unitPrice;
+      item.name = foodDoc.name || item.name;
+      item.image = item.image || foodDoc.image || foodDoc.images?.[0] || "";
+      item.isVeg = String(foodDoc.foodType || "").toLowerCase() === "veg";
+      item.isAddon = false;
+      item.sourceId = expectedRestaurantId;
+      item.sourceName = source?.sourceName || item.sourceName || "";
+      continue;
+    }
+
+    const addonDoc = addonById.get(itemId);
+    if (!addonDoc) {
       throw new ValidationError("One or more food items are unavailable");
     }
 
-    const source = sourceMap.get(String(item.sourceId));
-    const expectedRestaurantId = String(source?.sourceId || "").trim();
-    const docRestaurantId = String(foodDoc.restaurantId || "").trim();
+    const docRestaurantId = String(addonDoc.restaurantId || "").trim();
     if (!expectedRestaurantId || expectedRestaurantId !== docRestaurantId) {
-      throw new ValidationError("Food item does not belong to selected restaurant");
+      throw new ValidationError("Food addon does not belong to selected restaurant");
     }
 
-    let unitPrice = Number(foodDoc.price || 0);
-    if (item?.variantId) {
-      const variantId = String(item.variantId).trim();
-      const variant = (Array.isArray(foodDoc.variants) ? foodDoc.variants : []).find(
-        (entry) => String(entry?._id || "") === variantId,
-      );
-      if (!variant) {
-        throw new ValidationError("Selected food variant is unavailable");
-      }
-      unitPrice = Number(variant.price || 0);
-      item.variantName = variant.name || item.variantName || "";
-      item.variantPrice = unitPrice;
-    }
-
-    item.price = unitPrice;
-    item.name = foodDoc.name || item.name;
-    item.image = item.image || foodDoc.image || foodDoc.images?.[0] || "";
-    item.isVeg = String(foodDoc.foodType || "").toLowerCase() === "veg";
+    const published = addonDoc.published || addonDoc.draft || {};
+    item.price = Number(published.price || 0);
+    item.name = published.name || item.name;
+    item.image = item.image || published.image || published.images?.[0] || "";
+    item.isVeg = String(published.foodType || "Veg").toLowerCase() !== "non-veg";
+    item.isAddon = true;
+    item.variantId = undefined;
+    item.variantName = "";
+    item.variantPrice = item.price;
     item.sourceId = expectedRestaurantId;
     item.sourceName = source?.sourceName || item.sourceName || "";
   }
+}
+
+/**
+ * Overwrite quick line prices from SellerProduct. Never trusts client prices.
+ */
+async function applyServerQuickItemPricing(items = [], sourceMap = new Map()) {
+  const quickItems = (Array.isArray(items) ? items : []).filter((item) => item?.type === "quick");
+  if (!quickItems.length) return;
+
+  const itemIds = [
+    ...new Set(
+      quickItems
+        .map((item) => String(item?.itemId || "").trim())
+        .filter((id) => mongoose.isValidObjectId(id)),
+    ),
+  ];
+  if (!itemIds.length) {
+    throw new ValidationError("Invalid quick item selection");
+  }
+
+  const productDocs = await SellerProduct.find({
+    _id: { $in: itemIds.map((id) => new mongoose.Types.ObjectId(id)) },
+    status: "active",
+  })
+    .select("sellerId name price salePrice variants mainImage galleryImages")
+    .lean();
+  const productById = new Map(productDocs.map((doc) => [String(doc._id), doc]));
+
+  for (const item of quickItems) {
+    const itemId = String(item?.itemId || "").trim();
+    const product = productById.get(itemId);
+    if (!product) {
+      throw new ValidationError("One or more quick items are unavailable");
+    }
+
+    const source = sourceMap.get(String(item.sourceId));
+    const expectedSellerId = String(source?.sourceId || item.sourceId || "").trim();
+    const docSellerId = String(product.sellerId || "").trim();
+    if (!expectedSellerId || expectedSellerId !== docSellerId) {
+      throw new ValidationError("Quick item does not belong to selected store");
+    }
+
+    const { unitPrice, variantName } = resolveQuickUnitPrice(product, item?.variantId);
+    item.price = unitPrice;
+    if (item?.variantId) {
+      item.variantName = variantName || item.variantName || "";
+      item.variantPrice = unitPrice;
+    }
+    item.name = product.name || item.name;
+    item.image = item.image || product.mainImage || product.galleryImages?.[0] || "";
+    item.sourceId = expectedSellerId;
+    item.sourceName = source?.sourceName || item.sourceName || "";
+  }
+}
+
+async function applyServerItemPricing(items = [], sourceMap = new Map()) {
+  await applyServerFoodItemPricing(items, sourceMap);
+  await applyServerQuickItemPricing(items, sourceMap);
+}
+
+function sumItemsSubtotal(items = [], typeFilter = null) {
+  return (Array.isArray(items) ? items : [])
+    .filter((item) => (typeFilter ? item?.type === typeFilter : true))
+    .reduce(
+      (sum, item) => sum + (Number(item?.price) || 0) * (Number(item?.quantity) || 1),
+      0,
+    );
 }
 
 function getPointLatLng(locationLike) {
@@ -2244,7 +2376,7 @@ export async function calculateOrder(userId, dto) {
         ? "quick"
         : "food";
   const sourceMap = await fetchPickupSourcesByType(items);
-  await applyServerFoodItemPricing(items, sourceMap);
+  await applyServerItemPricing(items, sourceMap);
   const subtotal = items.reduce(
     (sum, it) => sum + (Number(it.price) || 0) * (Number(it.quantity) || 1),
     0,
@@ -2648,7 +2780,7 @@ export async function createOrder(userId, dto) {
       `${inactiveQuickSource.sourceName || "Quick store"} is not accepting orders`,
     );
   }
-  await applyServerFoodItemPricing(items, sourceMap);
+  await applyServerItemPricing(items, sourceMap);
 
   const orderId = await ensureUniqueOrderId();
   const settings =
@@ -2746,7 +2878,33 @@ export async function createOrder(userId, dto) {
   const commissionPercentage = primaryRestaurant
     ? resolveRestaurantCommissionPercentage(primaryRestaurant.commissionPercentage)
     : 0;
-  const commissionBase = Math.max(0, Number(serverPricing.subtotal || 0));
+
+  // Restaurant commission applies only to food GMV (never quick), after restaurant-borne discount.
+  const foodCommissionSubtotal =
+    orderType === "quick"
+      ? 0
+      : orderType === "mixed"
+        ? sumItemsSubtotal(items, "food")
+        : Math.max(0, Number(serverPricing.subtotal || 0));
+
+  let restaurantDiscountShareForCommission = 0;
+  const orderDiscount = Math.max(0, Number(serverPricing.discount || 0));
+  if (orderDiscount > 0 && foodCommissionSubtotal > 0) {
+    const split = await resolveDiscountSplitByCoupon({
+      couponCode: serverPricing.couponCode || couponCodeFromClient || "",
+      discount: orderDiscount,
+      couponSource: serverPricing.appliedCoupon?.source,
+    });
+    restaurantDiscountShareForCommission = Math.max(
+      0,
+      Number(split.restaurantDiscountShare || 0),
+    );
+  }
+
+  const commissionBase = Math.max(
+    0,
+    foodCommissionSubtotal - restaurantDiscountShareForCommission,
+  );
   const restaurantCommission =
     Math.round(commissionBase * (commissionPercentage / 100) * 100) / 100;
 
