@@ -4896,6 +4896,7 @@ export async function deleteAdminOffer(id) {
     const deleted = await FoodOffer.findByIdAndDelete(id).lean();
     if (!deleted) return null;
     await FoodOfferUsage.deleteMany({ offerId: new mongoose.Types.ObjectId(id) });
+    await invalidateOffersCacheSafely('offer delete');
     return { id };
 }
 
@@ -7663,5 +7664,4 @@ export async function settleCODVerification(id, { action, adminNote, performer }
 
     return updated;
 }
-
 
