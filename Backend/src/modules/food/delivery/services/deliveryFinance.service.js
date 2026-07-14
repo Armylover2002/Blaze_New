@@ -55,51 +55,62 @@ export const getDeliveryPartnerWalletEnhanced = async (deliveryPartnerId) => {
     if (completedOrders.length > 0) {
       const orderIds = completedOrders.map(o => o._id);
       const existingTxns = await Transaction.find({
-        entityType: "deliveryBoy",
-        entityId: partnerId,
-        category: "delivery_earning",
-        orderId: { $in: orderIds }
-      }).select("orderId").lean();
+        orderId: { $in: orderIds },
+        type: "credit",
+        status: "completed",
+        category: { $in: ["delivery_earning", "platform_fee"] },
+      }).select("orderId category entityType").lean();
 
-      const creditedOrderIds = new Set(existingTxns.map(t => String(t.orderId)));
+      const riderCredited = new Set(
+        existingTxns
+          .filter((t) => t.category === "delivery_earning" && t.entityType === "deliveryBoy")
+          .map((t) => String(t.orderId))
+      );
+      const platformCredited = new Set(
+        existingTxns
+          .filter((t) => t.category === "platform_fee" && t.entityType === "admin")
+          .map((t) => String(t.orderId))
+      );
 
       for (const order of completedOrders) {
-        if (!creditedOrderIds.has(String(order._id))) {
-          const riderEarning = Number(order.riderEarning || 0);
-          const platformProfit = Number(order.platformProfit || 0);
+        const orderKey = String(order._id);
+        const riderEarning = Number(order.riderEarning || 0);
+        const platformProfit = Number(order.platformProfit || 0);
 
-          if (riderEarning > 0) {
-            await creditWallet({
-              entityType: 'deliveryBoy',
-              entityId: partnerId,
-              amount: riderEarning,
-              description: `Order ${order.orderId || order._id} - delivery earning (self-heal)`,
-              category: 'delivery_earning',
-              orderId: order._id,
-              metadata: { orderId: order.orderId, paymentMethod: order.payment?.method }
-            });
+        if (!riderCredited.has(orderKey) && riderEarning > 0) {
+          const creditResult = await creditWallet({
+            entityType: 'deliveryBoy',
+            entityId: partnerId,
+            amount: riderEarning,
+            description: `Order ${order.orderId || order._id} - delivery earning (self-heal)`,
+            category: 'delivery_earning',
+            orderId: order._id,
+            metadata: { orderId: order.orderId, paymentMethod: order.payment?.method }
+          });
 
+          if (!creditResult?.alreadyProcessed) {
             await FoodDeliveryWallet.updateOne(
               { deliveryPartnerId: partnerId },
               { $inc: { totalDeliveries: 1 } }
             );
             logger.info(`Self-healed credit for delivery partner ${partnerId} order ${order._id}`);
           }
+        }
 
-          if (platformProfit > 0) {
-            try {
-              await creditWallet({
-                entityType: 'admin',
-                entityId: 'platform',
-                amount: platformProfit,
-                description: `Order ${order.orderId || order._id} - platform profit (self-heal)`,
-                category: 'platform_fee',
-                orderId: order._id,
-                metadata: { orderId: order.orderId, paymentMethod: order.payment?.method, riderEarning }
-              });
-            } catch (err) {
-              logger.error(`Self-heal platform profit failed for order ${order._id}: ${err.message}`);
-            }
+        // Heal platform profit independently (even if rider credit already exists).
+        if (!platformCredited.has(orderKey) && platformProfit > 0) {
+          try {
+            await creditWallet({
+              entityType: 'admin',
+              entityId: 'platform',
+              amount: platformProfit,
+              description: `Order ${order.orderId || order._id} - platform profit (self-heal)`,
+              category: 'platform_fee',
+              orderId: order._id,
+              metadata: { orderId: order.orderId, paymentMethod: order.payment?.method, riderEarning }
+            });
+          } catch (err) {
+            logger.error(`Self-heal platform profit failed for order ${order._id}: ${err.message}`);
           }
         }
       }
