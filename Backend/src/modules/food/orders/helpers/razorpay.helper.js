@@ -147,24 +147,45 @@ export async function fetchRazorpaySubscription(subscriptionId) {
 }
 
 /**
- * ✅ NEW: Initiate a refund for a successful payment.
- * NON-BREAKING Extension for automated cancellation refunds.
+ * Initiate a refund for a successful payment.
  * @param {string} paymentId - Original Razorpay payment_id (captured)
  * @param {number} amount - Amount to refund (in major unit, e.g., INR 123.45)
+ * @param {{ idempotencyKey?: string, notes?: Record<string, string> }} [options]
  */
-export async function initiateRazorpayRefund(paymentId, amount) {
+export async function initiateRazorpayRefund(paymentId, amount, options = {}) {
     if (!isRazorpayConfigured()) {
         throw new Error('Razorpay is not configured on this server');
     }
     const instance = getRazorpayInstance();
+    const amountPaise = Math.round(Number(amount) * 100);
+    const idempotencyKey = options?.idempotencyKey
+        ? String(options.idempotencyKey).trim().slice(0, 64)
+        : '';
+    // Prefer caller key; otherwise derive a stable receipt so retries map to the same refund.
+    const receipt =
+        idempotencyKey ||
+        crypto
+            .createHash('sha1')
+            .update(`${paymentId}:${amountPaise}`)
+            .digest('hex')
+            .slice(0, 40);
+
     try {
-        const refund = await instance.payments.refund(paymentId, {
-            amount: Math.round(Number(amount) * 100), // convert to paise
+        const refundPayload = {
+            amount: amountPaise,
+            receipt,
             notes: {
                 reason: 'Order cancelled by system flow',
-                at: new Date().toISOString()
-            }
-        });
+                at: new Date().toISOString(),
+                ...(options?.notes || {}),
+            },
+        };
+        const requestOptions = idempotencyKey
+            ? { headers: { 'X-Razorpay-Idempotency-Key': idempotencyKey } }
+            : undefined;
+        const refund = requestOptions
+            ? await instance.payments.refund(paymentId, refundPayload, requestOptions)
+            : await instance.payments.refund(paymentId, refundPayload);
         return {
             success: true,
             refundId: refund.id,
@@ -172,7 +193,19 @@ export async function initiateRazorpayRefund(paymentId, amount) {
             raw: refund
         };
     } catch (err) {
-        // Log locally but pass the error to the service to handle status update
+        // Already-refunded / duplicate receipt — treat as success when Razorpay reports it
+        const msg = String(err?.error?.description || err?.message || '');
+        const alreadyRefunded =
+            /already.*refund|duplicate|idempotenc/i.test(msg) ||
+            (Number(err?.statusCode) === 400 && /receipt/i.test(msg));
+        if (alreadyRefunded && err?.error?.metadata?.refund_id) {
+            return {
+                success: true,
+                refundId: err.error.metadata.refund_id,
+                status: 'processed',
+                raw: err.error,
+            };
+        }
         console.error(`Razorpay Refund API Failure [PaymentId: ${paymentId}]:`, err?.message || err);
         return {
             success: false,

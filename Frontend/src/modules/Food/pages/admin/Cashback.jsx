@@ -59,7 +59,7 @@ export default function Cashback() {
   const handleSubmit = (e) => {
     e.preventDefault()
     debugLog("Form submitted:", formData)
-    alert("Cashback offer created successfully!")
+    alert("Cashback offers are not wired to order pricing yet. This UI is preview-only and does not affect checkout totals.")
   }
 
   const handleReset = () => {
@@ -91,6 +91,9 @@ export default function Cashback() {
   return (
     <div className="p-4 lg:p-6 bg-slate-50 min-h-screen">
       <div className="max-w-7xl mx-auto">
+        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          Cashback is not connected to live order calculation. Offers saved here are local preview only and do not change checkout totals, wallets, or settlements.
+        </div>
         {/* Create Cashback Offer Section */}
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-6">
           <div className="flex items-center gap-3 mb-4">

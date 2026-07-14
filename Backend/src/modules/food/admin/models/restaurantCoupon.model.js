@@ -4,7 +4,7 @@ const restaurantCouponSchema = new mongoose.Schema(
     {
         restaurantId: { type: mongoose.Schema.Types.ObjectId, ref: 'FoodRestaurant', required: true, index: true },
         restaurantName: { type: String, required: true },
-        couponCode: { type: String, required: true, trim: true, uppercase: true, index: true },
+        couponCode: { type: String, required: true, trim: true, uppercase: true, unique: true },
         discountType: { type: String, enum: ['percentage', 'flat-price', 'fixed'], required: true },
         discountValue: { type: Number, required: true, min: 0 },
         customerScope: { type: String, enum: ['all', 'first-time'], default: 'all', index: true },

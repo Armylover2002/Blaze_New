@@ -29,8 +29,12 @@ import {
     calculateRiderEarning,
     resolveRestaurantToUserDistanceKm,
     resolveRestaurantToUserRoadDistanceKm,
+    resolveConfiguredDeliveryFeeFallback,
 } from '../../shared/delivery-fee.util.js';
 import { FoodItem } from '../../admin/models/food.model.js';
+import { FoodAddon } from '../../restaurant/models/foodAddon.model.js';
+import { SellerProduct } from '../../../quick-commerce/seller/models/sellerProduct.model.js';
+import { resolveDiscountSplitByCoupon } from '../../shared/discountSplit.util.js';
 import {
   sendNotificationToOwner,
   sendNotificationToOwners,
@@ -56,6 +60,7 @@ import {
 import { getIO, rooms } from '../../../../config/socket.js';
 import { isPointInPolygon } from '../../../../utils/geo.js';
 import { addOrderJob } from '../../../../queues/producers/order.producer.js';
+import { addPaymentJob } from '../../../../queues/producers/payment.producer.js';
 import { fetchPolyline } from '../utils/googleMaps.js';
 import { getFirebaseDB } from '../../../../config/firebase.js';
 import * as foodTransactionService from './foodTransaction.service.js';
@@ -76,7 +81,7 @@ import { DISPATCH_DOCUMENT_TYPES } from '../../../quick-commerce/utils/dispatchD
 import * as returnPickupDelivery from '../../../quick-commerce/services/returnPickupDelivery.service.js';
 import { deductWalletBalance, refundWalletBalance } from '../../user/services/userWallet.service.js';
 import { getGlobalBranding } from '../../../common/services/globalBranding.service.js';
-import { roadDistanceKm } from './order.helpers.js';
+import { roadDistanceKm, PAYMENT_QUEUE_ACTIONS } from './order.helpers.js';
 import { scorePointsByRoadDistance } from '../../../../services/roadDistance.service.js';
 
 export {
@@ -121,41 +126,63 @@ async function ensureRazorpayPaymentNotConsumed(paymentId, { currentFoodOrderId 
 
 /**
  * Fire-and-forget BullMQ enqueue for order lifecycle events.
+ * Payment settlement actions use the payment queue when BullMQ is enabled.
  * Never blocks API response; failures are logged only.
  */
 function enqueueOrderEvent(action, payload = {}) {
-    try {
-        void addOrderJob({ action, ...payload }).catch((err) => {
-            logger.warn(`BullMQ enqueue order event failed: ${action} - ${err?.message || err}`);
+  const isPaymentAction = PAYMENT_QUEUE_ACTIONS.includes(action);
+
+  const runSyncPaymentProcessor = () => {
+    import('../../../../queues/processors/payment.processor.js')
+      .then(({ processPaymentJob }) => {
+        logger.info(`[BullMQ:fallback] Running sync payment processor for action=${action}`);
+        processPaymentJob({
+          data: { action, ...payload },
+          id: `sync_${action}_${payload.orderMongoId || Date.now()}`,
+        }).catch((err) => {
+          logger.error(`[BullMQ:fallback] Sync payment processor failed: ${err.message}`);
         });
-    } catch (err) {
-        logger.warn(`BullMQ enqueue order event failed (sync): ${action} - ${err?.message || err}`);
+      })
+      .catch((err) => {
+        logger.error(`[BullMQ:fallback] Failed to import payment processor: ${err.message}`);
+      });
+  };
+
+  try {
+    if (isPaymentAction) {
+      if (process.env.BULLMQ_ENABLED === 'true') {
+        const jobOpts = {};
+        if (payload.orderMongoId) {
+          jobOpts.jobId = `payment_${action}_${payload.orderMongoId}`;
+        }
+        void addPaymentJob({ action, ...payload }, jobOpts)
+          .then((job) => {
+            if (!job) runSyncPaymentProcessor();
+          })
+          .catch((err) => {
+            const msg = String(err?.message || err);
+            if (/JobId|already exists|already existed/i.test(msg)) {
+              logger.info(
+                `[BullMQ] Payment job already present for action=${action} order=${payload.orderMongoId || ''}`,
+              );
+              return;
+            }
+            logger.warn(`BullMQ enqueue payment event failed: ${action} - ${msg}`);
+            runSyncPaymentProcessor();
+          });
+      } else {
+        runSyncPaymentProcessor();
+      }
+      return;
     }
 
-    // Synchronous fallback in development or when BullMQ is disabled
-    if (process.env.BULLMQ_ENABLED !== 'true') {
-        if ([
-            'delivery_completed',
-            'order_cancelled',
-            'order_cancelled_by_user',
-            'order_cancelled_by_watchdog',
-            'payment_verified',
-        ].includes(action)) {
-            import('../../../../queues/processors/payment.processor.js')
-                .then(({ processPaymentJob }) => {
-                    logger.info(`[BullMQ:fallback] Running sync payment processor for action=${action}`);
-                    processPaymentJob({
-                        data: { action, ...payload },
-                        id: `sync_${action}_${Date.now()}`
-                    }).catch((err) => {
-                        logger.error(`[BullMQ:fallback] Sync payment processor failed: ${err.message}`);
-                    });
-                })
-                .catch((err) => {
-                    logger.error(`[BullMQ:fallback] Failed to import payment processor: ${err.message}`);
-                });
-        }
-    }
+    void addOrderJob({ action, ...payload }).catch((err) => {
+      logger.warn(`BullMQ enqueue order event failed: ${action} - ${err?.message || err}`);
+    });
+  } catch (err) {
+    logger.warn(`BullMQ enqueue order event failed (sync): ${action} - ${err?.message || err}`);
+    if (isPaymentAction) runSyncPaymentProcessor();
+  }
 }
 
 
@@ -451,6 +478,30 @@ function normalizeOrderItems(items = [], fallbackOrderType = "food") {
   });
 }
 
+function resolveQuickUnitPrice(product, variantId) {
+  if (variantId) {
+    const variant = (Array.isArray(product?.variants) ? product.variants : []).find(
+      (entry) => String(entry?._id || "") === String(variantId).trim(),
+    );
+    if (!variant) {
+      throw new ValidationError("Selected quick product variant is unavailable");
+    }
+    const sale = Number(variant.salePrice || 0);
+    const base = Number(variant.price || 0);
+    return {
+      unitPrice: sale > 0 ? sale : base,
+      variantName: variant.name || "",
+    };
+  }
+  const sale = Number(product?.salePrice || 0);
+  const base = Number(product?.price || 0);
+  return { unitPrice: sale > 0 ? sale : base, variantName: "" };
+}
+
+/**
+ * Overwrite food line prices from FoodItem, then FoodAddon for remaining IDs.
+ * Never trusts client-provided food/addon prices.
+ */
 async function applyServerFoodItemPricing(items = [], sourceMap = new Map()) {
   const foodItems = (Array.isArray(items) ? items : []).filter((item) => item?.type === "food");
   if (!foodItems.length) return;
@@ -466,8 +517,9 @@ async function applyServerFoodItemPricing(items = [], sourceMap = new Map()) {
     throw new ValidationError("Invalid food item selection");
   }
 
+  const objectIds = itemIds.map((id) => new mongoose.Types.ObjectId(id));
   const foodDocs = await FoodItem.find({
-    _id: { $in: itemIds.map((id) => new mongoose.Types.ObjectId(id)) },
+    _id: { $in: objectIds },
     approvalStatus: "approved",
     isAvailable: true,
   })
@@ -475,41 +527,145 @@ async function applyServerFoodItemPricing(items = [], sourceMap = new Map()) {
     .lean();
   const foodById = new Map(foodDocs.map((doc) => [String(doc._id), doc]));
 
+  const missingIds = itemIds.filter((id) => !foodById.has(id));
+  const addonDocs = missingIds.length
+    ? await FoodAddon.find({
+        _id: { $in: missingIds.map((id) => new mongoose.Types.ObjectId(id)) },
+        approvalStatus: "approved",
+        isAvailable: true,
+        isDeleted: { $ne: true },
+        published: { $ne: null },
+      })
+        .select("restaurantId published draft")
+        .lean()
+    : [];
+  const addonById = new Map(addonDocs.map((doc) => [String(doc._id), doc]));
+
   for (const item of foodItems) {
     const itemId = String(item?.itemId || "").trim();
+    const source = sourceMap.get(String(item.sourceId));
+    const expectedRestaurantId = String(source?.sourceId || "").trim();
+
     const foodDoc = foodById.get(itemId);
-    if (!foodDoc) {
+    if (foodDoc) {
+      const docRestaurantId = String(foodDoc.restaurantId || "").trim();
+      if (!expectedRestaurantId || expectedRestaurantId !== docRestaurantId) {
+        throw new ValidationError("Food item does not belong to selected restaurant");
+      }
+
+      let unitPrice = Number(foodDoc.price || 0);
+      if (item?.variantId) {
+        const variantId = String(item.variantId).trim();
+        const variant = (Array.isArray(foodDoc.variants) ? foodDoc.variants : []).find(
+          (entry) => String(entry?._id || "") === variantId,
+        );
+        if (!variant) {
+          throw new ValidationError("Selected food variant is unavailable");
+        }
+        unitPrice = Number(variant.price || 0);
+        item.variantName = variant.name || item.variantName || "";
+        item.variantPrice = unitPrice;
+      }
+
+      item.price = unitPrice;
+      item.name = foodDoc.name || item.name;
+      item.image = item.image || foodDoc.image || foodDoc.images?.[0] || "";
+      item.isVeg = String(foodDoc.foodType || "").toLowerCase() === "veg";
+      item.isAddon = false;
+      item.sourceId = expectedRestaurantId;
+      item.sourceName = source?.sourceName || item.sourceName || "";
+      continue;
+    }
+
+    const addonDoc = addonById.get(itemId);
+    if (!addonDoc) {
       throw new ValidationError("One or more food items are unavailable");
     }
 
-    const source = sourceMap.get(String(item.sourceId));
-    const expectedRestaurantId = String(source?.sourceId || "").trim();
-    const docRestaurantId = String(foodDoc.restaurantId || "").trim();
+    const docRestaurantId = String(addonDoc.restaurantId || "").trim();
     if (!expectedRestaurantId || expectedRestaurantId !== docRestaurantId) {
-      throw new ValidationError("Food item does not belong to selected restaurant");
+      throw new ValidationError("Food addon does not belong to selected restaurant");
     }
 
-    let unitPrice = Number(foodDoc.price || 0);
-    if (item?.variantId) {
-      const variantId = String(item.variantId).trim();
-      const variant = (Array.isArray(foodDoc.variants) ? foodDoc.variants : []).find(
-        (entry) => String(entry?._id || "") === variantId,
-      );
-      if (!variant) {
-        throw new ValidationError("Selected food variant is unavailable");
-      }
-      unitPrice = Number(variant.price || 0);
-      item.variantName = variant.name || item.variantName || "";
-      item.variantPrice = unitPrice;
-    }
-
-    item.price = unitPrice;
-    item.name = foodDoc.name || item.name;
-    item.image = item.image || foodDoc.image || foodDoc.images?.[0] || "";
-    item.isVeg = String(foodDoc.foodType || "").toLowerCase() === "veg";
+    const published = addonDoc.published || addonDoc.draft || {};
+    item.price = Number(published.price || 0);
+    item.name = published.name || item.name;
+    item.image = item.image || published.image || published.images?.[0] || "";
+    item.isVeg = String(published.foodType || "Veg").toLowerCase() !== "non-veg";
+    item.isAddon = true;
+    item.variantId = undefined;
+    item.variantName = "";
+    item.variantPrice = item.price;
     item.sourceId = expectedRestaurantId;
     item.sourceName = source?.sourceName || item.sourceName || "";
   }
+}
+
+/**
+ * Overwrite quick line prices from SellerProduct. Never trusts client prices.
+ */
+async function applyServerQuickItemPricing(items = [], sourceMap = new Map()) {
+  const quickItems = (Array.isArray(items) ? items : []).filter((item) => item?.type === "quick");
+  if (!quickItems.length) return;
+
+  const itemIds = [
+    ...new Set(
+      quickItems
+        .map((item) => String(item?.itemId || "").trim())
+        .filter((id) => mongoose.isValidObjectId(id)),
+    ),
+  ];
+  if (!itemIds.length) {
+    throw new ValidationError("Invalid quick item selection");
+  }
+
+  const productDocs = await SellerProduct.find({
+    _id: { $in: itemIds.map((id) => new mongoose.Types.ObjectId(id)) },
+    status: "active",
+  })
+    .select("sellerId name price salePrice variants mainImage galleryImages")
+    .lean();
+  const productById = new Map(productDocs.map((doc) => [String(doc._id), doc]));
+
+  for (const item of quickItems) {
+    const itemId = String(item?.itemId || "").trim();
+    const product = productById.get(itemId);
+    if (!product) {
+      throw new ValidationError("One or more quick items are unavailable");
+    }
+
+    const source = sourceMap.get(String(item.sourceId));
+    const expectedSellerId = String(source?.sourceId || item.sourceId || "").trim();
+    const docSellerId = String(product.sellerId || "").trim();
+    if (!expectedSellerId || expectedSellerId !== docSellerId) {
+      throw new ValidationError("Quick item does not belong to selected store");
+    }
+
+    const { unitPrice, variantName } = resolveQuickUnitPrice(product, item?.variantId);
+    item.price = unitPrice;
+    if (item?.variantId) {
+      item.variantName = variantName || item.variantName || "";
+      item.variantPrice = unitPrice;
+    }
+    item.name = product.name || item.name;
+    item.image = item.image || product.mainImage || product.galleryImages?.[0] || "";
+    item.sourceId = expectedSellerId;
+    item.sourceName = source?.sourceName || item.sourceName || "";
+  }
+}
+
+async function applyServerItemPricing(items = [], sourceMap = new Map()) {
+  await applyServerFoodItemPricing(items, sourceMap);
+  await applyServerQuickItemPricing(items, sourceMap);
+}
+
+function sumItemsSubtotal(items = [], typeFilter = null) {
+  return (Array.isArray(items) ? items : [])
+    .filter((item) => (typeFilter ? item?.type === typeFilter : true))
+    .reduce(
+      (sum, item) => sum + (Number(item?.price) || 0) * (Number(item?.quantity) || 1),
+      0,
+    );
 }
 
 function getPointLatLng(locationLike) {
@@ -630,6 +786,7 @@ function normalizeFoodFeeSettings(feeDoc = null) {
     perKmCharge: 10,
     sponsorRules: [],
     platformFee: 5,
+    packagingFee: 0,
     gstRate: 5,
     mixedOrderDistanceLimit: 2,
     mixedOrderAngleLimit: 35,
@@ -657,6 +814,12 @@ function normalizeFoodFeeSettings(feeDoc = null) {
   feeSettings.platformFee = Number(
     feeSettings.platformFee ?? defaultFeeSettings.platformFee,
   );
+  feeSettings.packagingFee = Number(
+    feeSettings.packagingFee ?? defaultFeeSettings.packagingFee,
+  );
+  if (!Number.isFinite(feeSettings.packagingFee) || feeSettings.packagingFee < 0) {
+    feeSettings.packagingFee = 0;
+  }
   feeSettings.gstRate = Number(feeSettings.gstRate ?? defaultFeeSettings.gstRate);
   feeSettings.mixedOrderDistanceLimit = Number(
     feeSettings.mixedOrderDistanceLimit ?? defaultFeeSettings.mixedOrderDistanceLimit,
@@ -719,7 +882,7 @@ function calculateBaseDeliveryFeeForDistance(distanceKm, feeSettings) {
       if (sortedSlabs.length > 0 && distance > Number(sortedSlabs[0].toKm)) {
         return roundCurrency(Number(sortedSlabs[0].deliveryFee));
       }
-      return 60;
+      return roundCurrency(resolveConfiguredDeliveryFeeFallback(feeSettings, distance));
     }
 
     const baseFee = Number(baseSlab.deliveryFee || 0);
@@ -754,8 +917,8 @@ function calculateBaseDeliveryFeeForDistance(distanceKm, feeSettings) {
     return roundCurrency(totalFee);
   }
 
-  // Pure distance-based default: 60 delivery fee
-  return 60;
+  // No slabs: use admin flat / base+per-km (never hardcode ₹60).
+  return roundCurrency(resolveConfiguredDeliveryFeeFallback(feeSettings, distance));
 }
 
 function resolveSponsorRule(subtotal, distanceKm, sponsorRules = []) {
@@ -2221,7 +2384,7 @@ export async function calculateOrder(userId, dto) {
         ? "quick"
         : "food";
   const sourceMap = await fetchPickupSourcesByType(items);
-  await applyServerFoodItemPricing(items, sourceMap);
+  await applyServerItemPricing(items, sourceMap);
   const subtotal = items.reduce(
     (sum, it) => sum + (Number(it.price) || 0) * (Number(it.quantity) || 1),
     0,
@@ -2255,7 +2418,7 @@ export async function calculateOrder(userId, dto) {
   if (orderType === "quick") {
     const quickSourceId = items.find((item) => item.type === "quick")?.sourceId;
     const quickSource = quickSourceId ? sourceMap.get(String(quickSourceId)) : null;
-    const packagingFee = 0;
+    const packagingFee = roundCurrency(Number(feeSettings.packagingFee || 0));
     const platformFee = feeSettings.platformFee;
     let deliveryFee = feeSettings.deliveryFee;
     let deliveryDistanceKm = null;
@@ -2328,7 +2491,7 @@ export async function calculateOrder(userId, dto) {
     );
   }
 
-  const packagingFee = 0;
+  const packagingFee = roundCurrency(Number(feeSettings.packagingFee || 0));
   const platformFee = feeSettings.platformFee;
 
   let deliveryFee = 0;
@@ -2359,19 +2522,12 @@ export async function calculateOrder(userId, dto) {
       deliverySponsorType = rangePricing.deliverySponsorType;
       deliveryFeeBreakdown = rangePricing.deliveryFeeBreakdown;
     } else {
-      const userPoint = getPointLatLng(trustedDeliveryAddress?.location);
-      const restaurantPoint = getPointLatLng(
-        normalizeRestaurantLocation(primaryRestaurant?.location),
-      );
+      // Always charge using road distance (same source as ranges path / UX).
       const distanceKm =
-        userPoint && restaurantPoint
-          ? haversineKm(
-              restaurantPoint.lat,
-              restaurantPoint.lng,
-              userPoint.lat,
-              userPoint.lng,
-            )
-          : 0;
+        (await resolveRestaurantToUserRoadDistanceKm(
+          primaryRestaurant,
+          trustedDeliveryAddress,
+        )) ?? 0;
       const deliveryPricing = calculateFoodDeliveryPricing({
         subtotal,
         distanceKm,
@@ -2404,19 +2560,11 @@ export async function calculateOrder(userId, dto) {
       deliverySponsorType = rangePricing.deliverySponsorType;
       deliveryFeeBreakdown = rangePricing.deliveryFeeBreakdown;
     } else {
-      const userPoint = getPointLatLng(trustedDeliveryAddress?.location);
-      const restaurantPoint = getPointLatLng(
-        normalizeRestaurantLocation(primaryRestaurant?.location),
-      );
       const distanceKm =
-        userPoint && restaurantPoint
-          ? await roadDistanceKm(
-              restaurantPoint.lat,
-              restaurantPoint.lng,
-              userPoint.lat,
-              userPoint.lng,
-            )
-          : 0;
+        (await resolveRestaurantToUserRoadDistanceKm(
+          primaryRestaurant,
+          trustedDeliveryAddress,
+        )) ?? 0;
       const deliveryPricing = calculateFoodDeliveryPricing({
         subtotal,
         distanceKm,
@@ -2625,7 +2773,7 @@ export async function createOrder(userId, dto) {
       `${inactiveQuickSource.sourceName || "Quick store"} is not accepting orders`,
     );
   }
-  await applyServerFoodItemPricing(items, sourceMap);
+  await applyServerItemPricing(items, sourceMap);
 
   const orderId = await ensureUniqueOrderId();
   const settings =
@@ -2723,7 +2871,33 @@ export async function createOrder(userId, dto) {
   const commissionPercentage = primaryRestaurant
     ? resolveRestaurantCommissionPercentage(primaryRestaurant.commissionPercentage)
     : 0;
-  const commissionBase = Math.max(0, Number(serverPricing.subtotal || 0));
+
+  // Restaurant commission applies only to food GMV (never quick), after restaurant-borne discount.
+  const foodCommissionSubtotal =
+    orderType === "quick"
+      ? 0
+      : orderType === "mixed"
+        ? sumItemsSubtotal(items, "food")
+        : Math.max(0, Number(serverPricing.subtotal || 0));
+
+  let restaurantDiscountShareForCommission = 0;
+  const orderDiscount = Math.max(0, Number(serverPricing.discount || 0));
+  if (orderDiscount > 0 && foodCommissionSubtotal > 0) {
+    const split = await resolveDiscountSplitByCoupon({
+      couponCode: serverPricing.couponCode || couponCodeFromClient || "",
+      discount: orderDiscount,
+      couponSource: serverPricing.appliedCoupon?.source,
+    });
+    restaurantDiscountShareForCommission = Math.max(
+      0,
+      Number(split.restaurantDiscountShare || 0),
+    );
+  }
+
+  const commissionBase = Math.max(
+    0,
+    foodCommissionSubtotal - restaurantDiscountShareForCommission,
+  );
   const restaurantCommission =
     Math.round(commissionBase * (commissionPercentage / 100) * 100) / 100;
 
@@ -2855,7 +3029,8 @@ export async function createOrder(userId, dto) {
         ? normalizedPricing.deliveryFee
         : 0) +
       (Number.isFinite(normalizedPricing.platformFee) ? normalizedPricing.platformFee : 0) +
-      (Number(normalizedPricing.restaurantCommission) || 0) -
+      (Number(normalizedPricing.restaurantCommission) || 0) +
+      (Number(normalizedPricing.tax) || 0) -
       riderEarning,
   );
 
@@ -2972,19 +3147,43 @@ export async function createOrder(userId, dto) {
   }
 
   if (isWallet) {
+    const walletAmount = Number(normalizedPricing.total || 0);
     await deductWalletBalance(
       userId,
-      Number(normalizedPricing.total || 0),
+      walletAmount,
       "Food order payment",
       {
-        orderId,
+        orderId: String(order._id),
+        orderReadableId: orderId,
         source: "food_order_payment",
         orderType,
       },
     );
+    try {
+      await order.save();
+    } catch (saveErr) {
+      // Compensate: money was taken but order did not persist.
+      try {
+        await refundWalletBalance(
+          userId,
+          walletAmount,
+          "Order create compensation",
+          {
+            orderId: String(order._id),
+            orderReadableId: orderId,
+            source: "order_save_compensation",
+          },
+        );
+      } catch (refundErr) {
+        logger.error(
+          `Wallet compensation failed after order save error for ${orderId}: ${refundErr?.message || refundErr}`,
+        );
+      }
+      throw saveErr;
+    }
+  } else {
+    await order.save();
   }
-
-  await order.save();
 
   await foodTransactionService.createInitialTransaction(order);
   const sellerOrders = hasQuickItems
@@ -3312,10 +3511,56 @@ export async function cancelOrder(orderId, userId, reason, refundTo) {
   const isOnlinePaid =
     ["razorpay", "razorpay_qr"].includes(paymentMethod) &&
     (order.payment.status === "paid" || order.payment.status === "refunded");
+  const isWalletPaid =
+    paymentMethod === "wallet" &&
+    String(order.payment?.status || "").trim().toLowerCase() === "paid" &&
+    String(order.payment?.refund?.status || "").trim().toLowerCase() !== "processed";
   const requestedRefundMethod =
     refundTo === "wallet" || refundTo === "gateway" ? refundTo : "gateway";
 
-  if (isOnlinePaid) {
+  // Wallet-paid orders: refund immediately on user cancel (idempotent by orderId).
+  if (isWalletPaid) {
+    const totalAmount = Number(order.pricing?.total || 0);
+    if (Number.isFinite(totalAmount) && totalAmount > 0 && order.userId) {
+      try {
+        await refundWalletBalance(
+          order.userId,
+          totalAmount,
+          "Order refund",
+          {
+            orderId: String(order._id),
+            orderReadableId: String(order.orderId || ""),
+            source: "user_cancel_refund",
+          },
+        );
+        order.payment.status = "refunded";
+        order.payment.refund = {
+          status: "processed",
+          amount: totalAmount,
+          refundId: `wallet_refund_${order._id}`,
+          requestedMethod: "wallet",
+          processedMethod: "wallet",
+          requestedAt: new Date(),
+          requestedByUser: true,
+          reason: reason || "",
+          processedAt: new Date(),
+        };
+      } catch (err) {
+        logger.warn(
+          `Wallet refund failed on user cancel for Order ${orderId}: ${err?.message || err}`,
+        );
+        order.payment.refund = {
+          status: "failed",
+          amount: totalAmount,
+          requestedMethod: "wallet",
+          processedMethod: "wallet",
+          requestedAt: new Date(),
+          requestedByUser: true,
+          reason: reason || "",
+        };
+      }
+    }
+  } else if (isOnlinePaid) {
     order.payment.refund = {
       ...(order.payment.refund || {}),
       status: "pending",
@@ -3344,7 +3589,11 @@ export async function cancelOrder(orderId, userId, reason, refundTo) {
     try {
       const refundResult = await initiateRazorpayRefund(
         order.payment.razorpay.paymentId,
-        order.pricing.total
+        order.pricing.total,
+        {
+          idempotencyKey: `food_refund_${String(order._id)}_user_cancel`,
+          notes: { orderId: String(order.orderId || order._id), source: 'user_cancel' },
+        },
       );
 
       if (refundResult.success) {
@@ -3383,15 +3632,13 @@ export async function cancelOrder(orderId, userId, reason, refundTo) {
     refundTo: isOnlinePaid ? requestedRefundMethod : undefined,
   });
 
-  // Sync transaction status
+  // Sync transaction status — cancelled orders must leave captured/authorized
+  // so they never remain eligible for restaurant settlement.
   try {
+    const paymentStatus = String(order.payment?.status || "").trim().toLowerCase();
+    const wasPaidOrRefunded = ["paid", "refunded"].includes(paymentStatus);
     await foodTransactionService.updateTransactionStatus(order._id, 'cancelled_by_user', {
-        status:
-          order.payment.status === "refunded"
-            ? 'refunded'
-            : isOnlinePaid
-              ? 'captured'
-              : 'failed',
+        status: wasPaidOrRefunded ? 'refunded' : 'failed',
         note: `Order cancelled by user: ${reason || "No reason"}`,
         recordedByRole: 'USER',
         recordedById: userId
@@ -3878,49 +4125,116 @@ export async function updateOrderStatusRestaurant(
         to: orderStatus
     });
 
-    // ✅ NEW: Automated Razorpay Refund on Restaurant Cancel
-    // Triggers if the restaurant sets status to a cancelled state (e.g., cancelled_by_restaurant)
-    const isCancellationStatus = String(orderStatus).includes("cancel");
+    // Automated refund on restaurant cancel (Razorpay + wallet), before ledger sync.
+    const isCancellationStatus = String(orderStatus).includes("cancel") || isTerminalCancelStatus(orderStatus);
     if (
       isCancellationStatus &&
       order.payment?.status === "paid" &&
-      order.payment?.method === "razorpay" &&
-      order.payment?.razorpay?.paymentId &&
       (!order.payment?.refund || order.payment?.refund?.status !== "processed")
     ) {
-      try {
-        const refundResult = await initiateRazorpayRefund(
-          order.payment.razorpay.paymentId,
-          order.pricing?.total || 0
-        );
+      const cancelPayMethod = String(order.payment?.method || "").trim().toLowerCase();
+      const cancelRefundAmount = Number(order.pricing?.total || 0);
 
-        if (refundResult.success) {
+      if (cancelPayMethod === "wallet" && cancelRefundAmount > 0 && order.userId) {
+        try {
+          await refundWalletBalance(
+            order.userId,
+            cancelRefundAmount,
+            "Order refund",
+            {
+              orderId: String(order._id),
+              orderReadableId: String(order.orderId || ""),
+              source: "restaurant_cancel_refund",
+            },
+          );
           order.payment = order.payment || {};
           order.payment.status = "refunded";
           order.payment.refund = {
             status: "processed",
-            amount: order.pricing?.total || 0,
-            refundId: refundResult.refundId,
-            processedAt: new Date()
+            amount: cancelRefundAmount,
+            refundId: `wallet_refund_${order._id}`,
+            requestedMethod: "wallet",
+            processedMethod: "wallet",
+            requestedAt: new Date(),
+            requestedByUser: false,
+            reason: String(reason || ""),
+            processedAt: new Date(),
           };
-        } else {
-          // Record failure so admin knows a manual refund might be needed
+        } catch (err) {
+          console.error(`Automated wallet refund failed for Order ${orderId} (Restaurant Cancel):`, err);
           order.payment = order.payment || {};
           order.payment.refund = {
             status: "failed",
-            amount: order.pricing?.total || 0
+            amount: cancelRefundAmount,
+            requestedMethod: "wallet",
+            processedMethod: "wallet",
           };
         }
-      } catch (err) {
-        console.error(`Automated refund failed for Order ${orderId} (Restaurant Cancel):`, err);
-        order.payment = order.payment || {};
-        order.payment.refund = {
-          status: "failed",
-          amount: order.pricing?.total || 0,
-        };
+        await order.save();
+      } else if (
+        cancelPayMethod === "razorpay" &&
+        order.payment?.razorpay?.paymentId
+      ) {
+        try {
+          const refundResult = await initiateRazorpayRefund(
+            order.payment.razorpay.paymentId,
+            cancelRefundAmount,
+            {
+              idempotencyKey: `food_refund_${String(order._id)}_rest_cancel_${Math.round(Number(cancelRefundAmount) * 100)}`,
+              notes: { orderId: String(order.orderId || order._id), source: 'restaurant_cancel' },
+            },
+          );
+
+          if (refundResult.success) {
+            order.payment = order.payment || {};
+            order.payment.status = "refunded";
+            order.payment.refund = {
+              status: "processed",
+              amount: cancelRefundAmount,
+              refundId: refundResult.refundId,
+              processedAt: new Date()
+            };
+          } else {
+            order.payment = order.payment || {};
+            order.payment.refund = {
+              status: "failed",
+              amount: cancelRefundAmount
+            };
+          }
+        } catch (err) {
+          console.error(`Automated refund failed for Order ${orderId} (Restaurant Cancel):`, err);
+          order.payment = order.payment || {};
+          order.payment.refund = {
+            status: "failed",
+            amount: cancelRefundAmount,
+          };
+        }
+        await order.save();
       }
-      // Re-save order with updated payment status
-      await order.save();
+    }
+
+    // Remove cancelled orders from restaurant payout eligibility (never leave as captured).
+    if (isCancellationStatus || String(order.orderStatus || "").includes("cancel")) {
+      try {
+        const paymentStatus = String(order.payment?.status || "").trim().toLowerCase();
+        const wasPaidOrRefunded = ["paid", "refunded"].includes(paymentStatus);
+        await foodTransactionService.updateTransactionStatus(
+          order._id,
+          "cancelled_by_restaurant",
+          {
+            status: wasPaidOrRefunded ? "refunded" : "failed",
+            note: reason
+              ? `Order cancelled by restaurant: ${reason}`
+              : "Order cancelled by restaurant",
+            recordedByRole: "RESTAURANT",
+            recordedById: restaurantId,
+          },
+        );
+      } catch (err) {
+        logger.warn(
+          `updateOrderStatusRestaurant transaction sync failed: ${err?.message || err}`,
+        );
+      }
     }
 
     return order.toObject();
@@ -3976,12 +4290,10 @@ export async function updateOrderStatusAdmin(orderId, adminId, orderStatus, reas
     }
 
     try {
-      const paymentMethod = String(order.payment?.method || "").trim().toLowerCase();
-      const isOnlinePaid =
-        ["razorpay", "razorpay_qr"].includes(paymentMethod) &&
-        ["paid", "refunded"].includes(String(order.payment?.status || "").trim().toLowerCase());
+      const paymentStatus = String(order.payment?.status || "").trim().toLowerCase();
+      const wasPaidOrRefunded = ["paid", "refunded"].includes(paymentStatus);
       await foodTransactionService.updateTransactionStatus(order._id, "cancelled_by_admin", {
-        status: isOnlinePaid ? "refunded" : "failed",
+        status: wasPaidOrRefunded ? "refunded" : "failed",
         note: note ? `Order cancelled by admin: ${note}` : "Order cancelled by admin",
         recordedByRole: "ADMIN",
         recordedById: adminId,
@@ -4015,13 +4327,14 @@ export async function updateOrderStatusAdmin(orderId, adminId, orderStatus, reas
             orderId: String(order._id),
             orderReadableId: String(order.orderId || ""),
             source: "admin_auto_refund",
+            refundTransactionId: `wallet_refund_${String(order._id)}_full`,
           },
         );
         order.payment.status = "refunded";
         order.payment.refund = {
           status: "processed",
           amount: totalAmount,
-          refundId: `wallet_refund_${Date.now()}`,
+          refundId: `wallet_refund_${String(order._id)}_full`,
           requestedMethod: "wallet",
           processedMethod: "wallet",
           requestedAt: new Date(),
@@ -4039,6 +4352,10 @@ export async function updateOrderStatusAdmin(orderId, adminId, orderStatus, reas
         const refundResult = await initiateRazorpayRefund(
           order.payment.razorpay.paymentId,
           totalAmount,
+          {
+            idempotencyKey: `food_refund_${String(order._id)}_admin_full_${Math.round(Number(totalAmount) * 100)}`,
+            notes: { orderId: String(order.orderId || order._id), source: 'admin_cancel' },
+          },
         );
 
         if (refundResult?.success) {
@@ -4858,11 +5175,19 @@ export async function completeDelivery(orderId, deliveryPartnerId, body = {}) {
 
   const { otp, ratings, paymentMode } = body;
 
-  // Dynamically update payment method based on delivery partner selection
-  if (paymentMode === 'cash') {
-    order.payment.method = 'cash';
-  } else if (paymentMode === 'qr') {
-    order.payment.method = 'razorpay_qr';
+  // Only unpaid COD flows may switch collection mode at delivery.
+  // Never rewrite wallet / Razorpay method after prepaid capture.
+  const existingPayMethod = String(order.payment?.method || "").trim().toLowerCase();
+  const existingPayStatus = String(order.payment?.status || "").trim().toLowerCase();
+  const isPrepaidCaptured =
+    ["wallet", "razorpay", "razorpay_qr"].includes(existingPayMethod) &&
+    ["paid", "refunded"].includes(existingPayStatus);
+  if (!isPrepaidCaptured) {
+    if (paymentMode === "cash") {
+      order.payment.method = "cash";
+    } else if (paymentMode === "qr") {
+      order.payment.method = "razorpay_qr";
+    }
   }
 
   if (
@@ -4890,7 +5215,14 @@ export async function completeDelivery(orderId, deliveryPartnerId, body = {}) {
   }
 
   order.orderStatus = "delivered";
-  order.payment.status = "paid"; 
+  order.financialsLocked = true;
+  order.financialsLockedAt = order.financialsLockedAt || new Date();
+  // Mark COD / unpaid collection as paid on delivery; prepaid stays paid/refunded as-is.
+  if (!["paid", "refunded"].includes(String(order.payment?.status || "").trim().toLowerCase())) {
+    order.payment.status = "paid";
+  } else if (["cash", "cod", "cash_on_delivery", "razorpay_qr"].includes(String(payMethod || "").toLowerCase())) {
+    order.payment.status = "paid";
+  }
   order.deliveryState = {
     ...(order.deliveryState?.toObject?.() || order.deliveryState || {}),
     currentPhase: "delivered",
@@ -5018,6 +5350,10 @@ export async function updateOrderStatusDelivery(orderId, deliveryPartnerId, orde
     if (order.dispatch.deliveryPartnerId?.toString() !== deliveryPartnerId.toString()) throw new ForbiddenError('Not your order');
     const from = order.orderStatus;
     order.orderStatus = orderStatus;
+    if (String(orderStatus).toLowerCase() === 'delivered') {
+        order.financialsLocked = true;
+        order.financialsLockedAt = order.financialsLockedAt || new Date();
+    }
     pushStatusHistory(order, { byRole: 'DELIVERY_PARTNER', byId: deliveryPartnerId, from, to: orderStatus });
     await order.save();
     if (String(orderStatus).toLowerCase() === 'delivered') {
@@ -5051,6 +5387,12 @@ export async function createCollectQr(
     throw new ForbiddenError("Not your order");
   if (order.payment.method !== "cash" && order.payment.status === "paid")
     throw new ValidationError("Order already paid");
+  if (
+    order.financialsLocked ||
+    String(order.orderStatus || "").toLowerCase() === "delivered"
+  ) {
+    throw new ValidationError("Order financials are locked after delivery");
+  }
   const amountDue = order.payment.amountDue ?? order.pricing?.total ?? 0;
   if (amountDue < 1) throw new ValidationError("No amount due");
 
@@ -5069,19 +5411,30 @@ export async function createCollectQr(
     customerPhone: customerInfo.phone || user.phone,
   });
 
-  await FoodOrder.findByIdAndUpdate(order._id, {
-    $set: {
-      "payment.method": "razorpay_qr",
-      "payment.status": "pending_qr",
-      "payment.qr": {
-        paymentLinkId: link.id,
-        shortUrl: link.short_url,
-        imageUrl: link.short_url,
-        status: link.status || "created",
-        expiresAt: link.expire_by ? new Date(link.expire_by * 1000) : null,
+  // Conditional update so concurrent delivery finish cannot rewrite locked financials.
+  const qrWrite = await FoodOrder.updateOne(
+    {
+      _id: order._id,
+      financialsLocked: { $ne: true },
+      orderStatus: { $ne: "delivered" },
+    },
+    {
+      $set: {
+        "payment.method": "razorpay_qr",
+        "payment.status": "pending_qr",
+        "payment.qr": {
+          paymentLinkId: link.id,
+          shortUrl: link.short_url,
+          imageUrl: link.short_url,
+          status: link.status || "created",
+          expiresAt: link.expire_by ? new Date(link.expire_by * 1000) : null,
+        },
       },
     },
-  });
+  );
+  if (!qrWrite?.modifiedCount) {
+    throw new ValidationError("Order financials are locked after delivery");
+  }
 
     const updated = await FoodOrder.findById(order._id).select('orderId restaurantId userId riderEarning payment pricing').lean();
     if (updated) {
@@ -5564,6 +5917,25 @@ export async function recoverStuckOrders() {
         // Sync mixed order seller legs
         if (order.orderType === 'mixed' || order.orderType === 'quick') {
           await cancelSellerOrdersForParent(order, "Cancelled by system watchdog");
+        }
+
+        // Exclude stuck/cancelled orders from restaurant settlement eligibility.
+        try {
+          const paymentStatus = String(order.payment?.status || '').trim().toLowerCase();
+          const wasPaidOrRefunded = ['paid', 'refunded'].includes(paymentStatus);
+          await foodTransactionService.updateTransactionStatus(
+            order._id,
+            'cancelled_by_system',
+            {
+              status: wasPaidOrRefunded ? 'refunded' : 'failed',
+              note: 'Watchdog auto-recovery: Order cancelled while stuck in transient state',
+              recordedByRole: 'SYSTEM',
+            },
+          );
+        } catch (txErr) {
+          logger.warn(
+            `Watchdog transaction sync failed for ${order.orderId}: ${txErr?.message || txErr}`,
+          );
         }
         
         // Enqueue event for housekeeping/finance

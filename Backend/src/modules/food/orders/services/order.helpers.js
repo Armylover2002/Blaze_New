@@ -6,38 +6,79 @@ import {
 } from "../../../../core/notifications/firebase.service.js";
 import { getIO, rooms } from '../../../../config/socket.js';
 import { addOrderJob } from '../../../../queues/producers/order.producer.js';
+import { addPaymentJob } from '../../../../queues/producers/payment.producer.js';
 
+/** Actions that must be processed by the payment worker (wallet credits / refunds). */
+export const PAYMENT_QUEUE_ACTIONS = [
+  'delivery_completed',
+  'order_cancelled',
+  'order_cancelled_by_user',
+  'order_cancelled_by_watchdog',
+  'payment_verified',
+];
+
+function runSyncPaymentProcessor(action, payload = {}) {
+  import('../../../../queues/processors/payment.processor.js')
+    .then(({ processPaymentJob }) => {
+      logger.info(`[BullMQ:fallback] Running sync payment processor for action=${action}`);
+      processPaymentJob({
+        data: { action, ...payload },
+        id: `sync_${action}_${payload.orderMongoId || Date.now()}`,
+      }).catch((err) => {
+        logger.error(`[BullMQ:fallback] Sync payment processor failed: ${err.message}`);
+      });
+    })
+    .catch((err) => {
+      logger.error(`[BullMQ:fallback] Failed to import payment processor: ${err.message}`);
+    });
+}
+
+/**
+ * Fire-and-forget enqueue for order lifecycle events.
+ * Payment settlement actions go to the payment queue when BullMQ is enabled.
+ */
 export function enqueueOrderEvent(action, payload = {}) {
+  const isPaymentAction = PAYMENT_QUEUE_ACTIONS.includes(action);
+
   try {
+    if (isPaymentAction) {
+      if (process.env.BULLMQ_ENABLED === 'true') {
+        const jobOpts = {};
+        if (payload.orderMongoId) {
+          // Deduplicate concurrent enqueues for the same order+action.
+          jobOpts.jobId = `payment_${action}_${payload.orderMongoId}`;
+        }
+        void addPaymentJob({ action, ...payload }, jobOpts)
+          .then((job) => {
+            if (!job) {
+              // Queue unavailable despite BullMQ flag — still settle credits.
+              runSyncPaymentProcessor(action, payload);
+            }
+          })
+          .catch((err) => {
+            const msg = String(err?.message || err);
+            if (/JobId|already exists|already existed/i.test(msg)) {
+              logger.info(
+                `[BullMQ] Payment job already present for action=${action} order=${payload.orderMongoId || ''}`,
+              );
+              return;
+            }
+            logger.warn(`BullMQ enqueue payment event failed: ${action} - ${msg}`);
+            runSyncPaymentProcessor(action, payload);
+          });
+      } else {
+        runSyncPaymentProcessor(action, payload);
+      }
+      return;
+    }
+
     void addOrderJob({ action, ...payload }).catch((err) => {
       logger.warn(`BullMQ enqueue order event failed: ${action} - ${err?.message || err}`);
     });
   } catch (err) {
     logger.warn(`BullMQ enqueue order event failed (sync): ${action} - ${err?.message || err}`);
-  }
-
-  // Synchronous fallback in development or when BullMQ is disabled
-  if (process.env.BULLMQ_ENABLED !== 'true') {
-    if ([
-      'delivery_completed',
-      'order_cancelled',
-      'order_cancelled_by_user',
-      'order_cancelled_by_watchdog',
-      'payment_verified',
-    ].includes(action)) {
-      import('../../../../queues/processors/payment.processor.js')
-        .then(({ processPaymentJob }) => {
-          logger.info(`[BullMQ:fallback] Running sync payment processor for action=${action}`);
-          processPaymentJob({
-            data: { action, ...payload },
-            id: `sync_${action}_${Date.now()}`
-          }).catch((err) => {
-            logger.error(`[BullMQ:fallback] Sync payment processor failed: ${err.message}`);
-          });
-        })
-        .catch((err) => {
-          logger.error(`[BullMQ:fallback] Failed to import payment processor: ${err.message}`);
-        });
+    if (isPaymentAction) {
+      runSyncPaymentProcessor(action, payload);
     }
   }
 }

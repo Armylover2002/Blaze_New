@@ -2,6 +2,7 @@ import express from 'express';
 import { AuthError } from '../../../../core/auth/errors.js';
 import { invalidateCategoryCaches } from '../../shared/categoryCache.js';
 import * as adminController from '../controllers/admin.controller.js';
+import * as advertisementController from '../controllers/advertisement.controller.js';
 import roleRoutes from './role.routes.js';
 import { getCustomerContactsAdminController } from '../../user/controllers/userContact.controller.js';
 import * as foodApprovalController from '../controllers/foodApproval.controller.js';
@@ -137,6 +138,19 @@ router.patch('/offers/:id', checkPermission('food::promotions_management::coupon
 router.delete('/offers/:id', checkPermission('food::promotions_management::coupons', 'delete'), adminController.deleteAdminOffer);
 router.get('/restaurant-coupons', checkPermission('food::promotions_management::coupons', 'view'), adminController.getRestaurantCoupons);
 router.patch('/restaurant-coupons/:id/status', checkPermission('food::promotions_management::coupons', 'edit'), adminController.updateRestaurantCouponStatus);
+
+// ----- Advertisements -----
+router.get('/advertisements', checkPermission('food::promotions_management::coupons', 'view'), advertisementController.listAdminAdvertisementsController);
+router.post(
+    '/advertisements',
+    checkPermission('food::promotions_management::coupons', 'create'),
+    upload.fields([{ name: 'image', maxCount: 1 }, { name: 'video', maxCount: 1 }]),
+    advertisementController.createAdminAdvertisementController
+);
+router.get('/advertisement-requests', checkPermission('food::promotions_management::coupons', 'view'), advertisementController.listAdminAdvertisementRequestsController);
+router.patch('/advertisements/:id/status', checkPermission('food::promotions_management::coupons', 'edit'), advertisementController.updateAdminAdvertisementStatusController);
+router.patch('/advertisements/:id/priority', checkPermission('food::promotions_management::coupons', 'edit'), advertisementController.updateAdminAdvertisementPriorityController);
+router.delete('/advertisements/:id', checkPermission('food::promotions_management::coupons', 'delete'), advertisementController.deleteAdminAdvertisementController);
 
 // ----- Feedback Experience (Admin) -----
 router.get('/feedback-experiences', checkPermission('food::report_management::customer_report::feedback_experience', 'view'), feedbackExperienceController.getFeedbackExperiences);

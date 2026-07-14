@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { useNavigate } from "react-router-dom"
 import useRestaurantBackNavigation from "@food/hooks/useRestaurantBackNavigation"
@@ -11,16 +11,13 @@ import {
   Eye,
   Edit,
   Pause,
-  Copy,
   Trash2
 } from "lucide-react"
 import { Card, CardContent } from "@food/components/ui/card"
 import BottomNavbar from "@food/components/restaurant/BottomNavbar"
 import MenuOverlay from "@food/components/restaurant/MenuOverlay"
-const debugLog = (...args) => {}
-const debugWarn = (...args) => {}
-const debugError = (...args) => {}
-
+import { restaurantAPI } from "@food/api"
+import { toast } from "sonner"
 
 export default function AdvertisementsPage() {
   const navigate = useNavigate()
@@ -28,8 +25,27 @@ export default function AdvertisementsPage() {
   const [activeFilter, setActiveFilter] = useState("all")
   const [openMenuId, setOpenMenuId] = useState(null)
   const [showMenu, setShowMenu] = useState(false)
+  const [advertisements, setAdvertisements] = useState([])
+  const [loading, setLoading] = useState(true)
 
-  // Close menu when clicking outside
+  const fetchAds = useCallback(async () => {
+    try {
+      setLoading(true)
+      const response = await restaurantAPI.getAdvertisements()
+      const data = response?.data?.data
+      setAdvertisements(Array.isArray(data) ? data : [])
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to load advertisements")
+      setAdvertisements([])
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    fetchAds()
+  }, [fetchAds])
+
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (openMenuId && !event.target.closest(`[data-menu-id="${openMenuId}"]`)) {
@@ -48,7 +64,6 @@ export default function AdvertisementsPage() {
     }
   }, [openMenuId])
 
-  // Lenis smooth scrolling
   useEffect(() => {
     const lenis = new Lenis({
       duration: 1.2,
@@ -68,17 +83,13 @@ export default function AdvertisementsPage() {
     }
   }, [])
 
-  const advertisements = []
-
-  // Filter counts
   const filterCounts = {
     all: advertisements.length,
     pending: advertisements.filter(ad => ad.status === "Pending").length,
     running: advertisements.filter(ad => ad.status === "Running").length,
-    approve: 0
+    approve: advertisements.filter(ad => ad.status === "Approve").length
   }
 
-  // Filter advertisements based on active filter
   const filteredAds = activeFilter === "all" 
     ? advertisements 
     : activeFilter === "pending"
@@ -94,9 +105,28 @@ export default function AdvertisementsPage() {
     { id: "approve", label: "Approve", count: filterCounts.approve }
   ]
 
+  const handlePause = async (id) => {
+    try {
+      await restaurantAPI.pauseAdvertisement(id)
+      toast.success("Advertisement status updated")
+      await fetchAds()
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to pause advertisement")
+    }
+  }
+
+  const handleDelete = async (id) => {
+    try {
+      await restaurantAPI.deleteAdvertisement(id)
+      toast.success("Advertisement deleted")
+      await fetchAds()
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to delete advertisement")
+    }
+  }
+
   return (
     <div className="min-h-screen bg-[#f6e9dc] overflow-x-hidden pb-20 md:pb-6">
-      {/* Header */}
       <div className="bg-white border-b border-gray-200 px-4 py-3 sticky top-0 z-50 flex items-center gap-3">
         <button 
           onClick={goBack}
@@ -107,7 +137,6 @@ export default function AdvertisementsPage() {
         <h1 className="text-lg font-bold text-gray-900 flex-1">Advertisement List</h1>
       </div>
 
-      {/* Filter Tabs */}
       <div className="bg-white border-b border-gray-200 px-4 py-3 sticky top-[57px] z-40">
         <div className="flex gap-2 overflow-x-auto scrollbar-hide -mx-4 px-4">
           {filters.map((filter, index) => (
@@ -127,61 +156,60 @@ export default function AdvertisementsPage() {
             >
               {activeFilter === filter.id && (
                 <motion.div
-                  layoutId="activeFilter"
-                  className="absolute inset-0 bg-[#ff8100] rounded-full z-0"
-                  transition={{ type: "spring", stiffness: 500, damping: 30 }}
+                  layoutId="adFilterPill"
+                  className="absolute inset-0 bg-[#ff8100] rounded-full"
+                  transition={{ type: "spring", stiffness: 400, damping: 30 }}
                 />
               )}
-              <span className="relative z-10 text-black font-bold">
-                {filter.label} {filter.count > 0 && filter.count}
-              </span>
+              <span className="relative z-10">{filter.label} ({filter.count})</span>
             </motion.button>
           ))}
         </div>
       </div>
 
-      {/* Advertisement List */}
       <div className="px-4 py-4 space-y-3">
-        <AnimatePresence mode="wait">
-          {filteredAds.map((ad, index) => (
+        {loading && (
+          <div className="text-center py-12">
+            <p className="text-gray-500 text-sm">Loading advertisements...</p>
+          </div>
+        )}
+
+        <AnimatePresence>
+          {!loading && filteredAds.map((ad, index) => (
             <motion.div
               key={ad.id}
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -20 }}
-              transition={{ duration: 0.4, delay: index * 0.1, ease: [0.4, 0, 0.2, 1] }}
-              whileHover={{ y: -4, scale: 1.01 }}
-              whileTap={{ scale: 0.98 }}
+              exit={{ opacity: 0, y: -10 }}
+              transition={{ duration: 0.3, delay: index * 0.05 }}
             >
-              <Card className="bg-white shadow-sm border border-gray-100 hover:shadow-md transition-shadow cursor-pointer"
-                onClick={() => navigate(`/restaurant/advertisements/${ad.id}`)}
-              >
+              <Card className="bg-white shadow-sm border border-gray-100">
                 <CardContent className="p-4">
                   <div className="flex items-start justify-between gap-3">
-                    {/* Left Content */}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-2">
                         <h3 className="text-base font-bold text-gray-900">
-                          Ads ID # {ad.id}
+                          Ads ID # {ad.adsId || ad.id}
                         </h3>
                         <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
                           ad.status === "Running"
-                            ? "bg-blue-100 text-blue-700"
+                            ? "bg-green-100 text-green-700"
+                            : ad.status === "Pending"
+                            ? "bg-yellow-100 text-yellow-700"
                             : "bg-blue-100 text-blue-700"
                         }`}>
                           {ad.status}
                         </span>
                       </div>
                       
-                      <p className="text-sm text-gray-700 mb-2">{ad.type}</p>
+                      <p className="text-sm text-gray-700 mb-2">{ad.type || ad.adsType}</p>
                       
                       <div className="space-y-1 text-xs text-gray-600">
-                        <p>Ads Placed: {ad.adsPlaced}</p>
-                        <p>Duration: {ad.duration.start} - {ad.duration.end}</p>
+                        <p>Ads Placed: {ad.adsPlaced || "N/A"}</p>
+                        <p>Duration: {ad.duration?.start || "N/A"} - {ad.duration?.end || "N/A"}</p>
                       </div>
                     </div>
 
-                    {/* Right Icons */}
                     <div className="flex items-center gap-2 flex-shrink-0 relative">
                       <motion.button 
                         whileHover={{ scale: 1.1 }}
@@ -196,7 +224,6 @@ export default function AdvertisementsPage() {
                         <MoreVertical className="w-5 h-5 text-gray-600" />
                       </motion.button>
                       
-                      {/* Context Menu */}
                       <AnimatePresence>
                         {openMenuId === ad.id && (
                           <motion.div
@@ -208,11 +235,10 @@ export default function AdvertisementsPage() {
                             data-menu-id={ad.id}
                           >
                             {[
-                              { icon: Eye, label: "View Ads", action: () => navigate(`/restaurant/advertisements/${ad.id}`) },
-                              { icon: Edit, label: "Edit Ads", action: () => navigate(`/restaurant/advertisements/${ad.id}/edit`) },
-                              { icon: Pause, label: "Pause Ads", action: () => debugLog("Pause:", ad.id) },
-                              { icon: Copy, label: "Copy Ads", action: () => debugLog("Copy:", ad.id) },
-                              { icon: Trash2, label: "Delete Ads", action: () => debugLog("Delete:", ad.id), isDanger: true }
+                              { icon: Eye, label: "View Ads", action: () => navigate(`/food/restaurant/advertisements/${ad.id}`) },
+                              { icon: Edit, label: "Edit Ads", action: () => navigate(`/food/restaurant/advertisements/${ad.id}/edit`) },
+                              { icon: Pause, label: "Pause Ads", action: () => handlePause(ad.id) },
+                              { icon: Trash2, label: "Delete Ads", action: () => handleDelete(ad.id), isDanger: true }
                             ].map((option, idx) => {
                               const IconComponent = option.icon
                               return (
@@ -243,11 +269,11 @@ export default function AdvertisementsPage() {
                         )}
                       </AnimatePresence>
 
-                      <motion.button 
+                      <motion.button
                         whileHover={{ scale: 1.1 }}
                         whileTap={{ scale: 0.9 }}
                         onClick={() => {
-                          navigate(`/restaurant/advertisements/${ad.id}`)
+                          navigate(`/food/restaurant/advertisements/${ad.id}`)
                         }}
                         className="p-2 bg-[#ff8100] hover:bg-[#e67300] rounded-lg transition-colors"
                       >
@@ -261,15 +287,13 @@ export default function AdvertisementsPage() {
           ))}
         </AnimatePresence>
 
-        {/* Empty State */}
-        {filteredAds.length === 0 && (
+        {!loading && filteredAds.length === 0 && (
           <div className="text-center py-12">
             <p className="text-gray-500 text-sm">No advertisements found</p>
           </div>
         )}
       </div>
 
-      {/* Floating Action Button */}
       <motion.button
         initial={{ scale: 0 }}
         animate={{ scale: 1 }}
@@ -277,20 +301,15 @@ export default function AdvertisementsPage() {
         whileHover={{ scale: 1.1 }}
         whileTap={{ scale: 0.9 }}
         onClick={() => {
-          navigate("/restaurant/advertisements/new")
+          navigate("/food/restaurant/advertisements/new")
         }}
         className="fixed bottom-20 md:bottom-6 right-4 md:right-6 w-14 h-14 bg-[#ff8100] hover:bg-[#e67300] text-white rounded-full shadow-lg flex items-center justify-center z-40 transition-colors"
       >
         <Plus className="w-6 h-6" />
       </motion.button>
 
-      {/* Bottom Navigation Bar */}
       <BottomNavbar onMenuClick={() => setShowMenu(true)} />
-      
-      {/* Menu Overlay */}
       <MenuOverlay showMenu={showMenu} setShowMenu={setShowMenu} />
     </div>
   )
 }
-
-

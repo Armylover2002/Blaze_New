@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react"
+import { useState, useRef, useEffect, useMemo } from "react"
 import { useNavigate, useLocation } from "react-router-dom"
 import useRestaurantBackNavigation from "@food/hooks/useRestaurantBackNavigation"
 import { motion, AnimatePresence } from "framer-motion"
@@ -72,43 +72,46 @@ export default function FinanceDetailsPage() {
     }, 2000)
   }
 
-  // Settlement data with real values from financeData
+  // Settlement data bound to finance API — do not invent TDS/deduction rows.
   const settlementData = useMemo(() => {
     const cycle = financeData?.currentCycle || {};
     const summary = financeData?.invoiceSummary || {};
-    
+    const taxes = Number(summary.taxes || 0);
+    const subtotal = Number(summary.subtotal || 0);
+    const gross = Number(summary.gross || subtotal + taxes);
+
     return {
       totalOrders: cycle.totalOrders || 0,
       netOrderValue: {
-        itemSubtotal: summary.subtotal || 0,
-        totalGSTCollected: summary.taxes || 0,
+        itemSubtotal: subtotal,
+        totalGSTCollected: taxes,
         restaurantDiscountPromos: 0,
         restaurantDiscountOthers: 0,
-        total: summary.subtotal || 0
+        total: gross || subtotal,
       },
       additions: {
         tds194H: 0,
         tds194C: 0,
-        total: 0
+        total: 0,
       },
       orderLevelDeductions: {
-        total: 0
+        total: 0,
       },
       taxDeductions: {
         gstOnServiceFees: 0,
         tds194O: 0,
         gstPaidByZomato: 0,
-        total: summary.taxes || 0
+        total: taxes,
       },
       investmentsInGrowth: {
         onlineOrderingAds: 0,
-        total: 0
+        total: 0,
       },
-      estimatedPayout: cycle.estimatedPayout || 0,
+      estimatedPayout: Number(cycle.estimatedPayout || financeData?.earnings?.availableBalance || 0),
       start: cycle.start?.day || "15",
       end: cycle.end?.day || "21",
       month: cycle.start?.month || "Dec",
-      year: cycle.start?.year || "25"
+      year: cycle.start?.year || "25",
     }
   }, [financeData])
 

@@ -74,6 +74,9 @@ export default function LandingPageManagement() {
   const [bannersDeleting, setBannersDeleting] = useState(null)
   const [bannerZoneDrafts, setBannerZoneDrafts] = useState({})
   const [bannerZoneSavingId, setBannerZoneSavingId] = useState(null)
+  const [bannerLinkDrafts, setBannerLinkDrafts] = useState({})
+  const [bannerRestaurantDrafts, setBannerRestaurantDrafts] = useState({})
+  const [bannerLinkSavingId, setBannerLinkSavingId] = useState(null)
   const bannersFileInputRef = useRef(null)
   const [zones, setZones] = useState([])
   const [zonesLoading, setZonesLoading] = useState(false)
@@ -208,6 +211,21 @@ export default function LandingPageManagement() {
         setBannerZoneDrafts(
           nextBanners.reduce((acc, banner) => {
             acc[banner._id] = typeof banner.zoneId === 'string' ? banner.zoneId : ''
+            return acc
+          }, {})
+        )
+        setBannerLinkDrafts(
+          nextBanners.reduce((acc, banner) => {
+            acc[banner._id] = typeof banner.ctaLink === 'string' ? banner.ctaLink : ''
+            return acc
+          }, {})
+        )
+        setBannerRestaurantDrafts(
+          nextBanners.reduce((acc, banner) => {
+            acc[banner._id] = banner.linkedRestaurantId
+              || (Array.isArray(banner.linkedRestaurantIds) && banner.linkedRestaurantIds[0]
+                ? String(banner.linkedRestaurantIds[0]._id || banner.linkedRestaurantIds[0])
+                : '')
             return acc
           }, {})
         )
@@ -380,6 +398,20 @@ export default function LandingPageManagement() {
     }))
   }
 
+  const handleBannerLinkDraftChange = (bannerId, nextLink) => {
+    setBannerLinkDrafts((prev) => ({
+      ...prev,
+      [bannerId]: nextLink,
+    }))
+  }
+
+  const handleBannerRestaurantDraftChange = (bannerId, nextRestaurantId) => {
+    setBannerRestaurantDrafts((prev) => ({
+      ...prev,
+      [bannerId]: nextRestaurantId,
+    }))
+  }
+
   const handleSaveBannerZone = async (bannerId) => {
     try {
       setBannerZoneSavingId(bannerId)
@@ -401,6 +433,37 @@ export default function LandingPageManagement() {
       setErrorSafely(err.response?.data?.message || 'Failed to save banner zone.')
     } finally {
       setBannerZoneSavingId(null)
+    }
+  }
+
+  const handleSaveBannerDestination = async (bannerId) => {
+    try {
+      setBannerLinkSavingId(bannerId)
+      setError(null)
+      setSuccess(null)
+      const ctaLink = typeof bannerLinkDrafts[bannerId] === 'string' ? bannerLinkDrafts[bannerId].trim() : ''
+      const linkedRestaurantId = typeof bannerRestaurantDrafts[bannerId] === 'string'
+        ? bannerRestaurantDrafts[bannerId].trim()
+        : ''
+      const response = await api.patch(
+        `/food/hero-banners/${bannerId}`,
+        {
+          ctaLink,
+          linkedRestaurantId,
+          linkedRestaurantIds: linkedRestaurantId ? [linkedRestaurantId] : [],
+        },
+        getAuthConfig()
+      )
+
+      if (response.data.success) {
+        setSuccess('Banner destination saved successfully!')
+        await fetchBanners()
+        setTimeout(() => setSuccess(null), 3000)
+      }
+    } catch (err) {
+      setErrorSafely(err.response?.data?.message || 'Failed to save banner destination.')
+    } finally {
+      setBannerLinkSavingId(null)
     }
   }
 
@@ -1338,6 +1401,39 @@ export default function LandingPageManagement() {
                           {zonesLoading && (
                             <p className="mt-2 text-xs text-slate-500">Loading available zones...</p>
                           )}
+                        </div>
+                        <div className="mt-3 border-t border-slate-200 pt-3 space-y-2">
+                          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Click destination</p>
+                          <select
+                            value={bannerRestaurantDrafts[banner._id] ?? ''}
+                            onChange={(e) => handleBannerRestaurantDraftChange(banner._id, e.target.value)}
+                            disabled={restaurantsLoading || bannerLinkSavingId === banner._id}
+                            className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-50"
+                          >
+                            <option value="">No linked restaurant</option>
+                            {allRestaurants.map((restaurant) => (
+                              <option key={restaurant._id} value={restaurant._id}>
+                                {restaurant.name || restaurant.restaurantName || restaurant._id}
+                              </option>
+                            ))}
+                          </select>
+                          <input
+                            type="text"
+                            value={bannerLinkDrafts[banner._id] ?? ''}
+                            onChange={(e) => handleBannerLinkDraftChange(banner._id, e.target.value)}
+                            disabled={bannerLinkSavingId === banner._id}
+                            placeholder="Or CTA path/URL (e.g. /user/offers)"
+                            className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-50"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => handleSaveBannerDestination(banner._id)}
+                            disabled={bannerLinkSavingId === banner._id}
+                            className="inline-flex h-10 w-full items-center justify-center rounded-lg bg-blue-600 px-4 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            {bannerLinkSavingId === banner._id ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                            Save destination
+                          </button>
                         </div>
                       </div>
                     </div>

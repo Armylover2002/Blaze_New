@@ -12,6 +12,11 @@ import { FoodCategory } from '../models/category.model.js';
 import { FoodItem } from '../models/food.model.js';
 import { FoodOffer } from '../models/offer.model.js';
 import { FoodOfferUsage } from '../models/offerUsage.model.js';
+import {
+    COUPON_OWNER_TYPES,
+    claimCouponCodeReservation,
+    releaseCouponCodeReservation
+} from '../../shared/couponCodeRegistry.util.js';
 import { DeliveryBonusTransaction } from '../models/deliveryBonusTransaction.model.js';
 import { DeliveryBonusAuditLog } from '../models/deliveryBonusAuditLog.model.js';
 import { DeliveryBonusIdempotency } from '../models/deliveryBonusIdempotency.model.js';
@@ -2384,6 +2389,9 @@ export async function upsertFeeSettings(body) {
         if (body.platformFee === null) $unset.platformFee = 1;
         else if (body.platformFee !== undefined) $set.platformFee = body.platformFee;
 
+        if (body.packagingFee === null) $unset.packagingFee = 1;
+        else if (body.packagingFee !== undefined) $set.packagingFee = body.packagingFee;
+
         if (body.gstRate === null) $unset.gstRate = 1;
         else if (body.gstRate !== undefined) $set.gstRate = body.gstRate;
         if (body.mixedOrderDistanceLimit !== undefined) $set.mixedOrderDistanceLimit = body.mixedOrderDistanceLimit;
@@ -2417,6 +2425,7 @@ export async function upsertFeeSettings(body) {
     if (body.sponsorRules !== undefined) payload.sponsorRules = body.sponsorRules ?? [];
     if (body.deliveryDistanceSlabs !== undefined) payload.deliveryDistanceSlabs = body.deliveryDistanceSlabs ?? [];
     if (body.platformFee !== undefined && body.platformFee !== null) payload.platformFee = body.platformFee;
+    if (body.packagingFee !== undefined && body.packagingFee !== null) payload.packagingFee = body.packagingFee;
     if (body.gstRate !== undefined && body.gstRate !== null) payload.gstRate = body.gstRate;
     if (body.mixedOrderDistanceLimit !== undefined) payload.mixedOrderDistanceLimit = body.mixedOrderDistanceLimit;
     if (body.mixedOrderAngleLimit !== undefined) payload.mixedOrderAngleLimit = body.mixedOrderAngleLimit;
@@ -2426,8 +2435,9 @@ export async function upsertFeeSettings(body) {
 }
 
 // ----- Referral Settings (admin) -----
-export async function getReferralSettings() {
-    const doc = await FoodReferralSettings.findOne({ isActive: true }).sort({ createdAt: -1 }).lean();
+export async function getReferralSettings({ includeInactive = false } = {}) {
+    const filter = includeInactive ? {} : { isActive: true };
+    const doc = await FoodReferralSettings.findOne(filter).sort({ createdAt: -1 }).lean();
     return { referralSettings: doc || null };
 }
 
@@ -2446,8 +2456,11 @@ const normalizeReferralSection = (incoming, fallback = {}) => {
 };
 
 export async function upsertReferralSettings(body = {}) {
-    const existing = await FoodReferralSettings.findOne({ isActive: true }).sort({ createdAt: -1 });
+    // Always target the latest settings doc (including inactive) so deactivate
+    // does not orphan the config and force a new document on the next save.
+    const existing = await FoodReferralSettings.findOne({}).sort({ createdAt: -1 });
     const existingObj = existing?.toObject?.() || existing || {};
+    const wasActive = existingObj.isActive !== false;
 
     // Merge only provided sections/fields so a partial PUT cannot zero other roles.
     const formattedData = {
@@ -2457,17 +2470,26 @@ export async function upsertReferralSettings(body = {}) {
         isActive: body.isActive !== undefined ? Boolean(body.isActive) : (existingObj.isActive !== false)
     };
 
+    let saved;
     if (existing) {
-        const updated = await FoodReferralSettings.findByIdAndUpdate(
+        saved = await FoodReferralSettings.findByIdAndUpdate(
             existing._id,
             { $set: formattedData },
             { new: true }
         ).lean();
-        return updated;
+    } else {
+        saved = (await FoodReferralSettings.create(formattedData)).toObject();
     }
 
-    const created = await FoodReferralSettings.create(formattedData);
-    return created.toObject();
+    // Deactivating the program must cancel open restaurant payouts, not only block new invites.
+    if (wasActive && formattedData.isActive === false) {
+        await FoodReferralLog.updateMany(
+            { role: 'RESTAURANT', status: 'pending' },
+            { $set: { status: 'rejected', reason: 'program_inactive' } }
+        );
+    }
+
+    return saved;
 }
 
 // ----- Safety / Emergency Reports (admin) -----
@@ -4486,59 +4508,121 @@ export async function approveRestaurant(id, performer = null) {
 
     if (updated) {
         // --- Referral Reward Crediting ---
+        // Re-validate platform settings at payout, then claim + credit + count
+        // in one transaction (no double-pay; disabled/zeroed programs cannot pay).
         try {
-            const referralLog = await FoodReferralLog.findOne({
-                refereeId: updated._id,
-                role: 'RESTAURANT',
-                status: 'pending'
-            });
+            const session = await mongoose.startSession();
+            try {
+                await session.withTransaction(async () => {
+                    const pending = await FoodReferralLog.findOne({
+                        refereeId: updated._id,
+                        role: 'RESTAURANT',
+                        status: 'pending'
+                    }).session(session);
+                    if (!pending) return;
 
-            if (referralLog) {
-                const referrerReward = Number(referralLog.referrerRewardAmount) || 0;
-                const refereeReward = Number(referralLog.refereeRewardAmount) || 0;
+                    const settingsDoc = await FoodReferralSettings.findOne({ isActive: true })
+                        .sort({ createdAt: -1 })
+                        .session(session)
+                        .lean();
 
-                // Credit Referrer
-                if (referrerReward > 0) {
-                    await FoodRestaurantWallet.findOneAndUpdate(
-                        { restaurantId: referralLog.referrerId },
+                    const referrerReward = Math.max(0, Number(settingsDoc?.restaurant?.referrerReward) || 0);
+                    const refereeReward = Math.max(0, Number(settingsDoc?.restaurant?.refereeReward) || 0);
+                    const limit = Math.max(0, Number(settingsDoc?.restaurant?.limit) || 0);
+
+                    const referrer = await FoodRestaurant.findById(pending.referrerId)
+                        .select('_id status')
+                        .session(session)
+                        .lean();
+
+                    let rejectReason = null;
+                    if (!settingsDoc) rejectReason = 'program_inactive';
+                    else if (!referrer) rejectReason = 'referrer_not_found';
+                    else if (referrer.status !== 'approved') rejectReason = 'referrer_not_approved';
+                    else if (referrerReward <= 0 && refereeReward <= 0) rejectReason = 'reward_disabled';
+                    else if (limit <= 0) rejectReason = 'limit_disabled';
+
+                    if (rejectReason) {
+                        await FoodReferralLog.updateOne(
+                            { _id: pending._id, status: 'pending' },
+                            { $set: { status: 'rejected', reason: rejectReason } },
+                            { session }
+                        );
+                        return;
+                    }
+
+                    // Atomic hard gate: only credit if referrer is still approved and has slots.
+                    const slotReserved = await FoodRestaurant.findOneAndUpdate(
                         {
-                            $inc: {
-                                balance: referrerReward,
-                                totalEarnings: referrerReward,
-                                referralEarnings: referrerReward
+                            _id: pending.referrerId,
+                            status: 'approved',
+                            referralCount: { $lt: limit }
+                        },
+                        { $inc: { referralCount: 1 } },
+                        { new: true, session }
+                    );
+                    if (!slotReserved) {
+                        await FoodReferralLog.updateOne(
+                            { _id: pending._id, status: 'pending' },
+                            { $set: { status: 'rejected', reason: 'limit_reached' } },
+                            { session }
+                        );
+                        return;
+                    }
+
+                    // Claim with current settings amounts (not signup-time freeze).
+                    const claimed = await FoodReferralLog.findOneAndUpdate(
+                        { _id: pending._id, status: 'pending' },
+                        {
+                            $set: {
+                                status: 'credited',
+                                rewardAmount: referrerReward,
+                                referrerRewardAmount: referrerReward,
+                                refereeRewardAmount: refereeReward
                             }
                         },
-                        { upsert: true }
+                        { new: true, session }
                     );
-                }
+                    if (!claimed) {
+                        // Lost the race — release the reserved slot.
+                        await FoodRestaurant.updateOne(
+                            { _id: pending.referrerId },
+                            { $inc: { referralCount: -1 } },
+                            { session }
+                        );
+                        return;
+                    }
 
-                // Credit Referee (Approved Restaurant)
-                if (refereeReward > 0) {
-                    await FoodRestaurantWallet.findOneAndUpdate(
-                        { restaurantId: updated._id },
-                        {
-                            $inc: {
-                                balance: refereeReward,
-                                totalEarnings: refereeReward,
-                                referralEarnings: refereeReward
-                            }
-                        },
-                        { upsert: true }
-                    );
-                }
+                    if (referrerReward > 0) {
+                        await FoodRestaurantWallet.findOneAndUpdate(
+                            { restaurantId: claimed.referrerId },
+                            {
+                                $inc: {
+                                    balance: referrerReward,
+                                    totalEarnings: referrerReward,
+                                    referralEarnings: referrerReward
+                                }
+                            },
+                            { upsert: true, session }
+                        );
+                    }
 
-                // Count against limit for any successful credit (referrer and/or referee reward).
-                const marked = await FoodReferralLog.findOneAndUpdate(
-                    { _id: referralLog._id, status: 'pending' },
-                    { $set: { status: 'credited' } },
-                    { new: true }
-                );
-                if (marked) {
-                    await FoodRestaurant.updateOne(
-                        { _id: referralLog.referrerId },
-                        { $inc: { referralCount: 1 } }
-                    );
-                }
+                    if (refereeReward > 0) {
+                        await FoodRestaurantWallet.findOneAndUpdate(
+                            { restaurantId: updated._id },
+                            {
+                                $inc: {
+                                    balance: refereeReward,
+                                    totalEarnings: refereeReward,
+                                    referralEarnings: refereeReward
+                                }
+                            },
+                            { upsert: true, session }
+                        );
+                    }
+                });
+            } finally {
+                await session.endSession();
             }
         } catch (e) {
             console.error('Referral crediting failed on approval:', e);
@@ -4741,10 +4825,7 @@ export async function getAllOffers(_query = {}) {
 }
 
 export async function createAdminOffer(body) {
-    const existing = await FoodOffer.findOne({ couponCode: body.couponCode }).lean();
-    if (existing) {
-        throw new ValidationError('Coupon code already exists');
-    }
+    await assertUniquePlatformCouponCode(body.couponCode);
 
     const doc = await FoodOffer.create({
         couponCode: body.couponCode,
@@ -4766,6 +4847,20 @@ export async function createAdminOffer(body) {
         adminBearPercentage: 100,
         restaurantBearPercentage: 0
     });
+
+    try {
+        await claimCouponCodeReservation({
+            ownerType: COUPON_OWNER_TYPES.PLATFORM_OFFER,
+            ownerId: doc._id,
+            couponCode: doc.couponCode,
+        });
+    } catch (error) {
+        await FoodOffer.findByIdAndDelete(doc._id);
+        if (error?.code === 11000) {
+            throw new ValidationError('Coupon code already exists');
+        }
+        throw error;
+    }
 
     if (doc.restaurantScope === 'selected' && doc.restaurantId) {
         try {
@@ -4800,6 +4895,28 @@ async function invalidateOffersCacheSafely(context) {
     }
 }
 
+async function assertUniquePlatformCouponCode(couponCode, excludeId = null) {
+    const normalizedCode = String(couponCode || '').trim().toUpperCase();
+    if (!normalizedCode) {
+        throw new ValidationError('Coupon code is required');
+    }
+
+    const duplicateOfferFilter = { couponCode: normalizedCode };
+    if (excludeId) {
+        duplicateOfferFilter._id = { $ne: new mongoose.Types.ObjectId(String(excludeId)) };
+    }
+
+    const { RestaurantCoupon } = await import('../models/restaurantCoupon.model.js');
+    const [offerExists, restaurantCouponExists] = await Promise.all([
+        FoodOffer.findOne(duplicateOfferFilter).select('_id').lean(),
+        RestaurantCoupon.findOne({ couponCode: normalizedCode }).select('_id').lean(),
+    ]);
+
+    if (offerExists || restaurantCouponExists) {
+        throw new ValidationError('Coupon code already exists');
+    }
+}
+
 /** End-of-day semantics: an offer is only expired once its endDate is before today. */
 function isOfferEndDateExpired(endDate, now = new Date()) {
     if (!endDate) return false;
@@ -4813,23 +4930,31 @@ export async function updateAdminOffer(id, body) {
 
     const existing = await FoodOffer.findById(id).lean();
     if (!existing) return null;
+    const restoreOfferState = {
+        couponCode: existing.couponCode,
+        discountType: existing.discountType,
+        discountValue: existing.discountValue,
+        customerScope: existing.customerScope,
+        restaurantScope: existing.restaurantScope,
+        restaurantId: existing.restaurantId ?? null,
+        minOrderValue: existing.minOrderValue ?? 0,
+        maxDiscount: existing.maxDiscount ?? null,
+        usageLimit: existing.usageLimit ?? null,
+        perUserLimit: existing.perUserLimit ?? null,
+        startDate: existing.startDate ?? null,
+        endDate: existing.endDate ?? null,
+        isFirstOrderOnly: Boolean(existing.isFirstOrderOnly),
+        status: existing.status,
+    };
 
     if (body.couponCode && body.couponCode !== existing.couponCode) {
-        const duplicate = await FoodOffer.findOne({
-            couponCode: body.couponCode,
-            _id: { $ne: existing._id },
-        }).select('_id').lean();
-        if (duplicate) {
-            throw new ValidationError('Coupon code already exists');
-        }
+        await assertUniquePlatformCouponCode(body.couponCode, existing._id);
     }
 
-    // Recompute lifecycle status from the new dates without overriding a manual pause.
+    // Preserve the existing lifecycle state unless the new end date forces inactivity.
     let status = existing.status;
     if (isOfferEndDateExpired(body.endDate)) {
         status = 'inactive';
-    } else if (existing.status === 'inactive') {
-        status = 'active';
     }
 
     const updated = await FoodOffer.findByIdAndUpdate(
@@ -4854,6 +4979,24 @@ export async function updateAdminOffer(id, body) {
         },
         { new: true }
     ).lean();
+
+    try {
+        await claimCouponCodeReservation({
+            ownerType: COUPON_OWNER_TYPES.PLATFORM_OFFER,
+            ownerId: existing._id,
+            couponCode: body.couponCode,
+        });
+    } catch (error) {
+        await FoodOffer.findByIdAndUpdate(
+            id,
+            { $set: restoreOfferState },
+            { new: true }
+        );
+        if (error?.code === 11000) {
+            throw new ValidationError('Coupon code already exists');
+        }
+        throw error;
+    }
 
     await invalidateOffersCacheSafely('offer update');
     return updated;
@@ -4898,6 +5041,11 @@ export async function deleteAdminOffer(id) {
     const deleted = await FoodOffer.findByIdAndDelete(id).lean();
     if (!deleted) return null;
     await FoodOfferUsage.deleteMany({ offerId: new mongoose.Types.ObjectId(id) });
+    await releaseCouponCodeReservation({
+        ownerType: COUPON_OWNER_TYPES.PLATFORM_OFFER,
+        ownerId: id,
+    });
+    await invalidateOffersCacheSafely('offer delete');
     return { id };
 }
 
@@ -6790,8 +6938,14 @@ export async function getWithdrawals(query = {}) {
 export async function updateWithdrawalStatus(id, { status, adminNote, rejectionReason, transactionId }) {
     if (!id || !mongoose.Types.ObjectId.isValid(id)) throw new ValidationError('Invalid withdrawal ID');
 
+    const existing = await FoodRestaurantWithdrawal.findById(id).lean();
+    if (!existing) throw new ValidationError('Withdrawal request not found');
+
+    const nextStatus = String(status || '').trim().toLowerCase();
+    const wasAlreadyApproved = String(existing.status || '').trim().toLowerCase() === 'approved';
+
     const update = {
-        status: String(status).toLowerCase(),
+        status: nextStatus,
         adminNote,
         rejectionReason,
         transactionId,
@@ -6805,6 +6959,31 @@ export async function updateWithdrawalStatus(id, { status, adminNote, rejectionR
     ).populate('restaurantId', 'restaurantName').lean();
 
     if (!updated) throw new ValidationError('Withdrawal request not found');
+
+    // On first approval only: consume matching delivered order shares so available
+    // balance does not regenerate after pending → approved.
+    if (nextStatus === 'approved' && !wasAlreadyApproved) {
+        try {
+            const restaurantId = updated.restaurantId?._id || updated.restaurantId || existing.restaurantId;
+            await foodTransactionService.settleRestaurantSharesForWithdrawal(
+                restaurantId,
+                updated.amount,
+                {
+                    withdrawalId: String(updated._id),
+                    note: `Settled via restaurant withdrawal approval (${updated._id})`,
+                    recordedByRole: 'ADMIN',
+                }
+            );
+        } catch (err) {
+            // Withdrawal status is already updated; log without rolling back approval
+            // so admin payment records stay consistent with existing flow.
+            console.error(
+                `Failed to settle restaurant shares for withdrawal ${updated._id}:`,
+                err?.message || err
+            );
+        }
+    }
+
     return updated;
 }
 
@@ -7180,6 +7359,7 @@ export async function processRefund(orderId, refundAmount, refundTo) {
     const processedAt = new Date();
 
     if (normalizedRefundMethod === 'wallet') {
+        const refundTransactionId = `wallet_refund_${String(order._id)}_${normalizedAmount.toFixed(2)}`;
         await refundWalletBalance(
             order.userId,
             normalizedAmount,
@@ -7187,7 +7367,8 @@ export async function processRefund(orderId, refundAmount, refundTo) {
             {
                 orderId: String(order._id),
                 orderReadableId: String(order.orderId || ''),
-                source: 'admin_manual_refund'
+                source: 'admin_manual_refund',
+                refundTransactionId,
             }
         );
 
@@ -7195,7 +7376,7 @@ export async function processRefund(orderId, refundAmount, refundTo) {
         order.payment.refund = {
             status: 'processed',
             amount: normalizedAmount,
-            refundId: `wallet_refund_${Date.now()}`,
+            refundId: refundTransactionId,
             requestedMethod: requestedRefundMethod || normalizedRefundMethod,
             processedMethod: 'wallet',
             requestedAt: existingRefund?.requestedAt || processedAt,
@@ -7209,7 +7390,13 @@ export async function processRefund(orderId, refundAmount, refundTo) {
             throw new ValidationError('Original payment reference not found for this online order');
         }
 
-        const refundResult = await initiateRazorpayRefund(paymentId, normalizedAmount);
+        const refundResult = await initiateRazorpayRefund(paymentId, normalizedAmount, {
+            idempotencyKey: `food_refund_${String(order._id)}_admin_${Math.round(Number(normalizedAmount) * 100)}`,
+            notes: {
+                orderId: String(order.orderId || order._id),
+                source: 'admin_process_refund',
+            },
+        });
         if (!refundResult?.success) {
             order.payment.refund = {
                 status: 'failed',
@@ -7241,14 +7428,18 @@ export async function processRefund(orderId, refundAmount, refundTo) {
     await order.save();
 
     try {
-        await foodTransactionService.updateTransactionStatus(order._id, 'refunded', {
-            status: 'refunded',
-            note:
-                normalizedAmount < totalAmount
-                    ? `Partial refund of ₹${normalizedAmount.toFixed(2)} processed by admin`
-                    : `Full refund of ₹${normalizedAmount.toFixed(2)} processed by admin`,
-            recordedByRole: 'ADMIN'
-        });
+        await foodTransactionService.applyRefundToTransaction(
+            order._id,
+            normalizedAmount,
+            totalAmount,
+            {
+                note:
+                    normalizedAmount < totalAmount
+                        ? `Partial refund of ₹${normalizedAmount.toFixed(2)} processed by admin`
+                        : `Full refund of ₹${normalizedAmount.toFixed(2)} processed by admin`,
+                recordedByRole: 'ADMIN',
+            }
+        );
     } catch (_err) {
         // Keep the refund completed even if finance history sync needs follow-up.
     }
@@ -7665,7 +7856,3 @@ export async function settleCODVerification(id, { action, adminNote, performer }
 
     return updated;
 }
-
-
-
-

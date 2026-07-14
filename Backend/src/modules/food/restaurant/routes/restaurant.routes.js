@@ -68,6 +68,7 @@ import { authMiddleware, optionalAuthMiddleware } from '../../../../core/auth/au
 import { sendError } from '../../../../utils/response.js';
 import { getRestaurantFinanceController, getRestaurantSubscriptionWalletController } from '../controllers/restaurantFinance.controller.js';
 import { createTopupOrderController, verifyTopupController } from '../../subscriptions/controllers/subscription.controller.js';
+import { FoodRestaurant } from '../models/restaurant.model.js';
 
 import {
     listRestaurantCouponsController,
@@ -75,6 +76,14 @@ import {
     updateRestaurantCouponController,
     deleteRestaurantCouponController
 } from '../controllers/restaurantCoupon.controller.js';
+import {
+    listRestaurantAdvertisementsController,
+    getRestaurantAdvertisementController,
+    createRestaurantAdvertisementController,
+    updateRestaurantAdvertisementController,
+    deleteRestaurantAdvertisementController,
+    pauseRestaurantAdvertisementController
+} from '../controllers/advertisement.controller.js';
 
 import { cacheResponse, invalidateCache } from '../../../../middleware/cache.js';
 import { invalidateCategoryCaches } from '../../shared/categoryCache.js';
@@ -86,6 +95,31 @@ const requireRestaurant = (req, res, next) => {
         return sendError(res, 403, 'Restaurant access required');
     }
     next();
+};
+
+const requireApprovedRestaurant = async (req, res, next) => {
+    try {
+        const restaurantId = req.user?.userId;
+        if (!restaurantId) {
+            return sendError(res, 403, 'Restaurant access required');
+        }
+
+        const restaurant = await FoodRestaurant.findById(restaurantId)
+            .select('status isActive isDeleted accountStatus')
+            .lean();
+
+        if (!restaurant || restaurant.isDeleted === true || restaurant.accountStatus === 'deleted') {
+            return sendError(res, 403, 'Restaurant account is deleted/deactivated');
+        }
+
+        if (restaurant.status !== 'approved' || restaurant.isActive === false) {
+            return sendError(res, 403, 'Approved restaurant access required');
+        }
+
+        next();
+    } catch (error) {
+        next(error);
+    }
 };
 
 const uploadFields = upload.fields([
@@ -285,11 +319,32 @@ router.get('/support/tickets', authMiddleware, requireRestaurant, listRestaurant
 router.delete('/delete-account', authMiddleware, requireRestaurant, deleteRestaurantAccountController);
 
 // Coupons (restaurant dashboard)
-router.get('/coupons', authMiddleware, requireRestaurant, listRestaurantCouponsController);
-router.post('/coupons', authMiddleware, requireRestaurant, createRestaurantCouponController);
-router.put('/coupons/:id', authMiddleware, requireRestaurant, updateRestaurantCouponController);
-router.delete('/coupons/:id', authMiddleware, requireRestaurant, deleteRestaurantCouponController);
+router.get('/coupons', authMiddleware, requireRestaurant, requireApprovedRestaurant, listRestaurantCouponsController);
+router.post('/coupons', authMiddleware, requireRestaurant, requireApprovedRestaurant, createRestaurantCouponController);
+router.put('/coupons/:id', authMiddleware, requireRestaurant, requireApprovedRestaurant, updateRestaurantCouponController);
+router.delete('/coupons/:id', authMiddleware, requireRestaurant, requireApprovedRestaurant, deleteRestaurantCouponController);
+
+// Advertisements (restaurant dashboard)
+router.get('/advertisements', authMiddleware, requireRestaurant, requireApprovedRestaurant, listRestaurantAdvertisementsController);
+router.get('/advertisements/:id', authMiddleware, requireRestaurant, requireApprovedRestaurant, getRestaurantAdvertisementController);
+router.post(
+    '/advertisements',
+    authMiddleware,
+    requireRestaurant,
+    requireApprovedRestaurant,
+    upload.fields([{ name: 'image', maxCount: 1 }, { name: 'video', maxCount: 1 }]),
+    createRestaurantAdvertisementController
+);
+router.put(
+    '/advertisements/:id',
+    authMiddleware,
+    requireRestaurant,
+    requireApprovedRestaurant,
+    upload.fields([{ name: 'image', maxCount: 1 }, { name: 'video', maxCount: 1 }]),
+    updateRestaurantAdvertisementController
+);
+router.patch('/advertisements/:id/pause', authMiddleware, requireRestaurant, requireApprovedRestaurant, pauseRestaurantAdvertisementController);
+router.delete('/advertisements/:id', authMiddleware, requireRestaurant, requireApprovedRestaurant, deleteRestaurantAdvertisementController);
 
 export default router;
-
 

@@ -47,6 +47,7 @@ const feeSettingsSchema = new mongoose.Schema(
         deliveryDistanceSlabs: { type: [deliveryDistanceSlabSchema], default: [] },
         deliveryFeeRanges: { type: [deliveryFeeRangeSchema], default: [] },
         platformFee: { type: Number, min: 0 },
+        packagingFee: { type: Number, min: 0 },
         gstRate: { type: Number, min: 0, max: 100 },
         mixedOrderDistanceLimit: { type: Number, min: 0, default: 2 },
         mixedOrderAngleLimit: { type: Number, min: 0, default: 35 },

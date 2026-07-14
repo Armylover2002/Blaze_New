@@ -17,9 +17,7 @@ import BottomNavbar from "@food/components/restaurant/BottomNavbar"
 import { ImageSourcePicker } from "@food/components/ImageSourcePicker"
 import { isFlutterBridgeAvailable } from "@food/utils/imageUploadUtils"
 import { toast } from "sonner"
-const debugLog = (...args) => {}
-const debugWarn = (...args) => {}
-const debugError = (...args) => {}
+import { restaurantAPI } from "@food/api"
 
 
 export default function EditAdvertisementPage() {
@@ -44,18 +42,43 @@ export default function EditAdvertisementPage() {
   const fileInputRef = useRef(null)
   const videoInputRef = useRef(null)
   const [isPhotoPickerOpen, setIsPhotoPickerOpen] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [submitting, setSubmitting] = useState(false)
 
   // Load ad data on mount
   useEffect(() => {
-    setAdData(null)
-    setFormData({
-      category: "",
-      validity: "",
-      title: "",
-      description: "",
-      fileDescription: "",
-      videoDescription: ""
-    })
+    let cancelled = false
+    const load = async () => {
+      if (!id) return
+      try {
+        setLoading(true)
+        const response = await restaurantAPI.getAdvertisement(id)
+        const data = response?.data?.data
+        if (cancelled) return
+        if (!data) {
+          setAdData(null)
+          return
+        }
+        setAdData(data)
+        setFormData({
+          category: data.adsType || data.type || "",
+          validity: data.validity || "",
+          title: data.title || "",
+          description: data.description || "",
+          fileDescription: data.fileDescription || "",
+          videoDescription: data.videoDescription || ""
+        })
+      } catch (err) {
+        if (!cancelled) {
+          setAdData(null)
+          toast.error(err?.response?.data?.message || "Failed to load advertisement")
+        }
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+    load()
+    return () => { cancelled = true }
   }, [id])
 
   // Lenis smooth scrolling
@@ -147,6 +170,48 @@ export default function EditAdvertisementPage() {
 
   const getCharacterCount = (text, maxLength = 100) => {
     return `${text.length}/${maxLength}`
+  }
+
+  const handleUpdate = async () => {
+    if (!id) return
+    if (!formData.title.trim()) {
+      toast.error("Title is required")
+      return
+    }
+    if (!formData.validity.trim()) {
+      toast.error("Validity is required")
+      return
+    }
+
+    try {
+      setSubmitting(true)
+      const payload = new FormData()
+      payload.append("title", formData.title.trim())
+      payload.append("description", formData.description || "")
+      payload.append("adsType", formData.category)
+      payload.append("category", formData.category)
+      payload.append("validity", formData.validity.trim())
+      payload.append("fileDescription", formData.fileDescription || "")
+      payload.append("videoDescription", formData.videoDescription || "")
+      if (uploadedFile) payload.append("image", uploadedFile)
+      if (uploadedVideo) payload.append("video", uploadedVideo)
+
+      await restaurantAPI.updateAdvertisement(id, payload)
+      toast.success("Advertisement updated and pending approval")
+      navigate("/food/restaurant/advertisements")
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to update advertisement")
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[#f6e9dc] flex items-center justify-center">
+        <p className="text-gray-600 text-sm">Loading advertisement...</p>
+      </div>
+    )
   }
 
   return (
@@ -446,15 +511,11 @@ export default function EditAdvertisementPage() {
             Reset
           </Button>
           <Button
-            onClick={() => {
-              debugLog("Update ad:", id, formData)
-              // Navigate to advertisements list after update
-              navigate("/restaurant/advertisements")
-            }}
-            disabled={!adData}
-            className="flex-1 bg-[#ff8100] hover:bg-[#e67300] text-white font-semibold py-3 rounded-lg"
+            onClick={handleUpdate}
+            disabled={!adData || submitting}
+            className="flex-1 bg-[#ff8100] hover:bg-[#e67300] text-white font-semibold py-3 rounded-lg disabled:opacity-60"
           >
-            Update Ads
+            {submitting ? "Updating..." : "Update Ads"}
           </Button>
         </div>
       </div>
