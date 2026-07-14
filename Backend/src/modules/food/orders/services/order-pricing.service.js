@@ -1,12 +1,9 @@
-import mongoose from 'mongoose';
-import { FoodOrder } from '../models/order.model.js';
 import { FoodRestaurant } from '../../restaurant/models/restaurant.model.js';
 import { FoodFeeSettings } from '../../admin/models/feeSettings.model.js';
-import { FoodOffer } from '../../admin/models/offer.model.js';
-import { FoodOfferUsage } from '../../admin/models/offerUsage.model.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
 import { resolveRestaurantCommissionPercentage } from '../../constants/commission.constants.js';
 import { roadDistanceKm } from './order.helpers.js';
+import { resolveRestaurantObjectId, validateAndApplyCoupon } from '../../shared/coupon.util.js';
 
 function roundCurrency(value) {
   const num = Number(value);
@@ -187,123 +184,34 @@ export async function calculateOrderPricing(userId, dto) {
   const deliveryFee = roundCurrency(userDeliveryFee);
 
   const gstRate = Number(feeSettings.gstRate || 0);
-  const tax =
-    Number.isFinite(gstRate) && gstRate > 0
-      ? Math.round(subtotal * (gstRate / 100))
-      : 0;
+  let tax = 0;
 
   let discount = 0;
   let appliedCoupon = null;
   const codeRaw = dto.couponCode
     ? String(dto.couponCode).trim().toUpperCase()
     : "";
+  const resolvedRestaurantObjectId = await resolveRestaurantObjectId(dto.restaurantId);
 
   if (codeRaw) {
-    const now = new Date();
-    let offer = await FoodOffer.findOne({ couponCode: codeRaw }).lean();
-    if (offer) {
-      const statusOk = offer.status === "active";
-      const startOk = !offer.startDate || now >= new Date(offer.startDate);
-      const endOk = !offer.endDate || now < new Date(offer.endDate);
-      const scopeOk =
-        offer.restaurantScope !== "selected" ||
-        String(offer.restaurantId || "") === String(dto.restaurantId || "");
-      const minOk = subtotal >= (Number(offer.minOrderValue) || 0);
-      let usageOk = true;
-      if (
-        Number(offer.usageLimit) > 0 &&
-        Number(offer.usedCount || 0) >= Number(offer.usageLimit)
-      ) {
-        usageOk = false;
-      }
+    const validation = await validateAndApplyCoupon({
+      couponCode: codeRaw,
+      itemSubtotal: subtotal,
+      userId,
+      resolvedRestaurantObjectId,
+    });
 
-      let perUserOk = true;
-      if (userId && Number(offer.perUserLimit) > 0) {
-        const usage = await FoodOfferUsage.findOne({
-          offerId: offer._id,
-          userId,
-        }).lean();
-        if (usage && Number(usage.count) >= Number(offer.perUserLimit)) {
-          perUserOk = false;
-        }
-      }
-
-      let firstOrderOk = true;
-      if (userId && offer.customerScope === "first-time") {
-        const c = await FoodOrder.countDocuments({
-          userId: new mongoose.Types.ObjectId(userId),
-        });
-        firstOrderOk = c === 0;
-      }
-      if (userId && offer.isFirstOrderOnly === true) {
-        const c2 = await FoodOrder.countDocuments({
-          userId: new mongoose.Types.ObjectId(userId),
-        });
-        if (c2 > 0) firstOrderOk = false;
-      }
-
-      const allowed =
-        statusOk &&
-        startOk &&
-        endOk &&
-        scopeOk &&
-        minOk &&
-        usageOk &&
-        perUserOk &&
-        firstOrderOk;
-
-      if (allowed) {
-        if (offer.discountType === "percentage") {
-          const raw = subtotal * (Number(offer.discountValue) / 100);
-          const capped = Number(offer.maxDiscount)
-            ? Math.min(raw, Number(offer.maxDiscount))
-            : raw;
-          discount = Math.max(0, Math.min(subtotal, Math.floor(capped)));
-        } else {
-          discount = Math.max(
-            0,
-            Math.min(subtotal, Math.floor(Number(offer.discountValue) || 0)),
-          );
-        }
-        appliedCoupon = { code: codeRaw, discount };
-      }
-    } else {
-      const { RestaurantCoupon } = await import('../../admin/models/restaurantCoupon.model.js');
-      const isIdValid = mongoose.Types.ObjectId.isValid(dto.restaurantId);
-      const restCoupon = isIdValid ? await RestaurantCoupon.findOne({
-        couponCode: codeRaw,
-        status: 'Approved',
-        restaurantId: new mongoose.Types.ObjectId(dto.restaurantId)
-      }).lean() : null;
-
-      if (restCoupon) {
-        const endOk = !restCoupon.expiryDate || now < new Date(restCoupon.expiryDate);
-        const minOk = subtotal >= (Number(restCoupon.minOrderAmount) || 0);
-        let usageOk = true;
-        if (
-          Number(restCoupon.usageLimit) > 0 &&
-          Number(restCoupon.usedCount || 0) >= Number(restCoupon.usageLimit)
-        ) {
-          usageOk = false;
-        }
-
-        const allowed = endOk && minOk && usageOk;
-
-        if (allowed) {
-          if (restCoupon.discountType === "percentage") {
-            const raw = subtotal * (Number(restCoupon.discountValue) / 100);
-            discount = Math.max(0, Math.min(subtotal, Math.floor(raw)));
-          } else {
-            discount = Math.max(
-              0,
-              Math.min(subtotal, Math.floor(Number(restCoupon.discountValue) || 0)),
-            );
-          }
-          appliedCoupon = { code: codeRaw, discount };
-        }
-      }
+    if (validation?.discount > 0) {
+      discount = validation.discount;
+      appliedCoupon = validation.appliedCoupon;
     }
   }
+
+  const discountedSubtotal = Math.max(0, subtotal - discount);
+  tax =
+    Number.isFinite(gstRate) && gstRate > 0
+      ? Math.round(discountedSubtotal * (gstRate / 100))
+      : 0;
 
   const total = Math.max(
     0,

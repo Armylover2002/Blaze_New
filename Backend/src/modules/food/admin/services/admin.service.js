@@ -4824,12 +4824,10 @@ export async function updateAdminOffer(id, body) {
         }
     }
 
-    // Recompute lifecycle status from the new dates without overriding a manual pause.
+    // Preserve the existing lifecycle state unless the new end date forces inactivity.
     let status = existing.status;
     if (isOfferEndDateExpired(body.endDate)) {
         status = 'inactive';
-    } else if (existing.status === 'inactive') {
-        status = 'active';
     }
 
     const updated = await FoodOffer.findByIdAndUpdate(
@@ -7665,7 +7663,5 @@ export async function settleCODVerification(id, { action, adminNote, performer }
 
     return updated;
 }
-
-
 
 
