@@ -6934,8 +6934,14 @@ export async function getWithdrawals(query = {}) {
 export async function updateWithdrawalStatus(id, { status, adminNote, rejectionReason, transactionId }) {
     if (!id || !mongoose.Types.ObjectId.isValid(id)) throw new ValidationError('Invalid withdrawal ID');
 
+    const existing = await FoodRestaurantWithdrawal.findById(id).lean();
+    if (!existing) throw new ValidationError('Withdrawal request not found');
+
+    const nextStatus = String(status || '').trim().toLowerCase();
+    const wasAlreadyApproved = String(existing.status || '').trim().toLowerCase() === 'approved';
+
     const update = {
-        status: String(status).toLowerCase(),
+        status: nextStatus,
         adminNote,
         rejectionReason,
         transactionId,
@@ -6949,6 +6955,31 @@ export async function updateWithdrawalStatus(id, { status, adminNote, rejectionR
     ).populate('restaurantId', 'restaurantName').lean();
 
     if (!updated) throw new ValidationError('Withdrawal request not found');
+
+    // On first approval only: consume matching delivered order shares so available
+    // balance does not regenerate after pending → approved.
+    if (nextStatus === 'approved' && !wasAlreadyApproved) {
+        try {
+            const restaurantId = updated.restaurantId?._id || updated.restaurantId || existing.restaurantId;
+            await foodTransactionService.settleRestaurantSharesForWithdrawal(
+                restaurantId,
+                updated.amount,
+                {
+                    withdrawalId: String(updated._id),
+                    note: `Settled via restaurant withdrawal approval (${updated._id})`,
+                    recordedByRole: 'ADMIN',
+                }
+            );
+        } catch (err) {
+            // Withdrawal status is already updated; log without rolling back approval
+            // so admin payment records stay consistent with existing flow.
+            console.error(
+                `Failed to settle restaurant shares for withdrawal ${updated._id}:`,
+                err?.message || err
+            );
+        }
+    }
+
     return updated;
 }
 

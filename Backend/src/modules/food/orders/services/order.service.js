@@ -3383,15 +3383,13 @@ export async function cancelOrder(orderId, userId, reason, refundTo) {
     refundTo: isOnlinePaid ? requestedRefundMethod : undefined,
   });
 
-  // Sync transaction status
+  // Sync transaction status — cancelled orders must leave captured/authorized
+  // so they never remain eligible for restaurant settlement.
   try {
+    const paymentStatus = String(order.payment?.status || "").trim().toLowerCase();
+    const wasPaidOrRefunded = ["paid", "refunded"].includes(paymentStatus);
     await foodTransactionService.updateTransactionStatus(order._id, 'cancelled_by_user', {
-        status:
-          order.payment.status === "refunded"
-            ? 'refunded'
-            : isOnlinePaid
-              ? 'captured'
-              : 'failed',
+        status: wasPaidOrRefunded ? 'refunded' : 'failed',
         note: `Order cancelled by user: ${reason || "No reason"}`,
         recordedByRole: 'USER',
         recordedById: userId
@@ -3880,7 +3878,7 @@ export async function updateOrderStatusRestaurant(
 
     // ✅ NEW: Automated Razorpay Refund on Restaurant Cancel
     // Triggers if the restaurant sets status to a cancelled state (e.g., cancelled_by_restaurant)
-    const isCancellationStatus = String(orderStatus).includes("cancel");
+    const isCancellationStatus = String(orderStatus).includes("cancel") || isTerminalCancelStatus(orderStatus);
     if (
       isCancellationStatus &&
       order.payment?.status === "paid" &&
@@ -3921,6 +3919,30 @@ export async function updateOrderStatusRestaurant(
       }
       // Re-save order with updated payment status
       await order.save();
+    }
+
+    // Remove cancelled orders from restaurant payout eligibility (never leave as captured).
+    if (isCancellationStatus || String(order.orderStatus || "").includes("cancel")) {
+      try {
+        const paymentStatus = String(order.payment?.status || "").trim().toLowerCase();
+        const wasPaidOrRefunded = ["paid", "refunded"].includes(paymentStatus);
+        await foodTransactionService.updateTransactionStatus(
+          order._id,
+          "cancelled_by_restaurant",
+          {
+            status: wasPaidOrRefunded ? "refunded" : "failed",
+            note: reason
+              ? `Order cancelled by restaurant: ${reason}`
+              : "Order cancelled by restaurant",
+            recordedByRole: "RESTAURANT",
+            recordedById: restaurantId,
+          },
+        );
+      } catch (err) {
+        logger.warn(
+          `updateOrderStatusRestaurant transaction sync failed: ${err?.message || err}`,
+        );
+      }
     }
 
     return order.toObject();
@@ -3976,12 +3998,10 @@ export async function updateOrderStatusAdmin(orderId, adminId, orderStatus, reas
     }
 
     try {
-      const paymentMethod = String(order.payment?.method || "").trim().toLowerCase();
-      const isOnlinePaid =
-        ["razorpay", "razorpay_qr"].includes(paymentMethod) &&
-        ["paid", "refunded"].includes(String(order.payment?.status || "").trim().toLowerCase());
+      const paymentStatus = String(order.payment?.status || "").trim().toLowerCase();
+      const wasPaidOrRefunded = ["paid", "refunded"].includes(paymentStatus);
       await foodTransactionService.updateTransactionStatus(order._id, "cancelled_by_admin", {
-        status: isOnlinePaid ? "refunded" : "failed",
+        status: wasPaidOrRefunded ? "refunded" : "failed",
         note: note ? `Order cancelled by admin: ${note}` : "Order cancelled by admin",
         recordedByRole: "ADMIN",
         recordedById: adminId,
@@ -5564,6 +5584,25 @@ export async function recoverStuckOrders() {
         // Sync mixed order seller legs
         if (order.orderType === 'mixed' || order.orderType === 'quick') {
           await cancelSellerOrdersForParent(order, "Cancelled by system watchdog");
+        }
+
+        // Exclude stuck/cancelled orders from restaurant settlement eligibility.
+        try {
+          const paymentStatus = String(order.payment?.status || '').trim().toLowerCase();
+          const wasPaidOrRefunded = ['paid', 'refunded'].includes(paymentStatus);
+          await foodTransactionService.updateTransactionStatus(
+            order._id,
+            'cancelled_by_system',
+            {
+              status: wasPaidOrRefunded ? 'refunded' : 'failed',
+              note: 'Watchdog auto-recovery: Order cancelled while stuck in transient state',
+              recordedByRole: 'SYSTEM',
+            },
+          );
+        } catch (txErr) {
+          logger.warn(
+            `Watchdog transaction sync failed for ${order.orderId}: ${txErr?.message || txErr}`,
+          );
         }
         
         // Enqueue event for housekeeping/finance

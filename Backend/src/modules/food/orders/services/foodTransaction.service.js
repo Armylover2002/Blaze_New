@@ -183,6 +183,21 @@ export async function createInitialTransaction(order) {
 }
 
 /**
+ * True when the linked order is delivered and eligible for restaurant payout.
+ */
+export function isOrderDeliveredForSettlement(orderLike) {
+    if (!orderLike || typeof orderLike !== 'object') return false;
+    const status = String(orderLike.orderStatus || '').trim().toLowerCase();
+    if (status === 'delivered') return true;
+    const phase = String(
+        orderLike.deliveryState?.currentPhase || orderLike.deliveryState?.status || ''
+    )
+        .trim()
+        .toLowerCase();
+    return phase === 'delivered';
+}
+
+/**
  * Updates transaction status (captured, settled, etc) and appends to history.
  */
 export async function updateTransactionStatus(orderId, kind, details = {}) {
@@ -193,7 +208,14 @@ export async function updateTransactionStatus(orderId, kind, details = {}) {
     if (details.status) transaction.status = details.status;
     if (details.razorpayPaymentId) transaction.gateway.razorpayPaymentId = details.razorpayPaymentId;
     if (details.razorpaySignature) transaction.gateway.razorpaySignature = details.razorpaySignature;
-    
+
+    if (details.markRestaurantSettled === true) {
+        transaction.settlement = transaction.settlement || {};
+        transaction.settlement.isRestaurantSettled = true;
+        transaction.settlement.restaurantSettledAt =
+            details.restaurantSettledAt || new Date();
+    }
+
     transaction.history.push({
         kind,
         amount: transaction.amounts.totalCustomerPaid,
@@ -224,8 +246,98 @@ export async function updateTransactionRider(orderId, riderId) {
 export async function settleRestaurant(orderId, adminId) {
     return await updateTransactionStatus(orderId, 'settled', {
         status: 'captured', // Ensure it's marked as captured if it was pending cash
+        markRestaurantSettled: true,
         note: 'Restaurant payout settled by admin',
         recordedByRole: 'ADMIN',
         recordedById: adminId
     });
+}
+
+/**
+ * Consumes restaurant payout eligibility for an approved withdrawal (FIFO).
+ * Marks delivered, unsettled captured/authorized txs as restaurant-settled until
+ * the withdrawal amount is covered. Leftover amount reduces referral earnings.
+ */
+export async function settleRestaurantSharesForWithdrawal(
+    restaurantId,
+    amount,
+    meta = {}
+) {
+    if (!restaurantId || !mongoose.Types.ObjectId.isValid(restaurantId)) {
+        return { settledOrderShare: 0, settledCount: 0, referralDebited: 0 };
+    }
+
+    const target = Math.round((Number(amount) || 0) * 100) / 100;
+    if (!(target > 0)) {
+        return { settledOrderShare: 0, settledCount: 0, referralDebited: 0 };
+    }
+
+    const rid = new mongoose.Types.ObjectId(restaurantId);
+    const unsettled = await FoodTransaction.find({
+        restaurantId: rid,
+        status: { $in: ['captured', 'authorized'] },
+        'settlement.isRestaurantSettled': { $ne: true },
+    })
+        .populate('orderId', 'orderStatus deliveryState')
+        .sort({ createdAt: 1 });
+
+    let remaining = target;
+    const now = new Date();
+    const settledIds = [];
+    let settledOrderShare = 0;
+
+    for (const tx of unsettled) {
+        if (remaining <= 0) break;
+        if (!isOrderDeliveredForSettlement(tx.orderId)) continue;
+
+        const share = Math.round((Number(tx.amounts?.restaurantShare) || 0) * 100) / 100;
+        if (!(share > 0)) continue;
+
+        tx.settlement = tx.settlement || {};
+        tx.settlement.isRestaurantSettled = true;
+        tx.settlement.restaurantSettledAt = now;
+        tx.history.push({
+            kind: 'settled',
+            amount: share,
+            at: now,
+            note:
+                meta.note ||
+                `Settled via restaurant withdrawal approval${
+                    meta.withdrawalId ? ` (${meta.withdrawalId})` : ''
+                }`,
+            recordedBy: {
+                role: meta.recordedByRole || 'ADMIN',
+                id: meta.recordedById,
+            },
+        });
+        await tx.save();
+
+        settledIds.push(tx._id);
+        settledOrderShare = Math.round((settledOrderShare + share) * 100) / 100;
+        remaining = Math.round((remaining - share) * 100) / 100;
+    }
+
+    let referralDebited = 0;
+    if (remaining > 0) {
+        const { FoodRestaurantWallet } = await import(
+            '../../restaurant/models/restaurantWallet.model.js'
+        );
+        const wallet = await FoodRestaurantWallet.findOne({ restaurantId: rid });
+        if (wallet) {
+            const referralBal = Math.max(0, Number(wallet.referralEarnings || 0));
+            referralDebited = Math.min(referralBal, remaining);
+            if (referralDebited > 0) {
+                wallet.referralEarnings =
+                    Math.round((referralBal - referralDebited) * 100) / 100;
+                await wallet.save();
+            }
+        }
+    }
+
+    return {
+        settledOrderShare,
+        settledCount: settledIds.length,
+        referralDebited,
+        settledTransactionIds: settledIds,
+    };
 }
