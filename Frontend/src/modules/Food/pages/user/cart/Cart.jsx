@@ -1147,14 +1147,15 @@ export default function Cart() {
     pricing?.deliveryFee !== undefined && pricing?.deliveryFee !== null
       ? Number(pricing.deliveryFee || 0)
       : fallbackDeliveryFee
-  const deliveryFee = baseComputedDeliveryFee + (deliveryType === "fastest" ? 5 : 0)
+  const deliveryFee = baseComputedDeliveryFee
   const hasDistanceDeliveryBreakdown = Number.isFinite(Number(resolvedDistanceKm))
   const deliveryFeeBreakdownText = hasDistanceDeliveryBreakdown
     ? `${Number(resolvedDistanceKm).toFixed(1)} km delivery`
     : null
   const platformFee = pricing?.platformFee ?? Number(feeSettings.platformFee || 0)
   const gstCharges = pricing?.tax ?? Math.round(subtotal * (Number(feeSettings.gstRate || 0) / 100))
-  const discount = pricing?.discount ?? (appliedCoupon ? Math.min(appliedCoupon.discount, subtotal * 0.5) : 0)
+  // Never invent coupon caps — wait for server pricing for actual discount.
+  const discount = pricing?.discount ?? 0
   const totalBeforeDiscount = subtotal + deliveryFee + platformFee + gstCharges
   const total = pricing?.total ?? (totalBeforeDiscount - discount)
 
@@ -1604,7 +1605,7 @@ export default function Cart() {
       debugLog("?? Delivery address:", defaultAddress?.label || defaultAddress?.city)
 
       // Always recalculate with backend before placing order so payment matches cart.
-      let resolvedPricing = pricing
+      let resolvedPricing = null
       try {
         const pricingResponse = await orderAPI.calculateOrder({
           orderType: "food",
@@ -1614,33 +1615,34 @@ export default function Cart() {
           deliveryAddressId: resolvedDeliveryAddressId,
           couponCode: appliedCoupon?.code || couponCode || undefined,
         })
-        resolvedPricing = pricingResponse?.data?.data?.pricing || resolvedPricing
+        resolvedPricing = pricingResponse?.data?.data?.pricing || null
         if (resolvedPricing) {
           setPricing(resolvedPricing)
         }
       } catch (pricingError) {
         debugWarn("Could not refresh pricing before order placement:", pricingError)
+        toast.error(
+          pricingError?.response?.data?.message ||
+            "Could not refresh pricing. Please try again.",
+        )
+        setIsPlacingOrder(false)
+        return
       }
 
-      // Ensure couponCode is included in pricing
-      const orderPricing = resolvedPricing || {
-        subtotal,
-        deliveryFee,
-        tax: gstCharges,
-        platformFee,
-        discount,
-        total,
-        totalDeliveryFee: deliveryFee,
-        userDeliveryFee: deliveryFee,
-        restaurantDeliveryFee: 0,
-        sponsoredDelivery: false,
-        sponsoredKm: 0,
-        couponCode: appliedCoupon?.code || null
-      };
+      if (!resolvedPricing || !Number.isFinite(Number(resolvedPricing.total))) {
+        toast.error("Pricing unavailable. Please try again.")
+        setIsPlacingOrder(false)
+        return
+      }
 
-      // Add couponCode if not present but coupon is applied
-      if (!orderPricing.couponCode && appliedCoupon?.code) {
-        orderPricing.couponCode = appliedCoupon.code;
+      // Server pricing only — never fall back to client-calculated totals.
+      const orderPricing = {
+        ...resolvedPricing,
+        couponCode:
+          resolvedPricing.couponCode ||
+          appliedCoupon?.code ||
+          couponCode ||
+          null,
       }
 
       // Include all cart items (main items + addons)
@@ -2730,7 +2732,6 @@ export default function Cart() {
                         <span className={`text-[15px] font-semibold ${deliveryType === "fastest" ? "text-gray-900 dark:text-white" : "text-gray-600 dark:text-gray-400"}`}>
                           Quick ⚡
                         </span>
-                        <span className="text-[15px] font-medium text-gray-700 dark:text-gray-300">+{RUPEE_SYMBOL}5</span>
                       </div>
                       <span className="text-xs text-gray-400 mt-0.5">Add address to check delivery time</span>
                     </div>

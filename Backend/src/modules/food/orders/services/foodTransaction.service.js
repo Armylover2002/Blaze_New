@@ -87,7 +87,15 @@ export async function createInitialTransaction(order) {
     }
 
     restaurantNet = Math.max(0, restaurantNet - restaurantDiscountShare);
-    let platformNetProfit = (order.pricing?.platformFee || 0) + totalDeliveryFee - riderShare + restaurantCommission + sellerCommission;
+    const taxAmount = Number(order.pricing?.tax || 0) || 0;
+    // GST collected from customer is attributed to platform for remittance/reporting.
+    let platformNetProfit =
+        (order.pricing?.platformFee || 0) +
+        totalDeliveryFee -
+        riderShare +
+        restaurantCommission +
+        sellerCommission +
+        taxAmount;
     platformNetProfit = Math.max(0, platformNetProfit - adminDiscountShare);
 
     restaurantNet = Math.round((Number(restaurantNet) || 0) * 100) / 100;
@@ -218,10 +226,95 @@ export async function updateTransactionStatus(orderId, kind, details = {}) {
 
     transaction.history.push({
         kind,
-        amount: transaction.amounts.totalCustomerPaid,
+        amount: details.amount ?? transaction.amounts.totalCustomerPaid,
         at: new Date(),
         note: details.note || `Transaction updated: ${kind}`,
         recordedBy: { role: details.recordedByRole || 'SYSTEM', id: details.recordedById }
+    });
+
+    await transaction.save();
+    return transaction;
+}
+
+/**
+ * Apply admin refund to settlement ledger.
+ * Full refund → status refunded (excluded from restaurant payout).
+ * Partial refund → keep captured and scale remaining shares so payouts stay proportional.
+ */
+export async function applyRefundToTransaction(
+    orderId,
+    refundAmount,
+    totalAmount,
+    details = {}
+) {
+    const transaction = await FoodTransaction.findOne({ orderId });
+    if (!transaction) return null;
+
+    const total = Math.max(
+        0,
+        Number(totalAmount) || Number(transaction.amounts?.totalCustomerPaid) || 0
+    );
+    const refund = Math.max(0, Number(refundAmount) || 0);
+    const isFull = total <= 0 || refund >= total - 0.009;
+
+    if (isFull) {
+        transaction.status = 'refunded';
+        transaction.history.push({
+            kind: 'refunded',
+            amount: refund || total,
+            at: new Date(),
+            note:
+                details.note ||
+                `Full refund of ₹${(refund || total).toFixed(2)} processed by admin`,
+            recordedBy: {
+                role: details.recordedByRole || 'ADMIN',
+                id: details.recordedById,
+            },
+        });
+        await transaction.save();
+        return transaction;
+    }
+
+    const remainRatio = Math.max(0, Math.min(1, (total - refund) / total));
+    const amounts = transaction.amounts || {};
+    amounts.restaurantShare =
+        Math.round((Number(amounts.restaurantShare) || 0) * remainRatio * 100) / 100;
+    amounts.riderShare =
+        Math.round((Number(amounts.riderShare) || 0) * remainRatio * 100) / 100;
+    amounts.platformNetProfit =
+        Math.round((Number(amounts.platformNetProfit) || 0) * remainRatio * 100) / 100;
+    amounts.sellerShare =
+        Math.round((Number(amounts.sellerShare) || 0) * remainRatio * 100) / 100;
+    amounts.sellerCommission =
+        Math.round((Number(amounts.sellerCommission) || 0) * remainRatio * 100) / 100;
+    amounts.restaurantCommission =
+        Math.round((Number(amounts.restaurantCommission) || 0) * remainRatio * 100) / 100;
+    amounts.taxAmount =
+        Math.round((Number(amounts.taxAmount) || 0) * remainRatio * 100) / 100;
+    amounts.adminDiscountShare =
+        Math.round((Number(amounts.adminDiscountShare) || 0) * remainRatio * 100) / 100;
+    amounts.restaurantDiscountShare =
+        Math.round((Number(amounts.restaurantDiscountShare) || 0) * remainRatio * 100) / 100;
+    transaction.amounts = amounts;
+
+    // Remain payout-eligible for the unrefunded portion.
+    if (['pending', 'authorized'].includes(String(transaction.status || ''))) {
+        transaction.status = 'captured';
+    }
+
+    transaction.history.push({
+        kind: 'partial_refund',
+        amount: refund,
+        at: new Date(),
+        note:
+            details.note ||
+            `Partial refund of ₹${refund.toFixed(2)} — settlement shares scaled to remaining ${(
+                remainRatio * 100
+            ).toFixed(1)}%`,
+        recordedBy: {
+            role: details.recordedByRole || 'ADMIN',
+            id: details.recordedById,
+        },
     });
 
     await transaction.save();

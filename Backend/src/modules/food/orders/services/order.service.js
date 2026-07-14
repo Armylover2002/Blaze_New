@@ -3022,7 +3022,8 @@ export async function createOrder(userId, dto) {
         ? normalizedPricing.deliveryFee
         : 0) +
       (Number.isFinite(normalizedPricing.platformFee) ? normalizedPricing.platformFee : 0) +
-      (Number(normalizedPricing.restaurantCommission) || 0) -
+      (Number(normalizedPricing.restaurantCommission) || 0) +
+      (Number(normalizedPricing.tax) || 0) -
       riderEarning,
   );
 
@@ -5155,11 +5156,19 @@ export async function completeDelivery(orderId, deliveryPartnerId, body = {}) {
 
   const { otp, ratings, paymentMode } = body;
 
-  // Dynamically update payment method based on delivery partner selection
-  if (paymentMode === 'cash') {
-    order.payment.method = 'cash';
-  } else if (paymentMode === 'qr') {
-    order.payment.method = 'razorpay_qr';
+  // Only unpaid COD flows may switch collection mode at delivery.
+  // Never rewrite wallet / Razorpay method after prepaid capture.
+  const existingPayMethod = String(order.payment?.method || "").trim().toLowerCase();
+  const existingPayStatus = String(order.payment?.status || "").trim().toLowerCase();
+  const isPrepaidCaptured =
+    ["wallet", "razorpay", "razorpay_qr"].includes(existingPayMethod) &&
+    ["paid", "refunded"].includes(existingPayStatus);
+  if (!isPrepaidCaptured) {
+    if (paymentMode === "cash") {
+      order.payment.method = "cash";
+    } else if (paymentMode === "qr") {
+      order.payment.method = "razorpay_qr";
+    }
   }
 
   if (
@@ -5187,7 +5196,12 @@ export async function completeDelivery(orderId, deliveryPartnerId, body = {}) {
   }
 
   order.orderStatus = "delivered";
-  order.payment.status = "paid"; 
+  // Mark COD / unpaid collection as paid on delivery; prepaid stays paid/refunded as-is.
+  if (!["paid", "refunded"].includes(String(order.payment?.status || "").trim().toLowerCase())) {
+    order.payment.status = "paid";
+  } else if (["cash", "cod", "cash_on_delivery", "razorpay_qr"].includes(String(payMethod || "").toLowerCase())) {
+    order.payment.status = "paid";
+  }
   order.deliveryState = {
     ...(order.deliveryState?.toObject?.() || order.deliveryState || {}),
     currentPhase: "delivered",

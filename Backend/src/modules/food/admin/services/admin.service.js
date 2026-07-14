@@ -7418,14 +7418,18 @@ export async function processRefund(orderId, refundAmount, refundTo) {
     await order.save();
 
     try {
-        await foodTransactionService.updateTransactionStatus(order._id, 'refunded', {
-            status: 'refunded',
-            note:
-                normalizedAmount < totalAmount
-                    ? `Partial refund of ₹${normalizedAmount.toFixed(2)} processed by admin`
-                    : `Full refund of ₹${normalizedAmount.toFixed(2)} processed by admin`,
-            recordedByRole: 'ADMIN'
-        });
+        await foodTransactionService.applyRefundToTransaction(
+            order._id,
+            normalizedAmount,
+            totalAmount,
+            {
+                note:
+                    normalizedAmount < totalAmount
+                        ? `Partial refund of ₹${normalizedAmount.toFixed(2)} processed by admin`
+                        : `Full refund of ₹${normalizedAmount.toFixed(2)} processed by admin`,
+                recordedByRole: 'ADMIN',
+            }
+        );
     } catch (_err) {
         // Keep the refund completed even if finance history sync needs follow-up.
     }
