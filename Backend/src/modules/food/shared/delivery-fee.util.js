@@ -107,6 +107,35 @@ export function hasDeliveryFeeRanges(feeSettings = {}) {
   return Array.isArray(feeSettings.deliveryFeeRanges) && feeSettings.deliveryFeeRanges.length > 0;
 }
 
+/**
+ * Admin-configured flat / base+per-km delivery fee used when ranges/slabs do not match.
+ * Never hardcodes a magic ₹60 — uses deliveryFee / baseDeliveryFee / perKmCharge.
+ */
+export function resolveConfiguredDeliveryFeeFallback(feeSettings = {}, distanceKm = null) {
+  const distance = Number(distanceKm);
+  const baseFee = Number(feeSettings.baseDeliveryFee ?? feeSettings.deliveryFee);
+  const baseKm = Number(feeSettings.baseDistanceKm);
+  const perKm = Number(feeSettings.perKmCharge);
+
+  if (Number.isFinite(baseFee) && baseFee >= 0) {
+    if (
+      Number.isFinite(distance) &&
+      distance >= 0 &&
+      Number.isFinite(perKm) &&
+      perKm > 0 &&
+      Number.isFinite(baseKm) &&
+      baseKm >= 0 &&
+      distance > baseKm
+    ) {
+      return round2(baseFee + (distance - baseKm) * perKm);
+    }
+    return round2(baseFee);
+  }
+
+  // Matches normalizeFoodFeeSettings default when admin has not configured fees.
+  return 25;
+}
+
 export function resolveUserDeliveryFee(feeSettings = {}, { subtotal = 0, distanceKm = null } = {}) {
   const ranges = Array.isArray(feeSettings.deliveryFeeRanges)
     ? feeSettings.deliveryFeeRanges
@@ -123,7 +152,9 @@ export function resolveUserDeliveryFee(feeSettings = {}, { subtotal = 0, distanc
     }
   }
 
-  const fallbackFee = resolveBaseDeliveryFee(feeSettings);
+  const fallbackFee = Number.isFinite(Number(distanceKm))
+    ? resolveConfiguredDeliveryFeeFallback(feeSettings, distanceKm)
+    : resolveBaseDeliveryFee(feeSettings);
   return {
     deliveryFee: fallbackFee,
     distanceKm: Number.isFinite(distanceKm) ? Number(distanceKm.toFixed(2)) : null,
@@ -131,6 +162,11 @@ export function resolveUserDeliveryFee(feeSettings = {}, { subtotal = 0, distanc
   };
 }
 
+/**
+ * Rider earning from deliveryFeeRanges when configured; otherwise same base/per-km
+ * (or flat) fee config used for customer delivery so riders are never stuck at ₹0
+ * while the customer still pays a delivery charge.
+ */
 export function calculateRiderEarning(feeSettings = {}, distanceKm) {
   const distance = Number(distanceKm);
   if (!Number.isFinite(distance) || distance < 0) return 0;
@@ -138,16 +174,21 @@ export function calculateRiderEarning(feeSettings = {}, distanceKm) {
   const ranges = Array.isArray(feeSettings.deliveryFeeRanges)
     ? feeSettings.deliveryFeeRanges
     : [];
-  if (ranges.length === 0) return 0;
 
-  const earning = matchFeeRange(ranges, distance, (range) => {
-    const basePay = Number(range.deliveryBoyBasePay || 0);
-    const perKm = Number(range.deliveryBoyPerKm || 0);
+  if (ranges.length > 0) {
+    const earning = matchFeeRange(ranges, distance, (range) => {
+      const basePay = Number(range.deliveryBoyBasePay || 0);
+      const perKm = Number(range.deliveryBoyPerKm || 0);
 
-    if (basePay > 0) return basePay;
-    if (perKm > 0) return distance * perKm;
-    return 0;
-  });
+      if (basePay > 0) return basePay;
+      if (perKm > 0) return distance * perKm;
+      return 0;
+    });
 
-  return Number.isFinite(earning) ? round2(earning) : 0;
+    if (Number.isFinite(earning) && earning > 0) {
+      return round2(earning);
+    }
+  }
+
+  return resolveConfiguredDeliveryFeeFallback(feeSettings, distance);
 }

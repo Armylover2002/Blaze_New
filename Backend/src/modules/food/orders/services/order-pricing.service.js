@@ -5,6 +5,7 @@ import { resolveRestaurantCommissionPercentage } from '../../constants/commissio
 import { roadDistanceKm } from './order.helpers.js';
 import { resolveRestaurantObjectId, validateAndApplyCoupon } from '../../shared/coupon.util.js';
 import { resolveDiscountSplitByCoupon } from '../../shared/discountSplit.util.js';
+import { resolveConfiguredDeliveryFeeFallback } from '../../shared/delivery-fee.util.js';
 
 function roundCurrency(value) {
   const num = Number(value);
@@ -31,7 +32,7 @@ function calculateBaseDeliveryFeeForDistance(distanceKm, feeSettings) {
       if (sortedSlabs.length > 0 && distance > Number(sortedSlabs[0].toKm)) {
         return roundCurrency(Number(sortedSlabs[0].deliveryFee));
       }
-      return 60;
+      return roundCurrency(resolveConfiguredDeliveryFeeFallback(feeSettings, distance));
     }
 
     const baseFee = Number(baseSlab.deliveryFee || 0);
@@ -66,8 +67,8 @@ function calculateBaseDeliveryFeeForDistance(distanceKm, feeSettings) {
     return roundCurrency(totalFee);
   }
 
-  // Pure distance-based default: 60 delivery fee
-  return 60;
+  // No slabs: admin flat / base+per-km (never hardcode ₹60).
+  return roundCurrency(resolveConfiguredDeliveryFeeFallback(feeSettings, distance));
 }
 
 function resolveSponsorRule(subtotal, distanceKm, sponsorRules = []) {

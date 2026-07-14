@@ -29,6 +29,7 @@ import {
     calculateRiderEarning,
     resolveRestaurantToUserDistanceKm,
     resolveRestaurantToUserRoadDistanceKm,
+    resolveConfiguredDeliveryFeeFallback,
 } from '../../shared/delivery-fee.util.js';
 import { FoodItem } from '../../admin/models/food.model.js';
 import { FoodAddon } from '../../restaurant/models/foodAddon.model.js';
@@ -874,7 +875,7 @@ function calculateBaseDeliveryFeeForDistance(distanceKm, feeSettings) {
       if (sortedSlabs.length > 0 && distance > Number(sortedSlabs[0].toKm)) {
         return roundCurrency(Number(sortedSlabs[0].deliveryFee));
       }
-      return 60;
+      return roundCurrency(resolveConfiguredDeliveryFeeFallback(feeSettings, distance));
     }
 
     const baseFee = Number(baseSlab.deliveryFee || 0);
@@ -909,8 +910,8 @@ function calculateBaseDeliveryFeeForDistance(distanceKm, feeSettings) {
     return roundCurrency(totalFee);
   }
 
-  // Pure distance-based default: 60 delivery fee
-  return 60;
+  // No slabs: use admin flat / base+per-km (never hardcode ₹60).
+  return roundCurrency(resolveConfiguredDeliveryFeeFallback(feeSettings, distance));
 }
 
 function resolveSponsorRule(subtotal, distanceKm, sponsorRules = []) {
@@ -2514,19 +2515,12 @@ export async function calculateOrder(userId, dto) {
       deliverySponsorType = rangePricing.deliverySponsorType;
       deliveryFeeBreakdown = rangePricing.deliveryFeeBreakdown;
     } else {
-      const userPoint = getPointLatLng(trustedDeliveryAddress?.location);
-      const restaurantPoint = getPointLatLng(
-        normalizeRestaurantLocation(primaryRestaurant?.location),
-      );
+      // Always charge using road distance (same source as ranges path / UX).
       const distanceKm =
-        userPoint && restaurantPoint
-          ? haversineKm(
-              restaurantPoint.lat,
-              restaurantPoint.lng,
-              userPoint.lat,
-              userPoint.lng,
-            )
-          : 0;
+        (await resolveRestaurantToUserRoadDistanceKm(
+          primaryRestaurant,
+          trustedDeliveryAddress,
+        )) ?? 0;
       const deliveryPricing = calculateFoodDeliveryPricing({
         subtotal,
         distanceKm,
@@ -2559,19 +2553,11 @@ export async function calculateOrder(userId, dto) {
       deliverySponsorType = rangePricing.deliverySponsorType;
       deliveryFeeBreakdown = rangePricing.deliveryFeeBreakdown;
     } else {
-      const userPoint = getPointLatLng(trustedDeliveryAddress?.location);
-      const restaurantPoint = getPointLatLng(
-        normalizeRestaurantLocation(primaryRestaurant?.location),
-      );
       const distanceKm =
-        userPoint && restaurantPoint
-          ? await roadDistanceKm(
-              restaurantPoint.lat,
-              restaurantPoint.lng,
-              userPoint.lat,
-              userPoint.lng,
-            )
-          : 0;
+        (await resolveRestaurantToUserRoadDistanceKm(
+          primaryRestaurant,
+          trustedDeliveryAddress,
+        )) ?? 0;
       const deliveryPricing = calculateFoodDeliveryPricing({
         subtotal,
         distanceKm,
