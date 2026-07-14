@@ -2431,8 +2431,9 @@ export async function upsertFeeSettings(body) {
 }
 
 // ----- Referral Settings (admin) -----
-export async function getReferralSettings() {
-    const doc = await FoodReferralSettings.findOne({ isActive: true }).sort({ createdAt: -1 }).lean();
+export async function getReferralSettings({ includeInactive = false } = {}) {
+    const filter = includeInactive ? {} : { isActive: true };
+    const doc = await FoodReferralSettings.findOne(filter).sort({ createdAt: -1 }).lean();
     return { referralSettings: doc || null };
 }
 
@@ -2451,8 +2452,11 @@ const normalizeReferralSection = (incoming, fallback = {}) => {
 };
 
 export async function upsertReferralSettings(body = {}) {
-    const existing = await FoodReferralSettings.findOne({ isActive: true }).sort({ createdAt: -1 });
+    // Always target the latest settings doc (including inactive) so deactivate
+    // does not orphan the config and force a new document on the next save.
+    const existing = await FoodReferralSettings.findOne({}).sort({ createdAt: -1 });
     const existingObj = existing?.toObject?.() || existing || {};
+    const wasActive = existingObj.isActive !== false;
 
     // Merge only provided sections/fields so a partial PUT cannot zero other roles.
     const formattedData = {
@@ -2462,17 +2466,26 @@ export async function upsertReferralSettings(body = {}) {
         isActive: body.isActive !== undefined ? Boolean(body.isActive) : (existingObj.isActive !== false)
     };
 
+    let saved;
     if (existing) {
-        const updated = await FoodReferralSettings.findByIdAndUpdate(
+        saved = await FoodReferralSettings.findByIdAndUpdate(
             existing._id,
             { $set: formattedData },
             { new: true }
         ).lean();
-        return updated;
+    } else {
+        saved = (await FoodReferralSettings.create(formattedData)).toObject();
     }
 
-    const created = await FoodReferralSettings.create(formattedData);
-    return created.toObject();
+    // Deactivating the program must cancel open restaurant payouts, not only block new invites.
+    if (wasActive && formattedData.isActive === false) {
+        await FoodReferralLog.updateMany(
+            { role: 'RESTAURANT', status: 'pending' },
+            { $set: { status: 'rejected', reason: 'program_inactive' } }
+        );
+    }
+
+    return saved;
 }
 
 // ----- Safety / Emergency Reports (admin) -----
@@ -4491,59 +4504,121 @@ export async function approveRestaurant(id, performer = null) {
 
     if (updated) {
         // --- Referral Reward Crediting ---
+        // Re-validate platform settings at payout, then claim + credit + count
+        // in one transaction (no double-pay; disabled/zeroed programs cannot pay).
         try {
-            const referralLog = await FoodReferralLog.findOne({
-                refereeId: updated._id,
-                role: 'RESTAURANT',
-                status: 'pending'
-            });
+            const session = await mongoose.startSession();
+            try {
+                await session.withTransaction(async () => {
+                    const pending = await FoodReferralLog.findOne({
+                        refereeId: updated._id,
+                        role: 'RESTAURANT',
+                        status: 'pending'
+                    }).session(session);
+                    if (!pending) return;
 
-            if (referralLog) {
-                const referrerReward = Number(referralLog.referrerRewardAmount) || 0;
-                const refereeReward = Number(referralLog.refereeRewardAmount) || 0;
+                    const settingsDoc = await FoodReferralSettings.findOne({ isActive: true })
+                        .sort({ createdAt: -1 })
+                        .session(session)
+                        .lean();
 
-                // Credit Referrer
-                if (referrerReward > 0) {
-                    await FoodRestaurantWallet.findOneAndUpdate(
-                        { restaurantId: referralLog.referrerId },
+                    const referrerReward = Math.max(0, Number(settingsDoc?.restaurant?.referrerReward) || 0);
+                    const refereeReward = Math.max(0, Number(settingsDoc?.restaurant?.refereeReward) || 0);
+                    const limit = Math.max(0, Number(settingsDoc?.restaurant?.limit) || 0);
+
+                    const referrer = await FoodRestaurant.findById(pending.referrerId)
+                        .select('_id status')
+                        .session(session)
+                        .lean();
+
+                    let rejectReason = null;
+                    if (!settingsDoc) rejectReason = 'program_inactive';
+                    else if (!referrer) rejectReason = 'referrer_not_found';
+                    else if (referrer.status !== 'approved') rejectReason = 'referrer_not_approved';
+                    else if (referrerReward <= 0 && refereeReward <= 0) rejectReason = 'reward_disabled';
+                    else if (limit <= 0) rejectReason = 'limit_disabled';
+
+                    if (rejectReason) {
+                        await FoodReferralLog.updateOne(
+                            { _id: pending._id, status: 'pending' },
+                            { $set: { status: 'rejected', reason: rejectReason } },
+                            { session }
+                        );
+                        return;
+                    }
+
+                    // Atomic hard gate: only credit if referrer is still approved and has slots.
+                    const slotReserved = await FoodRestaurant.findOneAndUpdate(
                         {
-                            $inc: {
-                                balance: referrerReward,
-                                totalEarnings: referrerReward,
-                                referralEarnings: referrerReward
+                            _id: pending.referrerId,
+                            status: 'approved',
+                            referralCount: { $lt: limit }
+                        },
+                        { $inc: { referralCount: 1 } },
+                        { new: true, session }
+                    );
+                    if (!slotReserved) {
+                        await FoodReferralLog.updateOne(
+                            { _id: pending._id, status: 'pending' },
+                            { $set: { status: 'rejected', reason: 'limit_reached' } },
+                            { session }
+                        );
+                        return;
+                    }
+
+                    // Claim with current settings amounts (not signup-time freeze).
+                    const claimed = await FoodReferralLog.findOneAndUpdate(
+                        { _id: pending._id, status: 'pending' },
+                        {
+                            $set: {
+                                status: 'credited',
+                                rewardAmount: referrerReward,
+                                referrerRewardAmount: referrerReward,
+                                refereeRewardAmount: refereeReward
                             }
                         },
-                        { upsert: true }
+                        { new: true, session }
                     );
-                }
+                    if (!claimed) {
+                        // Lost the race — release the reserved slot.
+                        await FoodRestaurant.updateOne(
+                            { _id: pending.referrerId },
+                            { $inc: { referralCount: -1 } },
+                            { session }
+                        );
+                        return;
+                    }
 
-                // Credit Referee (Approved Restaurant)
-                if (refereeReward > 0) {
-                    await FoodRestaurantWallet.findOneAndUpdate(
-                        { restaurantId: updated._id },
-                        {
-                            $inc: {
-                                balance: refereeReward,
-                                totalEarnings: refereeReward,
-                                referralEarnings: refereeReward
-                            }
-                        },
-                        { upsert: true }
-                    );
-                }
+                    if (referrerReward > 0) {
+                        await FoodRestaurantWallet.findOneAndUpdate(
+                            { restaurantId: claimed.referrerId },
+                            {
+                                $inc: {
+                                    balance: referrerReward,
+                                    totalEarnings: referrerReward,
+                                    referralEarnings: referrerReward
+                                }
+                            },
+                            { upsert: true, session }
+                        );
+                    }
 
-                // Count against limit for any successful credit (referrer and/or referee reward).
-                const marked = await FoodReferralLog.findOneAndUpdate(
-                    { _id: referralLog._id, status: 'pending' },
-                    { $set: { status: 'credited' } },
-                    { new: true }
-                );
-                if (marked) {
-                    await FoodRestaurant.updateOne(
-                        { _id: referralLog.referrerId },
-                        { $inc: { referralCount: 1 } }
-                    );
-                }
+                    if (refereeReward > 0) {
+                        await FoodRestaurantWallet.findOneAndUpdate(
+                            { restaurantId: updated._id },
+                            {
+                                $inc: {
+                                    balance: refereeReward,
+                                    totalEarnings: refereeReward,
+                                    referralEarnings: refereeReward
+                                }
+                            },
+                            { upsert: true, session }
+                        );
+                    }
+                });
+            } finally {
+                await session.endSession();
             }
         } catch (e) {
             console.error('Referral crediting failed on approval:', e);

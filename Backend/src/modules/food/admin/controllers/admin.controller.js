@@ -1116,7 +1116,8 @@ export async function createOrUpdateFeeSettings(req, res, next) {
 // ----- Referral Settings (admin) -----
 export async function getReferralSettings(req, res, next) {
     try {
-        const data = await adminService.getReferralSettings();
+        // Admin must still load config when the program is deactivated.
+        const data = await adminService.getReferralSettings({ includeInactive: true });
         res.status(200).json({ success: true, message: 'Referral settings fetched successfully', data });
     } catch (error) {
         next(error);

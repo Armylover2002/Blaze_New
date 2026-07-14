@@ -1472,7 +1472,7 @@ export const registerRestaurant = async (payload, files, authUserId) => {
                     : { referralCode: refRaw };
 
                 const [referrer, settingsDoc] = await Promise.all([
-                    FoodRestaurant.findOne(referrerQuery).select('_id referralCount').lean(),
+                    FoodRestaurant.findOne(referrerQuery).select('_id referralCount status').lean(),
                     FoodReferralSettings.findOne({ isActive: true }).sort({ createdAt: -1 }).lean()
                 ]);
 
@@ -1481,10 +1481,27 @@ export const registerRestaurant = async (payload, files, authUserId) => {
                     const refereeReward = Math.max(0, Number(settingsDoc.restaurant?.refereeReward) || 0);
                     const limit = Math.max(0, Number(settingsDoc.restaurant?.limit) || 0);
 
-                    if (
+                    // Pending invites consume slots so referrers cannot oversell the limit
+                    // before approvals; credited count is the hard gate at payout.
+                    const usedSlots = await FoodReferralLog.countDocuments({
+                        referrerId: referrer._id,
+                        role: 'RESTAURANT',
+                        status: { $in: ['pending', 'credited'] }
+                    });
+
+                    if (referrer.status !== 'approved') {
+                        await FoodReferralLog.create({
+                            referrerId: referrer._id,
+                            refereeId: restaurant._id,
+                            role: 'RESTAURANT',
+                            rewardAmount: referrerReward,
+                            status: 'rejected',
+                            reason: 'referrer_not_approved'
+                        });
+                    } else if (
                         (referrerReward > 0 || refereeReward > 0) &&
                         limit > 0 &&
-                        Number(referrer.referralCount || 0) < limit
+                        usedSlots < limit
                     ) {
                         // Update new restaurant with referrer info
                         await FoodRestaurant.updateOne({ _id: restaurant._id }, { $set: { referredBy: referrer._id } });
