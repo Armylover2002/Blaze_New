@@ -12,6 +12,11 @@ import { FoodCategory } from '../models/category.model.js';
 import { FoodItem } from '../models/food.model.js';
 import { FoodOffer } from '../models/offer.model.js';
 import { FoodOfferUsage } from '../models/offerUsage.model.js';
+import {
+    COUPON_OWNER_TYPES,
+    claimCouponCodeReservation,
+    releaseCouponCodeReservation
+} from '../../shared/couponCodeRegistry.util.js';
 import { DeliveryBonusTransaction } from '../models/deliveryBonusTransaction.model.js';
 import { DeliveryBonusAuditLog } from '../models/deliveryBonusAuditLog.model.js';
 import { DeliveryBonusIdempotency } from '../models/deliveryBonusIdempotency.model.js';
@@ -4741,10 +4746,7 @@ export async function getAllOffers(_query = {}) {
 }
 
 export async function createAdminOffer(body) {
-    const existing = await FoodOffer.findOne({ couponCode: body.couponCode }).lean();
-    if (existing) {
-        throw new ValidationError('Coupon code already exists');
-    }
+    await assertUniquePlatformCouponCode(body.couponCode);
 
     const doc = await FoodOffer.create({
         couponCode: body.couponCode,
@@ -4766,6 +4768,20 @@ export async function createAdminOffer(body) {
         adminBearPercentage: 100,
         restaurantBearPercentage: 0
     });
+
+    try {
+        await claimCouponCodeReservation({
+            ownerType: COUPON_OWNER_TYPES.PLATFORM_OFFER,
+            ownerId: doc._id,
+            couponCode: doc.couponCode,
+        });
+    } catch (error) {
+        await FoodOffer.findByIdAndDelete(doc._id);
+        if (error?.code === 11000) {
+            throw new ValidationError('Coupon code already exists');
+        }
+        throw error;
+    }
 
     if (doc.restaurantScope === 'selected' && doc.restaurantId) {
         try {
@@ -4800,6 +4816,28 @@ async function invalidateOffersCacheSafely(context) {
     }
 }
 
+async function assertUniquePlatformCouponCode(couponCode, excludeId = null) {
+    const normalizedCode = String(couponCode || '').trim().toUpperCase();
+    if (!normalizedCode) {
+        throw new ValidationError('Coupon code is required');
+    }
+
+    const duplicateOfferFilter = { couponCode: normalizedCode };
+    if (excludeId) {
+        duplicateOfferFilter._id = { $ne: new mongoose.Types.ObjectId(String(excludeId)) };
+    }
+
+    const { RestaurantCoupon } = await import('../models/restaurantCoupon.model.js');
+    const [offerExists, restaurantCouponExists] = await Promise.all([
+        FoodOffer.findOne(duplicateOfferFilter).select('_id').lean(),
+        RestaurantCoupon.findOne({ couponCode: normalizedCode }).select('_id').lean(),
+    ]);
+
+    if (offerExists || restaurantCouponExists) {
+        throw new ValidationError('Coupon code already exists');
+    }
+}
+
 /** End-of-day semantics: an offer is only expired once its endDate is before today. */
 function isOfferEndDateExpired(endDate, now = new Date()) {
     if (!endDate) return false;
@@ -4813,15 +4851,25 @@ export async function updateAdminOffer(id, body) {
 
     const existing = await FoodOffer.findById(id).lean();
     if (!existing) return null;
+    const restoreOfferState = {
+        couponCode: existing.couponCode,
+        discountType: existing.discountType,
+        discountValue: existing.discountValue,
+        customerScope: existing.customerScope,
+        restaurantScope: existing.restaurantScope,
+        restaurantId: existing.restaurantId ?? null,
+        minOrderValue: existing.minOrderValue ?? 0,
+        maxDiscount: existing.maxDiscount ?? null,
+        usageLimit: existing.usageLimit ?? null,
+        perUserLimit: existing.perUserLimit ?? null,
+        startDate: existing.startDate ?? null,
+        endDate: existing.endDate ?? null,
+        isFirstOrderOnly: Boolean(existing.isFirstOrderOnly),
+        status: existing.status,
+    };
 
     if (body.couponCode && body.couponCode !== existing.couponCode) {
-        const duplicate = await FoodOffer.findOne({
-            couponCode: body.couponCode,
-            _id: { $ne: existing._id },
-        }).select('_id').lean();
-        if (duplicate) {
-            throw new ValidationError('Coupon code already exists');
-        }
+        await assertUniquePlatformCouponCode(body.couponCode, existing._id);
     }
 
     // Preserve the existing lifecycle state unless the new end date forces inactivity.
@@ -4852,6 +4900,24 @@ export async function updateAdminOffer(id, body) {
         },
         { new: true }
     ).lean();
+
+    try {
+        await claimCouponCodeReservation({
+            ownerType: COUPON_OWNER_TYPES.PLATFORM_OFFER,
+            ownerId: existing._id,
+            couponCode: body.couponCode,
+        });
+    } catch (error) {
+        await FoodOffer.findByIdAndUpdate(
+            id,
+            { $set: restoreOfferState },
+            { new: true }
+        );
+        if (error?.code === 11000) {
+            throw new ValidationError('Coupon code already exists');
+        }
+        throw error;
+    }
 
     await invalidateOffersCacheSafely('offer update');
     return updated;
@@ -4896,6 +4962,10 @@ export async function deleteAdminOffer(id) {
     const deleted = await FoodOffer.findByIdAndDelete(id).lean();
     if (!deleted) return null;
     await FoodOfferUsage.deleteMany({ offerId: new mongoose.Types.ObjectId(id) });
+    await releaseCouponCodeReservation({
+        ownerType: COUPON_OWNER_TYPES.PLATFORM_OFFER,
+        ownerId: id,
+    });
     await invalidateOffersCacheSafely('offer delete');
     return { id };
 }
@@ -7664,4 +7734,3 @@ export async function settleCODVerification(id, { action, adminNote, performer }
 
     return updated;
 }
-

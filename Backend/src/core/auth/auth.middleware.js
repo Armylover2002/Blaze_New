@@ -4,6 +4,7 @@ import { FoodUser } from '../users/user.model.js';
 import { FoodDeliveryPartner } from '../../modules/food/delivery/models/deliveryPartner.model.js';
 import { FoodAdmin } from '../admin/admin.model.js';
 import { AdminRole } from '../admin/role.model.js';
+import { FoodRestaurant } from '../../modules/food/restaurant/models/restaurant.model.js';
 
 export const requireAdmin = (req, res, next) => {
     if (req.user?.role !== 'ADMIN') {
@@ -52,6 +53,32 @@ export const authMiddleware = (req, res, next) => {
                 }
                 next();
             }).catch(() => sendError(res, 401, 'Authentication failed'));
+            return;
+        }
+        if (decoded.role === 'RESTAURANT') {
+            FoodRestaurant.findById(decoded.userId)
+                .select('status isActive isDeleted accountStatus wasEverApproved')
+                .lean()
+                .then((doc) => {
+                    if (!doc) {
+                        return sendError(res, 401, 'Restaurant account not found');
+                    }
+
+                    if (doc.isDeleted === true || doc.accountStatus === 'deleted') {
+                        return sendError(res, 401, 'Your account has been deleted/deactivated. Please contact support.');
+                    }
+
+                    if (String(doc.status || '').toLowerCase() === 'rejected') {
+                        return sendError(res, 401, 'Your account has been rejected. Please contact support.');
+                    }
+
+                    if (doc.isActive === false && String(doc.status || '').toLowerCase() !== 'pending') {
+                        return sendError(res, 401, 'Your account has been deleted/deactivated. Please contact support.');
+                    }
+
+                    next();
+                })
+                .catch(() => sendError(res, 401, 'Authentication failed'));
             return;
         }
         return next();
@@ -171,4 +198,3 @@ export const checkPermission = (permissionKey, action) => {
         }
     };
 };
-
