@@ -76,6 +76,14 @@ import {
     updateRestaurantCouponController,
     deleteRestaurantCouponController
 } from '../controllers/restaurantCoupon.controller.js';
+import {
+    listRestaurantAdvertisementsController,
+    getRestaurantAdvertisementController,
+    createRestaurantAdvertisementController,
+    updateRestaurantAdvertisementController,
+    deleteRestaurantAdvertisementController,
+    pauseRestaurantAdvertisementController
+} from '../controllers/advertisement.controller.js';
 
 import { cacheResponse, invalidateCache } from '../../../../middleware/cache.js';
 import { invalidateCategoryCaches } from '../../shared/categoryCache.js';
@@ -315,6 +323,28 @@ router.get('/coupons', authMiddleware, requireRestaurant, requireApprovedRestaur
 router.post('/coupons', authMiddleware, requireRestaurant, requireApprovedRestaurant, createRestaurantCouponController);
 router.put('/coupons/:id', authMiddleware, requireRestaurant, requireApprovedRestaurant, updateRestaurantCouponController);
 router.delete('/coupons/:id', authMiddleware, requireRestaurant, requireApprovedRestaurant, deleteRestaurantCouponController);
+
+// Advertisements (restaurant dashboard)
+router.get('/advertisements', authMiddleware, requireRestaurant, requireApprovedRestaurant, listRestaurantAdvertisementsController);
+router.get('/advertisements/:id', authMiddleware, requireRestaurant, requireApprovedRestaurant, getRestaurantAdvertisementController);
+router.post(
+    '/advertisements',
+    authMiddleware,
+    requireRestaurant,
+    requireApprovedRestaurant,
+    upload.fields([{ name: 'image', maxCount: 1 }, { name: 'video', maxCount: 1 }]),
+    createRestaurantAdvertisementController
+);
+router.put(
+    '/advertisements/:id',
+    authMiddleware,
+    requireRestaurant,
+    requireApprovedRestaurant,
+    upload.fields([{ name: 'image', maxCount: 1 }, { name: 'video', maxCount: 1 }]),
+    updateRestaurantAdvertisementController
+);
+router.patch('/advertisements/:id/pause', authMiddleware, requireRestaurant, requireApprovedRestaurant, pauseRestaurantAdvertisementController);
+router.delete('/advertisements/:id', authMiddleware, requireRestaurant, requireApprovedRestaurant, deleteRestaurantAdvertisementController);
 
 export default router;
 

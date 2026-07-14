@@ -164,11 +164,26 @@ const BannerSection = memo(({
           className="absolute inset-0 z-20 h-full w-full border-0 p-0 bg-transparent text-left"
           onClick={() => {
             const bannerData = heroBannersData[currentBannerIndex];
+            if (!bannerData || !navigate) return;
+
             const linkedRestaurants = bannerData?.linkedRestaurants || [];
             if (linkedRestaurants.length > 0) {
               const firstRestaurant = linkedRestaurants[0];
-              const restaurantSlug = firstRestaurant.slug || firstRestaurant.restaurantId || firstRestaurant._id;
-              navigate(`/restaurants/${restaurantSlug}`);
+              const restaurantSlug =
+                firstRestaurant.slug || firstRestaurant.restaurantId || firstRestaurant._id;
+              if (restaurantSlug) {
+                navigate(`/user/restaurants/${restaurantSlug}`);
+                return;
+              }
+            }
+
+            const ctaLink = typeof bannerData?.ctaLink === "string" ? bannerData.ctaLink.trim() : "";
+            if (ctaLink) {
+              if (/^https?:\/\//i.test(ctaLink)) {
+                window.open(ctaLink, "_blank", "noopener,noreferrer");
+              } else {
+                navigate(ctaLink.startsWith("/") ? ctaLink : `/${ctaLink}`);
+              }
             }
           }}
           aria-label={`Open hero banner ${currentBannerIndex + 1}`}

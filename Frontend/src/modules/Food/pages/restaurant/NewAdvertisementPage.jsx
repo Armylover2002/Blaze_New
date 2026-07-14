@@ -17,9 +17,7 @@ import BottomNavbar from "@food/components/restaurant/BottomNavbar"
 import { ImageSourcePicker } from "@food/components/ImageSourcePicker"
 import { isFlutterBridgeAvailable } from "@food/utils/imageUploadUtils"
 import { toast } from "sonner"
-const debugLog = (...args) => {}
-const debugWarn = (...args) => {}
-const debugError = (...args) => {}
+import { restaurantAPI } from "@food/api"
 
 
 export default function NewAdvertisementPage() {
@@ -42,6 +40,7 @@ export default function NewAdvertisementPage() {
   const fileInputRef = useRef(null)
   const videoInputRef = useRef(null)
   const [isPhotoPickerOpen, setIsPhotoPickerOpen] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
 
   // Lenis smooth scrolling
   useEffect(() => {
@@ -132,6 +131,50 @@ export default function NewAdvertisementPage() {
 
   const getCharacterCount = (text, maxLength = 100) => {
     return `${text.length}/${maxLength}`
+  }
+
+  const handleCreate = async () => {
+    if (!formData.title.trim()) {
+      toast.error("Title is required")
+      return
+    }
+    if (!formData.validity.trim()) {
+      toast.error("Validity is required")
+      return
+    }
+    if (formData.category === "Video Promotion" && !uploadedVideo) {
+      toast.error("Please upload a video")
+      return
+    }
+    if (
+      ["Image Promotion", "Banner Promotion", "Restaurant Promotion"].includes(formData.category) &&
+      !uploadedFile
+    ) {
+      toast.error("Please upload an image")
+      return
+    }
+
+    try {
+      setSubmitting(true)
+      const payload = new FormData()
+      payload.append("title", formData.title.trim())
+      payload.append("description", formData.description || "")
+      payload.append("adsType", formData.category)
+      payload.append("category", formData.category)
+      payload.append("validity", formData.validity.trim())
+      payload.append("fileDescription", formData.fileDescription || "")
+      payload.append("videoDescription", formData.videoDescription || "")
+      if (uploadedFile) payload.append("image", uploadedFile)
+      if (uploadedVideo) payload.append("video", uploadedVideo)
+
+      await restaurantAPI.createAdvertisement(payload)
+      toast.success("Advertisement submitted for approval")
+      navigate("/food/restaurant/advertisements")
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to create advertisement")
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   return (
@@ -402,14 +445,11 @@ export default function NewAdvertisementPage() {
             Reset
           </Button>
           <Button
-            onClick={() => {
-              debugLog("Create ad:", formData)
-              // Navigate to advertisements list after creation
-              navigate("/restaurant/advertisements")
-            }}
-            className="flex-1 bg-[#ff8100] hover:bg-[#e67300] text-white font-semibold py-3 rounded-lg"
+            onClick={handleCreate}
+            disabled={submitting}
+            className="flex-1 bg-[#ff8100] hover:bg-[#e67300] text-white font-semibold py-3 rounded-lg disabled:opacity-60"
           >
-            Create Ads
+            {submitting ? "Creating..." : "Create Ads"}
           </Button>
         </div>
       </div>

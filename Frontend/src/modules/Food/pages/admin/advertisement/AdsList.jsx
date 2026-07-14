@@ -1,17 +1,19 @@
-import { useState, useMemo } from "react"
+import { useState, useMemo, useEffect, useCallback } from "react"
 import { useNavigate } from "react-router-dom"
 import { Search, Download, ChevronDown, Plus, MoreVertical, Building2, Settings, Filter, FileDown, FileSpreadsheet, FileText, Code, Eye, Edit, Trash2 } from "lucide-react"
-import { emptyAds } from "@food/utils/adminFallbackData"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@food/components/ui/dropdown-menu"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@food/components/ui/dialog"
 import SettingsDialog from "@food/components/admin/orders/SettingsDialog"
 import { exportAdvertisementsToCSV, exportAdvertisementsToExcel, exportAdvertisementsToPDF, exportAdvertisementsToJSON } from "@food/components/admin/advertisements/advertisementsExportUtils"
+import { adminAPI } from "@food/api"
+import { toast } from "sonner"
 
 export default function AdsList() {
   const navigate = useNavigate()
   const [searchQuery, setSearchQuery] = useState("")
   const [adsType, setAdsType] = useState("all")
-  const [ads, setAds] = useState(emptyAds)
+  const [ads, setAds] = useState([])
+  const [loading, setLoading] = useState(true)
   const [isFilterOpen, setIsFilterOpen] = useState(false)
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
   const [isViewOpen, setIsViewOpen] = useState(false)
@@ -33,6 +35,24 @@ export default function AdsList() {
     priority: true,
     actions: true,
   })
+
+  const fetchAds = useCallback(async () => {
+    try {
+      setLoading(true)
+      const response = await adminAPI.getAdvertisements()
+      const data = response?.data?.data
+      setAds(Array.isArray(data) ? data : [])
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to load advertisements")
+      setAds([])
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    fetchAds()
+  }, [fetchAds])
 
   const columnsConfig = {
     si: "Serial Number",
@@ -99,10 +119,16 @@ export default function AdsList() {
     }
   }
 
-  const handlePriorityChange = (sl, newPriority) => {
-    setAds(ads.map(ad =>
-      ad.sl === sl ? { ...ad, priority: newPriority } : ad
-    ))
+  const handlePriorityChange = async (ad, newPriority) => {
+    try {
+      await adminAPI.updateAdvertisementPriority(ad._id, newPriority)
+      setAds(prev => prev.map(item =>
+        item._id === ad._id ? { ...item, priority: newPriority } : item
+      ))
+      toast.success("Priority updated")
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to update priority")
+    }
   }
 
   const handleViewAd = (ad) => {
@@ -110,8 +136,8 @@ export default function AdsList() {
     setIsViewOpen(true)
   }
 
-  const handleEditAd = (ad) => {
-    navigate("/admin/new-advertisement", { state: { editAd: ad } })
+  const handleEditAd = (_ad) => {
+    navigate("/admin/food/advertisement/requests")
   }
 
   const handleDeleteClick = (ad) => {
@@ -119,11 +145,16 @@ export default function AdsList() {
     setIsDeleteOpen(true)
   }
 
-  const handleDelete = () => {
-    if (selectedAd) {
-      setAds(ads.filter(ad => ad.sl !== selectedAd.sl))
+  const handleDelete = async () => {
+    if (!selectedAd?._id) return
+    try {
+      await adminAPI.deleteAdvertisement(selectedAd._id)
+      toast.success("Advertisement deleted")
       setIsDeleteOpen(false)
       setSelectedAd(null)
+      await fetchAds()
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to delete advertisement")
     }
   }
 
@@ -178,7 +209,7 @@ export default function AdsList() {
           </div>
 
           <button 
-            onClick={() => navigate("/admin/new-advertisement")}
+            onClick={() => navigate("/admin/food/advertisement/new")}
             className="px-4 py-2.5 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 flex items-center gap-2 transition-all shadow-md"
           >
             <Plus className="w-4 h-4" />
@@ -347,7 +378,7 @@ export default function AdsList() {
                       <td className="px-6 py-4 whitespace-nowrap">
                         <select
                           value={ad.priority || ""}
-                          onChange={(e) => handlePriorityChange(ad.sl, e.target.value)}
+                          onChange={(e) => handlePriorityChange(ad, e.target.value)}
                           className="px-2 py-1 text-xs border border-slate-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-slate-400"
                         >
                           <option value="">N/A</option>
