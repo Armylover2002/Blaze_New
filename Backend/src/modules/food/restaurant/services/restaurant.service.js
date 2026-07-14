@@ -20,6 +20,7 @@ import {
     splitReviewableUpdate,
     mergePendingProfileChanges,
 } from '../../shared/pendingProfileChanges.js';
+import { invalidateCache } from '../../../../middleware/cache.js';
 import {
     buildActivePublicOfferFilter,
     buildActiveRestaurantCouponFilter,
@@ -2230,6 +2231,15 @@ export const updateRestaurantProfile = async (restaurantId, body = {}) => {
             profile.pendingReviewSubmitted = true;
             profile.message = 'Changes submitted for admin approval. Your outlet stays live with previous details until approved.';
         }
+        
+        // Invalidate cache so that pending changes (e.g. pureVegRestaurant) are visible immediately
+        try {
+            await invalidateCache(`restaurant_detail:${String(restaurantId)}`);
+            await invalidateCache(`restaurant_detail:${doc.restaurantNameNormalized || ''}`);
+        } catch (cacheErr) {
+            console.error('Failed to invalidate cache after profile update', cacheErr);
+        }
+
         return profile;
     } catch (err) {
         if (err && err.code === 11000) {

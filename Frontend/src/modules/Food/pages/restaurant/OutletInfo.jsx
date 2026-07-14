@@ -59,6 +59,8 @@ export default function OutletInfo() {
   const [coverImages, setCoverImages] = useState([])
   const [showEditNameDialog, setShowEditNameDialog] = useState(false)
   const [editNameValue, setEditNameValue] = useState("")
+  const [showEditFoodTypeDialog, setShowEditFoodTypeDialog] = useState(false)
+  const [editFoodTypeValue, setEditFoodTypeValue] = useState(false)
   const [showEditPhoneDialog, setShowEditPhoneDialog] = useState(false)
   const [editPhoneValue, setEditPhoneValue] = useState("")
   const [editPhoneError, setEditPhoneError] = useState("")
@@ -380,6 +382,23 @@ export default function OutletInfo() {
     }
   }
 
+  // Handle edit food type dialog
+  const handleOpenFoodTypeDialog = () => {
+    setEditFoodTypeValue(isPureVeg)
+    setShowEditFoodTypeDialog(true)
+  }
+
+  const handleSaveFoodType = async () => {
+    try {
+      await restaurantAPI.updateProfile({ pureVegRestaurant: editFoodTypeValue })
+      setIsPureVeg(editFoodTypeValue)
+      setShowEditFoodTypeDialog(false)
+      toast.success("Food type updated successfully")
+    } catch (error) {
+      toast.error("Failed to update food type")
+    }
+  }
+
   // Handle edit phone dialog
   const handleOpenPhoneDialog = () => {
     setEditPhoneValue(primaryPhone)
@@ -568,9 +587,12 @@ export default function OutletInfo() {
                     <div className={`w-3 h-3 border-2 ${isPureVeg ? "border-green-600" : "border-red-600"} flex items-center justify-center p-0.5`}>
                       <div className={`w-full h-full rounded-full ${isPureVeg ? "bg-green-600" : "bg-red-600"}`} />
                     </div>
-                    <span className="text-sm font-semibold text-gray-800">{isPureVeg ? "Pure Veg" : "Veg & Non-Veg"}</span>
+                    <span className="text-sm font-semibold text-gray-800">{isPureVeg ? "Veg" : "Non-Veg"}</span>
                   </div>
                 </div>
+                <button onClick={handleOpenFoodTypeDialog} className="p-2 hover:bg-gray-50 rounded-full transition-colors">
+                  <Pencil className="w-4 h-4 text-[#FF0000]" />
+                </button>
               </div>
             </div>
           </section>
@@ -720,6 +742,39 @@ export default function OutletInfo() {
           <DialogFooter className="p-4 bg-gray-50 flex flex-row gap-3">
             <Button variant="outline" onClick={() => setShowEditNameDialog(false)}>Cancel</Button>
             <Button onClick={handleSaveName} disabled={!editNameValue.trim()} className="bg-[#FF0000] text-white">Save</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showEditFoodTypeDialog} onOpenChange={setShowEditFoodTypeDialog}>
+        <DialogContent className="sm:max-w-md p-0 overflow-hidden rounded-xl w-[90%]">
+          <DialogHeader className="p-4 border-b border-gray-100">
+            <DialogTitle className="text-lg font-bold">Edit food type</DialogTitle>
+          </DialogHeader>
+          <div className="p-4 flex flex-col gap-3">
+            <div 
+              onClick={() => setEditFoodTypeValue(true)}
+              className={`p-3 rounded-lg border flex items-center gap-3 cursor-pointer transition-colors ${editFoodTypeValue ? 'border-green-600 bg-green-50' : 'border-gray-200'}`}
+            >
+              <div className="w-4 h-4 border-2 border-green-600 flex items-center justify-center p-0.5">
+                {editFoodTypeValue && <div className="w-full h-full rounded-full bg-green-600" />}
+              </div>
+              <span className="font-medium text-gray-800">Veg</span>
+            </div>
+            
+            <div 
+              onClick={() => setEditFoodTypeValue(false)}
+              className={`p-3 rounded-lg border flex items-center gap-3 cursor-pointer transition-colors ${!editFoodTypeValue ? 'border-red-600 bg-red-50' : 'border-gray-200'}`}
+            >
+              <div className="w-4 h-4 border-2 border-red-600 flex items-center justify-center p-0.5">
+                {!editFoodTypeValue && <div className="w-full h-full rounded-full bg-red-600" />}
+              </div>
+              <span className="font-medium text-gray-800">Non-Veg</span>
+            </div>
+          </div>
+          <DialogFooter className="p-4 bg-gray-50 flex flex-row gap-3">
+            <Button variant="outline" onClick={() => setShowEditFoodTypeDialog(false)}>Cancel</Button>
+            <Button onClick={handleSaveFoodType} className="bg-blue-600 text-white">Save</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

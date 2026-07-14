@@ -10,7 +10,6 @@ export const REVIEWABLE_PROFILE_FIELDS = [
     'ownerPhoneDigits',
     'ownerPhoneLast10',
     'primaryContactNumber',
-    'pureVegRestaurant',
     'cuisines',
     'zoneId',
     'location',
