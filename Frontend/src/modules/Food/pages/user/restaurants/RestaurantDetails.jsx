@@ -163,10 +163,14 @@ function RestaurantDetailsContent() {
   const hasNonVegItems = useMemo(() => {
     if (!restaurant?.menuSections) return false;
     
+    const isPureVegRest = restaurant?.pureVegRestaurant === true || String(restaurant?.pureVegRestaurant).toLowerCase() === "true" || restaurant?.details?.pureVegRestaurant === true || String(restaurant?.details?.pureVegRestaurant).toLowerCase() === "true";
+    
+    if (isPureVegRest) return false;
+
     let foundNonVeg = false;
     const checkItem = (item) => {
       const ft = item?.foodType?.toLowerCase()?.trim() || "";
-      return ft === "non-veg" || ft === "nonveg";
+      return item?.isVeg === false || ft === "non-veg" || ft === "nonveg" || ft === "non veg";
     };
 
     for (const section of restaurant.menuSections) {
@@ -503,6 +507,7 @@ function RestaurantDetailsContent() {
             distance: calculatedDistance || actualRestaurant?.distance || apiRestaurant?.distance || actualRestaurant?.distanceFromUser || apiRestaurant?.distanceFromUser || "1.2 km",
             location: formattedAddress,
             locationObject: locationObj, // Store full location object for reference
+            pureVegRestaurant: actualRestaurant?.pureVegRestaurant ?? apiRestaurant?.pureVegRestaurant ?? false,
             image: normalizedCoverImages?.[0]?.url
               || normalizedCoverImages?.[0]
               || normalizedProfileImage?.url
@@ -1336,15 +1341,28 @@ function RestaurantDetailsContent() {
   const menuCategories = useMemo(() => {
     if (!restaurant?.menuSections || !Array.isArray(restaurant.menuSections)) return []
 
+    const isPureVegRest = restaurant?.pureVegRestaurant === true || String(restaurant?.pureVegRestaurant).toLowerCase() === "true" || restaurant?.details?.pureVegRestaurant === true || String(restaurant?.details?.pureVegRestaurant).toLowerCase() === "true"
+
     return restaurant.menuSections
       .map((section, index) => {
         if (isRecommendedSection(section)) return null
+        
+        if (isPureVegRest && section?.foodTypeScope?.toLowerCase() === "non-veg") return null
+
+        let validItems = Array.isArray(section?.items) ? section.items : []
+        let validSubsections = Array.isArray(section?.subsections) ? section.subsections : []
+
+        if (isPureVegRest) {
+          validItems = validItems.filter(item => item?.foodType?.toLowerCase() !== "non-veg")
+          validSubsections = validSubsections.map(sub => ({
+            ...sub,
+            items: Array.isArray(sub?.items) ? sub.items.filter(item => item?.foodType?.toLowerCase() !== "non-veg") : []
+          }))
+        }
 
         const sectionTitle = getSectionDisplayName(section)
-        const itemCount = Array.isArray(section?.items) ? section.items.length : 0
-        const subsectionCount = Array.isArray(section?.subsections)
-          ? section.subsections.reduce((sum, sub) => sum + (Array.isArray(sub?.items) ? sub.items.length : 0), 0)
-          : 0
+        const itemCount = validItems.length
+        const subsectionCount = validSubsections.reduce((sum, sub) => sum + (Array.isArray(sub?.items) ? sub.items.length : 0), 0)
         const totalCount = itemCount + subsectionCount
 
         if (totalCount <= 0) return null
@@ -1661,6 +1679,19 @@ function RestaurantDetailsContent() {
     const isRecSection = section ? isRecommendedSection(section) : false
 
     return items.filter((item) => {
+      // Hide non-veg items if the restaurant is pure veg
+      const hasProposedVegStatus = restaurant?.pendingProfileChanges?.proposed?.hasOwnProperty('pureVegRestaurant');
+      const proposedVegStatus = restaurant?.pendingProfileChanges?.proposed?.pureVegRestaurant;
+      const isPureVegRest = hasProposedVegStatus 
+        ? (proposedVegStatus === true || String(proposedVegStatus).toLowerCase() === "true")
+        : (restaurant?.pureVegRestaurant === true || String(restaurant?.pureVegRestaurant).toLowerCase() === "true" || restaurant?.details?.pureVegRestaurant === true || String(restaurant?.details?.pureVegRestaurant).toLowerCase() === "true");
+      
+      const ft = item?.foodType?.toLowerCase()?.trim() || ""
+      const isNonVegItem = item?.isVeg === false || ft === "non-veg" || ft === "nonveg" || ft === "non veg"
+      if (isPureVegRest && isNonVegItem) {
+        return false
+      }
+
       // Under 250 filter (when coming from Under 250 page)
       if (showOnlyUnder250) {
         const finalPrice = getFinalPrice(item);

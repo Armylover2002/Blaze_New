@@ -8,6 +8,8 @@ import { LocalizationProvider } from "@mui/x-date-pickers/LocalizationProvider"
 import { AdapterDateFns } from "@mui/x-date-pickers/AdapterDateFns"
 import { useCompanyName } from "@food/hooks/useCompanyName"
 import { restaurantAPI } from "@food/api"
+import { toast } from "sonner"
+
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -88,29 +90,23 @@ export default function OutletTimings() {
     }
   }, [])
 
-  // Save to backend whenever days change (debounced).
-  useEffect(() => {
-    if (loading) return
-    if (!isInternalUpdate.current) return // Skip saving if the update wasn't initiated by the user
-
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
-    saveTimerRef.current = setTimeout(async () => {
-      try {
-        const resp = await restaurantAPI.saveOutletTimings(days)
-        const payload = resp?.data?.data || resp?.data
-        // When a day is turned on/off on an approved restaurant, the change is staged
-        // for admin re-approval instead of going live immediately.
-        setPendingApproval(Boolean(payload?.pendingApproval))
-        window.dispatchEvent(new Event("outletTimingsUpdated"))
-        isInternalUpdate.current = false // Reset after successful save
-      } catch (error) {
-        debugError("Error saving outlet timings to backend:", error)
-      }
-    }, 500)
-    return () => {
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+  // Manual save handler
+  const handleSave = async () => {
+    try {
+      setLoading(true)
+      const resp = await restaurantAPI.saveOutletTimings(days)
+      const payload = resp?.data?.data || resp?.data
+      setPendingApproval(Boolean(payload?.pendingApproval))
+      window.dispatchEvent(new Event("outletTimingsUpdated"))
+      isInternalUpdate.current = false // Reset after successful save
+      toast.success("Outlet timings saved successfully")
+    } catch (error) {
+      debugError("Error saving outlet timings to backend:", error)
+      toast.error("Failed to save outlet timings")
+    } finally {
+      setLoading(false)
     }
-  }, [days, loading])
+  }
 
   const toggleDay = (day) => {
     setExpandedDay(expandedDay === day ? null : day)
@@ -248,10 +244,16 @@ export default function OutletTimings() {
             >
               <ArrowLeft className="w-6 h-6 text-gray-900" />
             </button>
-            <div>
+            <div className="flex-1">
               <h1 className="text-lg font-bold text-gray-900 lg:text-2xl">Outlet timings</h1>
               <p className="hidden text-sm text-gray-500 lg:block">Set your weekly opening and closing hours for delivery</p>
             </div>
+            <button
+              onClick={handleSave}
+              className="px-4 py-2 bg-black text-white rounded-lg text-sm font-semibold hover:bg-gray-800 transition-colors"
+            >
+              Save
+            </button>
           </div>
         </div>
 
@@ -259,9 +261,17 @@ export default function OutletTimings() {
         <div className="px-4 py-6 lg:max-w-4xl lg:mx-auto lg:px-8 lg:py-8">
           {/* Delivery Section Header */}
           <div className="mb-6 lg:mb-8">
-            <div className="text-center mb-2 lg:text-left">
-              <h2 className="text-base font-semibold text-blue-600 lg:text-lg">{companyName} delivery</h2>
-              <p className="hidden lg:block text-sm text-gray-500 mt-1">Changes are saved automatically</p>
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-left">
+                <h2 className="text-base font-semibold text-blue-600 lg:text-lg">{companyName} delivery</h2>
+                <p className="hidden lg:block text-sm text-gray-500 mt-1">Don't forget to save your changes</p>
+              </div>
+              <button
+                onClick={handleSave}
+                className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+              >
+                Save
+              </button>
             </div>
             <div className="h-0.5 bg-blue-600 lg:max-w-xs"></div>
           </div>

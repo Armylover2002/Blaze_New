@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react"
 import { useNavigate } from "react-router-dom"
-import { Search, Menu, ChevronRight, MapPin, X, Bell } from "lucide-react"
+import { Search, Menu, ChevronRight, MapPin, X, Bell, RefreshCw } from "lucide-react"
 import { restaurantAPI } from "@food/api"
 import {
   loadBusinessSettings,
@@ -396,6 +396,15 @@ export default function RestaurantNavbar({
             <Search className="w-5 h-5 text-gray-700" />
           </button>
         )}
+
+        {/* Refresh Icon */}
+        <button
+          onClick={() => window.location.reload()}
+          className="p-2 ml-1 hover:bg-gray-100 rounded-full transition-colors"
+          aria-label="Refresh"
+        >
+          <RefreshCw className="w-5 h-5 text-gray-700" />
+        </button>
 
         {/* Notifications Icon */}
         {showNotifications && (

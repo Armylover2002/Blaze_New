@@ -34,22 +34,24 @@ export default function RestaurantDetailsMenuToolbar({
             <ChevronDown className="h-3 w-3 ml-1" />
           </Button>
 
-          <Button
-            variant="outline"
-            size="sm"
-            className={`shrink-0 rounded-full ${
-              filters.vegNonVeg === "veg"
-                ? "border-green-600 bg-green-50 text-green-700 font-bold"
-                : "border-gray-300 bg-white dark:bg-[#1a1a1a]"
-            }`}
-            onClick={onToggleVegFilter}
-          >
-            <span className="h-2.5 w-2.5 rounded-full bg-green-600 mr-1.5" />
-            Veg
-            {filters.vegNonVeg === "veg" && <X className="h-3 w-3 ml-1" />}
-          </Button>
+          {true && (
+            <Button
+              variant="outline"
+              size="sm"
+              className={`shrink-0 rounded-full ${
+                filters.vegNonVeg === "veg"
+                  ? "border-green-600 bg-green-50 text-green-700 font-bold"
+                  : "border-gray-300 bg-white dark:bg-[#1a1a1a]"
+              }`}
+              onClick={onToggleVegFilter}
+            >
+              <span className="h-2.5 w-2.5 rounded-full bg-green-600 mr-1.5" />
+              Veg
+              {filters.vegNonVeg === "veg" && <X className="h-3 w-3 ml-1" />}
+            </Button>
+          )}
 
-          {(vegMode !== "pure" && vegMode !== "all" && vegMode !== true && !isPureVeg && hasNonVegItems !== false) && (
+          {(vegMode !== "pure" && vegMode !== "all" && vegMode !== true && !isPureVeg && hasNonVegItems) && (
             <Button
               variant="outline"
               size="sm"
