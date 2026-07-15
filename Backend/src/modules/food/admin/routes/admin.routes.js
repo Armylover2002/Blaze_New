@@ -180,6 +180,10 @@ router.get('/subscription/analytics', checkPermission('food::subscription_manage
 router.get('/delivery-cash-limit', checkPermission('food::deliveryman_management::cash_limit', 'view'), adminController.getDeliveryCashLimit);
 router.patch('/delivery-cash-limit', checkPermission('food::deliveryman_management::cash_limit', 'edit'), adminController.updateDeliveryCashLimit);
 
+// ----- Restaurant Withdrawal Limits (separate from delivery) -----
+router.get('/restaurant-withdrawal-limit', checkPermission('food::transaction_management::restaurant_withdraws', 'view'), adminController.getRestaurantWithdrawalLimit);
+router.patch('/restaurant-withdrawal-limit', checkPermission('food::transaction_management::restaurant_withdraws', 'edit'), adminController.updateRestaurantWithdrawalLimit);
+
 // ----- Deposit Payment Settings -----
 router.get('/deposit-payment-settings', checkPermission('food::deliveryman_management::cash_limit', 'view'), adminController.getDepositPaymentSettings);
 router.patch('/deposit-payment-settings', checkPermission('food::deliveryman_management::cash_limit', 'edit'), upload.single('qrCodeImage'), adminController.updateDepositPaymentSettings);

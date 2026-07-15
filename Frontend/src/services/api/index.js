@@ -1013,6 +1013,16 @@ export const adminAPI = {
       contextModule: "admin",
     }),
 
+  /** Restaurant Withdrawal Limits (admin) — separate from delivery */
+  getRestaurantWithdrawalLimit: () =>
+    apiClient.get("/food/admin/restaurant-withdrawal-limit", {
+      contextModule: "admin",
+    }),
+  updateRestaurantWithdrawalLimit: (body) =>
+    apiClient.patch("/food/admin/restaurant-withdrawal-limit", body ?? {}, {
+      contextModule: "admin",
+    }),
+
   /** Delivery Emergency Help (admin) */
   getEmergencyHelp: () =>
     apiClient.get("/food/admin/delivery-emergency-help", {

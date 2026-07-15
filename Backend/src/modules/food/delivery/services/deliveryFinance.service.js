@@ -247,6 +247,9 @@ export const getDeliveryPartnerWalletEnhanced = async (deliveryPartnerId) => {
   const totalCashLimit = Number(cashLimitSettings.deliveryCashLimit) || 0;
   const deliveryWithdrawalLimit =
     Number(cashLimitSettings.deliveryWithdrawalLimit) || 100;
+  const rawMax = cashLimitSettings.deliveryMaxWithdrawalLimit;
+  const deliveryMaxWithdrawalLimit =
+    rawMax != null && Number(rawMax) > 0 ? Number(rawMax) : null;
 
   const effectiveWalletBalance =
     Number(wallet.balance || 0) + missingBonusBalance;
@@ -287,6 +290,7 @@ export const getDeliveryPartnerWalletEnhanced = async (deliveryPartnerId) => {
     totalCashLimit,
     availableCashLimit: Math.max(0, totalCashLimit - cashInHand),
     deliveryWithdrawalLimit,
+    deliveryMaxWithdrawalLimit,
     totalDeliveries: (Number(totalDeliveries) || 0) + Number(porterDeliveries || 0),
     subscriptionBalance: Number(wallet.subscriptionBalance || 0),
     transactions,
@@ -323,6 +327,14 @@ export const requestDeliveryWithdrawal = async (deliveryPartnerId, payload) => {
       if (amount < wallet.deliveryWithdrawalLimit) {
         throw new ValidationError(
           `Minimum withdrawal amount is ₹${wallet.deliveryWithdrawalLimit}`,
+        );
+      }
+      if (
+        wallet.deliveryMaxWithdrawalLimit != null &&
+        amount > wallet.deliveryMaxWithdrawalLimit
+      ) {
+        throw new ValidationError(
+          `Maximum withdrawal amount is ₹${wallet.deliveryMaxWithdrawalLimit}`,
         );
       }
       if (amount > wallet.pocketBalance) {

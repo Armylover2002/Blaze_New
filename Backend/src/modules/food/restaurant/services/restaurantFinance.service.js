@@ -6,6 +6,7 @@ import { FoodRestaurantWallet } from '../models/restaurantWallet.model.js';
 import { FoodRestaurantWithdrawal } from '../models/foodRestaurantWithdrawal.model.js';
 import { FoodDailyPass } from '../../subscriptions/models/foodDailyPass.model.js';
 import { FoodWalletLedger } from '../../subscriptions/models/foodWalletLedger.model.js';
+import { getRestaurantWithdrawalLimitSettings } from '../../admin/services/admin.service.js';
 import dayjs from 'dayjs';
 import timezone from 'dayjs/plugin/timezone.js';
 import utc from 'dayjs/plugin/utc.js';
@@ -234,6 +235,14 @@ export async function getRestaurantFinance(restaurantId, query = {}) {
         };
     }
 
+    const limitSettings = await getRestaurantWithdrawalLimitSettings();
+    const restaurantMinWithdrawalLimit = Number(limitSettings.restaurantMinWithdrawalLimit) || 1;
+    const restaurantMaxWithdrawalLimit =
+        limitSettings.restaurantMaxWithdrawalLimit != null &&
+        Number(limitSettings.restaurantMaxWithdrawalLimit) > 0
+            ? Number(limitSettings.restaurantMaxWithdrawalLimit)
+            : null;
+
     return {
         restaurant: {
             name: restaurant?.restaurantName || '',
@@ -245,6 +254,10 @@ export async function getRestaurantFinance(restaurantId, query = {}) {
             pendingPayout: globalEstimatedPayout,
             referralEarnings: referralBalance,
             totalEarnings: Number(wallet?.totalEarnings || 0)
+        },
+        withdrawalLimits: {
+            min: restaurantMinWithdrawalLimit,
+            max: restaurantMaxWithdrawalLimit
         },
         currentCycle,
         invoiceSummary,

@@ -31,6 +31,7 @@ import { FoodUser } from '../../../../core/users/user.model.js';
 import { FoodAdmin } from '../../../../core/admin/admin.model.js';
 import { FoodRefreshToken } from '../../../../core/refreshTokens/refreshToken.model.js';
 import { FoodDeliveryCashLimit } from '../models/deliveryCashLimit.model.js';
+import { FoodRestaurantWithdrawalLimit } from '../models/restaurantWithdrawalLimit.model.js';
 import { FoodDeliveryEmergencyHelp } from '../models/deliveryEmergencyHelp.model.js';
 import { FoodReferralSettings } from '../models/referralSettings.model.js';
 import { FoodReferralLog } from '../models/referralLog.model.js';
@@ -2629,12 +2630,26 @@ export async function getContactMessages(query = {}) {
 }
 
 // ----- Delivery Cash Limit (admin) -----
+function normalizeMaxWithdrawalLimit(value) {
+    if (value === undefined || value === null || value === '') return null;
+    const n = Number(value);
+    if (!Number.isFinite(n) || n <= 0) return null;
+    return n;
+}
+
 export async function getDeliveryCashLimitSettings() {
     const doc = await FoodDeliveryCashLimit.findOne({ isActive: true }).sort({ createdAt: -1 }).lean();
-    const settings = doc || { deliveryCashLimit: 0, deliveryWithdrawalLimit: 100, isActive: true };
+    const settings = doc || {
+        deliveryCashLimit: 0,
+        deliveryWithdrawalLimit: 100,
+        deliveryMaxWithdrawalLimit: null,
+        isActive: true
+    };
     return {
         deliveryCashLimit: Number(settings.deliveryCashLimit) || 0,
-        deliveryWithdrawalLimit: Number(settings.deliveryWithdrawalLimit) || 100
+        deliveryWithdrawalLimit: Number(settings.deliveryWithdrawalLimit) || 100,
+        // Legacy docs without this field → null (unlimited)
+        deliveryMaxWithdrawalLimit: normalizeMaxWithdrawalLimit(settings.deliveryMaxWithdrawalLimit)
     };
 }
 
@@ -2642,26 +2657,89 @@ export async function upsertDeliveryCashLimitSettings(body = {}) {
     const existing = await FoodDeliveryCashLimit.findOne({ isActive: true }).sort({ createdAt: -1 });
     const nextCashLimit = body.deliveryCashLimit;
     const nextWithdrawalLimit = body.deliveryWithdrawalLimit;
+    const nextMaxWithdrawalLimit = body.deliveryMaxWithdrawalLimit;
 
     if (existing) {
         if (nextCashLimit !== undefined) existing.deliveryCashLimit = Math.max(0, Number(nextCashLimit) || 0);
         if (nextWithdrawalLimit !== undefined) existing.deliveryWithdrawalLimit = Math.max(0, Number(nextWithdrawalLimit) || 0);
+        if (nextMaxWithdrawalLimit !== undefined) {
+            existing.deliveryMaxWithdrawalLimit = normalizeMaxWithdrawalLimit(nextMaxWithdrawalLimit);
+        }
+        const effectiveMin = Number(existing.deliveryWithdrawalLimit) || 0;
+        const effectiveMax = normalizeMaxWithdrawalLimit(existing.deliveryMaxWithdrawalLimit);
+        if (effectiveMax != null && effectiveMax < effectiveMin) {
+            throw new ValidationError(
+                'Maximum withdrawal limit must be greater than or equal to minimum withdrawal limit'
+            );
+        }
         await existing.save();
         return {
             deliveryCashLimit: existing.deliveryCashLimit,
-            deliveryWithdrawalLimit: existing.deliveryWithdrawalLimit
+            deliveryWithdrawalLimit: existing.deliveryWithdrawalLimit,
+            deliveryMaxWithdrawalLimit: normalizeMaxWithdrawalLimit(existing.deliveryMaxWithdrawalLimit)
         };
     }
 
     const created = await FoodDeliveryCashLimit.create({
         deliveryCashLimit: nextCashLimit !== undefined ? Math.max(0, Number(nextCashLimit) || 0) : 0,
         deliveryWithdrawalLimit: nextWithdrawalLimit !== undefined ? Math.max(0, Number(nextWithdrawalLimit) || 0) : 100,
+        deliveryMaxWithdrawalLimit:
+            nextMaxWithdrawalLimit !== undefined ? normalizeMaxWithdrawalLimit(nextMaxWithdrawalLimit) : null,
         isActive: true
     });
 
     return {
         deliveryCashLimit: created.deliveryCashLimit,
-        deliveryWithdrawalLimit: created.deliveryWithdrawalLimit
+        deliveryWithdrawalLimit: created.deliveryWithdrawalLimit,
+        deliveryMaxWithdrawalLimit: normalizeMaxWithdrawalLimit(created.deliveryMaxWithdrawalLimit)
+    };
+}
+
+// ----- Restaurant Withdrawal Limits (admin) — separate from delivery -----
+export async function getRestaurantWithdrawalLimitSettings() {
+    const doc = await FoodRestaurantWithdrawalLimit.findOne({ isActive: true }).sort({ createdAt: -1 }).lean();
+    const settings = doc || {
+        restaurantMinWithdrawalLimit: 1,
+        restaurantMaxWithdrawalLimit: null,
+        isActive: true
+    };
+    return {
+        restaurantMinWithdrawalLimit: Number(settings.restaurantMinWithdrawalLimit) || 1,
+        restaurantMaxWithdrawalLimit: normalizeMaxWithdrawalLimit(settings.restaurantMaxWithdrawalLimit)
+    };
+}
+
+export async function upsertRestaurantWithdrawalLimitSettings(body = {}) {
+    const existing = await FoodRestaurantWithdrawalLimit.findOne({ isActive: true }).sort({ createdAt: -1 });
+    const nextMin = body.restaurantMinWithdrawalLimit;
+    const nextMax = body.restaurantMaxWithdrawalLimit;
+
+    if (existing) {
+        if (nextMin !== undefined) existing.restaurantMinWithdrawalLimit = Math.max(0, Number(nextMin) || 0);
+        if (nextMax !== undefined) existing.restaurantMaxWithdrawalLimit = normalizeMaxWithdrawalLimit(nextMax);
+        const effectiveMin = Number(existing.restaurantMinWithdrawalLimit) || 0;
+        const effectiveMax = normalizeMaxWithdrawalLimit(existing.restaurantMaxWithdrawalLimit);
+        if (effectiveMax != null && effectiveMax < effectiveMin) {
+            throw new ValidationError(
+                'Maximum withdrawal limit must be greater than or equal to minimum withdrawal limit'
+            );
+        }
+        await existing.save();
+        return {
+            restaurantMinWithdrawalLimit: existing.restaurantMinWithdrawalLimit,
+            restaurantMaxWithdrawalLimit: normalizeMaxWithdrawalLimit(existing.restaurantMaxWithdrawalLimit)
+        };
+    }
+
+    const created = await FoodRestaurantWithdrawalLimit.create({
+        restaurantMinWithdrawalLimit: nextMin !== undefined ? Math.max(0, Number(nextMin) || 0) : 1,
+        restaurantMaxWithdrawalLimit: nextMax !== undefined ? normalizeMaxWithdrawalLimit(nextMax) : null,
+        isActive: true
+    });
+
+    return {
+        restaurantMinWithdrawalLimit: created.restaurantMinWithdrawalLimit,
+        restaurantMaxWithdrawalLimit: normalizeMaxWithdrawalLimit(created.restaurantMaxWithdrawalLimit)
     };
 }
 

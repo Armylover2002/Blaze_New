@@ -4,6 +4,7 @@ import { FoodRestaurantWithdrawal } from '../models/foodRestaurantWithdrawal.mod
 import { FoodRestaurantWallet } from '../models/restaurantWallet.model.js';
 import { FoodRestaurant } from '../models/restaurant.model.js';
 import { getRestaurantFinance } from '../services/restaurantFinance.service.js';
+import { getRestaurantWithdrawalLimitSettings } from '../../admin/services/admin.service.js';
 
 function resolveBankDetails(bodyBank, restaurant) {
     const fromBody = bodyBank && typeof bodyBank === 'object' ? bodyBank : {};
@@ -42,17 +43,37 @@ export const createWithdrawalRequestController = async (req, res, next) => {
         const { amount, bankDetails } = req.body;
 
         if (!restaurantId) return sendError(res, 401, 'Restaurant authentication required');
-        if (!amount || amount <= 0) return sendError(res, 400, 'Invalid withdrawal amount');
+        const numericAmount = Number(amount);
+        if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+            return sendError(res, 400, 'Invalid withdrawal amount');
+        }
 
         if (!mongoose.Types.ObjectId.isValid(restaurantId)) {
             return sendError(res, 400, 'Invalid restaurant ID');
         }
 
         const rid = new mongoose.Types.ObjectId(restaurantId);
-        const restaurant = await FoodRestaurant.findById(rid)
-            .select('restaurantName accountNumber ifscCode bankName accountHolderName')
-            .lean();
+        const [restaurant, limitSettings] = await Promise.all([
+            FoodRestaurant.findById(rid)
+                .select('restaurantName accountNumber ifscCode bankName accountHolderName')
+                .lean(),
+            getRestaurantWithdrawalLimitSettings()
+        ]);
         if (!restaurant) return sendError(res, 404, 'Restaurant not found');
+
+        const minLimit = Number(limitSettings.restaurantMinWithdrawalLimit) || 1;
+        const maxLimit =
+            limitSettings.restaurantMaxWithdrawalLimit != null &&
+            Number(limitSettings.restaurantMaxWithdrawalLimit) > 0
+                ? Number(limitSettings.restaurantMaxWithdrawalLimit)
+                : null;
+
+        if (numericAmount < minLimit) {
+            return sendError(res, 400, `Minimum withdrawal amount is ₹${minLimit}`);
+        }
+        if (maxLimit != null && numericAmount > maxLimit) {
+            return sendError(res, 400, `Maximum withdrawal amount is ₹${maxLimit}`);
+        }
 
         const resolvedBank = resolveBankDetails(bankDetails, restaurant);
         if (!hasUsableBankDetails(resolvedBank)) {
@@ -76,7 +97,7 @@ export const createWithdrawalRequestController = async (req, res, next) => {
             const finance = await getRestaurantFinance(restaurantId);
             const availableBalance = finance?.currentCycle?.estimatedPayout || 0;
 
-            if (amount > availableBalance) {
+            if (numericAmount > availableBalance) {
                 const err = new Error(
                     `Insufficient balance. Available: ₹${availableBalance}`
                 );
@@ -88,7 +109,7 @@ export const createWithdrawalRequestController = async (req, res, next) => {
                 [
                     {
                         restaurantId: rid,
-                        amount,
+                        amount: numericAmount,
                         bankDetails: resolvedBank,
                         status: 'pending',
                     },
@@ -102,7 +123,7 @@ export const createWithdrawalRequestController = async (req, res, next) => {
             [{ ownerType: 'ADMIN', ownerId: 'GLOBAL' }],
             {
                 title: 'New withdrawal request',
-                body: `${restaurant.restaurantName || 'Restaurant'} requested ₹${Number(amount).toFixed(2)}`,
+                body: `${restaurant.restaurantName || 'Restaurant'} requested ₹${Number(numericAmount).toFixed(2)}`,
                 data: {
                     type: 'withdraw_request',
                     withdrawalId: String(withdrawal._id),
@@ -113,7 +134,10 @@ export const createWithdrawalRequestController = async (req, res, next) => {
 
         return sendResponse(res, 201, 'Withdrawal request submitted successfully', withdrawal);
     } catch (error) {
-        if (error?.statusCode === 400 || /Insufficient balance/i.test(error?.message || '')) {
+        if (
+            error?.statusCode === 400 ||
+            /Insufficient balance|Minimum withdrawal|Maximum withdrawal/i.test(error?.message || '')
+        ) {
             return sendError(res, 400, error.message);
         }
         next(error);

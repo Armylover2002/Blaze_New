@@ -890,6 +890,9 @@ export const getDeliveryPartnerWallet = async (deliveryPartnerId) => {
     const cashLimitSettings = await getDeliveryCashLimitSettings();
     const totalCashLimit = Number(cashLimitSettings.deliveryCashLimit) || 0;
     const deliveryWithdrawalLimit = Number(cashLimitSettings.deliveryWithdrawalLimit) || 100;
+    const rawMax = cashLimitSettings.deliveryMaxWithdrawalLimit;
+    const deliveryMaxWithdrawalLimit =
+        rawMax != null && Number(rawMax) > 0 ? Number(rawMax) : null;
 
     const partnerId = new mongoose.Types.ObjectId(deliveryPartnerId);
 
@@ -1017,6 +1020,7 @@ export const getDeliveryPartnerWallet = async (deliveryPartnerId) => {
         totalCashLimit,
         availableCashLimit,
         deliveryWithdrawalLimit,
+        deliveryMaxWithdrawalLimit,
         transactions: [...paymentTransactions, ...returnPickupTxList, ...bonusTransactions].sort((a, b) => {
             const ad = a?.date ? new Date(a.date).getTime() : 0;
             const bd = b?.date ? new Date(b.date).getTime() : 0;
