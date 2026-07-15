@@ -4,6 +4,11 @@ import { RestaurantCoupon } from '../../admin/models/restaurantCoupon.model.js';
 import { FoodOffer } from '../../admin/models/offer.model.js';
 import { FoodRestaurant } from '../models/restaurant.model.js';
 import { normalizeDiscountType } from '../../shared/coupon.util.js';
+import {
+    COUPON_OWNER_TYPES,
+    claimCouponCodeReservation,
+    releaseCouponCodeReservation
+} from '../../shared/couponCodeRegistry.util.js';
 
 function startOfDay(date) {
     const d = new Date(date);
@@ -148,6 +153,20 @@ export async function createRestaurantCoupon(restaurantId, body) {
     });
 
     try {
+        await claimCouponCodeReservation({
+            ownerType: COUPON_OWNER_TYPES.RESTAURANT_COUPON,
+            ownerId: doc._id,
+            couponCode: doc.couponCode,
+        });
+    } catch (error) {
+        await RestaurantCoupon.findByIdAndDelete(doc._id);
+        if (error?.code === 11000) {
+            throw new ValidationError('A coupon with this code already exists');
+        }
+        throw error;
+    }
+
+    try {
         const { invalidateCache } = await import('../../../../middleware/cache.js');
         await invalidateCache('offers*');
     } catch (err) {
@@ -171,6 +190,24 @@ export async function updateRestaurantCoupon(restaurantId, couponId, body) {
     if (!existingCoupon) {
         throw new ValidationError('Coupon not found');
     }
+    const restoreCouponState = {
+        couponCode: existingCoupon.couponCode,
+        discountType: existingCoupon.discountType,
+        discountValue: existingCoupon.discountValue,
+        customerScope: existingCoupon.customerScope,
+        minOrderValue: existingCoupon.minOrderValue ?? existingCoupon.minOrderAmount ?? 0,
+        minOrderAmount: existingCoupon.minOrderValue ?? existingCoupon.minOrderAmount ?? 0,
+        maxDiscount: existingCoupon.maxDiscount ?? null,
+        startDate: existingCoupon.startDate ?? null,
+        endDate: existingCoupon.endDate ?? null,
+        expiryDate: existingCoupon.expiryDate ?? existingCoupon.endDate ?? null,
+        usageLimit: existingCoupon.usageLimit ?? null,
+        perUserLimit: existingCoupon.perUserLimit ?? null,
+        isFirstOrderOnly: Boolean(existingCoupon.isFirstOrderOnly),
+        description: existingCoupon.description || '',
+        showInCart: existingCoupon.showInCart !== false,
+        status: existingCoupon.status,
+    };
 
     const payload = normalizeRestaurantCouponPayload(body, existingCoupon);
     if (payload.couponCode !== existingCoupon.couponCode) {
@@ -187,6 +224,24 @@ export async function updateRestaurantCoupon(restaurantId, couponId, body) {
         },
         { new: true }
     ).lean();
+
+    try {
+        await claimCouponCodeReservation({
+            ownerType: COUPON_OWNER_TYPES.RESTAURANT_COUPON,
+            ownerId: cid,
+            couponCode: payload.couponCode,
+        });
+    } catch (error) {
+        await RestaurantCoupon.findOneAndUpdate(
+            { _id: cid, restaurantId: rid },
+            { $set: restoreCouponState },
+            { new: true }
+        );
+        if (error?.code === 11000) {
+            throw new ValidationError('A coupon with this code already exists');
+        }
+        throw error;
+    }
 
     try {
         const { invalidateCache } = await import('../../../../middleware/cache.js');
@@ -216,6 +271,10 @@ export async function deleteRestaurantCoupon(restaurantId, couponId) {
     try {
         const { RestaurantCouponUsage } = await import('../../admin/models/restaurantCouponUsage.model.js');
         await RestaurantCouponUsage.deleteMany({ couponId: cid });
+        await releaseCouponCodeReservation({
+            ownerType: COUPON_OWNER_TYPES.RESTAURANT_COUPON,
+            ownerId: cid,
+        });
     } catch {
         // non-fatal
     }

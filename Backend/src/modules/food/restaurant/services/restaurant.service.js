@@ -20,6 +20,7 @@ import {
     splitReviewableUpdate,
     mergePendingProfileChanges,
 } from '../../shared/pendingProfileChanges.js';
+import { invalidateCache } from '../../../../middleware/cache.js';
 import {
     buildActivePublicOfferFilter,
     buildActiveRestaurantCouponFilter,
@@ -1484,7 +1485,7 @@ export const registerRestaurant = async (payload, files, authUserId) => {
                     : { referralCode: refRaw };
 
                 const [referrer, settingsDoc] = await Promise.all([
-                    FoodRestaurant.findOne(referrerQuery).select('_id referralCount').lean(),
+                    FoodRestaurant.findOne(referrerQuery).select('_id referralCount status').lean(),
                     FoodReferralSettings.findOne({ isActive: true }).sort({ createdAt: -1 }).lean()
                 ]);
 
@@ -1493,10 +1494,27 @@ export const registerRestaurant = async (payload, files, authUserId) => {
                     const refereeReward = Math.max(0, Number(settingsDoc.restaurant?.refereeReward) || 0);
                     const limit = Math.max(0, Number(settingsDoc.restaurant?.limit) || 0);
 
-                    if (
+                    // Pending invites consume slots so referrers cannot oversell the limit
+                    // before approvals; credited count is the hard gate at payout.
+                    const usedSlots = await FoodReferralLog.countDocuments({
+                        referrerId: referrer._id,
+                        role: 'RESTAURANT',
+                        status: { $in: ['pending', 'credited'] }
+                    });
+
+                    if (referrer.status !== 'approved') {
+                        await FoodReferralLog.create({
+                            referrerId: referrer._id,
+                            refereeId: restaurant._id,
+                            role: 'RESTAURANT',
+                            rewardAmount: referrerReward,
+                            status: 'rejected',
+                            reason: 'referrer_not_approved'
+                        });
+                    } else if (
                         (referrerReward > 0 || refereeReward > 0) &&
                         limit > 0 &&
-                        Number(referrer.referralCount || 0) < limit
+                        usedSlots < limit
                     ) {
                         // Update new restaurant with referrer info
                         await FoodRestaurant.updateOne({ _id: restaurant._id }, { $set: { referredBy: referrer._id } });
@@ -2305,6 +2323,15 @@ export const updateRestaurantProfile = async (restaurantId, body = {}) => {
             profile.pendingReviewSubmitted = true;
             profile.message = 'Changes submitted for admin approval. Your outlet stays live with previous details until approved.';
         }
+        
+        // Invalidate cache so that pending changes (e.g. pureVegRestaurant) are visible immediately
+        try {
+            await invalidateCache(`restaurant_detail:${String(restaurantId)}`);
+            await invalidateCache(`restaurant_detail:${doc.restaurantNameNormalized || ''}`);
+        } catch (cacheErr) {
+            console.error('Failed to invalidate cache after profile update', cacheErr);
+        }
+
         return profile;
     } catch (err) {
         if (err && err.code === 11000) {

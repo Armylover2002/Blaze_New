@@ -31,6 +31,7 @@ import {
   Gift,
   Crown,
   Wallet,
+  Megaphone,
 } from "lucide-react"
 import { Card, CardContent } from "@food/components/ui/card"
 import { DateRangeCalendar } from "@food/components/ui/date-range-calendar"
@@ -720,6 +721,7 @@ export default function ExploreMore() {
     { id: 4, label: "Menu categories", icon: Settings, route: "/restaurant/menu-categories" },
     { id: 6, label: "Item slot timings", icon: Clock, route: "/restaurant/item-slot-timings" },
     { id: 5, label: "Create Coupons", icon: Gift, route: "/restaurant/create-coupons" },
+    { id: 7, label: "Advertisements", icon: Megaphone, route: "/restaurant/advertisements" },
   ]
 
   const settingsItems = [

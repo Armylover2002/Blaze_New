@@ -249,6 +249,37 @@ export default function MixedSharedCart({ initialAddress = null, addressMode = "
 
     try {
       setIsPlacingOrder(true);
+
+      let resolvedPricing = null;
+      try {
+        const pricingResponse = await orderAPI.calculateOrder({
+          orderType: "mixed",
+          items: mappedItems,
+          address: deliveryAddress,
+          deliveryFleet: selectedDeliveryMode,
+        });
+        resolvedPricing = pricingResponse?.data?.data?.pricing || null;
+        if (resolvedPricing) setPricing(resolvedPricing);
+      } catch (pricingError) {
+        toast.error(
+          pricingError?.response?.data?.message ||
+            "Could not refresh pricing. Please try again.",
+        );
+        return;
+      }
+
+      const selectedOption =
+        resolvedPricing?.deliveryOptions?.find(
+          (option) => option.code === selectedDeliveryMode,
+        ) || null;
+      const serverTotal = Number(
+        selectedOption?.total ?? resolvedPricing?.total,
+      );
+      if (!resolvedPricing || !Number.isFinite(serverTotal)) {
+        toast.error("Pricing unavailable. Please try again.");
+        return;
+      }
+
       const orderPayload = {
         orderType: "mixed",
         items: mappedItems,
@@ -256,14 +287,11 @@ export default function MixedSharedCart({ initialAddress = null, addressMode = "
         restaurantId: foodItems[0]?.restaurantId,
         restaurantName: foodItems[0]?.restaurant || undefined,
         pricing: {
-          subtotal,
-          deliveryFee,
-          platformFee,
-          tax,
-          discount,
-          packagingFee: pricing?.packagingFee || 0,
-          total,
-          currency: pricing?.currency || "INR",
+          ...resolvedPricing,
+          deliveryFee: selectedOption?.deliveryFee ?? resolvedPricing.deliveryFee,
+          total: serverTotal,
+          packagingFee: resolvedPricing?.packagingFee || 0,
+          currency: resolvedPricing?.currency || "INR",
         },
         paymentMethod: selectedPaymentMethod,
         deliveryFleet: selectedDeliveryMode,

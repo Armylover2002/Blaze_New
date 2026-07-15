@@ -47,59 +47,147 @@ import {
 import { getPublicPageController } from '../../admin/controllers/pageContent.controller.js';
 import { getPublicReferralSettingsController } from '../controllers/publicReferralSettings.controller.js';
 import { cacheResponse } from '../../../../middleware/cache.js';
+import { authMiddleware, checkPermission } from '../../../../core/auth/auth.middleware.js';
+import { requireRoles } from '../../../../core/roles/role.middleware.js';
+import { invalidateLandingCacheOnSuccess } from '../landingCache.js';
 
 const router = express.Router();
+
+const LANDING_PERM = 'food::banner_settings::landing_page';
+const adminLanding = (action) => [
+    authMiddleware,
+    requireRoles('ADMIN', 'EMPLOYEE'),
+    checkPermission(LANDING_PERM, action)
+];
 
 // Public CMS pages (About + legal). No auth required.
 router.get('/pages/:key', getPublicPageController);
 // Public referral settings (no auth required).
 router.get('/referral-settings', getPublicReferralSettingsController);
 
-// Admin hero banner management (DEV: auth temporarily disabled for faster integration)
-router.get('/hero-banners', listHeroBannersController);
+// Admin hero banner management
+router.get('/hero-banners', ...adminLanding('view'), listHeroBannersController);
 router.post(
     '/hero-banners/multiple',
+    ...adminLanding('create'),
     upload.array('files'),
+    invalidateLandingCacheOnSuccess('landing_hero'),
     uploadHeroBannersController
 );
-router.delete('/hero-banners/:id', deleteHeroBannerController);
-router.patch('/hero-banners/:id/order', updateHeroBannerOrderController);
-router.patch('/hero-banners/:id/status', toggleHeroBannerStatusController);
-router.patch('/hero-banners/:id', updateHeroBannerController);
+router.delete(
+    '/hero-banners/:id',
+    ...adminLanding('delete'),
+    invalidateLandingCacheOnSuccess('landing_hero'),
+    deleteHeroBannerController
+);
+router.patch(
+    '/hero-banners/:id/order',
+    ...adminLanding('edit'),
+    invalidateLandingCacheOnSuccess('landing_hero'),
+    updateHeroBannerOrderController
+);
+router.patch(
+    '/hero-banners/:id/status',
+    ...adminLanding('edit'),
+    invalidateLandingCacheOnSuccess('landing_hero'),
+    toggleHeroBannerStatusController
+);
+router.patch(
+    '/hero-banners/:id',
+    ...adminLanding('edit'),
+    invalidateLandingCacheOnSuccess('landing_hero'),
+    updateHeroBannerController
+);
 
 // Admin under 250 banners
-router.get('/hero-banners/under-250', listUnder250BannersController);
+router.get('/hero-banners/under-250', ...adminLanding('view'), listUnder250BannersController);
 router.post(
     '/hero-banners/under-250/multiple',
+    ...adminLanding('create'),
     upload.array('files'),
+    invalidateLandingCacheOnSuccess('landing_under250'),
     uploadUnder250BannersController
 );
-router.delete('/hero-banners/under-250/:id', deleteUnder250BannerController);
-router.patch('/hero-banners/under-250/:id/order', updateUnder250BannerOrderController);
-router.patch('/hero-banners/under-250/:id/status', toggleUnder250BannerStatusController);
+router.delete(
+    '/hero-banners/under-250/:id',
+    ...adminLanding('delete'),
+    invalidateLandingCacheOnSuccess('landing_under250'),
+    deleteUnder250BannerController
+);
+router.patch(
+    '/hero-banners/under-250/:id/order',
+    ...adminLanding('edit'),
+    invalidateLandingCacheOnSuccess('landing_under250'),
+    updateUnder250BannerOrderController
+);
+router.patch(
+    '/hero-banners/under-250/:id/status',
+    ...adminLanding('edit'),
+    invalidateLandingCacheOnSuccess('landing_under250'),
+    toggleUnder250BannerStatusController
+);
 
 // Admin Explore More (icons)
-router.get('/hero-banners/landing/explore-more', listExploreMoreController);
+router.get('/hero-banners/landing/explore-more', ...adminLanding('view'), listExploreMoreController);
 router.post(
     '/hero-banners/landing/explore-more',
+    ...adminLanding('create'),
     upload.single('image'),
+    invalidateLandingCacheOnSuccess('landing_explore'),
     createExploreMoreController
 );
-router.delete('/hero-banners/landing/explore-more/:id', deleteExploreMoreController);
-router.patch('/hero-banners/landing/explore-more/:id/status', toggleExploreMoreStatusController);
-router.patch('/hero-banners/landing/explore-more/:id/order', updateExploreMoreOrderController);
+router.delete(
+    '/hero-banners/landing/explore-more/:id',
+    ...adminLanding('delete'),
+    invalidateLandingCacheOnSuccess('landing_explore'),
+    deleteExploreMoreController
+);
+router.patch(
+    '/hero-banners/landing/explore-more/:id/status',
+    ...adminLanding('edit'),
+    invalidateLandingCacheOnSuccess('landing_explore'),
+    toggleExploreMoreStatusController
+);
+router.patch(
+    '/hero-banners/landing/explore-more/:id/order',
+    ...adminLanding('edit'),
+    invalidateLandingCacheOnSuccess('landing_explore'),
+    updateExploreMoreOrderController
+);
 router.patch(
     '/hero-banners/landing/explore-more/:id',
+    ...adminLanding('edit'),
     upload.single('image'),
+    invalidateLandingCacheOnSuccess('landing_explore'),
     updateExploreMoreController
 );
 
 // Admin Gourmet (hero-banners)
-router.get('/hero-banners/gourmet', listGourmetAdmin);
-router.post('/hero-banners/gourmet', createGourmetAdmin);
-router.delete('/hero-banners/gourmet/:id', deleteGourmetAdmin);
-router.patch('/hero-banners/gourmet/:id/order', updateGourmetOrderAdmin);
-router.patch('/hero-banners/gourmet/:id/status', toggleGourmetStatusAdmin);
+router.get('/hero-banners/gourmet', ...adminLanding('view'), listGourmetAdmin);
+router.post(
+    '/hero-banners/gourmet',
+    ...adminLanding('create'),
+    invalidateLandingCacheOnSuccess('landing_gourmet'),
+    createGourmetAdmin
+);
+router.delete(
+    '/hero-banners/gourmet/:id',
+    ...adminLanding('delete'),
+    invalidateLandingCacheOnSuccess('landing_gourmet'),
+    deleteGourmetAdmin
+);
+router.patch(
+    '/hero-banners/gourmet/:id/order',
+    ...adminLanding('edit'),
+    invalidateLandingCacheOnSuccess('landing_gourmet'),
+    updateGourmetOrderAdmin
+);
+router.patch(
+    '/hero-banners/gourmet/:id/status',
+    ...adminLanding('edit'),
+    invalidateLandingCacheOnSuccess('landing_gourmet'),
+    toggleGourmetStatusAdmin
+);
 
 // Public landing endpoints (Food user app)
 router.get('/hero-banners/public', cacheResponse(300, 'landing_hero'), getPublicHeroBannersController);
@@ -112,9 +200,14 @@ router.get('/zones/nearby', listZonesNearbyPublicController);
 router.get('/zones/public', cacheResponse(600, 'landing_zones'), listZonesPublicController);
 router.get('/public/env', getPublicEnvController);
 router.get('/fee-settings/public', cacheResponse(60, 'fee_settings'), getPublicFeeSettingsController);
+
 // Admin landing settings (old paths used by admin UI)
-router.get('/hero-banners/landing/settings', getAdminLandingSettingsController);
-router.patch('/hero-banners/landing/settings', updateAdminLandingSettingsController);
+router.get('/hero-banners/landing/settings', ...adminLanding('view'), getAdminLandingSettingsController);
+router.patch(
+    '/hero-banners/landing/settings',
+    ...adminLanding('edit'),
+    invalidateLandingCacheOnSuccess('landing_settings'),
+    updateAdminLandingSettingsController
+);
 
 export default router;
-

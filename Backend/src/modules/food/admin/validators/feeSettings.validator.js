@@ -62,6 +62,7 @@ const feeSettingsUpsertSchema = z.object({
     sponsorRules: z.array(sponsorRuleSchema).optional(),
     deliveryDistanceSlabs: z.array(deliveryDistanceSlabSchema).optional(),
     platformFee: z.number().min(0).nullable().optional(),
+    packagingFee: z.number().min(0).nullable().optional(),
     gstRate: z.number().min(0).max(100).nullable().optional(),
     mixedOrderDistanceLimit: z.number().min(0).nullable().optional(),
     mixedOrderAngleLimit: z.number().min(0).nullable().optional(),
@@ -128,6 +129,8 @@ export const validateFeeSettingsUpsertDto = (body) => {
             : undefined,
         platformFee:
             body?.platformFee === null ? null : body?.platformFee !== undefined ? Number(body.platformFee) : undefined,
+        packagingFee:
+            body?.packagingFee === null ? null : body?.packagingFee !== undefined ? Number(body.packagingFee) : undefined,
         gstRate:
             body?.gstRate === null ? null : body?.gstRate !== undefined ? Number(body.gstRate) : undefined,
         mixedOrderDistanceLimit:

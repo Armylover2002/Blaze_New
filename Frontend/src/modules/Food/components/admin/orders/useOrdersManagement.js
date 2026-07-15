@@ -351,10 +351,18 @@ export function useOrdersManagement(orders, statusKey, title) {
         order.discountAmount ??
         order.pricing?.discount
       )
-      const computedTotal = subtotal + deliveryFee + taxAmount - discountAmount
+      const platformFee = toNumber(
+        order.platformFee ??
+        order.pricing?.platformFee
+      )
+      const packagingFee = toNumber(
+        order.packagingFee ??
+        order.pricing?.packagingFee
+      )
+      const computedTotal = subtotal + deliveryFee + platformFee + packagingFee + taxAmount - discountAmount
       const totalAmount = toNumber(
-        order.totalAmount ??
         order.pricing?.total ??
+        order.totalAmount ??
         computedTotal
       )
       const paymentType = order.paymentType || order.payment?.method || order.paymentMethod || "N/A"
@@ -552,16 +560,21 @@ export function useOrdersManagement(orders, statusKey, title) {
       const summaryStartY = (doc.lastAutoTable?.finalY || 130) + 10
       doc.setDrawColor(226, 232, 240)
       doc.setFillColor(248, 250, 252)
-      doc.roundedRect(pageWidth - 92, summaryStartY - 5, 78, 35, 2, 2, "FD")
-      autoTable(doc, {
-        startY: summaryStartY,
-        body: [
+      const summaryRows = [
           ["Subtotal", formatMoney(subtotal)],
           ["Delivery Fee", formatMoney(deliveryFee)],
+      ]
+      if (platformFee > 0) summaryRows.push(["Platform Fee", formatMoney(platformFee)])
+      if (packagingFee > 0) summaryRows.push(["Packaging", formatMoney(packagingFee)])
+      summaryRows.push(
           ["Tax", formatMoney(taxAmount)],
           ["Discount", `- ${formatMoney(discountAmount)}`],
           ["Grand Total", formatMoney(totalAmount)],
-        ],
+      )
+      doc.roundedRect(pageWidth - 92, summaryStartY - 5, 78, 8 + summaryRows.length * 7, 2, 2, "FD")
+      autoTable(doc, {
+        startY: summaryStartY,
+        body: summaryRows,
         theme: "plain",
         styles: {
           fontSize: 10,
@@ -574,7 +587,7 @@ export function useOrdersManagement(orders, statusKey, title) {
         },
         margin: { left: pageWidth - 88 },
         didParseCell: (hookData) => {
-          if (hookData.row.index === 4) {
+          if (hookData.row.index === summaryRows.length - 1) {
             hookData.cell.styles.fontStyle = "bold"
             hookData.cell.styles.fontSize = 11
             hookData.cell.styles.textColor = [15, 118, 110]

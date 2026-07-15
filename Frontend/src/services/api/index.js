@@ -1083,6 +1083,21 @@ export const adminAPI = {
     apiClient.get("/food/admin/restaurant-coupons", { contextModule: "admin" }),
   updateRestaurantCouponStatus: (id, status) =>
     apiClient.patch(`/food/admin/restaurant-coupons/${id}/status`, { status }, { contextModule: "admin" }),
+  getAdvertisements: () =>
+    apiClient.get("/food/admin/advertisements", { contextModule: "admin" }),
+  getAdvertisementRequests: () =>
+    apiClient.get("/food/admin/advertisement-requests", { contextModule: "admin" }),
+  createAdvertisement: (formData) =>
+    apiClient.post("/food/admin/advertisements", formData, {
+      contextModule: "admin",
+      headers: { "Content-Type": "multipart/form-data" },
+    }),
+  updateAdvertisementStatus: (id, status) =>
+    apiClient.patch(`/food/admin/advertisements/${id}/status`, { status }, { contextModule: "admin" }),
+  updateAdvertisementPriority: (id, priority) =>
+    apiClient.patch(`/food/admin/advertisements/${id}/priority`, { priority }, { contextModule: "admin" }),
+  deleteAdvertisement: (id) =>
+    apiClient.delete(`/food/admin/advertisements/${id}`, { contextModule: "admin" }),
   getDeletedAccounts: () =>
     apiClient.get("/food/admin/deleted-accounts", { contextModule: "admin" }),
   reactivateAccount: (id, role) =>
@@ -1705,6 +1720,32 @@ export const restaurantAPI = {
     }),
   deleteCoupon: (id) =>
     apiClient.delete(`/food/restaurant/coupons/${String(id)}`, {
+      contextModule: "restaurant",
+    }),
+  getAdvertisements: () =>
+    apiClient.get("/food/restaurant/advertisements", {
+      contextModule: "restaurant",
+    }),
+  getAdvertisement: (id) =>
+    apiClient.get(`/food/restaurant/advertisements/${String(id)}`, {
+      contextModule: "restaurant",
+    }),
+  createAdvertisement: (formData) =>
+    apiClient.post("/food/restaurant/advertisements", formData, {
+      contextModule: "restaurant",
+      headers: { "Content-Type": "multipart/form-data" },
+    }),
+  updateAdvertisement: (id, formData) =>
+    apiClient.put(`/food/restaurant/advertisements/${String(id)}`, formData, {
+      contextModule: "restaurant",
+      headers: { "Content-Type": "multipart/form-data" },
+    }),
+  pauseAdvertisement: (id) =>
+    apiClient.patch(`/food/restaurant/advertisements/${String(id)}/pause`, {}, {
+      contextModule: "restaurant",
+    }),
+  deleteAdvertisement: (id) =>
+    apiClient.delete(`/food/restaurant/advertisements/${String(id)}`, {
       contextModule: "restaurant",
     }),
 };

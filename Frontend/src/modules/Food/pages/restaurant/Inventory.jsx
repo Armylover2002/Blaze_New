@@ -829,7 +829,7 @@ export default function Inventory() {
 
   // Inventory tabs
   const inventoryTabs = ["all-items", "add-ons"]
-  const isPureVegRestaurant = restaurantProfile?.pureVegRestaurant === true
+  const isPureVegRestaurant = restaurantProfile?.pureVegRestaurant === true || String(restaurantProfile?.pureVegRestaurant).toLowerCase() === "true" || restaurantProfile?.details?.pureVegRestaurant === true || String(restaurantProfile?.details?.pureVegRestaurant).toLowerCase() === "true"
 
   // Tab bar ref for excluding swipe on topbar
   const tabBarRef = useRef(null)
@@ -965,6 +965,16 @@ export default function Inventory() {
                 (rule.mode === "manual" ||
                   (rule.resumeAt && new Date(rule.resumeAt).getTime() > nowMs))
 
+              const isNonVeg = !item.isVeg || item?.foodType?.toLowerCase() === "non-veg"
+              if (isPureVegRestaurant && isNonVeg) {
+                return {
+                  ...item,
+                  inStock: false,
+                  isAvailable: false,
+                  stockRule: rule || { mode: "manual" },
+                }
+              }
+
               if (!isActiveRule) return item
               return {
                 ...item,
@@ -1006,7 +1016,7 @@ export default function Inventory() {
     }
 
     fetchMenuData()
-  }, [recommendedMap])
+  }, [recommendedMap, isPureVegRestaurant])
 
   // Note: Menu items are now displayed from menu API
   // Stock status updates should be managed through the menu API, not inventory API
@@ -1606,6 +1616,25 @@ export default function Inventory() {
 
       const targetItemIds = getTargetItemIds(type, categoryId, itemId)
 
+      if (isPureVegRestaurant) {
+        if (type === "category") {
+          const category = categories.find((c) => c.id === categoryId)
+          if (category?.foodTypeScope?.toLowerCase() === "non-veg") {
+             toast.error("Your outlet is Veg. Cannot turn on Non-Veg category.")
+             return
+          }
+        } else {
+          const category = categories.find((c) => c.id === categoryId)
+          const item = category?.items?.find((i) => i.id === itemId)
+          const ft = item?.foodType?.toLowerCase()?.trim() || ""
+          const isNonVeg = !item?.isVeg || ft === "non-veg" || ft === "non veg" || ft === "nonveg"
+          if (item && isNonVeg) {
+             toast.error("Your outlet is Veg. Cannot turn on Non-Veg items.")
+             return
+          }
+        }
+      }
+
       // Turning ON - apply immediately without popup
       setCategories(prev =>
         prev.map(category => {
@@ -1613,12 +1642,19 @@ export default function Inventory() {
           const items = category.items || []
 
           if (type === "category") {
-            const updatedItems = items.map(item => ({
-              ...item,
-              inStock: true,
-              isAvailable: true,
-              stockRule: null,
-            }))
+            const updatedItems = items.map(item => {
+              const ft = item?.foodType?.toLowerCase()?.trim() || ""
+              const isNonVeg = !item?.isVeg || ft === "non-veg" || ft === "non veg" || ft === "nonveg"
+              if (isPureVegRestaurant && isNonVeg) {
+                return item // keep it as is, don't turn on
+              }
+              return {
+                ...item,
+                inStock: true,
+                isAvailable: true,
+                stockRule: null,
+              }
+            })
             return {
               ...category,
               inStock: true,
@@ -2343,8 +2379,10 @@ export default function Inventory() {
                               {(category.items || []).map((item) => {
                                 const approvalMeta = getApprovalDisplayMeta(item.approvalStatus)
                                 const isRejectedItem = item.approvalStatus === "rejected"
+                                const ft = item?.foodType?.toLowerCase()?.trim() || ""
+                                const isNonVeg = !item?.isVeg || ft === "non-veg" || ft === "non veg" || ft === "nonveg"
                                 return (
-                                  <tr key={item.id} className="border-b border-slate-100 last:border-b-0 hover:bg-slate-50/70">
+                                  <tr key={item.id} className={`border-b border-slate-100 last:border-b-0 transition-colors ${isPureVegRestaurant && isNonVeg ? "opacity-50 grayscale" : "hover:bg-slate-50/70"}`}>
                                     <td className="px-4 py-3">
                                       <div className="flex items-center gap-3 min-w-0">
                                         {item.image || item.images?.[0] ? (
@@ -2379,7 +2417,7 @@ export default function Inventory() {
                                     </td>
                                     <td className="px-4 py-3">
                                       <Switch
-                                        checked={item.inStock}
+                                        checked={item.inStock && !(isPureVegRestaurant && isNonVeg)}
                                         onCheckedChange={(checked) => handleToggleChange("item", category.id, item.id, checked)}
                                         className="data-[state=checked]:bg-[#27a15a]"
                                       />
@@ -2651,9 +2689,11 @@ export default function Inventory() {
                         {categoryItems.map((item) => {
                           const approvalMeta = getApprovalDisplayMeta(item.approvalStatus)
                           const isRejectedItem = item.approvalStatus === "rejected"
+                          const ft = item?.foodType?.toLowerCase()?.trim() || ""
+                          const isNonVeg = !item?.isVeg || ft === "non-veg" || ft === "non veg" || ft === "nonveg"
 
                           return (
-                            <div key={item.id}>
+                            <div key={item.id} className={`transition-colors ${isPureVegRestaurant && isNonVeg ? "opacity-50 grayscale" : ""}`}>
                               <div className="flex items-center justify-between gap-2.5 rounded-xl border border-slate-200 bg-slate-50/80 px-3 py-2.5">
                                 <div className="flex flex-1 items-center gap-3 min-w-0">
                                   {item.image || (item.images && item.images[0]) ? (
@@ -2730,7 +2770,7 @@ export default function Inventory() {
                                     className="rounded-full bg-white px-2 py-1 shadow-inner"
                                   >
                                     <Switch
-                                      checked={item.inStock}
+                                      checked={item.inStock && !(isPureVegRestaurant && isNonVeg)}
                                       onCheckedChange={(checked) =>
                                         handleToggleChange("item", category.id, item.id, checked)
                                       }

@@ -333,6 +333,7 @@ export default function Cart() {
     baseDeliveryFee: 0,
     deliveryFeeRanges: [],
     platformFee: 0,
+    packagingFee: 0,
     gstRate: 0,
   })
 
@@ -1136,6 +1137,7 @@ export default function Cart() {
               ? settings.deliveryFeeRanges
               : [],
             platformFee: Number(settings.platformFee ?? 0),
+            packagingFee: Number(settings.packagingFee ?? 0),
             gstRate: Number(settings.gstRate ?? 0),
           })
         }
@@ -1235,9 +1237,13 @@ export default function Cart() {
     ? `${Number(resolvedDistanceKm).toFixed(1)} km delivery`
     : null
   const platformFee = pricing?.platformFee ?? Number(feeSettings.platformFee || 0)
+  const packagingFee = pricing?.packagingFee ?? Number(feeSettings.packagingFee || 0)
   const gstCharges = pricing?.tax ?? Math.round(subtotal * (Number(feeSettings.gstRate || 0) / 100))
   const discount = pricing?.discount ?? (appliedCoupon ? Math.min(appliedCoupon.discount, subtotal * 0.5) : 0)
   const totalBeforeDiscount = subtotal + deliveryFee + platformFee + gstCharges + quickDeliveryFee
+  // Never invent coupon caps — wait for server pricing for actual discount.
+  const discount = pricing?.discount ?? 0
+  const totalBeforeDiscount = subtotal + deliveryFee + platformFee + packagingFee + gstCharges
   const total = pricing?.total ?? (totalBeforeDiscount - discount)
 
   // Calculate other platform total for comparison
@@ -1691,30 +1697,44 @@ export default function Cart() {
           if (result.softFallback) {
             placeOrderDeliveryType = "standard"
           }
+      let resolvedPricing = null
+      try {
+        const pricingResponse = await orderAPI.calculateOrder({
+          orderType: "food",
+          items: cart.map(mapOrderItem),
+          restaurantId: restaurantData?.restaurantId || restaurantData?._id || restaurantId || undefined,
+          address: defaultAddress,
+          deliveryAddressId: resolvedDeliveryAddressId,
+          couponCode: appliedCoupon?.code || couponCode || undefined,
+        })
+        resolvedPricing = pricingResponse?.data?.data?.pricing || null
+        if (resolvedPricing) {
+          setPricing(resolvedPricing)
         }
       } catch (pricingError) {
         debugWarn("Could not refresh pricing before order placement:", pricingError)
+        toast.error(
+          pricingError?.response?.data?.message ||
+            "Could not refresh pricing. Please try again.",
+        )
+        setIsPlacingOrder(false)
+        return
       }
 
-      // Ensure couponCode is included in pricing
-      const orderPricing = resolvedPricing || {
-        subtotal,
-        deliveryFee,
-        tax: gstCharges,
-        platformFee,
-        discount,
-        total,
-        totalDeliveryFee: deliveryFee,
-        userDeliveryFee: deliveryFee,
-        restaurantDeliveryFee: 0,
-        sponsoredDelivery: false,
-        sponsoredKm: 0,
-        couponCode: appliedCoupon?.code || null
-      };
+      if (!resolvedPricing || !Number.isFinite(Number(resolvedPricing.total))) {
+        toast.error("Pricing unavailable. Please try again.")
+        setIsPlacingOrder(false)
+        return
+      }
 
-      // Add couponCode if not present but coupon is applied
-      if (!orderPricing.couponCode && appliedCoupon?.code) {
-        orderPricing.couponCode = appliedCoupon.code;
+      // Server pricing only — never fall back to client-calculated totals.
+      const orderPricing = {
+        ...resolvedPricing,
+        couponCode:
+          resolvedPricing.couponCode ||
+          appliedCoupon?.code ||
+          couponCode ||
+          null,
       }
 
       // Include all cart items (main items + addons)
@@ -3158,6 +3178,14 @@ export default function Cart() {
                         <span className="text-gray-600 dark:text-gray-400">Platform Fee</span>
                         <div className="text-right">
                           <span className="text-gray-800 dark:text-gray-200 font-medium">{RUPEE_SYMBOL}{platformFee.toFixed(0)}</span>
+                        </div>
+                      </div>
+                    )}
+                    {packagingFee > 0 && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-600 dark:text-gray-400">Packaging Fee</span>
+                        <div className="text-right">
+                          <span className="text-gray-800 dark:text-gray-200 font-medium">{RUPEE_SYMBOL}{packagingFee.toFixed(0)}</span>
                         </div>
                       </div>
                     )}
