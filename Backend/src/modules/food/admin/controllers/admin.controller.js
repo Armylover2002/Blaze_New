@@ -1606,7 +1606,7 @@ export async function getWithdrawals(req, res, next) {
 export async function updateWithdrawalStatus(req, res, next) {
     try {
         const { id } = req.params;
-        const data = await adminService.updateWithdrawalStatus(id, req.body || {});
+        const data = await adminService.updateWithdrawalStatus(id, req.body || {}, req.user);
         res.status(200).json({ success: true, message: 'Withdrawal status updated successfully', data });
     } catch (error) {
         next(error);
@@ -1625,7 +1625,7 @@ export async function getDeliveryWithdrawals(req, res, next) {
 export async function updateDeliveryWithdrawalStatus(req, res, next) {
     try {
         const { id } = req.params;
-        const data = await adminService.updateDeliveryWithdrawalStatus(id, req.body || {});
+        const data = await adminService.updateDeliveryWithdrawalStatus(id, req.body || {}, req.user);
         res.status(200).json({ success: true, message: 'Delivery withdrawal status updated successfully', data });
     } catch (error) {
         next(error);

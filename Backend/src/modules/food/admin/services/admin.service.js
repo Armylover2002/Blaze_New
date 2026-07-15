@@ -87,6 +87,10 @@ import {
 } from '../utils/dashboardStatsCache.js';
 import { sendNotificationToOwner } from '../../../../core/notifications/firebase.service.js';
 import { resolveActionPerformerSnapshot } from '../../../../core/utils/performer.js';
+import {
+    recordRestaurantWithdrawalPayment,
+    recordDeliveryWithdrawalPayment,
+} from './withdrawalPaymentHistory.service.js';
 
 const parseBooleanLike = (value, fieldName) => {
     if (typeof value === 'boolean') return value;
@@ -7013,7 +7017,7 @@ export async function getWithdrawals(query = {}) {
     return { requests, total, page, limit };
 }
 
-export async function updateWithdrawalStatus(id, { status, adminNote, rejectionReason, transactionId }) {
+export async function updateWithdrawalStatus(id, { status, adminNote, rejectionReason, transactionId }, adminUser = null) {
     if (!id || !mongoose.Types.ObjectId.isValid(id)) throw new ValidationError('Invalid withdrawal ID');
 
     const existing = await FoodRestaurantWithdrawal.findById(id).lean();
@@ -7061,6 +7065,7 @@ export async function updateWithdrawalStatus(id, { status, adminNote, rejectionR
                     withdrawalId: String(claimed._id),
                     note: `Settled via restaurant withdrawal approval (${claimed._id})`,
                     recordedByRole: 'ADMIN',
+                    recordedById: adminUser?.userId || adminUser?._id || null,
                 }
             );
         } catch (err) {
@@ -7081,6 +7086,16 @@ export async function updateWithdrawalStatus(id, { status, adminNote, rejectionR
                 err?.message || 'Failed to settle restaurant earnings for this withdrawal. Status left as pending.'
             );
         }
+
+        // Permanent payout history (idempotent; does not affect money path)
+        const performer = adminUser
+            ? await resolveActionPerformerSnapshot(adminUser)
+            : null;
+        await recordRestaurantWithdrawalPayment(claimed, performer, {
+            transactionId,
+            adminNote,
+            userId: restaurantId,
+        });
     }
 
     // Notify restaurant of approve/reject (non-blocking for money path)
@@ -7150,7 +7165,7 @@ export async function getDeliveryWithdrawals(query = {}) {
     return { requests, total, page, limit };
 }
 
-export async function updateDeliveryWithdrawalStatus(id, { status, adminNote, rejectionReason, transactionId }) {
+export async function updateDeliveryWithdrawalStatus(id, { status, adminNote, rejectionReason, transactionId }, adminUser = null) {
     if (!id || !mongoose.Types.ObjectId.isValid(id)) throw new ValidationError('Invalid withdrawal ID');
 
     const nextStatus = String(status || '').trim().toLowerCase();
@@ -7212,6 +7227,15 @@ export async function updateDeliveryWithdrawalStatus(id, { status, adminNote, re
                 );
             }
         }
+
+        // Permanent payout history (idempotent; does not affect money path)
+        const performer = adminUser
+            ? await resolveActionPerformerSnapshot(adminUser)
+            : null;
+        await recordDeliveryWithdrawalPayment(claimed, performer, {
+            transactionId,
+            adminNote,
+        });
     }
 
     try {
