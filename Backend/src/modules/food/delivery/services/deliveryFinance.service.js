@@ -119,8 +119,8 @@ export const getDeliveryPartnerWalletEnhanced = async (deliveryPartnerId) => {
     logger.error(`Self-healing delivery wallet credits failed: ${err.message}`);
   }
 
-  // 2. In local development, auto-reject pending withdrawals to allow continuous testing of withdrawal flow
-  if (process.env.NODE_ENV === 'development') {
+  // Optional test helper only — never gate on NODE_ENV alone (mis-set prod would wipe pendings)
+  if (process.env.AUTO_REJECT_PENDING_DELIVERY_WITHDRAWALS === 'true') {
     try {
       const pendingWithdrawalsCount = await FoodDeliveryWithdrawal.countDocuments({
         deliveryPartnerId: partnerId,
@@ -129,9 +129,9 @@ export const getDeliveryPartnerWalletEnhanced = async (deliveryPartnerId) => {
       if (pendingWithdrawalsCount > 0) {
         await FoodDeliveryWithdrawal.updateMany(
           { deliveryPartnerId: partnerId, status: 'pending' },
-          { $set: { status: 'rejected', rejectionReason: 'Auto-rejected in development environment for testing' } }
+          { $set: { status: 'rejected', rejectionReason: 'Auto-rejected for testing (AUTO_REJECT_PENDING_DELIVERY_WITHDRAWALS)' } }
         );
-        logger.info(`Auto-rejected ${pendingWithdrawalsCount} pending withdrawals for partner ${partnerId} in development`);
+        logger.info(`Auto-rejected ${pendingWithdrawalsCount} pending withdrawals for partner ${partnerId}`);
       }
     } catch (err) {
       logger.error(`Auto-rejecting pending withdrawals failed: ${err.message}`);
@@ -295,38 +295,64 @@ export const getDeliveryPartnerWalletEnhanced = async (deliveryPartnerId) => {
 
 /**
  * Submits a new withdrawal request for a delivery partner.
+ * Serializes concurrent creates per partner so pending totals cannot oversubscribe pocket balance.
  */
 export const requestDeliveryWithdrawal = async (deliveryPartnerId, payload) => {
   const { amount, bankDetails, paymentMethod = "bank_transfer" } = payload;
   if (!amount || amount < 1) throw new ValidationError("Invalid amount");
 
-  const wallet = await getDeliveryPartnerWalletEnhanced(deliveryPartnerId);
-  if (amount < wallet.deliveryWithdrawalLimit) {
-    throw new ValidationError(
-      `Minimum withdrawal amount is ₹${wallet.deliveryWithdrawalLimit}`,
-    );
-  }
-  if (amount > wallet.pocketBalance) {
-    throw new ValidationError("Insufficient balance for this withdrawal");
+  if (!mongoose.Types.ObjectId.isValid(deliveryPartnerId)) {
+    throw new ValidationError("Invalid delivery partner ID");
   }
 
-  const partner = await FoodDeliveryPartner.findById(deliveryPartnerId).lean();
+  const partnerId = new mongoose.Types.ObjectId(deliveryPartnerId);
+  const partner = await FoodDeliveryPartner.findById(partnerId).lean();
   if (!partner) throw new ValidationError("Delivery partner not found");
 
-  const withdrawal = await FoodDeliveryWithdrawal.create({
-    deliveryPartnerId,
-    amount,
-    paymentMethod,
-    bankDetails: bankDetails || {
-      accountNumber: partner.bankAccountNumber,
-      ifscCode: partner.bankIfscCode,
-      bankName: partner.bankName,
-      accountHolderName: partner.bankAccountHolderName,
-    },
-    upiId: partner.upiId,
-    upiQrCode: partner.upiQrCode,
-    status: "pending",
-  });
+  const session = await mongoose.startSession();
+  let withdrawal;
+  try {
+    await session.withTransaction(async () => {
+      await FoodDeliveryWallet.findOneAndUpdate(
+        { deliveryPartnerId: partnerId },
+        { $setOnInsert: { deliveryPartnerId: partnerId } },
+        { upsert: true, session, new: true }
+      );
+
+      const wallet = await getDeliveryPartnerWalletEnhanced(deliveryPartnerId);
+      if (amount < wallet.deliveryWithdrawalLimit) {
+        throw new ValidationError(
+          `Minimum withdrawal amount is ₹${wallet.deliveryWithdrawalLimit}`,
+        );
+      }
+      if (amount > wallet.pocketBalance) {
+        throw new ValidationError("Insufficient balance for this withdrawal");
+      }
+
+      const [created] = await FoodDeliveryWithdrawal.create(
+        [
+          {
+            deliveryPartnerId: partnerId,
+            amount,
+            paymentMethod,
+            bankDetails: bankDetails || {
+              accountNumber: partner.bankAccountNumber,
+              ifscCode: partner.bankIfscCode,
+              bankName: partner.bankName,
+              accountHolderName: partner.bankAccountHolderName,
+            },
+            upiId: partner.upiId,
+            upiQrCode: partner.upiQrCode,
+            status: "pending",
+          },
+        ],
+        { session },
+      );
+      withdrawal = created;
+    });
+  } finally {
+    session.endSession();
+  }
 
   return withdrawal;
 };

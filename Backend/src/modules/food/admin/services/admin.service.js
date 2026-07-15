@@ -6941,8 +6941,16 @@ export async function updateWithdrawalStatus(id, { status, adminNote, rejectionR
     const existing = await FoodRestaurantWithdrawal.findById(id).lean();
     if (!existing) throw new ValidationError('Withdrawal request not found');
 
+    const currentStatus = String(existing.status || '').trim().toLowerCase();
     const nextStatus = String(status || '').trim().toLowerCase();
-    const wasAlreadyApproved = String(existing.status || '').trim().toLowerCase() === 'approved';
+
+    if (!['approved', 'rejected'].includes(nextStatus)) {
+        throw new ValidationError('Status must be approved or rejected');
+    }
+    // Terminal statuses: cannot re-approve, reject-after-approve, or settle twice
+    if (currentStatus !== 'pending') {
+        throw new ValidationError(`Withdrawal is already ${currentStatus}`);
+    }
 
     const update = {
         status: nextStatus,
@@ -6952,39 +6960,77 @@ export async function updateWithdrawalStatus(id, { status, adminNote, rejectionR
         processedAt: new Date()
     };
 
-    const updated = await FoodRestaurantWithdrawal.findByIdAndUpdate(
-        id,
+    // Atomic claim: only one concurrent admin can transition pending → nextStatus
+    const claimed = await FoodRestaurantWithdrawal.findOneAndUpdate(
+        { _id: id, status: 'pending' },
         { $set: update },
         { new: true }
-    ).populate('restaurantId', 'restaurantName').lean();
+    ).populate('restaurantId', 'restaurantName');
 
-    if (!updated) throw new ValidationError('Withdrawal request not found');
+    if (!claimed) {
+        throw new ValidationError('Withdrawal is no longer pending (already processed)');
+    }
 
-    // On first approval only: consume matching delivered order shares so available
-    // balance does not regenerate after pending → approved.
-    if (nextStatus === 'approved' && !wasAlreadyApproved) {
+    // Settle after claim. On failure, revert to pending so balance math stays correct
+    // and another admin can safely retry.
+    if (nextStatus === 'approved') {
+        const restaurantId = claimed.restaurantId?._id || claimed.restaurantId || existing.restaurantId;
         try {
-            const restaurantId = updated.restaurantId?._id || updated.restaurantId || existing.restaurantId;
             await foodTransactionService.settleRestaurantSharesForWithdrawal(
                 restaurantId,
-                updated.amount,
+                claimed.amount,
                 {
-                    withdrawalId: String(updated._id),
-                    note: `Settled via restaurant withdrawal approval (${updated._id})`,
+                    withdrawalId: String(claimed._id),
+                    note: `Settled via restaurant withdrawal approval (${claimed._id})`,
                     recordedByRole: 'ADMIN',
                 }
             );
         } catch (err) {
-            // Withdrawal status is already updated; log without rolling back approval
-            // so admin payment records stay consistent with existing flow.
             console.error(
-                `Failed to settle restaurant shares for withdrawal ${updated._id}:`,
+                `Failed to settle restaurant shares for withdrawal ${claimed._id}:`,
                 err?.message || err
+            );
+            await FoodRestaurantWithdrawal.findByIdAndUpdate(id, {
+                $set: { status: 'pending' },
+                $unset: {
+                    adminNote: 1,
+                    rejectionReason: 1,
+                    transactionId: 1,
+                    processedAt: 1,
+                },
+            });
+            throw new ValidationError(
+                err?.message || 'Failed to settle restaurant earnings for this withdrawal. Status left as pending.'
             );
         }
     }
 
-    return updated;
+    // Notify restaurant of approve/reject (non-blocking for money path)
+    try {
+        const restaurantId = claimed.restaurantId?._id || claimed.restaurantId || existing.restaurantId;
+        const { notifyOwnersSafely } = await import('../../../../core/notifications/firebase.service.js');
+        await notifyOwnersSafely(
+            [{ ownerType: 'RESTAURANT', ownerId: restaurantId }],
+            {
+                title: nextStatus === 'approved' ? 'Withdrawal approved' : 'Withdrawal rejected',
+                body:
+                    nextStatus === 'approved'
+                        ? `Your withdrawal of ₹${Number(claimed.amount || 0).toFixed(2)} has been approved.`
+                        : `Your withdrawal of ₹${Number(claimed.amount || 0).toFixed(2)} was rejected${
+                              rejectionReason ? `: ${rejectionReason}` : '.'
+                          }`,
+                data: {
+                    type: 'withdrawal_request_status',
+                    withdrawalId: String(claimed._id),
+                    status: nextStatus,
+                },
+            }
+        );
+    } catch (e) {
+        console.error('Failed to send restaurant withdrawal status notification:', e?.message || e);
+    }
+
+    return claimed.toObject ? claimed.toObject() : claimed;
 }
 
 export async function getDeliveryWithdrawals(query = {}) {
@@ -7029,40 +7075,94 @@ export async function getDeliveryWithdrawals(query = {}) {
 export async function updateDeliveryWithdrawalStatus(id, { status, adminNote, rejectionReason, transactionId }) {
     if (!id || !mongoose.Types.ObjectId.isValid(id)) throw new ValidationError('Invalid withdrawal ID');
 
+    const nextStatus = String(status || '').trim().toLowerCase();
+    if (!['approved', 'rejected', 'processed'].includes(nextStatus)) {
+        throw new ValidationError('Status must be approved, processed, or rejected');
+    }
+
+    const existing = await FoodDeliveryWithdrawal.findById(id).lean();
+    if (!existing) throw new ValidationError('Withdrawal request not found');
+    if (existing.status !== 'pending') throw new ValidationError(`Withdrawal is already ${existing.status}`);
+
     const update = {
-        status: String(status).toLowerCase(),
+        status: nextStatus === 'processed' ? 'approved' : nextStatus,
         adminNote,
         rejectionReason,
         transactionId,
         processedAt: new Date()
     };
 
-    const existing = await FoodDeliveryWithdrawal.findById(id).lean();
-    if (!existing) throw new ValidationError('Withdrawal request not found');
-    if (existing.status !== 'pending') throw new ValidationError(`Withdrawal is already ${existing.status}`);
-
-    const updated = await FoodDeliveryWithdrawal.findByIdAndUpdate(
-        id,
+    // Atomic claim so concurrent admins cannot double-approve / double-debit
+    const claimed = await FoodDeliveryWithdrawal.findOneAndUpdate(
+        { _id: id, status: 'pending' },
         { $set: update },
         { new: true }
-    ).populate('deliveryPartnerId', 'name phone profilePartnerId').lean();
+    ).populate('deliveryPartnerId', 'name phone profilePartnerId');
 
-    // If approved, deduct from wallet balance using central transaction service
-    if (status.toLowerCase() === 'approved' || status.toLowerCase() === 'processed') {
-        const amount = Number(updated.amount || 0);
+    if (!claimed) {
+        throw new ValidationError('Withdrawal is no longer pending (already processed)');
+    }
+
+    if (nextStatus === 'approved' || nextStatus === 'processed') {
+        const amount = Number(claimed.amount || 0);
         if (amount > 0) {
-            await debitWallet({
-                entityType: 'deliveryBoy',
-                entityId: updated.deliveryPartnerId?._id || updated.deliveryPartnerId,
-                amount: amount,
-                description: `Withdrawal Approved - ${updated.orderId || updated.id}`,
-                category: 'settlement_payout',
-                metadata: { withdrawalId: updated._id, transactionId }
-            });
+            try {
+                await debitWallet({
+                    entityType: 'deliveryBoy',
+                    entityId: claimed.deliveryPartnerId?._id || claimed.deliveryPartnerId,
+                    amount: amount,
+                    description: `Withdrawal Approved - ${claimed.orderId || claimed.id || claimed._id}`,
+                    category: 'settlement_payout',
+                    metadata: { withdrawalId: claimed._id, transactionId }
+                });
+            } catch (err) {
+                console.error(
+                    `Failed to debit wallet for delivery withdrawal ${claimed._id}:`,
+                    err?.message || err
+                );
+                await FoodDeliveryWithdrawal.findByIdAndUpdate(id, {
+                    $set: { status: 'pending' },
+                    $unset: {
+                        adminNote: 1,
+                        rejectionReason: 1,
+                        transactionId: 1,
+                        processedAt: 1,
+                    },
+                });
+                throw new ValidationError(
+                    err?.message || 'Failed to debit delivery wallet. Withdrawal left as pending.'
+                );
+            }
         }
     }
 
-    return updated;
+    try {
+        const partnerId =
+            claimed.deliveryPartnerId?._id || claimed.deliveryPartnerId || existing.deliveryPartnerId;
+        const { notifyOwnersSafely } = await import('../../../../core/notifications/firebase.service.js');
+        const finalStatus = nextStatus === 'processed' ? 'approved' : nextStatus;
+        await notifyOwnersSafely(
+            [{ ownerType: 'DELIVERY_PARTNER', ownerId: partnerId }],
+            {
+                title: finalStatus === 'approved' ? 'Withdrawal approved' : 'Withdrawal rejected',
+                body:
+                    finalStatus === 'approved'
+                        ? `Your withdrawal of ₹${Number(claimed.amount || 0).toFixed(2)} has been approved.`
+                        : `Your withdrawal of ₹${Number(claimed.amount || 0).toFixed(2)} was rejected${
+                              rejectionReason ? `: ${rejectionReason}` : '.'
+                          }`,
+                data: {
+                    type: 'withdrawal_status',
+                    withdrawalId: String(claimed._id),
+                    status: finalStatus,
+                },
+            }
+        );
+    } catch (e) {
+        console.error('Failed to send delivery withdrawal status notification:', e?.message || e);
+    }
+
+    return claimed.toObject ? claimed.toObject() : claimed;
 }
 
 /**

@@ -106,6 +106,8 @@ const foodTransactionSchema = new mongoose.Schema({
     // Settlement Tracking
     settlement: {
         isRestaurantSettled: { type: Boolean, default: false },
+        // Cumulative restaurantShare consumed by withdrawals (supports partial settlement)
+        restaurantSettledAmount: { type: Number, default: 0, min: 0 },
         restaurantSettledAt: Date,
         isRiderSettled: { type: Boolean, default: false },
         riderSettledAt: Date

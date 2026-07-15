@@ -220,6 +220,8 @@ export async function updateTransactionStatus(orderId, kind, details = {}) {
     if (details.markRestaurantSettled === true) {
         transaction.settlement = transaction.settlement || {};
         transaction.settlement.isRestaurantSettled = true;
+        const fullShare = Math.round((Number(transaction.amounts?.restaurantShare) || 0) * 100) / 100;
+        transaction.settlement.restaurantSettledAmount = fullShare;
         transaction.settlement.restaurantSettledAt =
             details.restaurantSettledAt || new Date();
     }
@@ -348,8 +350,10 @@ export async function settleRestaurant(orderId, adminId) {
 
 /**
  * Consumes restaurant payout eligibility for an approved withdrawal (FIFO).
- * Marks delivered, unsettled captured/authorized txs as restaurant-settled until
- * the withdrawal amount is covered. Leftover amount reduces referral earnings.
+ * Partially settles delivered, unsettled captured txs until the
+ * withdrawal amount is covered (never marks more than `remaining` settled).
+ * Leftover amount reduces referral earnings.
+ * Throws if unsettled earnings + referral cannot fully cover the amount.
  */
 export async function settleRestaurantSharesForWithdrawal(
     restaurantId,
@@ -357,22 +361,45 @@ export async function settleRestaurantSharesForWithdrawal(
     meta = {}
 ) {
     if (!restaurantId || !mongoose.Types.ObjectId.isValid(restaurantId)) {
-        return { settledOrderShare: 0, settledCount: 0, referralDebited: 0 };
+        throw new Error('Invalid restaurant ID for withdrawal settlement');
     }
 
     const target = Math.round((Number(amount) || 0) * 100) / 100;
     if (!(target > 0)) {
-        return { settledOrderShare: 0, settledCount: 0, referralDebited: 0 };
+        throw new Error('Withdrawal amount must be greater than zero');
     }
 
     const rid = new mongoose.Types.ObjectId(restaurantId);
     const unsettled = await FoodTransaction.find({
         restaurantId: rid,
-        status: { $in: ['captured', 'authorized'] },
+        status: { $in: ['captured'] },
         'settlement.isRestaurantSettled': { $ne: true },
     })
         .populate('orderId', 'orderStatus deliveryState')
         .sort({ createdAt: 1 });
+
+    const { FoodRestaurantWallet } = await import(
+        '../../restaurant/models/restaurantWallet.model.js'
+    );
+    const wallet = await FoodRestaurantWallet.findOne({ restaurantId: rid });
+    const referralBal = Math.max(0, Number(wallet?.referralEarnings || 0));
+
+    // Pre-check coverage so we do not partially consume earnings then fail approval
+    let openOrderShare = 0;
+    for (const tx of unsettled) {
+        if (!isOrderDeliveredForSettlement(tx.orderId)) continue;
+        const share = Math.round((Number(tx.amounts?.restaurantShare) || 0) * 100) / 100;
+        const alreadySettled =
+            Math.round((Number(tx.settlement?.restaurantSettledAmount) || 0) * 100) / 100;
+        openOrderShare += Math.max(0, Math.round((share - alreadySettled) * 100) / 100);
+    }
+    openOrderShare = Math.round(openOrderShare * 100) / 100;
+    const coverable = Math.round((openOrderShare + referralBal) * 100) / 100;
+    if (coverable + 0.009 < target) {
+        throw new Error(
+            `Insufficient unsettled earnings to cover withdrawal. Available ₹${coverable}, required ₹${target}`
+        );
+    }
 
     let remaining = target;
     const now = new Date();
@@ -387,17 +414,33 @@ export async function settleRestaurantSharesForWithdrawal(
         if (!(share > 0)) continue;
 
         tx.settlement = tx.settlement || {};
-        tx.settlement.isRestaurantSettled = true;
-        tx.settlement.restaurantSettledAt = now;
+        const alreadySettled =
+            Math.round((Number(tx.settlement.restaurantSettledAmount) || 0) * 100) / 100;
+        const openShare = Math.round((share - alreadySettled) * 100) / 100;
+        if (!(openShare > 0)) {
+            // Repair inconsistent docs: open share exhausted but flag still false
+            tx.settlement.isRestaurantSettled = true;
+            tx.settlement.restaurantSettledAt = tx.settlement.restaurantSettledAt || now;
+            await tx.save();
+            continue;
+        }
+
+        const consume = Math.min(openShare, remaining);
+        tx.settlement.restaurantSettledAmount =
+            Math.round((alreadySettled + consume) * 100) / 100;
+        if (tx.settlement.restaurantSettledAmount >= share) {
+            tx.settlement.isRestaurantSettled = true;
+            tx.settlement.restaurantSettledAt = now;
+        }
         tx.history.push({
             kind: 'settled',
-            amount: share,
+            amount: consume,
             at: now,
             note:
                 meta.note ||
                 `Settled via restaurant withdrawal approval${
                     meta.withdrawalId ? ` (${meta.withdrawalId})` : ''
-                }`,
+                }${consume < openShare ? ' (partial)' : ''}`,
             recordedBy: {
                 role: meta.recordedByRole || 'ADMIN',
                 id: meta.recordedById,
@@ -406,25 +449,50 @@ export async function settleRestaurantSharesForWithdrawal(
         await tx.save();
 
         settledIds.push(tx._id);
-        settledOrderShare = Math.round((settledOrderShare + share) * 100) / 100;
-        remaining = Math.round((remaining - share) * 100) / 100;
+        settledOrderShare = Math.round((settledOrderShare + consume) * 100) / 100;
+        remaining = Math.round((remaining - consume) * 100) / 100;
     }
 
     let referralDebited = 0;
     if (remaining > 0) {
-        const { FoodRestaurantWallet } = await import(
-            '../../restaurant/models/restaurantWallet.model.js'
-        );
-        const wallet = await FoodRestaurantWallet.findOne({ restaurantId: rid });
         if (wallet) {
-            const referralBal = Math.max(0, Number(wallet.referralEarnings || 0));
-            referralDebited = Math.min(referralBal, remaining);
+            const liveReferral = Math.max(0, Number(wallet.referralEarnings || 0));
+            referralDebited = Math.min(liveReferral, remaining);
             if (referralDebited > 0) {
                 wallet.referralEarnings =
-                    Math.round((referralBal - referralDebited) * 100) / 100;
+                    Math.round((liveReferral - referralDebited) * 100) / 100;
+                // Keep wallet.balance / totalSettled aligned with referral withdrawals
+                const liveBalance = Math.max(0, Number(wallet.balance || 0));
+                wallet.balance =
+                    Math.round(Math.max(0, liveBalance - referralDebited) * 100) / 100;
+                wallet.totalSettled =
+                    Math.round(
+                        (Math.max(0, Number(wallet.totalSettled || 0)) + referralDebited) * 100
+                    ) / 100;
                 await wallet.save();
+                remaining = Math.round((remaining - referralDebited) * 100) / 100;
             }
         }
+    }
+
+    // Post-check: do not allow callers to treat a short settle as success
+    if (remaining > 0.009) {
+        const covered = Math.round((settledOrderShare + referralDebited) * 100) / 100;
+        throw new Error(
+            `Insufficient unsettled earnings to cover withdrawal. Covered ₹${covered}, required ₹${target}`
+        );
+    }
+
+    // Order-share settlements never credited wallet.balance; still track lifetime settled
+    if (settledOrderShare > 0) {
+        await FoodRestaurantWallet.findOneAndUpdate(
+            { restaurantId: rid },
+            {
+                $inc: { totalSettled: settledOrderShare },
+                $setOnInsert: { restaurantId: rid },
+            },
+            { upsert: true }
+        );
     }
 
     return {

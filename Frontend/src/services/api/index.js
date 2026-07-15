@@ -1163,6 +1163,11 @@ export const restaurantAPI = {
     apiClient.post("/food/restaurant/withdraw", { amount: Number(amount) }, {
       contextModule: "restaurant"
     }),
+  /** Cancel a pending restaurant withdrawal. */
+  cancelWithdrawalRequest: (id) =>
+    apiClient.post(`/food/restaurant/withdrawals/${id}/cancel`, {}, {
+      contextModule: "restaurant"
+    }),
   /** List withdrawal history for current restaurant. */
   getWithdrawalHistory: () =>
     apiClient.get("/food/restaurant/withdrawals", {
