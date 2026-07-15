@@ -97,6 +97,7 @@ export function useOrdersManagement(orders, statusKey, title) {
   const [filters, setFilters] = useState({
     paymentStatus: "",
     deliveryType: "",
+    deliveryMode: "",
     minAmount: "",
     maxAmount: "",
     fromDate: "",
@@ -108,6 +109,7 @@ export function useOrdersManagement(orders, statusKey, title) {
     orderId: true,
     orderDate: true,
     orderType: true,
+    deliveryMode: true,
     orderOtp: true,
     customer: true,
     restaurant: true,
@@ -167,6 +169,18 @@ export function useOrdersManagement(orders, statusKey, title) {
     if (filters.deliveryType) {
       result = result.filter(
         (order) => String(order.deliveryType || "").toLowerCase() === filters.deliveryType.toLowerCase(),
+      )
+    }
+
+    if (filters.deliveryMode === "quick" || filters.deliveryMode === "basic") {
+      result = result.filter(
+        (order) => String(order.deliveryMode || "basic").toLowerCase() === filters.deliveryMode,
+      )
+    } else if (filters.deliveryMode === "sla_breached") {
+      result = result.filter(
+        (order) =>
+          String(order.deliveryMode || "").toLowerCase() === "quick" &&
+          order?.sla?.breached === true,
       )
     }
 
@@ -249,6 +263,7 @@ export function useOrdersManagement(orders, statusKey, title) {
     setFilters({
       paymentStatus: "",
       deliveryType: "",
+      deliveryMode: "",
       minAmount: "",
       maxAmount: "",
       fromDate: "",

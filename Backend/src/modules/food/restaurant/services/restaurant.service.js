@@ -354,6 +354,18 @@ const toRestaurantProfile = (doc) => {
                 ? Number(doc.estimatedDeliveryTimeMinutes)
                 : null,
         isAcceptingOrders: doc.isAcceptingOrders !== false,
+        scheduleOrderEnabled: doc.scheduleOrderEnabled !== false,
+        /** Opt-in Quick Delivery. Missing ⇒ false. */
+        quickDeliveryEnabled: doc.quickDeliveryEnabled === true,
+        /**
+         * Kitchen prep for Food Quick ETA only (not listing delivery estimate).
+         * null ⇒ platform defaultKitchenPrepMinutes.
+         */
+        kitchenPrepMinutes:
+            Number.isFinite(Number(doc.kitchenPrepMinutes)) &&
+            Number(doc.kitchenPrepMinutes) > 0
+                ? Math.round(Number(doc.kitchenPrepMinutes))
+                : null,
         status: doc.status || null,
         onboardingStep: doc.onboardingStep ?? 1,
         isActive: doc.isActive !== false,
@@ -1594,6 +1606,9 @@ export const getCurrentRestaurantProfile = async (restaurantId) => {
                 'offer',
                 'estimatedDeliveryTimeMinutes',
                 'isAcceptingOrders',
+                'scheduleOrderEnabled',
+                'quickDeliveryEnabled',
+                'kitchenPrepMinutes',
                 'isActive',
                 'wasEverApproved',
                 'approvedAt',
@@ -1725,6 +1740,9 @@ export const updateRestaurantAcceptingOrders = async (restaurantId, isAcceptingO
                 'closingTime',
                 'openDays',
                 'isAcceptingOrders',
+                'scheduleOrderEnabled',
+                'quickDeliveryEnabled',
+                'kitchenPrepMinutes',
                 'status',
                 'createdAt',
                 'updatedAt'
@@ -1761,6 +1779,59 @@ export const updateRestaurantProfile = async (restaurantId, body = {}) => {
             throw new ValidationError('Owner name is too long');
         }
         update.ownerName = ownerName;
+    }
+
+    if (body.scheduleOrderEnabled !== undefined) {
+        if (typeof body.scheduleOrderEnabled === 'boolean') {
+            update.scheduleOrderEnabled = body.scheduleOrderEnabled;
+        } else if (typeof body.scheduleOrderEnabled === 'string') {
+            const normalized = body.scheduleOrderEnabled.trim().toLowerCase();
+            if (normalized === 'true' || normalized === '1' || normalized === 'yes') {
+                update.scheduleOrderEnabled = true;
+            } else if (normalized === 'false' || normalized === '0' || normalized === 'no') {
+                update.scheduleOrderEnabled = false;
+            } else {
+                throw new ValidationError('scheduleOrderEnabled must be a boolean');
+            }
+        } else {
+            throw new ValidationError('scheduleOrderEnabled must be a boolean');
+        }
+    }
+
+    if (body.quickDeliveryEnabled !== undefined) {
+        if (typeof body.quickDeliveryEnabled === 'boolean') {
+            update.quickDeliveryEnabled = body.quickDeliveryEnabled;
+        } else if (typeof body.quickDeliveryEnabled === 'string') {
+            const normalized = body.quickDeliveryEnabled.trim().toLowerCase();
+            if (normalized === 'true' || normalized === '1' || normalized === 'yes') {
+                update.quickDeliveryEnabled = true;
+            } else if (normalized === 'false' || normalized === '0' || normalized === 'no') {
+                update.quickDeliveryEnabled = false;
+            } else {
+                throw new ValidationError('quickDeliveryEnabled must be a boolean');
+            }
+        } else {
+            throw new ValidationError('quickDeliveryEnabled must be a boolean');
+        }
+    }
+
+    if (body.kitchenPrepMinutes !== undefined) {
+        if (body.kitchenPrepMinutes === null || body.kitchenPrepMinutes === '') {
+            update.kitchenPrepMinutes = null;
+        } else {
+            const {
+                parseKitchenPrepMinutes,
+                KITCHEN_PREP_MINUTES_MIN,
+                KITCHEN_PREP_MINUTES_MAX,
+            } = await import('../../orders/utils/quickDeliveryConstants.js');
+            const parsed = parseKitchenPrepMinutes(body.kitchenPrepMinutes);
+            if (!Number.isFinite(parsed)) {
+                throw new ValidationError(
+                    `kitchenPrepMinutes must be an integer between ${KITCHEN_PREP_MINUTES_MIN} and ${KITCHEN_PREP_MINUTES_MAX}`,
+                );
+            }
+            update.kitchenPrepMinutes = parsed;
+        }
     }
 
     if (body.ownerEmail !== undefined) {
@@ -2158,6 +2229,10 @@ export const updateRestaurantProfile = async (restaurantId, body = {}) => {
                     'openingTime',
                     'closingTime',
                     'openDays',
+                    'isAcceptingOrders',
+                    'scheduleOrderEnabled',
+                    'quickDeliveryEnabled',
+                    'kitchenPrepMinutes',
                     'status',
                     'createdAt',
                     'updatedAt',

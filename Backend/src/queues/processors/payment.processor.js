@@ -68,7 +68,13 @@ async function handleDeliveryCompleted(data) {
                 description: `Order ${orderId} - delivery earning`,
                 category: 'delivery_earning',
                 orderId: orderMongoId,
-                metadata: { orderId, paymentMethod }
+                metadata: {
+                    orderId,
+                    paymentMethod,
+                    // Informative only — amount already includes quickRiderBonus when applicable
+                    deliveryMode: data.deliveryMode || 'basic',
+                    quickRiderBonus: Number(data.quickRiderBonus || 0) || 0,
+                }
             });
 
             // Increment delivery count

@@ -4,6 +4,8 @@ import { FoodNotification } from '../../../../core/notifications/models/notifica
 import { notifyOwnerSafely, notifyAdminsSafely } from '../../../../core/notifications/firebase.service.js';
 import { computeNotificationExpiresAt } from '../../../../core/notifications/utils/notificationTtl.js';
 import { bulkWriteInChunks } from '../../../../core/notifications/utils/bulkWriteChunks.js';
+import { FoodAdmin } from '../../../../core/admin/admin.model.js';
+import { getIO, rooms } from '../../../../config/socket.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -187,6 +189,22 @@ export const syncExpiredFssaiNotifications = async () => {
                 fssaiNumber: summary.fssaiNumber || ''
             }
         });
+    }
+
+    if (newlyCreated.length > 0) {
+        try {
+            const io = getIO();
+            if (io) {
+                const admins = await FoodAdmin.find({}).select('_id').lean();
+                for (const admin of admins) {
+                    io.to(rooms.admin(admin._id)).emit('admin_notification', {
+                        type: 'fssai_expired'
+                    });
+                }
+            }
+        } catch (err) {
+            // Ignore socket errors so they don't break the scheduler flow
+        }
     }
 
     return {

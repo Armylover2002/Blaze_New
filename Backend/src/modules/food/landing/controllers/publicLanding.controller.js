@@ -6,7 +6,7 @@ import { FoodExploreIcon } from '../models/exploreIcon.model.js';
 import { FoodRestaurant } from '../../restaurant/models/restaurant.model.js';
 import { sendResponse } from '../../../../utils/response.js';
 
-/** Public hero banners for user home: active only, sorted, with linkedRestaurants populated for click-through */
+/** Public hero banners for user home: active only, sorted */
 export const getPublicHeroBannersController = async (req, res, next) => {
     try {
         const requestedZoneId =
@@ -24,20 +24,12 @@ export const getPublicHeroBannersController = async (req, res, next) => {
 
         const docs = await FoodHeroBanner.find(query)
             .sort({ sortOrder: 1, createdAt: -1 })
-            .populate({
-                path: 'linkedRestaurantIds',
-                select: '_id restaurantName slug area city rating cuisines profileImage pureVegRestaurant',
-                model: 'FoodRestaurant'
-            })
             .lean();
-        const banners = (docs || []).map((b) => {
-            const { linkedRestaurantIds, ...rest } = b;
-            return {
-                ...rest,
-                linkedRestaurants: Array.isArray(linkedRestaurantIds) ? linkedRestaurantIds : [],
-                imageUrl: b.imageUrl
-            };
-        });
+        const banners = (docs || []).map((b) => ({
+            ...b,
+            linkedRestaurants: [],
+            imageUrl: b.imageUrl
+        }));
         return sendResponse(res, 200, 'Hero banners fetched', { banners });
     } catch (error) {
         next(error);

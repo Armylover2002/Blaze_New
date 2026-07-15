@@ -117,6 +117,19 @@ const pricingSchema = new mongoose.Schema(
         referralDiscount: { type: Number, default: 0, min: 0 },
         restaurantCommissionPercentage: { type: Number, default: 0, min: 0 },
         restaurantCommission: { type: Number, default: 0, min: 0 },
+        /** Food Quick surcharge (Phase 2.2). 0 for Basic. Never merge into deliveryFee. */
+        quickDeliveryFee: { type: Number, default: 0, min: 0 },
+        quickPlatformShare: { type: Number, default: 0, min: 0 },
+        quickRiderBonus: { type: Number, default: 0, min: 0 },
+        /** Alias of quickRiderBonus — policy name for Rider Quick Share. */
+        quickRiderShare: { type: Number, default: 0, min: 0 },
+        quickRestaurantShare: { type: Number, default: 0, min: 0 },
+        quickSharePcts: {
+            platform: { type: Number, default: 0, min: 0 },
+            rider: { type: Number, default: 0, min: 0 },
+            restaurant: { type: Number, default: 0, min: 0 },
+        },
+        quickFinanceVersion: { type: String, default: '' },
         total: { type: Number, required: true, min: 0 },
         currency: { type: String, default: 'INR' }
     },
@@ -202,7 +215,9 @@ const dispatchSchema = new mongoose.Schema(
             partnerId: { type: mongoose.Schema.Types.ObjectId, ref: 'FoodDeliveryPartner' },
             at: { type: Date, default: Date.now },
             action: { type: String, enum: ['offered', 'rejected', 'timeout'], default: 'offered' }
-        }]
+        }],
+        /** Seconds the DP offer modal should count down (Food Quick uses shorter window). */
+        offerTimeoutSec: { type: Number, default: null, min: 10, max: 180 },
     },
     { _id: false }
 );
@@ -212,6 +227,7 @@ const deliveryStateSchema = new mongoose.Schema(
         currentPhase: {
             type: String,
             enum: [
+                'waiting_activation',
                 'en_route_to_pickup',
                 'at_pickup',
                 'en_route_to_delivery',
@@ -334,6 +350,68 @@ const orderSchema = new mongoose.Schema(
             required: true
         },
         /**
+         * Food Instant delivery mode (Phase 2.2).
+         * "quick" = Food Quick Delivery surcharge path.
+         * Default "basic" preserves historical Instant behavior.
+         * Never confuse with orderType:"quick" (Quick Commerce).
+         */
+        deliveryMode: {
+            type: String,
+            enum: ['basic', 'quick'],
+            default: 'basic',
+            index: true,
+        },
+        /**
+         * Food Quick promised ETA window + forensic snapshot.
+         * Absent on Basic. SLA clock = 'placed' (startsAt at create).
+         */
+        etaPromise: {
+            min: { type: Number, default: null },
+            max: { type: Number, default: null },
+            mid: { type: Number, default: null },
+            startsAt: { type: Date, default: null },
+            endsAt: { type: Date, default: null },
+            /** BC alias for kitchenPrepMinutes (v1 field name). */
+            prepMinutes: { type: Number, default: null },
+            kitchenPrepMinutes: { type: Number, default: null },
+            assignmentMinutes: { type: Number, default: null },
+            pickupMinutes: { type: Number, default: null },
+            travelMinutes: { type: Number, default: null },
+            bufferMinutes: { type: Number, default: null },
+            engineVersion: { type: String, default: '' },
+            /** Frozen: 'placed' — promise starts at order placement. */
+            slaClock: { type: String, default: 'placed' },
+            prepSource: { type: String, default: '' },
+            travelSource: { type: String, default: '' },
+            assignmentSource: { type: String, default: '' },
+            rejectionReason: { type: String, default: '' },
+            components: {
+                kitchenPrepMinutes: { type: Number, default: null },
+                assignmentMinutes: { type: Number, default: null },
+                pickupMinutes: { type: Number, default: null },
+                travelMinutes: { type: Number, default: null },
+                bufferMinutes: { type: Number, default: null },
+            },
+            sources: {
+                prepSource: { type: String, default: '' },
+                assignmentSource: { type: String, default: '' },
+                pickupSource: { type: String, default: '' },
+                travelSource: { type: String, default: '' },
+                bufferSource: { type: String, default: '' },
+            },
+        },
+        /** Food Quick SLA outcome + compensation audit. Clock = etaPromise.slaClock. */
+        sla: {
+            breached: { type: Boolean, default: false },
+            delayMinutes: { type: Number, default: 0, min: 0 },
+            compensationAmount: { type: Number, default: 0, min: 0 },
+            compensationMode: { type: String, enum: ['wallet', 'refund'], default: undefined },
+            compensationStatus: { type: String, default: '' },
+            compensatedAt: { type: Date, default: null },
+            /** Mirror of ETA SLA clock for reports ('placed'). */
+            slaClock: { type: String, default: 'placed' },
+        },
+        /**
          * Denormalized payment snapshot for fast reads & legacy clients.
          * Authoritative audit trail: collection `food_order_payments` (FoodOrderPayment model).
          */
@@ -383,6 +461,10 @@ const orderSchema = new mongoose.Schema(
         sendCutlery: { type: Boolean, default: true },
         deliveryFleet: { type: String, default: 'standard', trim: true },
         scheduledAt: { type: Date, default: null },
+        /** When scheduled → placed (restaurant activation). Additive; missing on legacy docs. */
+        activatedAt: { type: Date, default: null },
+        /** BullMQ job id for NOTIFY_SCHEDULED_ORDER (cancel / dedupe). */
+        scheduleNotifyJobId: { type: String, default: null, trim: true },
         riderEarning: { type: Number, default: 0, min: 0 },
         platformProfit: { type: Number, default: 0, min: 0 },
         /** Plain 4-digit OTP for handover; cleared after successful verify (never expose to partner in API responses). */
@@ -412,6 +494,9 @@ orderSchema.index({ 'dispatch.deliveryPartnerId': 1, orderStatus: 1 });
 orderSchema.index({ 'dispatch.status': 1, orderStatus: 1 });
 orderSchema.index({ 'payment.status': 1, createdAt: -1 });
 orderSchema.index({ 'payment.method': 1, createdAt: -1 });
+orderSchema.index({ orderStatus: 1, scheduledAt: 1 });
+orderSchema.index({ deliveryMode: 1, createdAt: -1 });
+orderSchema.index({ restaurantId: 1, deliveryMode: 1, createdAt: -1 });
 
 export const FoodOrder = mongoose.model('FoodOrder', orderSchema, 'food_orders');
 

@@ -6,6 +6,7 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@food/components/ui/dialog"
+import { formatScheduledAt, parseValidDate } from "@food/utils/scheduleTime"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -24,6 +25,12 @@ const formatHistoryTimestamp = (value) => {
       hour12: true,
     })
     .toUpperCase()
+}
+
+const formatOrderTimestamp = (value) => {
+  const formatted = formatScheduledAt(value)
+  if (formatted) return formatted
+  return formatHistoryTimestamp(value) || "—"
 }
 
 const getBackendStatusLabel = (raw) => {
@@ -182,10 +189,39 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order }) {
               <div className="space-y-1">
                 <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-2">
                   <Calendar className="w-4 h-4" />
-                  Order Date
+                  Order Created
                 </p>
-                <p className="text-sm font-medium text-slate-900">{order.date}{order.time ? `, ${order.time}` : ""}</p>
+                <p className="text-sm font-medium text-slate-900">
+                  {formatOrderTimestamp(
+                    order.createdAt ||
+                      (order.date
+                        ? `${order.date}${order.time ? `, ${order.time}` : ""}`
+                        : null)
+                  )}
+                </p>
               </div>
+              {parseValidDate(order.scheduledAt) && (
+                <div className="space-y-1">
+                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-2">
+                    <Clock className="w-4 h-4" />
+                    Scheduled For
+                  </p>
+                  <p className="text-sm font-medium text-slate-900">
+                    {formatOrderTimestamp(order.scheduledAt)}
+                  </p>
+                </div>
+              )}
+              {parseValidDate(order.activatedAt) && (
+                <div className="space-y-1">
+                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4" />
+                    Activation Time
+                  </p>
+                  <p className="text-sm font-medium text-slate-900">
+                    {formatOrderTimestamp(order.activatedAt)}
+                  </p>
+                </div>
+              )}
               {order.orderOtp && (
                 <div className="space-y-1">
                   <p className="text-xs font-semibold text-red-600 uppercase tracking-wider flex items-center gap-2 font-bold">
@@ -278,6 +314,31 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order }) {
                   <p className="text-sm font-medium text-slate-900">{order.deliveryType}</p>
                 </div>
               )}
+              <div className="space-y-1">
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-2">
+                  <Truck className="w-4 h-4" />
+                  Food Delivery Mode
+                </p>
+                <p className="text-sm font-medium text-slate-900">
+                  {String(order.deliveryMode || "basic").toLowerCase() === "quick" ? "Quick Delivery" : "Basic Delivery"}
+                  {order?.etaPromise?.max
+                    ? ` · Promise ≤ ${order.etaPromise.max} min`
+                    : ""}
+                </p>
+                {Number(order.quickDeliveryFee || order?.pricing?.quickDeliveryFee || 0) > 0 && (
+                  <p className="text-xs text-slate-500">
+                    Quick Charge ₹{Number(order.quickDeliveryFee || order?.pricing?.quickDeliveryFee || 0).toFixed(0)}
+                  </p>
+                )}
+                {order?.sla?.breached && (
+                  <p className="text-xs font-semibold text-amber-700">
+                    SLA breached
+                    {Number(order.sla.compensationAmount) > 0
+                      ? ` · Comp ₹${Number(order.sla.compensationAmount).toFixed(0)} (${order.sla.compensationStatus || "pending"})`
+                      : ""}
+                  </p>
+                )}
+              </div>
             </div>
           </div>
 

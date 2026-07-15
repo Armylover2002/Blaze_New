@@ -57,6 +57,7 @@ export default function AddZone() {
     country: "India",
     zoneName: "",
     unit: "kilometer",
+    quickDeliveryEnabled: false,
   })
   
   const [coordinates, setCoordinates] = useState([])
@@ -173,6 +174,7 @@ export default function AddZone() {
           country: zoneData.country || "India",
           zoneName: zoneData.name || zoneData.zoneName || "",
           unit: zoneData.unit || "kilometer",
+          quickDeliveryEnabled: zoneData.quickDeliveryEnabled === true,
         })
         
         if (zoneData.coordinates && zoneData.coordinates.length > 0) {
@@ -666,7 +668,8 @@ export default function AddZone() {
         country: formData.country,
         unit: formData.unit || "kilometer",
         coordinates: validCoordinates,
-        isActive: true
+        isActive: true,
+        quickDeliveryEnabled: formData.quickDeliveryEnabled === true,
       }
 
       const overlapMessage = findZoneOverlapMessage(
@@ -801,6 +804,24 @@ export default function AddZone() {
                       <option value="kilometer">Kilometers (km)</option>
                       <option value="miles">Miles (mi)</option>
                     </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-semibold text-slate-700 mb-2">
+                      Quick Delivery
+                    </label>
+                    <label className="inline-flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={formData.quickDeliveryEnabled === true}
+                        onChange={(e) => handleInputChange("quickDeliveryEnabled", e.target.checked)}
+                        className="h-4 w-4 rounded border-slate-300 text-green-600 focus:ring-green-500"
+                      />
+                      Enable Quick Delivery for this zone
+                    </label>
+                    <p className="text-xs text-slate-500 mt-1">
+                      Zone gate only. Global Fee Settings and Restaurant must also be enabled for customers.
+                    </p>
                   </div>
                 </div>
               </div>

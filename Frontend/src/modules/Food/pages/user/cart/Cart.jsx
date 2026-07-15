@@ -19,6 +19,18 @@ import { orderAPI, restaurantAPI, adminAPI, userAPI, API_ENDPOINTS } from "@food
 import { API_BASE_URL } from "@food/api/config"
 import { initRazorpayPayment, isFlutterWebView, handleFlutterRazorpayPayment } from "@food/utils/razorpay"
 import { sanitizeOrderImage, sanitizeOrderNotes } from "@food/utils/orderPayload"
+import {
+  areQuickGatesOpen,
+  clearQuickDeliveryToast,
+  formatQuickCharge,
+  formatQuickEtaWindow,
+  mapQuickDeliveryReason,
+  showQuickDeliveryUnavailableToast,
+} from "@food/utils/quickDelivery"
+import {
+  applyCartPricingResult,
+  createCartPricingRequestController,
+} from "@food/utils/cartPricingRequest"
 import { toast } from "sonner"
 import { getCompanyNameAsync } from "@common/utils/businessSettings"
 import { useCompanyName } from "@food/hooks/useCompanyName"
@@ -195,6 +207,11 @@ export default function Cart() {
   const orderSuccessAudioRef = useRef(null)
   const hasRestoredRecipientRef = useRef(false)
   const hasRestoredNoteRef = useRef(false)
+  /** Single sequencer for every Cart calculateOrder (effect + coupon + place-order). */
+  const pricingRequestControllerRef = useRef(null)
+  if (!pricingRequestControllerRef.current) {
+    pricingRequestControllerRef.current = createCartPricingRequestController()
+  }
 
   // Defensive check: Ensure CartProvider is available
   const cartContext = useCart() || {};
@@ -251,7 +268,9 @@ export default function Cart() {
   const [isPlacingOrder, setIsPlacingOrder] = useState(false)
   const [showBillDetails, setShowBillDetails] = useState(true)
   const [showPlacingOrder, setShowPlacingOrder] = useState(false)
+  /** Food Instant delivery mode: "standard" (Basic) | "quick". Never confuse with QC. */
   const [deliveryType, setDeliveryType] = useState("standard")
+  const [quickFallbackNotice, setQuickFallbackNotice] = useState(null)
   const [isScheduled, setIsScheduled] = useState(false)
   const [scheduledDate, setScheduledDate] = useState("")
   const [scheduledTime, setScheduledTime] = useState("")
@@ -965,7 +984,63 @@ export default function Cart() {
     fetchCouponsForCart()
   }, [cart, restaurantId, isQuickCart])
 
-  // Calculate pricing from backend whenever cart, address, or coupon changes
+  // Shared sequenced calculateOrder — main effect, coupons, place-order all share one pipeline.
+  const buildFoodCalculatePayload = ({
+    couponCodeOverride,
+    deliveryModeOverride,
+    includeOrderType = true,
+  } = {}) => {
+    const requestedQuick =
+      deliveryModeOverride != null
+        ? deliveryModeOverride === "quick"
+        : deliveryType === "quick" && !isScheduled
+    const payload = {
+      items: cart.map(mapOrderItem),
+      restaurantId:
+        restaurantData?.restaurantId ||
+        restaurantData?._id ||
+        restaurantId ||
+        undefined,
+      address: defaultAddress,
+      deliveryAddressId: resolvedDeliveryAddressId,
+      couponCode:
+        couponCodeOverride !== undefined
+          ? couponCodeOverride
+          : appliedCoupon?.code || couponCode || undefined,
+      deliveryMode: requestedQuick ? "quick" : "basic",
+      scheduledAt:
+        isScheduled && scheduledDate && scheduledTime
+          ? new Date(`${scheduledDate}T${scheduledTime}:00`).toISOString()
+          : undefined,
+    }
+    if (includeOrderType) {
+      payload.orderType = "food"
+    }
+    return payload
+  }
+
+  const runSequencedFoodCalculate = async (
+    payloadOptions = {},
+    { apply = true } = {},
+  ) => {
+    const payload = buildFoodCalculatePayload(payloadOptions)
+    const result = await pricingRequestControllerRef.current.calculate(payload)
+    if (result.stale) {
+      return { ...result, applied: false }
+    }
+    if (!apply) {
+      return { ...result, applied: false }
+    }
+    const applied = applyCartPricingResult({
+      result,
+      setPricing,
+      setDeliveryType,
+      setQuickFallbackNotice,
+    })
+    return { ...result, ...applied }
+  }
+
+  // Calculate pricing from backend whenever cart, address, coupon, or Quick mode changes
   useEffect(() => {
     const calculatePricing = async () => {
       // Don't calculate here if it's a mixed or quick cart - those components handle their own pricing
@@ -976,37 +1051,29 @@ export default function Cart() {
 
       try {
         setLoadingPricing(true)
-        const items = cart.map(mapOrderItem)
+        const result = await runSequencedFoodCalculate()
+        if (result.stale) return
 
-        const resolvedRestaurantId = restaurantData?.restaurantId || restaurantData?._id || restaurantId || undefined
-        const resolvedCouponCode = appliedCoupon?.code || couponCode || undefined
+        if (!result.pricing) {
+          setPricing(null)
+          return
+        }
 
-        const response = await orderAPI.calculateOrder({
-          orderType: "food",
-          items,
-          restaurantId: resolvedRestaurantId,
-          address: defaultAddress,
-          deliveryAddressId: resolvedDeliveryAddressId,
-          couponCode: resolvedCouponCode
-        })
-
-        if (response?.data?.success && response?.data?.data?.pricing) {
-          setPricing(response.data.data.pricing)
-
-          // Update applied coupon if backend returns one
-          if (response.data.data.pricing.appliedCoupon && !appliedCoupon) {
-            const coupon = availableCoupons.find(c => c.code === response.data.data.pricing.appliedCoupon.code)
-            if (coupon) {
-              setAppliedCoupon(coupon)
-            }
+        // Update applied coupon if backend returns one
+        if (result.pricing.appliedCoupon && !appliedCoupon) {
+          const coupon = availableCoupons.find(
+            (c) => c.code === result.pricing.appliedCoupon.code,
+          )
+          if (coupon) {
+            setAppliedCoupon(coupon)
           }
         }
       } catch (error) {
         // Network errors or 404 errors - silently handle, fallback to frontend calculation
-        if (error.code !== 'ERR_NETWORK' && error.response?.status !== 404) {
+        if (error.code !== "ERR_NETWORK" && error.response?.status !== 404) {
           debugError("Error calculating pricing:", error)
         }
-        // Fallback to frontend calculation if backend fails
+        // Only clear if this is still the latest request failure path (non-stale throws)
         setPricing(null)
       } finally {
         setLoadingPricing(false)
@@ -1014,7 +1081,7 @@ export default function Cart() {
     }
 
     calculatePricing()
-  }, [cart, defaultAddress, appliedCoupon, couponCode, restaurantId])
+  }, [cart, defaultAddress, appliedCoupon, couponCode, restaurantId, deliveryType, isScheduled, scheduledDate, scheduledTime])
 
   // Fetch wallet balance
   useEffect(() => {
@@ -1147,7 +1214,22 @@ export default function Cart() {
     pricing?.deliveryFee !== undefined && pricing?.deliveryFee !== null
       ? Number(pricing.deliveryFee || 0)
       : fallbackDeliveryFee
-  const deliveryFee = baseComputedDeliveryFee + (deliveryType === "fastest" ? 5 : 0)
+  const deliveryFee = baseComputedDeliveryFee
+  const quickDeliveryFee = Number(pricing?.quickDeliveryFee || 0) || 0
+  const quickEtaLabel = formatQuickEtaWindow(pricing?.etaPromise || pricing?.quickDelivery?.etaPromise)
+  const gates = pricing?.quickDelivery?.gates
+  const quickGatesOpen =
+    areQuickGatesOpen(pricing?.quickDelivery) ||
+    pricing?.quickDelivery?.eligible === true
+  // Hide option entirely when Instant + Schedule off and we know all three gates are closed.
+  const showQuickOption =
+    !isScheduled &&
+    (pricing?.quickDelivery == null ||
+      quickGatesOpen ||
+      deliveryType === "quick" ||
+      gates?.globalEnabled ||
+      gates?.restaurantEnabled ||
+      gates?.zoneEnabled)
   const hasDistanceDeliveryBreakdown = Number.isFinite(Number(resolvedDistanceKm))
   const deliveryFeeBreakdownText = hasDistanceDeliveryBreakdown
     ? `${Number(resolvedDistanceKm).toFixed(1)} km delivery`
@@ -1155,7 +1237,7 @@ export default function Cart() {
   const platformFee = pricing?.platformFee ?? Number(feeSettings.platformFee || 0)
   const gstCharges = pricing?.tax ?? Math.round(subtotal * (Number(feeSettings.gstRate || 0) / 100))
   const discount = pricing?.discount ?? (appliedCoupon ? Math.min(appliedCoupon.discount, subtotal * 0.5) : 0)
-  const totalBeforeDiscount = subtotal + deliveryFee + platformFee + gstCharges
+  const totalBeforeDiscount = subtotal + deliveryFee + platformFee + gstCharges + quickDeliveryFee
   const total = pricing?.total ?? (totalBeforeDiscount - discount)
 
   // Calculate other platform total for comparison
@@ -1438,27 +1520,29 @@ export default function Cart() {
     // Validate with backend first; only set applied if backend accepts
     if (cart.length > 0 && hasSavedAddress) {
       try {
-        const items = cart.map(mapOrderItem)
+        const result = await runSequencedFoodCalculate(
+          { couponCodeOverride: coupon.code },
+          { apply: false },
+        )
+        if (result.stale) return
 
-        const response = await orderAPI.calculateOrder({
-          items,
-          restaurantId: restaurantData?.restaurantId || restaurantData?._id || restaurantId || null,
-          address: defaultAddress,
-          deliveryAddressId: resolvedDeliveryAddressId,
-          couponCode: coupon.code
-        })
-
-        const pricingData = response?.data?.data?.pricing
-        if (!pricingData || !pricingData.appliedCoupon) {
+        if (!result.pricing?.appliedCoupon) {
           toast.error(
             isFirstTimeOnlyCoupon(coupon)
               ? "This coupon is only for first-time users"
               : "Coupon not applicable",
           )
+          // Restore sequenced pricing without the rejected coupon code
+          await runSequencedFoodCalculate({ couponCodeOverride: appliedCoupon?.code || couponCode || null })
           return
         }
 
-        setPricing(pricingData)
+        applyCartPricingResult({
+          result,
+          setPricing,
+          setDeliveryType,
+          setQuickFallbackNotice,
+        })
         setAppliedCoupon(coupon)
         setCouponCode(coupon.code)
         setManualCouponCode(coupon.code)
@@ -1487,38 +1571,44 @@ export default function Cart() {
     )
 
     try {
-      const items = cart.map(mapOrderItem)
+      const result = await runSequencedFoodCalculate(
+        { couponCodeOverride: inputCode },
+        { apply: false },
+      )
+      if (result.stale) return
 
-      const response = await orderAPI.calculateOrder({
-        items,
-        restaurantId: restaurantData?.restaurantId || restaurantData?._id || restaurantId || null,
-        address: defaultAddress,
-        deliveryAddressId: resolvedDeliveryAddressId,
-        couponCode: inputCode
-      })
-
-      const pricingData = response?.data?.data?.pricing
-      if (!pricingData) {
+      if (!result.pricing) {
         toast.error("Unable to validate coupon")
+        await runSequencedFoodCalculate({
+          couponCodeOverride: appliedCoupon?.code || couponCode || null,
+        })
         return
       }
 
-      if (!pricingData.appliedCoupon) {
+      if (!result.pricing.appliedCoupon) {
         toast.error(
           isFirstTimeOnlyCoupon(matchedCoupon)
             ? "This coupon is only for first-time users"
             : "Invalid or unavailable coupon code",
         )
         setCouponCode("")
+        await runSequencedFoodCalculate({
+          couponCodeOverride: appliedCoupon?.code || null,
+        })
         return
       }
 
-      setPricing(pricingData)
+      applyCartPricingResult({
+        result,
+        setPricing,
+        setDeliveryType,
+        setQuickFallbackNotice,
+      })
       setCouponCode(inputCode)
       setAppliedCoupon(
         matchedCoupon || {
           code: inputCode,
-          discount: pricingData.appliedCoupon.discount || 0,
+          discount: result.pricing.appliedCoupon.discount || 0,
           minOrder: 0,
           customerGroup: "all",
         },
@@ -1537,22 +1627,10 @@ export default function Cart() {
     setCouponCode("")
     setManualCouponCode("")
 
-    // Recalculate pricing without coupon
+    // Recalculate pricing without coupon (same sequencer as main effect)
     if (cart.length > 0 && hasSavedAddress) {
       try {
-        const items = cart.map(mapOrderItem)
-
-        const response = await orderAPI.calculateOrder({
-          items,
-          restaurantId: restaurantData?.restaurantId || restaurantData?._id || restaurantId || null,
-          address: defaultAddress,
-          deliveryAddressId: resolvedDeliveryAddressId,
-          couponCode: null
-        })
-
-        if (response?.data?.success && response?.data?.data?.pricing) {
-          setPricing(response.data.data.pricing)
-        }
+        await runSequencedFoodCalculate({ couponCodeOverride: null })
       } catch (error) {
         debugError("Error recalculating pricing:", error)
       }
@@ -1605,18 +1683,14 @@ export default function Cart() {
 
       // Always recalculate with backend before placing order so payment matches cart.
       let resolvedPricing = pricing
+      let placeOrderDeliveryType = deliveryType
       try {
-        const pricingResponse = await orderAPI.calculateOrder({
-          orderType: "food",
-          items: cart.map(mapOrderItem),
-          restaurantId: restaurantData?.restaurantId || restaurantData?._id || restaurantId || undefined,
-          address: defaultAddress,
-          deliveryAddressId: resolvedDeliveryAddressId,
-          couponCode: appliedCoupon?.code || couponCode || undefined,
-        })
-        resolvedPricing = pricingResponse?.data?.data?.pricing || resolvedPricing
-        if (resolvedPricing) {
-          setPricing(resolvedPricing)
+        const result = await runSequencedFoodCalculate()
+        if (!result.stale && result.pricing) {
+          resolvedPricing = result.pricing
+          if (result.softFallback) {
+            placeOrderDeliveryType = "standard"
+          }
         }
       } catch (pricingError) {
         debugWarn("Could not refresh pricing before order placement:", pricingError)
@@ -1833,7 +1907,11 @@ export default function Cart() {
         paymentMethod: selectedPaymentMethod,
         // `useZone()` can return `null`. Zod expects string/undefined, not null.
         zoneId: zoneId || undefined,
-        scheduledAt: isScheduled ? new Date(`${scheduledDate}T${scheduledTime}:00`).toISOString() : undefined,
+        scheduledAt: isScheduled
+          ? new Date(`${scheduledDate}T${scheduledTime}:00`).toISOString()
+          : undefined,
+        deliveryMode:
+          !isScheduled && placeOrderDeliveryType === "quick" ? "quick" : "basic",
       };
       // Log final order details (including paymentMethod for COD debugging)
       debugLog('?? FINAL: Sending order to backend with:', {
@@ -1861,11 +1939,34 @@ export default function Cart() {
 
       debugLog("? Order created successfully:", orderResponse.data)
 
-      const { order, razorpay } = orderResponse.data.data
+      const { order, razorpay, quickDeliveryFallback } = orderResponse.data.data || {}
+
+      if (quickDeliveryFallback || (orderPayload.deliveryMode === "quick" && order?.deliveryMode !== "quick")) {
+        setDeliveryType("standard")
+        const fallbackReason =
+          quickDeliveryFallback?.reason ||
+          order?.pricing?.quickDelivery?.reason ||
+          ""
+        showQuickDeliveryUnavailableToast(
+          fallbackReason ||
+            "Quick Delivery unavailable — order placed as Basic",
+        )
+        setQuickFallbackNotice(
+          mapQuickDeliveryReason(fallbackReason) ||
+            "Quick Delivery unavailable — order placed as Basic",
+        )
+      } else if (order?.deliveryMode === "quick") {
+        clearQuickDeliveryToast()
+        setQuickFallbackNotice(null)
+      }
 
       // Cash flow: order placed without online payment
       if (selectedPaymentMethod === "cash") {
-        toast.success("Order placed with Cash on Delivery")
+        toast.success(
+          order?.deliveryMode === "quick"
+            ? "Quick Delivery order placed (Cash on Delivery)"
+            : "Order placed with Cash on Delivery"
+        )
         setPlacedOrderId(order?._id || order?.orderId || order?.id || null)
         setPlacedOrderData(order || null)
         setShowOrderSuccess(true)
@@ -2410,7 +2511,16 @@ export default function Cart() {
                           Live prep to doorstep flow
                         </div>
                         <button
-                          onClick={() => setIsScheduled(!isScheduled)}
+                          type="button"
+                          onClick={() => {
+                            const next = !isScheduled
+                            setIsScheduled(next)
+                            if (next) {
+                              clearQuickDeliveryToast()
+                              setQuickFallbackNotice(null)
+                              setDeliveryType("standard")
+                            }
+                          }}
                           className="rounded-2xl border border-dashed border-[#FF0000]/60 bg-[#FFF2EB] px-3 py-2 text-xs font-bold text-[#FF0000] transition-colors hover:bg-[#ffe6d8] dark:bg-[#FF0000]/10 dark:hover:bg-[#FF0000]/20"
                         >
                           {isScheduled ? "Switch back to express now" : "Want this later? Schedule it"}
@@ -2711,50 +2821,80 @@ export default function Cart() {
                 </div>
                 
                 <div className="flex flex-col gap-0">
-                  {/* Quick Delivery */}
-                  <div
-                    onClick={() => setDeliveryType("fastest")}
-                    className={`flex items-start gap-3 p-3 cursor-pointer rounded-xl transition-all ${
-                      deliveryType === "fastest" ? "bg-gray-50 dark:bg-gray-800/50" : "bg-transparent"
-                    }`}
-                  >
-                    <div className="mt-1">
-                      <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${
-                        deliveryType === "fastest" ? "border-[#118A42]" : "border-gray-300 dark:border-gray-600"
-                      }`}>
-                        {deliveryType === "fastest" && <div className="w-2.5 h-2.5 bg-[#118A42] rounded-full" />}
+                  {/* Food Quick Delivery — mutually exclusive with Schedule */}
+                  {showQuickOption && (
+                    <div
+                      onClick={() => {
+                        if (!quickGatesOpen && deliveryType !== "quick") {
+                          showQuickDeliveryUnavailableToast(
+                            pricing?.quickDelivery?.reason ||
+                              "Quick Delivery not available for this restaurant/zone yet",
+                          )
+                          return
+                        }
+                        clearQuickDeliveryToast()
+                        setQuickFallbackNotice(null)
+                        setDeliveryType("quick")
+                        if (isScheduled) setIsScheduled(false)
+                      }}
+                      className={`flex items-start gap-3 p-3 cursor-pointer rounded-xl transition-all ${
+                        deliveryType === "quick" ? "bg-gray-50 dark:bg-gray-800/50" : "bg-transparent"
+                      } ${!quickGatesOpen && deliveryType !== "quick" ? "opacity-60" : ""}`}
+                    >
+                      <div className="mt-1">
+                        <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${
+                          deliveryType === "quick" ? "border-[#118A42]" : "border-gray-300 dark:border-gray-600"
+                        }`}>
+                          {deliveryType === "quick" && <div className="w-2.5 h-2.5 bg-[#118A42] rounded-full" />}
+                        </div>
                       </div>
-                    </div>
-                    <div className="flex-1 flex flex-col">
-                      <div className="flex items-center justify-between w-full">
-                        <span className={`text-[15px] font-semibold ${deliveryType === "fastest" ? "text-gray-900 dark:text-white" : "text-gray-600 dark:text-gray-400"}`}>
-                          Quick ⚡
+                      <div className="flex-1 flex flex-col">
+                        <div className="flex items-center justify-between w-full">
+                          <span className={`text-[15px] font-semibold ${deliveryType === "quick" ? "text-gray-900 dark:text-white" : "text-gray-600 dark:text-gray-400"}`}>
+                            Quick Delivery
+                          </span>
+                          <span className="text-[15px] font-medium text-gray-700 dark:text-gray-300">
+                            {quickDeliveryFee > 0
+                              ? `+${formatQuickCharge(quickDeliveryFee)}`
+                              : pricing?.quickDelivery?.charge
+                                ? `+${formatQuickCharge(pricing.quickDelivery.charge)}`
+                                : "Server priced"}
+                          </span>
+                        </div>
+                        <span className="text-xs text-gray-400 mt-0.5">
+                          {quickEtaLabel
+                            ? `Promise ${quickEtaLabel}`
+                            : "Faster delivery when restaurant & zone enable Quick"}
                         </span>
-                        <span className="text-[15px] font-medium text-gray-700 dark:text-gray-300">+{RUPEE_SYMBOL}5</span>
                       </div>
-                      <span className="text-xs text-gray-400 mt-0.5">Add address to check delivery time</span>
                     </div>
-                  </div>
+                  )}
 
                   {/* Basic Delivery */}
                   <div
-                    onClick={() => setDeliveryType("standard")}
+                    onClick={() => {
+                      clearQuickDeliveryToast()
+                      setQuickFallbackNotice(null)
+                      setDeliveryType("standard")
+                    }}
                     className={`flex items-start gap-3 p-3 cursor-pointer rounded-xl transition-all ${
-                      deliveryType === "standard" ? "bg-gray-50 dark:bg-gray-800/50" : "bg-transparent"
+                      deliveryType === "standard" || isScheduled ? "bg-gray-50 dark:bg-gray-800/50" : "bg-transparent"
                     }`}
                   >
                     <div className="mt-1">
                       <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${
-                        deliveryType === "standard" ? "border-[#118A42]" : "border-gray-300 dark:border-gray-600"
+                        deliveryType === "standard" || isScheduled ? "border-[#118A42]" : "border-gray-300 dark:border-gray-600"
                       }`}>
-                        {deliveryType === "standard" && <div className="w-2.5 h-2.5 bg-[#118A42] rounded-full" />}
+                        {(deliveryType === "standard" || isScheduled) && <div className="w-2.5 h-2.5 bg-[#118A42] rounded-full" />}
                       </div>
                     </div>
                     <div className="flex-1 flex flex-col">
-                      <span className={`text-[15px] font-semibold ${deliveryType === "standard" ? "text-gray-900 dark:text-white" : "text-gray-600 dark:text-gray-400"}`}>
+                      <span className={`text-[15px] font-semibold ${deliveryType === "standard" || isScheduled ? "text-gray-900 dark:text-white" : "text-gray-600 dark:text-gray-400"}`}>
                         Basic
                       </span>
-                      <span className="text-xs text-gray-400 mt-0.5">Add address to check delivery time</span>
+                      <span className="text-xs text-gray-400 mt-0.5">
+                        {isScheduled ? "Schedule uses Basic delivery" : "Standard delivery fee"}
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -3004,6 +3144,14 @@ export default function Cart() {
                         </span>
                       </div>
                     </div>
+                    {quickDeliveryFee > 0 && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-600 dark:text-gray-400">Quick Delivery</span>
+                        <span className="text-gray-800 dark:text-gray-200 font-medium">
+                          {RUPEE_SYMBOL}{quickDeliveryFee.toFixed(0)}
+                        </span>
+                      </div>
+                    )}
 
                     {platformFee > 0 && (
                       <div className="flex justify-between text-sm">

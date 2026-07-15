@@ -105,6 +105,34 @@ export default function FilterPanel({
             </div>
           )}
 
+          {/* Food Quick Delivery mode (deliveryMode) — distinct from QC orderType */}
+          <div>
+            <label className="block text-sm font-semibold text-slate-700 mb-2">
+              Food Delivery Mode
+            </label>
+            <div className="flex flex-wrap gap-2">
+              {[
+                { key: "", label: "All" },
+                { key: "basic", label: "Basic" },
+                { key: "quick", label: "Quick" },
+                { key: "sla_breached", label: "Quick SLA Breach" },
+              ].map((opt) => (
+                <button
+                  key={opt.key || "all-mode"}
+                  type="button"
+                  onClick={() => setFilters((prev) => ({ ...prev, deliveryMode: opt.key }))}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                    (filters.deliveryMode || "") === opt.key
+                      ? "bg-emerald-500 text-white shadow-md"
+                      : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
           {/* Amount Range */}
           <div className="grid grid-cols-2 gap-4">
             <div>

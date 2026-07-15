@@ -54,16 +54,8 @@ export function resolveFirstTimeRestaurantScope(coupon, resolvedRestaurantObject
         : null;
 }
 
-export async function resolveRestaurantObjectId(restaurantId) {
-    if (!restaurantId) return null;
-    const idStr = String(restaurantId).trim();
-    if (mongoose.Types.ObjectId.isValid(idStr)) {
-        return new mongoose.Types.ObjectId(idStr);
-    }
-    const { FoodRestaurant } = await import('../restaurant/models/restaurant.model.js');
-    const rest = await FoodRestaurant.findOne({ restaurantId: idStr }).select('_id restaurantId').lean();
-    return rest?._id ? new mongoose.Types.ObjectId(String(rest._id)) : null;
-}
+/** @deprecated Prefer importing from restaurantIdentity.util.js — kept as re-export for BC. */
+export { resolveRestaurantObjectId } from './restaurantIdentity.util.js';
 
 export function normalizeDiscountType(discountType) {
     const value = String(discountType || '').toLowerCase();

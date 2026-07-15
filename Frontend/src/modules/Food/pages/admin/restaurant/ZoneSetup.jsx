@@ -242,6 +242,14 @@ export default function ZoneSetup() {
                       {zone.isActive ? "Active" : "Inactive"}
                     </span>
                   </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-600">Quick Delivery:</span>
+                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                      zone.quickDeliveryEnabled === true ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-800"
+                    }`}>
+                      {zone.quickDeliveryEnabled === true ? "Enabled" : "Off"}
+                    </span>
+                  </div>
                   {zone.coordinates && zone.coordinates.length > 0 && (
                     <div className="flex items-center justify-between">
                       <span className="text-slate-600">Points:</span>
