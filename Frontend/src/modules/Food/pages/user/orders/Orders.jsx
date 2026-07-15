@@ -5,6 +5,12 @@ import { orderAPI } from "@food/api"
 import { useCart } from "@food/context/CartContext"
 import { toast } from "sonner"
 import { getCompanyNameAsync } from "@common/utils/businessSettings"
+import {
+  formatScheduledAtParts,
+  formatScheduleCountdown,
+  parseValidDate,
+} from "@food/utils/scheduleTime"
+import { isFoodQuickOrder, formatQuickEtaWindow } from "@food/utils/quickDelivery"
 const debugLog = (...args) => { }
 const debugWarn = (...args) => { }
 const debugError = (...args) => { }
@@ -45,7 +51,7 @@ export default function Orders() {
     }
   }, [shownRatingForOrders])
 
-  // Calculate countdown for an order
+  // Calculate countdown for an order (ETA for active; schedule remaining for scheduled)
   const calculateCountdown = (order) => {
     if (!order ||
       order.status === 'delivered' ||
@@ -53,12 +59,22 @@ export default function Orders() {
       return null
     }
 
+    if (order.status === 'scheduled') {
+      const scheduled = parseValidDate(order.scheduledAt)
+      if (!scheduled) return null
+      return formatScheduleCountdown(scheduled)
+    }
+
     const createdAt = new Date(order.createdAt)
     const now = new Date()
     const elapsedMinutes = Math.floor((now - createdAt) / (1000 * 60))
 
-    // Get max ETA (use eta.max if available, otherwise estimatedDeliveryTime)
-    const maxETA = order.eta?.max || order.estimatedDeliveryTime || 30
+    // Prefer Food Quick promise window when present
+    const maxETA =
+      order.etaPromise?.max ||
+      order.eta?.max ||
+      order.estimatedDeliveryTime ||
+      30
     const remainingMinutes = Math.max(0, maxETA - elapsedMinutes)
 
     return remainingMinutes > 0 ? remainingMinutes : null
@@ -291,6 +307,8 @@ export default function Orders() {
               status: isRestaurantCancelled ? 'restaurant_cancelled' : getOrderStatus({ ...order, status: backendStatus }),
               originalStatus: originalStatus, // Keep original status for reference
               createdAt: createdAt.toISOString(),
+              scheduledAt: order.scheduledAt || null,
+              activatedAt: order.activatedAt || null,
               address: order.address || order.deliveryAddress || {},
               items: (order.items || []).map(item => ({
                 itemId: item.itemId || item._id || item.id,
@@ -327,6 +345,9 @@ export default function Orders() {
               isUserCancelled: isUserCancelled,
               cancelledBy: order.cancelledBy,
               eta: order.eta || { min: order.estimatedDeliveryTime || 30, max: order.estimatedDeliveryTime || 30 },
+              etaPromise: order.etaPromise || null,
+              deliveryMode: order.deliveryMode || "basic",
+              sla: order.sla || null,
               estimatedDeliveryTime: order.estimatedDeliveryTime || 30,
               preparationTime: order.preparationTime || 0,
               deliveredAt: order.deliveredAt || null,
@@ -770,7 +791,22 @@ Order again from this restaurant in the ${companyName} app.`
                     </div>
 
                     <div className="flex-1 min-w-0">
-                      <h3 className="font-semibold text-gray-800 dark:text-white text-lg leading-tight">{order.restaurant}</h3>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h3 className="font-semibold text-gray-800 dark:text-white text-lg leading-tight">{order.restaurant}</h3>
+                        {isFoodQuickOrder(order) && (
+                          <span className="inline-flex items-center rounded-md bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide">
+                            Quick
+                            {formatQuickEtaWindow(order.etaPromise)
+                              ? ` · ${formatQuickEtaWindow(order.etaPromise)}`
+                              : ""}
+                          </span>
+                        )}
+                        {order.sla?.breached && Number(order.sla?.compensationAmount) > 0 && (
+                          <span className="inline-flex items-center rounded-md bg-amber-50 text-amber-800 border border-amber-200 px-1.5 py-0.5 text-[10px] font-semibold">
+                            SLA credit ₹{Math.round(Number(order.sla.compensationAmount))}
+                          </span>
+                        )}
+                      </div>
                       <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
                         Order ID: <span className="font-semibold text-gray-700 dark:text-gray-200">{order.orderId || order.id}</span>
                       </p>
@@ -966,19 +1002,32 @@ Order again from this restaurant in the ${companyName} app.`
                     {isCancelled && !isRestaurantCancelled && !isUserCancelled && (
                       <p className="text-xs font-medium text-gray-500 mt-1">Cancelled</p>
                     )}
-                    {order.status === 'scheduled' && (
-                      <div className="flex items-center gap-1.5 mt-1.5 p-2 bg-blue-50 border border-blue-100 rounded-lg w-fit">
-                        <Calendar className="w-3.5 h-3.5 text-blue-600" />
-                        <span className="text-[10px] font-bold text-blue-700 uppercase tracking-tight">
-                          Scheduled for {new Date(order.scheduledAt).toLocaleString("en-US", {
-                            day: "numeric",
-                            month: "short",
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}
+                    {order.status === 'scheduled' && (() => {
+                      const parts = formatScheduledAtParts(order.scheduledAt)
+                      const countdown = countdowns[order.id]
+                      if (!parts) return null
+                      return (
+                      <div className="flex flex-col gap-0.5 mt-1.5 p-2 bg-blue-50 border border-blue-100 rounded-lg w-fit">
+                        <div className="flex items-center gap-1.5">
+                          <Calendar className="w-3.5 h-3.5 text-blue-600" />
+                          <span className="text-[10px] font-bold text-blue-700 uppercase tracking-tight">
+                            Scheduled For
+                          </span>
+                        </div>
+                        <span className="text-xs font-semibold text-blue-800 pl-5">
+                          {parts.dateLabel}
                         </span>
+                        <span className="text-xs font-semibold text-blue-800 pl-5">
+                          {parts.timeLabel}
+                        </span>
+                        {countdown != null && (
+                          <span className="text-[10px] font-medium text-blue-600 pl-5 mt-0.5">
+                            {typeof countdown === "string" ? countdown : `${countdown} min left`}
+                          </span>
+                        )}
                       </div>
-                    )}
+                      )
+                    })()}
                   </div>
                   <div className="flex items-center ml-4">
                     <Link to={`/user/orders/${order.id}`}>

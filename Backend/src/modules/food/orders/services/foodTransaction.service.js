@@ -1,6 +1,7 @@
 import { FoodTransaction } from '../models/foodTransaction.model.js';
 import { resolveDiscountSplitByCoupon } from '../../shared/discountSplit.util.js';
 import { loadActiveFeeSettings, calculateRiderEarning } from '../../shared/delivery-fee.util.js';
+import { computePlatformNetProfitWithQuickFreeze } from '../utils/quickFinance.util.js';
 import mongoose from 'mongoose';
 import { ValidationError } from '../../../../core/auth/errors.js';
 
@@ -88,6 +89,37 @@ export async function createInitialTransaction(order) {
     }
 
     restaurantNet = Math.max(0, restaurantNet - restaurantDiscountShare);
+    const quickDeliveryFee = Number(order.pricing?.quickDeliveryFee || 0) || 0;
+    const quickPlatformShare = Number(order.pricing?.quickPlatformShare || 0) || 0;
+    const quickRiderBonus = Number(order.pricing?.quickRiderBonus || 0) || 0;
+    const quickRiderShare =
+      Number(order.pricing?.quickRiderShare ?? order.pricing?.quickRiderBonus ?? 0) || 0;
+    // Missing restaurant share on old orders ⇒ 0 (BC). Never fold into restaurantShare at create.
+    const quickRestaurantShare = Number(order.pricing?.quickRestaurantShare || 0) || 0;
+    const quickSharePcts = {
+      platform: Number(order.pricing?.quickSharePcts?.platform || 0) || 0,
+      rider: Number(order.pricing?.quickSharePcts?.rider || 0) || 0,
+      restaurant: Number(order.pricing?.quickSharePcts?.restaurant || 0) || 0,
+    };
+    const quickFinanceVersion = String(order.pricing?.quickFinanceVersion || '');
+    /**
+     * FINANCE FREEZE — Food Quick Charge:
+     * Platform gets quickPlatformShare only (never full quickDeliveryFee).
+     * Rider share rides on order.riderEarning (via quickRiderBonus).
+     * Restaurant Quick Share is snapshotted here but NOT added to restaurantShare
+     * until successful delivery (realizeFoodQuickRestaurantShare).
+     * riderShare on the order already includes quickRiderBonus — use base rider for P&L.
+     */
+    const baseRiderShare = Math.max(0, (Number(riderShare) || 0) - quickRiderBonus);
+    let platformNetProfit = computePlatformNetProfitWithQuickFreeze({
+      deliveryFee: totalDeliveryFee,
+      platformFee: order.pricing?.platformFee || 0,
+      restaurantCommission,
+      sellerCommission,
+      quickPlatformShare,
+      baseRiderShare,
+      adminDiscountShare,
+    });
     const taxAmount = Number(order.pricing?.tax || 0) || 0;
     // GST collected from customer is attributed to platform for remittance/reporting.
     let platformNetProfit =
@@ -148,11 +180,19 @@ export async function createInitialTransaction(order) {
             discount: Number(order.pricing?.discount || 0) || 0,
             restaurantCommissionPercentage: Number(order.pricing?.restaurantCommissionPercentage || 0) || 0,
             restaurantCommission: Number(order.pricing?.restaurantCommission || 0) || 0,
+            quickDeliveryFee,
+            quickPlatformShare,
+            quickRiderBonus,
+            quickRiderShare,
+            quickRestaurantShare,
+            quickSharePcts,
+            quickFinanceVersion,
             total: Number(order.pricing?.total || 0) || 0,
             currency: String(order.pricing?.currency || order.currency || 'INR'),
         },
         amounts: {
             totalCustomerPaid,
+            // Food economics only at create — Quick Restaurant Share realized post-delivery.
             restaurantShare: Math.max(0, restaurantNet),
             restaurantCommission,
             sellerShare: Math.max(0, sellerShare),
@@ -164,6 +204,14 @@ export async function createInitialTransaction(order) {
             restaurantDiscountShare,
             discountAdminBearPercentage,
             discountRestaurantBearPercentage,
+            quickDeliveryFee,
+            quickPlatformShare,
+            quickRiderBonus,
+            quickRiderShare,
+            quickRestaurantShare,
+            quickRestaurantShareRealized: false,
+            quickSharePcts,
+            quickFinanceVersion,
         },
         gateway: {
             razorpayOrderId: order.payment?.razorpay?.orderId,
@@ -192,6 +240,49 @@ export async function createInitialTransaction(order) {
 }
 
 /**
+ * Realize frozen Restaurant Quick Share into existing restaurantShare settlement
+ * component after successful delivery. Idempotent — never double-credits.
+ * Never writes restaurant wallet. Missing/0 share (old orders) ⇒ no-op.
+ */
+export async function realizeFoodQuickRestaurantShare(order) {
+    const orderId = order?._id || order;
+    if (!orderId) return null;
+
+    const share =
+        Math.round(
+            (Number(
+                order?.pricing?.quickRestaurantShare ??
+                    order?.amounts?.quickRestaurantShare ??
+                    0,
+            ) || 0) * 100,
+        ) / 100;
+
+    if (!(share > 0)) return null;
+
+    const updated = await FoodTransaction.findOneAndUpdate(
+        {
+            orderId,
+            'amounts.quickRestaurantShareRealized': { $ne: true },
+        },
+        {
+            $inc: { 'amounts.restaurantShare': share },
+            $set: {
+                'amounts.quickRestaurantShareRealized': true,
+                'amounts.quickRestaurantShare': share,
+            },
+            $push: {
+                history: {
+                    kind: 'quick_restaurant_share_realized',
+                    amount: share,
+                    at: new Date(),
+                    note: 'Restaurant Quick Share realized after successful delivery (settlement component only)',
+                },
+            },
+        },
+        { new: true },
+    );
+
+    return updated;
  * True when the linked order is delivered and eligible for restaurant payout.
  */
 export function isOrderDeliveredForSettlement(orderLike) {

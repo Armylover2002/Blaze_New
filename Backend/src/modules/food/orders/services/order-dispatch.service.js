@@ -589,6 +589,8 @@ async function runDispatchHunt({
   resolvePartners,
   persistOffers,
   alertLabel,
+  /** Food Quick Delivery knobs — only when order.deliveryMode==="quick". Basic untouched. */
+  foodQuickDispatch = null,
 }) {
   void enforceCashLimitForAllOnlinePartners().catch((err) =>
     logger.warn(`[Dispatch] Pre-dispatch cash-limit sweep failed: ${err.message}`),
@@ -599,8 +601,24 @@ async function runDispatchHunt({
   if (attempt === 3) maxKm = 40;
   if (attempt >= 4) maxKm = 60;
 
-  const isPhase2 = attempt >= 3;
-  const isPhase3 = attempt >= 6;
+  let offerTimeoutMs = 60000;
+  let maxWaves = Number.POSITIVE_INFINITY;
+  if (foodQuickDispatch && typeof foodQuickDispatch === "object") {
+    const start = Math.max(1, Number(foodQuickDispatch.startKm) || 8);
+    const cap = Math.max(start, Number(foodQuickDispatch.maxKm) || 20);
+    maxWaves = Math.max(1, Number(foodQuickDispatch.maxWaves) || 3);
+    const wave2 = Math.min(cap, start + 4);
+    const wave3 = Math.min(cap, start + 10);
+    const waves = [start, wave2, wave3];
+    maxKm = waves[Math.min(Math.max(attempt, 1) - 1, waves.length - 1)];
+    if (attempt > maxWaves) maxKm = cap;
+    offerTimeoutMs = Math.max(15000, (Number(foodQuickDispatch.timeoutSec) || 45) * 1000);
+  }
+
+  const isPhase2 = foodQuickDispatch ? attempt >= 2 : attempt >= 3;
+  const isPhase3 = foodQuickDispatch
+    ? attempt >= Math.max(3, maxWaves + 1)
+    : attempt >= 6;
   let { partners, source } = await resolvePartners(maxKm);
   const geoPartnerPoolCount = partners?.length || 0;
 
@@ -632,7 +650,10 @@ async function runDispatchHunt({
 
   const eligible = partners.filter((p) => !offeredIds.includes(p.partnerId.toString()));
   const io = getIO();
-  const payload = await buildPayload(source);
+  const payload = {
+    ...(await buildPayload(source)),
+    offerTimeoutSec: Math.round(offerTimeoutMs / 1000),
+  };
   let socketEmitCount = 0;
 
   if (!eligible.length) {
@@ -663,7 +684,7 @@ async function runDispatchHunt({
     }
 
     const retryJob = await addOrderJob(buildDispatchJobPayload(documentType, documentMongoId, attempt + 1), {
-      delay: 30000,
+      delay: foodQuickDispatch ? offerTimeoutMs : 30000,
     });
     if (!retryJob) {
       logger.warn(
@@ -717,12 +738,14 @@ async function runDispatchHunt({
         { ownerType: "DELIVERY_PARTNER", ownerId: p.partnerId },
         {
           title: payload.tripType === "return_pickup" ? "New return pickup!" : "New order assigned!",
-          body: `You have 60 seconds to accept ${alertLabel} ${payload.orderId || documentMongoId}.`,
+          body: `You have ${Math.round(offerTimeoutMs / 1000)} seconds to accept ${alertLabel} ${payload.orderId || documentMongoId}.`,
           data: {
             type: "new_order",
             documentType,
             orderId: documentMongoId,
             tripType: payload.tripType || "forward",
+            deliveryMode: payload.deliveryMode || "basic",
+            isFoodQuickDelivery: payload.isFoodQuickDelivery === true,
           },
         },
       );
@@ -739,7 +762,7 @@ async function runDispatchHunt({
   await persistOffers(offeredToEntries);
 
   const retryJob = await addOrderJob(buildDispatchJobPayload(documentType, documentMongoId, attempt + 1), {
-    delay: 60000,
+    delay: offerTimeoutMs,
   });
   if (!retryJob) {
     logger.warn(
@@ -770,10 +793,10 @@ async function runDispatchHunt({
 async function tryAutoAssignForwardOrder(orderId, options = {}) {
   const attempt = options.attempt || 1;
   const lockTimeout = 55000;
+  // Never auto-assign while orderStatus is scheduled (hold until activation → placed → restaurant accept).
   const activeOrderStatuses = [
     "created",
     "placed",
-    "scheduled",
     "confirmed",
     "preparing",
     "ready_for_pickup",
@@ -806,18 +829,52 @@ async function tryAutoAssignForwardOrder(orderId, options = {}) {
   try {
     const offeredIds = (order.dispatch?.offeredTo || []).map((o) => o.partnerId.toString());
     const isQuickOrder = order.orderType === "quick";
+    const isFoodQuickDelivery = String(order.deliveryMode || "").toLowerCase() === "quick";
     const quickSellerId =
       options.quickSellerId ||
       order.items?.find((item) => item?.type === "quick" && item?.sourceId)?.sourceId ||
       order.pickupPoints?.find((point) => point?.pickupType === "quick" && point?.sourceId)?.sourceId;
     const dispatchSourceId = isQuickOrder ? quickSellerId : order.restaurantId;
 
+    let foodQuickDispatch = null;
+    if (isFoodQuickDelivery && !isQuickOrder) {
+      try {
+        const { FoodFeeSettings } = await import("../../admin/models/feeSettings.model.js");
+        const { normalizeQuickDeliverySettings } = await import(
+          "../utils/quickDeliveryConstants.js"
+        );
+        const feeDoc = await FoodFeeSettings.findOne({ isActive: { $ne: false } })
+          .sort({ createdAt: -1 })
+          .lean();
+        const q = normalizeQuickDeliverySettings(feeDoc?.quickDelivery);
+        // Rider hunt uses maxRadiusKm (search radius), NOT maxDistanceKm
+        // (customer eligibility). Do not merge these concepts.
+        foodQuickDispatch = {
+          startKm: q.dispatchStartRadiusKm,
+          maxKm: q.maxRadiusKm,
+          timeoutSec: q.dispatchTimeoutSec,
+          maxWaves: q.maxDispatchWaves,
+        };
+        try {
+          await FoodOrder.updateOne(
+            { _id: order._id },
+            { $set: { "dispatch.offerTimeoutSec": Number(q.dispatchTimeoutSec) || 45 } },
+          );
+        } catch {
+          /* non-blocking */
+        }
+      } catch (err) {
+        logger.warn(`[Dispatch] Food Quick knobs load failed: ${err.message}`);
+      }
+    }
+
     const result = await runDispatchHunt({
       documentType: DISPATCH_DOCUMENT_TYPES.FORWARD_ORDER,
       documentMongoId: order._id.toString(),
       attempt,
       offeredIds,
-      alertLabel: "Order",
+      alertLabel: isFoodQuickDelivery ? "Quick Order" : "Order",
+      foodQuickDispatch,
       buildPayload: async (source) => buildDeliverySocketPayload(order, source),
       resolvePartners: (maxKm) =>
         listNearbyOnlineDeliveryPartners(dispatchSourceId, {

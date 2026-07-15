@@ -34,6 +34,12 @@ function runSyncPaymentProcessor(action, payload = {}) {
 }
 
 /**
+ * Fire-and-forget BullMQ enqueue. Third argument is BullMQ job options (e.g. { delay, jobId }).
+ * ADR-FOOD-001-Q-BULL
+ */
+export function enqueueOrderEvent(action, payload = {}, jobOptions = {}) {
+  try {
+    void addOrderJob({ action, ...payload }, jobOptions).catch((err) => {
  * Fire-and-forget enqueue for order lifecycle events.
  * Payment settlement actions go to the payment queue when BullMQ is enabled.
  */
@@ -437,6 +443,24 @@ export function buildDeliverySocketPayload(orderDoc, restaurantDoc = null) {
     dispatch: order?.dispatch,
     createdAt: order?.createdAt,
     updatedAt: order?.updatedAt,
+    // Food Quick Delivery (deliveryMode) — distinct from QC orderType:quick
+    deliveryMode: String(order?.deliveryMode || 'basic'),
+    isFoodQuickDelivery: String(order?.deliveryMode || '').toLowerCase() === 'quick',
+    quickRiderBonus: Number(order?.pricing?.quickRiderBonus || 0) || 0,
+    quickRiderShare:
+      Number(
+        order?.pricing?.quickRiderShare ?? order?.pricing?.quickRiderBonus ?? 0,
+      ) || 0,
+    quickRestaurantShare: Number(order?.pricing?.quickRestaurantShare || 0) || 0,
+    quickDeliveryFee: Number(order?.pricing?.quickDeliveryFee || 0) || 0,
+    quickPlatformShare: Number(order?.pricing?.quickPlatformShare || 0) || 0,
+    quickSharePcts: order?.pricing?.quickSharePcts || null,
+    quickFinanceVersion: String(order?.pricing?.quickFinanceVersion || ''),
+    etaPromise: order?.etaPromise || null,
+    offerTimeoutSec:
+      String(order?.deliveryMode || '').toLowerCase() === 'quick'
+        ? Number(order?.dispatch?.offerTimeoutSec || 45) || 45
+        : Number(order?.dispatch?.offerTimeoutSec || 60) || 60,
   };
 
   if (isQuickOrder && seller?._id) {
@@ -473,6 +497,8 @@ export function buildDeliverySocketPayload(orderDoc, restaurantDoc = null) {
 }
 
 export function canExposeOrderToRestaurant(orderLike) {
+  // Hold restaurant exposure while still scheduled (mirror order.service).
+  if (String(orderLike?.orderStatus || '').toLowerCase() === 'scheduled') return false;
   const method = String(orderLike?.payment?.method || "").toLowerCase();
   const status = String(orderLike?.payment?.status || "").toLowerCase();
   if (["cash", "wallet"].includes(method)) return true;
@@ -482,6 +508,7 @@ export function canExposeOrderToRestaurant(orderLike) {
 export async function notifyRestaurantNewOrder(orderDoc) {
   try {
     if (!orderDoc || !canExposeOrderToRestaurant(orderDoc)) return;
+    if (String(orderDoc.orderStatus || '').toLowerCase() === 'scheduled') return;
 
     const io = getIO();
     if (io) {
@@ -496,15 +523,21 @@ export async function notifyRestaurantNewOrder(orderDoc) {
       io.to(rooms.restaurant(orderDoc.restaurantId)).emit("new_order", payload);
     }
 
+    const isFoodQuick =
+      String(orderDoc.deliveryMode || "").toLowerCase() === "quick";
     await notifyOwnersSafely(
       [{ ownerType: "RESTAURANT", ownerId: orderDoc.restaurantId }],
       {
-        title: "New order received",
-        body: `Order #${orderDoc.order_id || orderDoc._id} is waiting for review.`,
+        title: isFoodQuick ? "New Quick Delivery order" : "New order received",
+        body: isFoodQuick
+          ? `PRIORITY: Quick order #${orderDoc.orderId || orderDoc.order_id || orderDoc._id} — prep ASAP.`
+          : `Order #${orderDoc.order_id || orderDoc._id} is waiting for review.`,
         data: {
           type: "new_order",
           orderId: orderDoc._id.toString(),
           orderMongoId: orderDoc._id?.toString?.() || "",
+          deliveryMode: String(orderDoc.deliveryMode || "basic"),
+          isFoodQuickDelivery: isFoodQuick,
           link: `/restaurant/orders/${orderDoc._id?.toString?.() || ""}`,
         },
       },
@@ -516,6 +549,8 @@ export async function notifyRestaurantNewOrder(orderDoc) {
 
 export const STATUS_PRIORITY = {
   created: 10,
+  scheduled: 12,
+  placed: 15,
   confirmed: 20,
   preparing: 30,
   ready_for_pickup: 40,
@@ -526,6 +561,7 @@ export const STATUS_PRIORITY = {
   cancelled_by_user: 100,
   cancelled_by_restaurant: 100,
   cancelled_by_admin: 100,
+  cancelled_by_system: 100,
 };
 
 /**

@@ -25,6 +25,10 @@ export default function DeliverySettings() {
   const [showSuccessToast, setShowSuccessToast] = useState(false)
   const [toastMessage, setToastMessage] = useState("")
   const [savingStatus, setSavingStatus] = useState(false)
+  const [quickDeliveryEnabled, setQuickDeliveryEnabled] = useState(false)
+  const [savingQuickDelivery, setSavingQuickDelivery] = useState(false)
+  const [kitchenPrepMinutes, setKitchenPrepMinutes] = useState("")
+  const [savingKitchenPrep, setSavingKitchenPrep] = useState(false)
 
   // Lenis smooth scrolling
   useEffect(() => {
@@ -70,11 +74,17 @@ export default function DeliverySettings() {
         const restaurant =
           response?.data?.data?.restaurant ||
           response?.data?.restaurant ||
+          response?.data?.data ||
           null
         const nextStatus = restaurant?.isAcceptingOrders === true
         if (!cancelled) {
           setDeliveryStatus(nextStatus)
           syncStatusLocally(nextStatus)
+          setQuickDeliveryEnabled(restaurant?.quickDeliveryEnabled === true)
+          const prep = restaurant?.kitchenPrepMinutes
+          setKitchenPrepMinutes(
+            prep == null || prep === "" ? "" : String(Math.round(Number(prep))),
+          )
         }
       } catch (error) {
         try {
@@ -201,6 +211,67 @@ export default function DeliverySettings() {
     setPendingStatus(deliveryStatus)
   }
 
+  const handleQuickDeliveryChange = async (checked) => {
+    if (savingQuickDelivery) return
+    const previous = quickDeliveryEnabled
+    const next = Boolean(checked)
+    setQuickDeliveryEnabled(next)
+    setSavingQuickDelivery(true)
+    try {
+      await restaurantAPI.updateProfile({ quickDeliveryEnabled: next })
+      showToast(
+        next
+          ? "Quick Delivery enabled for this restaurant"
+          : "Quick Delivery disabled for this restaurant"
+      )
+    } catch (error) {
+      setQuickDeliveryEnabled(previous)
+      debugError("Error updating Quick Delivery:", error)
+      showToast(error?.response?.data?.message || "Failed to update Quick Delivery")
+    } finally {
+      setSavingQuickDelivery(false)
+    }
+  }
+
+  const handleSaveKitchenPrep = async () => {
+    if (savingKitchenPrep) return
+    const raw = String(kitchenPrepMinutes || "").trim()
+    if (raw === "") {
+      setSavingKitchenPrep(true)
+      try {
+        await restaurantAPI.updateProfile({ kitchenPrepMinutes: null })
+        setKitchenPrepMinutes("")
+        showToast("Kitchen prep cleared — platform default will be used")
+      } catch (error) {
+        debugError("Error clearing kitchen prep:", error)
+        showToast(error?.response?.data?.message || "Failed to clear kitchen prep")
+      } finally {
+        setSavingKitchenPrep(false)
+      }
+      return
+    }
+    const n = Number(raw)
+    if (!Number.isFinite(n) || !Number.isInteger(n) || n < 1 || n > 90) {
+      showToast("Kitchen prep must be a whole number between 1 and 90 minutes")
+      return
+    }
+    setSavingKitchenPrep(true)
+    try {
+      const response = await restaurantAPI.updateProfile({ kitchenPrepMinutes: n })
+      const saved =
+        response?.data?.data?.restaurant?.kitchenPrepMinutes ??
+        response?.data?.restaurant?.kitchenPrepMinutes ??
+        n
+      setKitchenPrepMinutes(String(Math.round(Number(saved))))
+      showToast("Kitchen preparation time saved")
+    } catch (error) {
+      debugError("Error saving kitchen prep:", error)
+      showToast(error?.response?.data?.message || "Failed to save kitchen prep")
+    } finally {
+      setSavingKitchenPrep(false)
+    }
+  }
+
   return (
     <div className="min-h-screen bg-gray-100 flex flex-col">
       {/* Header */}
@@ -284,6 +355,72 @@ export default function DeliverySettings() {
                   disabled={savingStatus}
                   className="ml-4 data-[state=checked]:bg-green-500 data-[state=unchecked]:bg-gray-300"
                 />
+              </div>
+            </CardContent>
+          </Card>
+        </motion.div>
+
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3, delay: 0.05 }}
+          className="mt-4"
+        >
+          <Card className="bg-white border-gray-200 shadow-sm">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between gap-4">
+                <div className="flex-1">
+                  <p className="text-base font-bold text-gray-900 mb-1">Quick Delivery</p>
+                  <p className="text-sm text-gray-500">
+                    Opt-in for this restaurant. Customers see Quick only when Admin Global Fee Settings and Zone are also enabled.
+                  </p>
+                </div>
+                <Switch
+                  checked={quickDeliveryEnabled}
+                  onCheckedChange={handleQuickDeliveryChange}
+                  disabled={savingQuickDelivery}
+                  className="ml-4 shrink-0 data-[state=checked]:bg-green-500 data-[state=unchecked]:bg-gray-300"
+                />
+              </div>
+            </CardContent>
+          </Card>
+        </motion.div>
+
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3, delay: 0.08 }}
+          className="mt-4"
+        >
+          <Card className="bg-white border-gray-200 shadow-sm">
+            <CardContent className="p-4 space-y-3">
+              <div>
+                <p className="text-base font-bold text-gray-900 mb-1">Kitchen preparation (minutes)</p>
+                <p className="text-sm text-gray-500">
+                  This is average kitchen preparation time only. Do not include rider travel or delivery time.
+                  Leave blank to use the platform default from Admin Fee Settings.
+                </p>
+              </div>
+              <div className="flex items-center gap-3">
+                <input
+                  type="number"
+                  min={1}
+                  max={90}
+                  step={1}
+                  value={kitchenPrepMinutes}
+                  onChange={(e) => setKitchenPrepMinutes(e.target.value)}
+                  placeholder="Platform default"
+                  className="w-32 px-3 py-2 rounded-lg border border-gray-300 text-sm"
+                  disabled={savingKitchenPrep}
+                />
+                <button
+                  type="button"
+                  onClick={handleSaveKitchenPrep}
+                  disabled={savingKitchenPrep}
+                  className="px-4 py-2 rounded-lg bg-[#118A42] text-white text-sm font-semibold disabled:opacity-60"
+                >
+                  {savingKitchenPrep ? "Saving…" : "Save"}
+                </button>
               </div>
             </CardContent>
           </Card>

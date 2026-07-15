@@ -71,6 +71,8 @@ export function validateCalculateOrderDto(body) {
         zoneId: z.string().optional(),
         couponCode: z.string().optional(),
         deliveryFleet: z.string().optional(),
+        /** Food Instant delivery mode. Do not confuse with orderType:"quick" (QC). */
+        deliveryMode: z.enum(['basic', 'quick']).optional(),
         scheduledAt: z.string().optional()
     }).superRefine((data, ctx) => {
         const hasFoodItems = data.items.some((item) => item.type === 'food');
@@ -112,6 +114,20 @@ export function validateCalculateOrderDto(body) {
                 message: 'Restaurant id required'
             });
         }
+        if (data.deliveryMode === 'quick' && data.scheduledAt) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: ['deliveryMode'],
+                message: 'Quick Delivery cannot be combined with Schedule Order'
+            });
+        }
+        if (data.deliveryMode === 'quick' && effectiveType !== 'food') {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: ['deliveryMode'],
+                message: 'Quick Delivery is only available for restaurant food orders'
+            });
+        }
     });
     const result = schema.safeParse(body);
     if (!result.success) {
@@ -141,6 +157,7 @@ export function validateCreateOrderDto(body) {
         // 'razorpay_qr' means COD-style flow, but payment is collected via Razorpay QR at delivery.
         paymentMethod: z.enum(['cash', 'razorpay', 'razorpay_qr', 'card', 'wallet']),
         zoneId: z.string().nullable().optional(),
+        deliveryMode: z.enum(['basic', 'quick']).optional(),
         scheduledAt: z.string().optional()
     }).superRefine((data, ctx) => {
         const hasFoodItems = data.items.some((item) => item.type === 'food');
@@ -187,6 +204,30 @@ export function validateCreateOrderDto(body) {
                 code: z.ZodIssueCode.custom,
                 path: ['address'],
                 message: 'Address is required'
+            });
+        }
+        if (data.scheduledAt) {
+            const parsed = new Date(data.scheduledAt);
+            if (Number.isNaN(parsed.getTime())) {
+                ctx.addIssue({
+                    code: z.ZodIssueCode.custom,
+                    path: ['scheduledAt'],
+                    message: 'scheduledAt must be a valid ISO datetime'
+                });
+            }
+        }
+        if (data.deliveryMode === 'quick' && data.scheduledAt) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: ['deliveryMode'],
+                message: 'Quick Delivery cannot be combined with Schedule Order'
+            });
+        }
+        if (data.deliveryMode === 'quick' && effectiveType !== 'food') {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: ['deliveryMode'],
+                message: 'Quick Delivery is only available for restaurant food orders'
             });
         }
     });

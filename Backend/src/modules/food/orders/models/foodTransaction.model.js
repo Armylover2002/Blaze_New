@@ -53,6 +53,17 @@ const foodTransactionSchema = new mongoose.Schema({
         referralDiscount: { type: Number, default: 0, min: 0 },
         restaurantCommissionPercentage: { type: Number, default: 0 },
         restaurantCommission: { type: Number, default: 0 },
+        quickDeliveryFee: { type: Number, default: 0, min: 0 },
+        quickPlatformShare: { type: Number, default: 0, min: 0 },
+        quickRiderBonus: { type: Number, default: 0, min: 0 },
+        quickRiderShare: { type: Number, default: 0, min: 0 },
+        quickRestaurantShare: { type: Number, default: 0, min: 0 },
+        quickSharePcts: {
+            platform: { type: Number, default: 0, min: 0 },
+            rider: { type: Number, default: 0, min: 0 },
+            restaurant: { type: Number, default: 0, min: 0 },
+        },
+        quickFinanceVersion: { type: String, default: '' },
         total: { type: Number, default: 0, min: 0 },
         currency: { type: String, default: 'INR', trim: true },
     },
@@ -90,7 +101,24 @@ const foodTransactionSchema = new mongoose.Schema({
         adminDiscountShare: { type: Number, default: 0, min: 0 },
         restaurantDiscountShare: { type: Number, default: 0, min: 0 },
         discountAdminBearPercentage: { type: Number, default: 0, min: 0, max: 100 },
-        discountRestaurantBearPercentage: { type: Number, default: 0, min: 0, max: 100 }
+        discountRestaurantBearPercentage: { type: Number, default: 0, min: 0, max: 100 },
+        quickDeliveryFee: { type: Number, default: 0, min: 0 },
+        quickPlatformShare: { type: Number, default: 0, min: 0 },
+        quickRiderBonus: { type: Number, default: 0, min: 0 },
+        quickRiderShare: { type: Number, default: 0, min: 0 },
+        /**
+         * Frozen Restaurant Quick Share snapshot. NOT included in restaurantShare
+         * at create — added once on successful delivery (see realizeFoodQuickRestaurantShare).
+         */
+        quickRestaurantShare: { type: Number, default: 0, min: 0 },
+        /** Idempotent guard: restaurant Quick Share already rolled into restaurantShare. */
+        quickRestaurantShareRealized: { type: Boolean, default: false },
+        quickSharePcts: {
+            platform: { type: Number, default: 0, min: 0 },
+            rider: { type: Number, default: 0, min: 0 },
+            restaurant: { type: Number, default: 0, min: 0 },
+        },
+        quickFinanceVersion: { type: String, default: '' },
     },
 
     // Gateway / Provider Metadata

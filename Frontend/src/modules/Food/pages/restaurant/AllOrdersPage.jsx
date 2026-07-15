@@ -18,6 +18,7 @@ import { DateRangeCalendar } from "@food/components/ui/date-range-calendar"
 import { restaurantAPI } from "@food/api"
 import { useRestaurantNotifications } from "@food/hooks/useRestaurantNotifications"
 import OrderDetails from "@food/pages/restaurant/OrderDetails"
+import { parseValidDate } from "@food/utils/scheduleTime"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -177,9 +178,10 @@ export default function AllOrdersPage() {
 
   // Transform API order to component format
   const transformOrder = useCallback((order) => {
-    const createdAt = new Date(order.createdAt)
-    const date = createdAt.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
-    const time = createdAt.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })
+    const scheduled = parseValidDate(order.scheduledAt)
+    const displayInstant = scheduled || (order.createdAt ? new Date(order.createdAt) : new Date())
+    const date = displayInstant.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+    const time = displayInstant.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })
     
     // Format address (backend: deliveryAddress)
     const addr = order.deliveryAddress || order.address || null
@@ -245,6 +247,7 @@ export default function AllOrdersPage() {
       reason,
       tags: tags.length > 0 ? tags : undefined,
       createdAt: order.createdAt,
+      scheduledAt: order.scheduledAt || null,
       mongoId: order._id?.toString()
     }
   }, [restaurantData])

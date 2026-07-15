@@ -38,6 +38,10 @@ import BottomNavOrders from "@food/components/restaurant/BottomNavOrders";
 import RestaurantNavbar from "@food/components/restaurant/RestaurantNavbar";
 import notificationSound from "@food/assets/audio/alert.mp3";
 import { restaurantAPI } from "@food/api";
+import {
+  formatScheduledAtShort,
+  parseValidDate,
+} from "@food/utils/scheduleTime";
 import { useRestaurantNotifications } from "@food/hooks/useRestaurantNotifications";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -72,12 +76,21 @@ const allOrdersStatusPriority = {
   cancelled: 7,
 };
 
-const getAllOrdersTimestamp = (order) =>
-  order?.cancelledAt ||
-  order?.deliveredAt ||
-  order?.updatedAt ||
-  order?.createdAt ||
-  new Date().toISOString();
+const getAllOrdersTimestamp = (order) => {
+  const status = String(order?.status || order?.orderStatus || "").toLowerCase();
+  // Only while still scheduled: list clock must show scheduledAt (not createdAt).
+  if (status === "scheduled") {
+    const scheduled = parseValidDate(order.scheduledAt);
+    if (scheduled) return scheduled.toISOString();
+  }
+  return (
+    order?.cancelledAt ||
+    order?.deliveredAt ||
+    order?.updatedAt ||
+    order?.createdAt ||
+    new Date().toISOString()
+  );
+};
 
 const getRestaurantVisibleItems = (items = []) => {
   const normalizedItems = Array.isArray(items) ? items : [];
@@ -96,14 +109,21 @@ const buildOrderItemsSummary = (items = []) =>
 const getOrderPreviewItem = (items = []) =>
   getRestaurantVisibleItems(items)[0] || null;
 
-const transformOrderForList = (order) => ({
+const transformOrderForList = (order) => {
+  const status = String(order.status || order.orderStatus || "pending").toLowerCase();
+  const displayTs =
+    status === "scheduled" && parseValidDate(order.scheduledAt)
+      ? order.scheduledAt
+      : getAllOrdersTimestamp(order);
+  const isFoodQuick = String(order.deliveryMode || "").toLowerCase() === "quick";
+  return {
   orderId: order.orderId || order._id,
   mongoId: order._id,
   status: order.status || "pending",
   customerName: order.userId?.name || order.customerName || "Customer",
   type: "Home Delivery",
   tableOrToken: null,
-  timePlaced: new Date(getAllOrdersTimestamp(order)).toLocaleDateString(
+  timePlaced: new Date(displayTs).toLocaleDateString(
     "en-US",
     {
       month: "short",
@@ -112,7 +132,11 @@ const transformOrderForList = (order) => ({
       minute: "2-digit",
     },
   ),
-  eta: null,
+  scheduledAt: order.scheduledAt || null,
+  eta: order.etaPromise?.max || null,
+  deliveryMode: order.deliveryMode || "basic",
+  isFoodQuickDelivery: isFoodQuick,
+  etaPromise: order.etaPromise || null,
   itemsSummary: buildOrderItemsSummary(order.items),
   photoUrl: getOrderPreviewItem(order.items)?.image || null,
   photoAlt: getOrderPreviewItem(order.items)?.name || "Order",
@@ -122,9 +146,11 @@ const transformOrderForList = (order) => ({
   preparingTimestamp: order.tracking?.preparing?.timestamp
     ? new Date(order.tracking.preparing.timestamp)
     : new Date(order.createdAt || Date.now()),
-  initialETA: order.estimatedDeliveryTime || 30,
+  initialETA: order.etaPromise?.max || order.estimatedDeliveryTime || 30,
   sortTimestamp: new Date(getAllOrdersTimestamp(order)).getTime(),
-});
+  kitchenPriority: isFoodQuick ? 0 : 1,
+};
+};
 
 // Completed Orders List Component
 function CompletedOrders({ onSelectOrder, refreshToken = 0, searchQuery = "" }) {
@@ -599,6 +625,8 @@ function AllOrders({ onSelectOrder, onCancel, searchQuery = "" }) {
           const transformedOrders = response.data.data.orders
             .map(transformOrderForList)
             .sort((a, b) => {
+              const quickDiff = (a.kitchenPriority ?? 1) - (b.kitchenPriority ?? 1);
+              if (quickDiff !== 0) return quickDiff;
               const priorityDiff =
                 (allOrdersStatusPriority[a.status] ?? 999) -
                 (allOrdersStatusPriority[b.status] ?? 999);
@@ -1042,7 +1070,7 @@ export default function OrdersMain() {
 
       if (isFutureScheduled) {
         toast.info(
-          `New scheduled order received for ${new Date(scheduledAt).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}`,
+          `New scheduled order received for ${formatScheduledAtShort(newOrder.scheduledAt) || "later"}`,
         );
         requestOrdersRefresh();
         return; // Do not show the immediate popup
@@ -1126,18 +1154,26 @@ export default function OrdersMain() {
           const targetOrders = response.data.data.orders.filter((order) => {
             if (hasOrderBeenShown(order)) return false;
 
-            const isConfirmed = order.status === "confirmed";
-            const isCreatedScheduled =
-              order.status === "created" && order.scheduledAt;
+            const status = String(order.status || order.orderStatus || "").toLowerCase();
+
+            // Never Instant-popup while still waiting for BullMQ activation.
+            if (status === "scheduled") return false;
+
+            const isConfirmed = status === "confirmed";
 
             if (isConfirmed && !order.scheduledAt) return true; // ordinary confirmed fallback
 
+            // After PRIMARY/fallback activation → placed. Same Instant popup surface.
+            if (order.scheduledAt && status === "placed") {
+              return true;
+            }
+
+            // Legacy remnant: created/confirmed with scheduledAt near window.
             if (
               order.scheduledAt &&
-              (order.status === "created" || order.status === "confirmed")
+              (status === "created" || status === "confirmed")
             ) {
               const scheduledTime = new Date(order.scheduledAt).getTime();
-              // Show popup if scheduled time is <= 15 mins from now
               if (scheduledTime <= now + 15 * 60000) return true;
             }
 
@@ -2348,15 +2384,8 @@ case "cancelled":
                         </p>
                         <p className="text-sm font-bold text-[#FF0000]">
                           For{" "}
-                          {new Date(
-                            currentPopupOrder.scheduledAt,
-                          ).toLocaleString("en-US", {
-                            day: "numeric",
-                            month: "short",
-                            hour: "2-digit",
-                            minute: "2-digit",
-                            hour12: true,
-                          })}
+                          {formatScheduledAtShort(currentPopupOrder.scheduledAt) ||
+                            "Scheduled time"}
                         </p>
                       </div>
                     </div>
@@ -2907,6 +2936,8 @@ const OrderCard = memo(function OrderCard({
   photoAlt,
   deliveryPartnerId,
   dispatchStatus,
+  isFoodQuickDelivery = false,
+  deliveryMode,
   onSelect,
   onCancel,
   onMarkReady,
@@ -2920,7 +2951,7 @@ const OrderCard = memo(function OrderCard({
     .replace(/\b\w/g, (c) => c.toUpperCase());
 
   return (
-    <div className="w-full bg-white rounded-2xl p-4 mb-3 border border-gray-100/80 shadow-[0_2px_10px_rgba(0,0,0,0.01)] hover:shadow-md transition-shadow relative flex flex-col gap-3 cursor-pointer group"
+    <div className={`w-full bg-white rounded-2xl p-4 mb-3 border shadow-[0_2px_10px_rgba(0,0,0,0.01)] hover:shadow-md transition-shadow relative flex flex-col gap-3 cursor-pointer group ${isFoodQuickDelivery ? "border-emerald-300 ring-1 ring-emerald-100" : "border-gray-100/80"}`}
       onClick={() =>
         onSelect?.({
           orderId,
@@ -2935,14 +2966,23 @@ const OrderCard = memo(function OrderCard({
           paymentMethod,
           deliveryPartnerId,
           dispatchStatus,
+          isFoodQuickDelivery,
+          deliveryMode,
         })
       }>
       
       {/* Top Row: Order ID & Status */}
       <div className="flex justify-between items-start">
-        <span className="text-sm font-bold text-gray-900 tracking-tight truncate mr-2">
-          #{orderId}
-        </span>
+        <div className="flex items-center gap-2 min-w-0 mr-2">
+          <span className="text-sm font-bold text-gray-900 tracking-tight truncate">
+            #{orderId}
+          </span>
+          {isFoodQuickDelivery && (
+            <span className="inline-flex items-center rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider shrink-0">
+              Quick · Priority
+            </span>
+          )}
+        </div>
         <div className="flex items-center gap-2 flex-shrink-0">
           <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[9px] font-bold uppercase tracking-wider ${isReady ? "bg-green-50 text-green-700" : "bg-gray-50 text-gray-600"}`}>
              <span className={`w-1 h-1 rounded-full ${isReady ? "bg-green-500" : "bg-gray-400"}`} />
@@ -3077,7 +3117,10 @@ function PreparingOrders({
           );
 
           const transformedOrders = preparingOrders.map((order) => {
-            const initialETA = order.estimatedDeliveryTime || 30; // in minutes
+            const isFoodQuick =
+              String(order.deliveryMode || "").toLowerCase() === "quick";
+            const initialETA =
+              order.etaPromise?.max || order.estimatedDeliveryTime || 30; // in minutes
             const preparingTimestamp = order.tracking?.preparing?.timestamp
               ? new Date(order.tracking.preparing.timestamp)
               : new Date(order.createdAt); // Fallback to createdAt if preparing timestamp not available
@@ -3105,8 +3148,11 @@ function PreparingOrders({
               dispatchStatus: order.dispatch?.status || null,
               paymentMethod:
                 order.paymentMethod || order.payment?.method || null,
+              deliveryMode: order.deliveryMode || "basic",
+              isFoodQuickDelivery: isFoodQuick,
+              kitchenPriority: isFoodQuick ? 0 : 1,
             };
-          });
+          }).sort((a, b) => (a.kitchenPriority ?? 1) - (b.kitchenPriority ?? 1));
 
           if (isMounted) {
             setOrders(transformedOrders);
@@ -3641,26 +3687,29 @@ function ScheduledOrders({ onSelectOrder, refreshToken = 0, searchQuery = "" }) 
 
         if (response.data?.success && response.data.data?.orders) {
           const scheduledOrders = response.data.data.orders.filter(
-            (order) => order.status === "scheduled",
+            (order) =>
+              String(order.status || order.orderStatus || "").toLowerCase() ===
+              "scheduled",
           );
 
-          const transformedOrders = scheduledOrders.map((order) => ({
+          const transformedOrders = scheduledOrders.map((order) => {
+            const scheduledLabel =
+              formatScheduledAtShort(order.scheduledAt) || "Scheduled";
+            return {
             orderId: order.orderId || order._id,
             mongoId: order._id,
-            status: order.status || "scheduled",
+            status: order.status || order.orderStatus || "scheduled",
             customerName: order.userId?.name || "Customer",
             type: order.deliveryFleet === "standard" ? "Home Delivery" : "Express Delivery",
             tableOrToken: null,
-            timePlaced: new Date(order.createdAt).toLocaleTimeString("en-US", {
-              hour: "2-digit",
-              minute: "2-digit",
-            }),
+            timePlaced: `For: ${scheduledLabel}`,
             scheduledAt: order.scheduledAt,
             itemsSummary: buildOrderItemsSummary(order.items),
             photoUrl: getOrderPreviewItem(order.items)?.image || null,
             photoAlt: getOrderPreviewItem(order.items)?.name || "Order",
             paymentMethod: order.paymentMethod || order.payment?.method || null,
-          }));
+          };
+          });
 
           setOrders(transformedOrders);
         } else {
@@ -3720,17 +3769,10 @@ function ScheduledOrders({ onSelectOrder, refreshToken = 0, searchQuery = "" }) 
       ) : (
         <div>
           {filteredOrders.map((order) => {
-            const scheduledTime = new Date(order.scheduledAt).toLocaleString("en-US", {
-              day: "numeric",
-              month: "short",
-              hour: "2-digit",
-              minute: "2-digit",
-            });
             return (
               <OrderCard
                 key={order.orderId || order.mongoId}
                 {...order}
-                timePlaced={`For: ${scheduledTime}`}
                 onSelect={onSelectOrder}
               />
             );

@@ -16,7 +16,50 @@ export default function FeeSettings() {
     platformFee: "",
     packagingFee: "",
     gstRate: "",
+    quickDelivery: {
+      enabled: false,
+      charge: 30,
+      platformSharePct: 70,
+      riderSharePct: 30,
+      restaurantSharePct: 0,
+      maxDistanceKm: 8,
+      maxEtaMinutes: 30,
+      defaultKitchenPrepMinutes: 12,
+    },
   })
+
+  /** Admin UI — business fields only (engineering knobs are server-internal). */
+  const defaultQuickDeliveryBusiness = () => ({
+    enabled: false,
+    charge: 30,
+    platformSharePct: 70,
+    riderSharePct: 30,
+    restaurantSharePct: 0,
+    maxDistanceKm: 8,
+    maxEtaMinutes: 30,
+    defaultKitchenPrepMinutes: 12,
+  })
+
+  const mapFeeSettingsFromApi = (src) => {
+    const qd = src?.quickDelivery && typeof src.quickDelivery === "object" ? src.quickDelivery : {}
+    return {
+      deliveryFee: src?.deliveryFee ?? "",
+      deliveryFeeRanges: src?.deliveryFeeRanges || [],
+      platformFee: src?.platformFee ?? "",
+      gstRate: src?.gstRate ?? "",
+      quickDelivery: {
+        ...defaultQuickDeliveryBusiness(),
+        enabled: qd.enabled === true,
+        charge: qd.charge ?? 30,
+        platformSharePct: qd.platformSharePct ?? 70,
+        riderSharePct: qd.riderSharePct ?? 30,
+        restaurantSharePct: qd.restaurantSharePct ?? 0,
+        maxDistanceKm: qd.maxDistanceKm ?? 8,
+        maxEtaMinutes: qd.maxEtaMinutes ?? 30,
+        defaultKitchenPrepMinutes: qd.defaultKitchenPrepMinutes ?? 12,
+      },
+    }
+  }
   const [loadingFeeSettings, setLoadingFeeSettings] = useState(false)
   const [savingFeeSettings, setSavingFeeSettings] = useState(false)
   const [editingRangeIndex, setEditingRangeIndex] = useState(null)
@@ -28,12 +71,97 @@ export default function FeeSettings() {
     deliveryBoyBasePay: '0' 
   })
 
+  const QUICK_SHARE_TOTAL_ERROR =
+    "Platform Share + Rider Share + Restaurant Share must equal exactly 100%."
+  const QUICK_CHARGE_ERROR = "Quick Charge must be greater than or equal to 0."
+  const QUICK_DISTANCE_ERROR = "Maximum Delivery Distance must be greater than 0."
+  const QUICK_ETA_ERROR = "Maximum ETA must be greater than 0."
+  const QUICK_PREP_ERROR = "Default kitchen prep must be between 1 and 90 minutes."
+
+  const getQuickShareTotals = (qd = feeSettings.quickDelivery) => {
+    const platformRaw = qd?.platformSharePct
+    const riderRaw = qd?.riderSharePct
+    const restaurantRaw = qd?.restaurantSharePct
+    if (
+      platformRaw === "" ||
+      riderRaw === "" ||
+      restaurantRaw === "" ||
+      platformRaw == null ||
+      riderRaw == null ||
+      restaurantRaw == null
+    ) {
+      return {
+        platformSharePct: NaN,
+        riderSharePct: NaN,
+        restaurantSharePct: NaN,
+        total: NaN,
+        isValid: false,
+        bothFinite: false,
+      }
+    }
+    const platformSharePct = Number(platformRaw)
+    const riderSharePct = Number(riderRaw)
+    const restaurantSharePct = Number(restaurantRaw)
+    const bothFinite =
+      Number.isFinite(platformSharePct) &&
+      Number.isFinite(riderSharePct) &&
+      Number.isFinite(restaurantSharePct)
+    const total = bothFinite
+      ? platformSharePct + riderSharePct + restaurantSharePct
+      : NaN
+    const isValid = bothFinite && Math.abs(total - 100) < 0.01
+    return {
+      platformSharePct,
+      riderSharePct,
+      restaurantSharePct,
+      total,
+      isValid,
+      bothFinite,
+    }
+  }
+
+  const getQuickBusinessFieldErrors = (qd = feeSettings.quickDelivery) => {
+    const errors = {}
+    const chargeRaw = qd?.charge
+    const distanceRaw = qd?.maxDistanceKm
+    const etaRaw = qd?.maxEtaMinutes
+
+    if (chargeRaw === "" || chargeRaw == null || !Number.isFinite(Number(chargeRaw)) || Number(chargeRaw) < 0) {
+      errors.charge = QUICK_CHARGE_ERROR
+    }
+    if (distanceRaw === "" || distanceRaw == null || !Number.isFinite(Number(distanceRaw)) || !(Number(distanceRaw) > 0)) {
+      errors.maxDistanceKm = QUICK_DISTANCE_ERROR
+    }
+    if (etaRaw === "" || etaRaw == null || !Number.isFinite(Number(etaRaw)) || !(Number(etaRaw) > 0)) {
+      errors.maxEtaMinutes = QUICK_ETA_ERROR
+    }
+    const prepRaw = qd?.defaultKitchenPrepMinutes
+    if (
+      prepRaw === "" ||
+      prepRaw == null ||
+      !Number.isFinite(Number(prepRaw)) ||
+      Number(prepRaw) < 1 ||
+      Number(prepRaw) > 90
+    ) {
+      errors.defaultKitchenPrepMinutes = QUICK_PREP_ERROR
+    }
+    if (!getQuickShareTotals(qd).isValid) {
+      errors.shareTotal = QUICK_SHARE_TOTAL_ERROR
+    }
+    return errors
+  }
+
+  const quickFieldErrors = getQuickBusinessFieldErrors()
+  const quickShareInvalid = Boolean(quickFieldErrors.shareTotal)
+  const quickFinanceInvalid = Object.keys(quickFieldErrors).length > 0
+
   // Fetch fee settings
   const fetchFeeSettings = async () => {
     try {
       setLoadingFeeSettings(true)
       const response = await adminAPI.getFeeSettings()
       if (response.data.success && response.data.data.feeSettings) {
+        setFeeSettings(mapFeeSettingsFromApi(response.data.data.feeSettings))
         setFeeSettings({
           deliveryFee: response.data.data.feeSettings.deliveryFee ?? "",
           deliveryFeeRanges: response.data.data.feeSettings.deliveryFeeRanges || [],
@@ -42,13 +170,14 @@ export default function FeeSettings() {
           gstRate: response.data.data.feeSettings.gstRate ?? "",
         })
       } else if (response.data.success && response.data.data.feeSettings === null) {
-        // Not configured yet - keep empty fields (no defaults).
+        // Not configured yet - keep empty fields (no defaults for basic fees).
         setFeeSettings({
           deliveryFee: "",
           deliveryFeeRanges: [],
           platformFee: "",
           packagingFee: "",
           gstRate: "",
+          quickDelivery: defaultQuickDeliveryBusiness(),
         })
       }
     } catch (error) {
@@ -66,6 +195,19 @@ export default function FeeSettings() {
 
   // Unified save function
   const saveSettings = async (settingsToSave) => {
+    const qd = settingsToSave.quickDelivery || defaultQuickDeliveryBusiness()
+    const fieldErrors = getQuickBusinessFieldErrors(qd)
+    if (Object.keys(fieldErrors).length > 0) {
+      toast.error(
+        fieldErrors.shareTotal ||
+          fieldErrors.charge ||
+          fieldErrors.maxDistanceKm ||
+          fieldErrors.maxEtaMinutes ||
+          fieldErrors.defaultKitchenPrepMinutes
+      )
+      return false
+    }
+
     try {
       setSavingFeeSettings(true)
       const payload = {
@@ -78,6 +220,17 @@ export default function FeeSettings() {
         platformFee: settingsToSave.platformFee === "" ? undefined : Number(settingsToSave.platformFee),
         packagingFee: settingsToSave.packagingFee === "" ? undefined : Number(settingsToSave.packagingFee),
         gstRate: settingsToSave.gstRate === "" ? undefined : Number(settingsToSave.gstRate),
+        // Business fields only — server preserves / defaults engineering internals
+        quickDelivery: {
+          enabled: qd.enabled === true,
+          charge: Number(qd.charge) || 0,
+          platformSharePct: Number(qd.platformSharePct) || 0,
+          riderSharePct: Number(qd.riderSharePct) || 0,
+          restaurantSharePct: Number(qd.restaurantSharePct) || 0,
+          maxDistanceKm: Number(qd.maxDistanceKm) || 0,
+          maxEtaMinutes: Number(qd.maxEtaMinutes) || 0,
+          defaultKitchenPrepMinutes: Number(qd.defaultKitchenPrepMinutes) || 12,
+        },
         isActive: true,
       }
       
@@ -89,6 +242,7 @@ export default function FeeSettings() {
         toast.success('Settings saved successfully')
         const saved = response?.data?.data?.feeSettings
         if (saved) {
+          setFeeSettings(mapFeeSettingsFromApi(saved))
           setFeeSettings({
             deliveryFee: saved.deliveryFee ?? "",
             deliveryFeeRanges: saved.deliveryFeeRanges ?? [],
@@ -332,8 +486,8 @@ export default function FeeSettings() {
             </div>
             <Button
               onClick={handleSaveFeeSettings}
-              disabled={savingFeeSettings || loadingFeeSettings}
-              className="bg-green-600 hover:bg-green-700 text-white flex items-center gap-2"
+              disabled={savingFeeSettings || loadingFeeSettings || quickFinanceInvalid}
+              className="bg-green-600 hover:bg-green-700 text-white flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {savingFeeSettings ? (
                 <>
@@ -673,6 +827,122 @@ export default function FeeSettings() {
                     GST percentage applied on order subtotal
                   </p>
                 </div>
+              </div>
+
+              {/* Food Quick Delivery — Global business config only */}
+              <div className="border-t border-slate-200 pt-6 mt-6 space-y-4">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <h3 className="text-base font-semibold text-slate-900">Food Quick Delivery (Global)</h3>
+                    <p className="text-xs text-slate-500 mt-1">
+                      Enable Quick for Instant Food when Global, Restaurant, and Zone are all on.
+                      Maximum Delivery Distance is the customer-path eligibility cap.
+                      Maximum ETA is the quote eligibility cap (not a dispatch setting).
+                      Rider search radius, MOV, and SLA are platform-managed.
+                    </p>
+                  </div>
+                  <label className="inline-flex items-center gap-2 text-sm font-medium text-slate-700 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={feeSettings.quickDelivery?.enabled === true}
+                      onChange={(e) =>
+                        setFeeSettings({
+                          ...feeSettings,
+                          quickDelivery: {
+                            ...feeSettings.quickDelivery,
+                            enabled: e.target.checked,
+                          },
+                        })
+                      }
+                      className="h-4 w-4 rounded border-slate-300 text-green-600 focus:ring-green-500"
+                    />
+                    Enable Quick Delivery
+                  </label>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {[
+                    { key: "charge", label: "Quick Charge (₹)", step: "1" },
+                    { key: "platformSharePct", label: "Platform Share (%)", step: "1" },
+                    { key: "riderSharePct", label: "Rider Share (%)", step: "1" },
+                    { key: "restaurantSharePct", label: "Restaurant Share (%)", step: "1" },
+                    { key: "maxDistanceKm", label: "Maximum Delivery Distance (km)", step: "0.1" },
+                    { key: "maxEtaMinutes", label: "Maximum ETA (minutes)", step: "1" },
+                    {
+                      key: "defaultKitchenPrepMinutes",
+                      label: "Default Kitchen Prep (minutes)",
+                      step: "1",
+                    },
+                  ].map((field) => {
+                    const isShareField =
+                      field.key === "platformSharePct" ||
+                      field.key === "riderSharePct" ||
+                      field.key === "restaurantSharePct"
+                    const fieldError =
+                      field.key === "charge"
+                        ? quickFieldErrors.charge
+                        : field.key === "maxDistanceKm"
+                          ? quickFieldErrors.maxDistanceKm
+                          : field.key === "maxEtaMinutes"
+                            ? quickFieldErrors.maxEtaMinutes
+                            : field.key === "defaultKitchenPrepMinutes"
+                              ? quickFieldErrors.defaultKitchenPrepMinutes
+                              : isShareField
+                                ? quickFieldErrors.shareTotal
+                                : null
+                    return (
+                    <div key={field.key} className="space-y-1">
+                      <label className="block text-xs font-medium text-slate-600">{field.label}</label>
+                      <input
+                        type="number"
+                        min={
+                          field.key === "charge"
+                            ? "0"
+                            : field.key === "maxDistanceKm" || field.key === "maxEtaMinutes"
+                              ? "0.01"
+                              : field.key === "defaultKitchenPrepMinutes"
+                                ? "1"
+                                : "0"
+                        }
+                        max={
+                          isShareField
+                            ? "100"
+                            : field.key === "defaultKitchenPrepMinutes"
+                              ? "90"
+                              : undefined
+                        }
+                        step={field.step}
+                        value={feeSettings.quickDelivery?.[field.key] ?? ""}
+                        onChange={(e) => {
+                          const next = {
+                            ...feeSettings.quickDelivery,
+                            [field.key]: e.target.value === "" ? "" : Number(e.target.value),
+                          }
+                          setFeeSettings({ ...feeSettings, quickDelivery: next })
+                        }}
+                        className={`w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 outline-none ${
+                          fieldError
+                            ? "border-red-400 focus:ring-red-500 focus:border-red-500"
+                            : "border-slate-300 focus:ring-green-500 focus:border-green-500"
+                        }`}
+                      />
+                      {fieldError && !isShareField && (
+                        <p className="text-xs text-red-600" role="alert">{fieldError}</p>
+                      )}
+                      {!fieldError && field.key === "defaultKitchenPrepMinutes" && (
+                        <p className="text-[11px] text-slate-500">
+                          Used when a restaurant has not set its own kitchen prep time.
+                        </p>
+                      )}
+                    </div>
+                    )
+                  })}
+                </div>
+                {quickShareInvalid && (
+                  <p className="text-sm text-red-600 font-medium" role="alert">
+                    {QUICK_SHARE_TOTAL_ERROR}
+                  </p>
+                )}
               </div>
           </>
           )}

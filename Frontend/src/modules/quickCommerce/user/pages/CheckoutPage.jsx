@@ -64,7 +64,7 @@ import {
   isFlutterWebView,
   handleFlutterRazorpayPayment,
 } from "@food/utils/razorpay";
-import { getRoadDistanceKm } from "@/shared/services/roadDistance";
+import { getRoadDistanceKm, getRoadDistanceDetails } from "@/shared/services/roadDistance";
 
 // ─── Constants (moved outside — no re-creation on render) ────────────────────
 
@@ -94,9 +94,6 @@ const TIME_SLOTS = [
 
 
 // ─── Pure helpers (unchanged) ─────────────────────────────────────────────────
-
-const calculateFrontendRiderEarning = (distanceKm, rules = []) => {
-import { getRoadDistanceDetails } from '@/shared/services/roadDistance';
 
 const calculateFrontendRiderEarning = (distanceKm, rules = []) => {
   const d = Number(distanceKm);

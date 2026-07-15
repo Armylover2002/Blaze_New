@@ -13,15 +13,26 @@ import { RenderNewOrder } from './renderers/NewOrderRenderers';
  */
 export const NewOrderModal = ({ order, onAccept, onReject, onMinimize }) => {
   const { riderLocation } = useDeliveryStore();
-  const [timeLeft, setTimeLeft] = useState(30);
+  const isFoodQuick =
+    order?.isFoodQuickDelivery === true ||
+    String(order?.deliveryMode || '').toLowerCase() === 'quick';
+  const offerWindowSec = Math.max(
+    15,
+    Number(order?.offerTimeoutSec || (isFoodQuick ? 45 : 30)) || (isFoodQuick ? 45 : 30),
+  );
+  const [timeLeft, setTimeLeft] = useState(offerWindowSec);
   const pickupPoints = normalizePickupPoints(order);
   const primaryPickup = pickupPoints[0] || null;
   const mixedOrder = isMixedOrder(order);
 
   useEffect(() => {
+    setTimeLeft(offerWindowSec);
+  }, [order?.orderMongoId, order?.orderId, offerWindowSec]);
+
+  useEffect(() => {
     const timer = setInterval(() => setTimeLeft((t) => t - 1), 1000);
     return () => clearInterval(timer);
-  }, []);
+  }, [order?.orderMongoId, order?.orderId]);
 
   useEffect(() => {
     if (timeLeft <= 0) {
@@ -178,7 +189,7 @@ export const NewOrderModal = ({ order, onAccept, onReject, onMinimize }) => {
             onConfirm={() => onAccept(order)}
             color="bg-black"
             successLabel="Order Accepted ✓"
-            timeProgress={(timeLeft / 30) * 100}
+            timeProgress={(timeLeft / offerWindowSec) * 100}
           />
 
           <button

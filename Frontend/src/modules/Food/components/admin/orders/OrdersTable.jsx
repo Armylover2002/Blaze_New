@@ -33,6 +33,11 @@ const getOrderTypeColor = (orderType) => {
   return "bg-emerald-100 text-emerald-700"
 }
 
+const getDeliveryModeColor = (mode) => {
+  if (String(mode || "").toLowerCase() === "quick") return "bg-emerald-100 text-emerald-700"
+  return "bg-slate-100 text-slate-600"
+}
+
 export default function OrdersTable({
   orders,
   visibleColumns,
@@ -117,6 +122,13 @@ export default function OrdersTable({
                   <div className="flex items-center gap-2">
                     <span>Order Type</span>
                     <ArrowUpDown className="w-3 h-3 text-slate-400 cursor-pointer hover:text-slate-600" />
+                  </div>
+                </th>
+              )}
+              {visibleColumns.deliveryMode && (
+                <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">
+                  <div className="flex items-center gap-2">
+                    <span>Mode</span>
                   </div>
                 </th>
               )}
@@ -216,6 +228,14 @@ export default function OrdersTable({
                   <td className="px-6 py-4 whitespace-nowrap">
                     <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${getOrderTypeColor(order.orderType)}`}>
                       {order.orderType || "Food"}
+                    </span>
+                  </td>
+                )}
+                {visibleColumns.deliveryMode && (
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${getDeliveryModeColor(order.deliveryMode)}`}>
+                      {String(order.deliveryMode || "basic").toLowerCase() === "quick" ? "Quick" : "Basic"}
+                      {order?.sla?.breached ? " · SLA" : ""}
                     </span>
                   </td>
                 )}
