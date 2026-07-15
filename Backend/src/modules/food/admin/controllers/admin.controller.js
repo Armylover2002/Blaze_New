@@ -6,6 +6,8 @@ import { validateCreateOfferDto, validateUpdateOfferCartVisibilityDto, validateU
 import { validateCheckCompletionsDto, validateEarningAddonHistoryActionDto, validateEarningAddonUpsertDto, validateToggleEarningAddonStatusDto } from '../validators/earningAddon.validator.js';
 import { validateDeliveryCommissionRuleDto, validateOptionalStatusDto } from '../validators/commission.validator.js';
 import { validateFeeSettingsUpsertDto } from '../validators/feeSettings.validator.js';
+import { validateDeliveryCashLimitUpsertDto } from '../validators/deliveryCashLimit.validator.js';
+import { validateRestaurantWithdrawalLimitUpsertDto } from '../validators/restaurantWithdrawalLimit.validator.js';
 import { validateDeliveryEmergencyHelpUpsertDto } from '../validators/deliveryEmergencyHelp.validator.js';
 import { validateReferralSettingsUpsertDto } from '../validators/referralSettings.validator.js';
 import { resolveActionPerformerSnapshot } from '../../../../core/utils/performer.js';
@@ -1146,8 +1148,29 @@ export async function getDeliveryCashLimit(req, res, next) {
 
 export async function updateDeliveryCashLimit(req, res, next) {
     try {
-        const data = await adminService.upsertDeliveryCashLimitSettings(req.body || {});
+        const body = validateDeliveryCashLimitUpsertDto(req.body || {});
+        const data = await adminService.upsertDeliveryCashLimitSettings(body);
         res.status(200).json({ success: true, message: 'Delivery cash limit updated successfully', data });
+    } catch (error) {
+        next(error);
+    }
+}
+
+// ----- Restaurant Withdrawal Limits (admin) -----
+export async function getRestaurantWithdrawalLimit(req, res, next) {
+    try {
+        const data = await adminService.getRestaurantWithdrawalLimitSettings();
+        res.status(200).json({ success: true, message: 'Restaurant withdrawal limits fetched successfully', data });
+    } catch (error) {
+        next(error);
+    }
+}
+
+export async function updateRestaurantWithdrawalLimit(req, res, next) {
+    try {
+        const body = validateRestaurantWithdrawalLimitUpsertDto(req.body || {});
+        const data = await adminService.upsertRestaurantWithdrawalLimitSettings(body);
+        res.status(200).json({ success: true, message: 'Restaurant withdrawal limits updated successfully', data });
     } catch (error) {
         next(error);
     }
@@ -1583,7 +1606,7 @@ export async function getWithdrawals(req, res, next) {
 export async function updateWithdrawalStatus(req, res, next) {
     try {
         const { id } = req.params;
-        const data = await adminService.updateWithdrawalStatus(id, req.body || {});
+        const data = await adminService.updateWithdrawalStatus(id, req.body || {}, req.user);
         res.status(200).json({ success: true, message: 'Withdrawal status updated successfully', data });
     } catch (error) {
         next(error);
@@ -1602,7 +1625,7 @@ export async function getDeliveryWithdrawals(req, res, next) {
 export async function updateDeliveryWithdrawalStatus(req, res, next) {
     try {
         const { id } = req.params;
-        const data = await adminService.updateDeliveryWithdrawalStatus(id, req.body || {});
+        const data = await adminService.updateDeliveryWithdrawalStatus(id, req.body || {}, req.user);
         res.status(200).json({ success: true, message: 'Delivery withdrawal status updated successfully', data });
     } catch (error) {
         next(error);

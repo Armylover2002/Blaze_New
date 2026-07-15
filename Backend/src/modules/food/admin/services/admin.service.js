@@ -32,6 +32,7 @@ import { FoodUser } from '../../../../core/users/user.model.js';
 import { FoodAdmin } from '../../../../core/admin/admin.model.js';
 import { FoodRefreshToken } from '../../../../core/refreshTokens/refreshToken.model.js';
 import { FoodDeliveryCashLimit } from '../models/deliveryCashLimit.model.js';
+import { FoodRestaurantWithdrawalLimit } from '../models/restaurantWithdrawalLimit.model.js';
 import { FoodDeliveryEmergencyHelp } from '../models/deliveryEmergencyHelp.model.js';
 import { FoodReferralSettings } from '../models/referralSettings.model.js';
 import { FoodReferralLog } from '../models/referralLog.model.js';
@@ -87,6 +88,10 @@ import {
 } from '../utils/dashboardStatsCache.js';
 import { sendNotificationToOwner } from '../../../../core/notifications/firebase.service.js';
 import { resolveActionPerformerSnapshot } from '../../../../core/utils/performer.js';
+import {
+    recordRestaurantWithdrawalPayment,
+    recordDeliveryWithdrawalPayment,
+} from './withdrawalPaymentHistory.service.js';
 
 const parseBooleanLike = (value, fieldName) => {
     if (typeof value === 'boolean') return value;
@@ -2740,12 +2745,26 @@ export async function getContactMessages(query = {}) {
 }
 
 // ----- Delivery Cash Limit (admin) -----
+function normalizeMaxWithdrawalLimit(value) {
+    if (value === undefined || value === null || value === '') return null;
+    const n = Number(value);
+    if (!Number.isFinite(n) || n <= 0) return null;
+    return n;
+}
+
 export async function getDeliveryCashLimitSettings() {
     const doc = await FoodDeliveryCashLimit.findOne({ isActive: true }).sort({ createdAt: -1 }).lean();
-    const settings = doc || { deliveryCashLimit: 0, deliveryWithdrawalLimit: 100, isActive: true };
+    const settings = doc || {
+        deliveryCashLimit: 0,
+        deliveryWithdrawalLimit: 100,
+        deliveryMaxWithdrawalLimit: null,
+        isActive: true
+    };
     return {
         deliveryCashLimit: Number(settings.deliveryCashLimit) || 0,
-        deliveryWithdrawalLimit: Number(settings.deliveryWithdrawalLimit) || 100
+        deliveryWithdrawalLimit: Number(settings.deliveryWithdrawalLimit) || 100,
+        // Legacy docs without this field → null (unlimited)
+        deliveryMaxWithdrawalLimit: normalizeMaxWithdrawalLimit(settings.deliveryMaxWithdrawalLimit)
     };
 }
 
@@ -2753,26 +2772,89 @@ export async function upsertDeliveryCashLimitSettings(body = {}) {
     const existing = await FoodDeliveryCashLimit.findOne({ isActive: true }).sort({ createdAt: -1 });
     const nextCashLimit = body.deliveryCashLimit;
     const nextWithdrawalLimit = body.deliveryWithdrawalLimit;
+    const nextMaxWithdrawalLimit = body.deliveryMaxWithdrawalLimit;
 
     if (existing) {
         if (nextCashLimit !== undefined) existing.deliveryCashLimit = Math.max(0, Number(nextCashLimit) || 0);
         if (nextWithdrawalLimit !== undefined) existing.deliveryWithdrawalLimit = Math.max(0, Number(nextWithdrawalLimit) || 0);
+        if (nextMaxWithdrawalLimit !== undefined) {
+            existing.deliveryMaxWithdrawalLimit = normalizeMaxWithdrawalLimit(nextMaxWithdrawalLimit);
+        }
+        const effectiveMin = Number(existing.deliveryWithdrawalLimit) || 0;
+        const effectiveMax = normalizeMaxWithdrawalLimit(existing.deliveryMaxWithdrawalLimit);
+        if (effectiveMax != null && effectiveMax < effectiveMin) {
+            throw new ValidationError(
+                'Maximum withdrawal limit must be greater than or equal to minimum withdrawal limit'
+            );
+        }
         await existing.save();
         return {
             deliveryCashLimit: existing.deliveryCashLimit,
-            deliveryWithdrawalLimit: existing.deliveryWithdrawalLimit
+            deliveryWithdrawalLimit: existing.deliveryWithdrawalLimit,
+            deliveryMaxWithdrawalLimit: normalizeMaxWithdrawalLimit(existing.deliveryMaxWithdrawalLimit)
         };
     }
 
     const created = await FoodDeliveryCashLimit.create({
         deliveryCashLimit: nextCashLimit !== undefined ? Math.max(0, Number(nextCashLimit) || 0) : 0,
         deliveryWithdrawalLimit: nextWithdrawalLimit !== undefined ? Math.max(0, Number(nextWithdrawalLimit) || 0) : 100,
+        deliveryMaxWithdrawalLimit:
+            nextMaxWithdrawalLimit !== undefined ? normalizeMaxWithdrawalLimit(nextMaxWithdrawalLimit) : null,
         isActive: true
     });
 
     return {
         deliveryCashLimit: created.deliveryCashLimit,
-        deliveryWithdrawalLimit: created.deliveryWithdrawalLimit
+        deliveryWithdrawalLimit: created.deliveryWithdrawalLimit,
+        deliveryMaxWithdrawalLimit: normalizeMaxWithdrawalLimit(created.deliveryMaxWithdrawalLimit)
+    };
+}
+
+// ----- Restaurant Withdrawal Limits (admin) — separate from delivery -----
+export async function getRestaurantWithdrawalLimitSettings() {
+    const doc = await FoodRestaurantWithdrawalLimit.findOne({ isActive: true }).sort({ createdAt: -1 }).lean();
+    const settings = doc || {
+        restaurantMinWithdrawalLimit: 1,
+        restaurantMaxWithdrawalLimit: null,
+        isActive: true
+    };
+    return {
+        restaurantMinWithdrawalLimit: Number(settings.restaurantMinWithdrawalLimit) || 1,
+        restaurantMaxWithdrawalLimit: normalizeMaxWithdrawalLimit(settings.restaurantMaxWithdrawalLimit)
+    };
+}
+
+export async function upsertRestaurantWithdrawalLimitSettings(body = {}) {
+    const existing = await FoodRestaurantWithdrawalLimit.findOne({ isActive: true }).sort({ createdAt: -1 });
+    const nextMin = body.restaurantMinWithdrawalLimit;
+    const nextMax = body.restaurantMaxWithdrawalLimit;
+
+    if (existing) {
+        if (nextMin !== undefined) existing.restaurantMinWithdrawalLimit = Math.max(0, Number(nextMin) || 0);
+        if (nextMax !== undefined) existing.restaurantMaxWithdrawalLimit = normalizeMaxWithdrawalLimit(nextMax);
+        const effectiveMin = Number(existing.restaurantMinWithdrawalLimit) || 0;
+        const effectiveMax = normalizeMaxWithdrawalLimit(existing.restaurantMaxWithdrawalLimit);
+        if (effectiveMax != null && effectiveMax < effectiveMin) {
+            throw new ValidationError(
+                'Maximum withdrawal limit must be greater than or equal to minimum withdrawal limit'
+            );
+        }
+        await existing.save();
+        return {
+            restaurantMinWithdrawalLimit: existing.restaurantMinWithdrawalLimit,
+            restaurantMaxWithdrawalLimit: normalizeMaxWithdrawalLimit(existing.restaurantMaxWithdrawalLimit)
+        };
+    }
+
+    const created = await FoodRestaurantWithdrawalLimit.create({
+        restaurantMinWithdrawalLimit: nextMin !== undefined ? Math.max(0, Number(nextMin) || 0) : 1,
+        restaurantMaxWithdrawalLimit: nextMax !== undefined ? normalizeMaxWithdrawalLimit(nextMax) : null,
+        isActive: true
+    });
+
+    return {
+        restaurantMinWithdrawalLimit: created.restaurantMinWithdrawalLimit,
+        restaurantMaxWithdrawalLimit: normalizeMaxWithdrawalLimit(created.restaurantMaxWithdrawalLimit)
     };
 }
 
@@ -7078,56 +7160,187 @@ export async function getWithdrawals(query = {}) {
     return { requests, total, page, limit };
 }
 
-export async function updateWithdrawalStatus(id, { status, adminNote, rejectionReason, transactionId }) {
+export async function updateWithdrawalStatus(id, { status, adminNote, rejectionReason, transactionId }, adminUser = null) {
     if (!id || !mongoose.Types.ObjectId.isValid(id)) throw new ValidationError('Invalid withdrawal ID');
 
     const existing = await FoodRestaurantWithdrawal.findById(id).lean();
     if (!existing) throw new ValidationError('Withdrawal request not found');
 
+    const currentStatus = String(existing.status || '').trim().toLowerCase();
     const nextStatus = String(status || '').trim().toLowerCase();
-    const wasAlreadyApproved = String(existing.status || '').trim().toLowerCase() === 'approved';
 
-    const update = {
-        status: nextStatus,
-        adminNote,
-        rejectionReason,
-        transactionId,
-        processedAt: new Date()
-    };
-
-    const updated = await FoodRestaurantWithdrawal.findByIdAndUpdate(
-        id,
-        { $set: update },
-        { new: true }
-    ).populate('restaurantId', 'restaurantName').lean();
-
-    if (!updated) throw new ValidationError('Withdrawal request not found');
-
-    // On first approval only: consume matching delivered order shares so available
-    // balance does not regenerate after pending → approved.
-    if (nextStatus === 'approved' && !wasAlreadyApproved) {
-        try {
-            const restaurantId = updated.restaurantId?._id || updated.restaurantId || existing.restaurantId;
-            await foodTransactionService.settleRestaurantSharesForWithdrawal(
-                restaurantId,
-                updated.amount,
-                {
-                    withdrawalId: String(updated._id),
-                    note: `Settled via restaurant withdrawal approval (${updated._id})`,
-                    recordedByRole: 'ADMIN',
-                }
-            );
-        } catch (err) {
-            // Withdrawal status is already updated; log without rolling back approval
-            // so admin payment records stay consistent with existing flow.
-            console.error(
-                `Failed to settle restaurant shares for withdrawal ${updated._id}:`,
-                err?.message || err
-            );
-        }
+    if (!['approved', 'rejected'].includes(nextStatus)) {
+        throw new ValidationError('Status must be approved or rejected');
     }
 
-    return updated;
+    // Reject only from pending (never mid-settle)
+    if (nextStatus === 'rejected') {
+        if (currentStatus !== 'pending') {
+            throw new ValidationError(`Withdrawal is already ${currentStatus}`);
+        }
+
+        const claimed = await FoodRestaurantWithdrawal.findOneAndUpdate(
+            { _id: id, status: 'pending' },
+            {
+                $set: {
+                    status: 'rejected',
+                    adminNote,
+                    rejectionReason,
+                    transactionId,
+                    processedAt: new Date(),
+                },
+            },
+            { new: true }
+        ).populate('restaurantId', 'restaurantName');
+
+        if (!claimed) {
+            throw new ValidationError('Withdrawal is no longer pending (already processed)');
+        }
+
+        try {
+            const restaurantId =
+                claimed.restaurantId?._id || claimed.restaurantId || existing.restaurantId;
+            const { notifyOwnersSafely } = await import(
+                '../../../../core/notifications/firebase.service.js'
+            );
+            await notifyOwnersSafely(
+                [{ ownerType: 'RESTAURANT', ownerId: restaurantId }],
+                {
+                    title: 'Withdrawal rejected',
+                    body: `Your withdrawal of ₹${Number(claimed.amount || 0).toFixed(2)} was rejected${
+                        rejectionReason ? `: ${rejectionReason}` : '.'
+                    }`,
+                    data: {
+                        type: 'withdrawal_request_status',
+                        withdrawalId: String(claimed._id),
+                        status: 'rejected',
+                    },
+                }
+            );
+        } catch (e) {
+            console.error(
+                'Failed to send restaurant withdrawal status notification:',
+                e?.message || e
+            );
+        }
+
+        return claimed.toObject ? claimed.toObject() : claimed;
+    }
+
+    // Approve: claim pending|processing → processing, settle, then mark approved.
+    // Never leave "approved" without a successful settle (crash-safe).
+    if (!['pending', 'processing'].includes(currentStatus)) {
+        throw new ValidationError(`Withdrawal is already ${currentStatus}`);
+    }
+
+    const claimed = await FoodRestaurantWithdrawal.findOneAndUpdate(
+        { _id: id, status: { $in: ['pending', 'processing'] } },
+        {
+            $set: {
+                status: 'processing',
+                adminNote,
+                rejectionReason,
+                transactionId,
+            },
+        },
+        { new: true }
+    ).populate('restaurantId', 'restaurantName');
+
+    if (!claimed) {
+        throw new ValidationError('Withdrawal is no longer pending (already processed)');
+    }
+
+    const restaurantId =
+        claimed.restaurantId?._id || claimed.restaurantId || existing.restaurantId;
+
+    try {
+        await foodTransactionService.settleRestaurantSharesForWithdrawal(
+            restaurantId,
+            claimed.amount,
+            {
+                withdrawalId: String(claimed._id),
+                note: `Settled via restaurant withdrawal approval (${claimed._id})`,
+                recordedByRole: 'ADMIN',
+                recordedById: adminUser?.userId || adminUser?._id || null,
+            }
+        );
+    } catch (err) {
+        console.error(
+            `Failed to settle restaurant shares for withdrawal ${claimed._id}:`,
+            err?.message || err
+        );
+        await FoodRestaurantWithdrawal.findByIdAndUpdate(id, {
+            $set: { status: 'pending', ledgerSettled: false },
+            $unset: {
+                adminNote: 1,
+                rejectionReason: 1,
+                transactionId: 1,
+                processedAt: 1,
+            },
+        });
+        throw new ValidationError(
+            err?.message ||
+                'Failed to settle restaurant earnings for this withdrawal. Status left as pending.'
+        );
+    }
+
+    const paidAt = new Date();
+    const approved = await FoodRestaurantWithdrawal.findOneAndUpdate(
+        { _id: id, status: 'processing' },
+        {
+            $set: {
+                status: 'approved',
+                adminNote,
+                rejectionReason,
+                transactionId,
+                processedAt: paidAt,
+            },
+        },
+        { new: true }
+    ).populate('restaurantId', 'restaurantName');
+
+    if (!approved) {
+        // Settle already committed; another worker likely finished the approve step.
+        const existingApproved = await FoodRestaurantWithdrawal.findById(id)
+            .populate('restaurantId', 'restaurantName');
+        return existingApproved?.toObject
+            ? existingApproved.toObject()
+            : existingApproved;
+    }
+
+    const performer = adminUser
+        ? await resolveActionPerformerSnapshot(adminUser)
+        : null;
+    await recordRestaurantWithdrawalPayment(approved, performer, {
+        transactionId,
+        adminNote,
+        userId: restaurantId,
+    });
+
+    try {
+        const { notifyOwnersSafely } = await import(
+            '../../../../core/notifications/firebase.service.js'
+        );
+        await notifyOwnersSafely(
+            [{ ownerType: 'RESTAURANT', ownerId: restaurantId }],
+            {
+                title: 'Withdrawal approved',
+                body: `Your withdrawal of ₹${Number(approved.amount || 0).toFixed(2)} has been approved.`,
+                data: {
+                    type: 'withdrawal_request_status',
+                    withdrawalId: String(approved._id),
+                    status: 'approved',
+                },
+            }
+        );
+    } catch (e) {
+        console.error(
+            'Failed to send restaurant withdrawal status notification:',
+            e?.message || e
+        );
+    }
+
+    return approved.toObject ? approved.toObject() : approved;
 }
 
 export async function getDeliveryWithdrawals(query = {}) {
@@ -7169,43 +7382,106 @@ export async function getDeliveryWithdrawals(query = {}) {
     return { requests, total, page, limit };
 }
 
-export async function updateDeliveryWithdrawalStatus(id, { status, adminNote, rejectionReason, transactionId }) {
+export async function updateDeliveryWithdrawalStatus(id, { status, adminNote, rejectionReason, transactionId }, adminUser = null) {
     if (!id || !mongoose.Types.ObjectId.isValid(id)) throw new ValidationError('Invalid withdrawal ID');
 
+    const nextStatus = String(status || '').trim().toLowerCase();
+    if (!['approved', 'rejected', 'processed'].includes(nextStatus)) {
+        throw new ValidationError('Status must be approved, processed, or rejected');
+    }
+
+    const existing = await FoodDeliveryWithdrawal.findById(id).lean();
+    if (!existing) throw new ValidationError('Withdrawal request not found');
+    if (existing.status !== 'pending') throw new ValidationError(`Withdrawal is already ${existing.status}`);
+
     const update = {
-        status: String(status).toLowerCase(),
+        status: nextStatus === 'processed' ? 'approved' : nextStatus,
         adminNote,
         rejectionReason,
         transactionId,
         processedAt: new Date()
     };
 
-    const existing = await FoodDeliveryWithdrawal.findById(id).lean();
-    if (!existing) throw new ValidationError('Withdrawal request not found');
-    if (existing.status !== 'pending') throw new ValidationError(`Withdrawal is already ${existing.status}`);
-
-    const updated = await FoodDeliveryWithdrawal.findByIdAndUpdate(
-        id,
+    // Atomic claim so concurrent admins cannot double-approve / double-debit
+    const claimed = await FoodDeliveryWithdrawal.findOneAndUpdate(
+        { _id: id, status: 'pending' },
         { $set: update },
         { new: true }
-    ).populate('deliveryPartnerId', 'name phone profilePartnerId').lean();
+    ).populate('deliveryPartnerId', 'name phone profilePartnerId');
 
-    // If approved, deduct from wallet balance using central transaction service
-    if (status.toLowerCase() === 'approved' || status.toLowerCase() === 'processed') {
-        const amount = Number(updated.amount || 0);
-        if (amount > 0) {
-            await debitWallet({
-                entityType: 'deliveryBoy',
-                entityId: updated.deliveryPartnerId?._id || updated.deliveryPartnerId,
-                amount: amount,
-                description: `Withdrawal Approved - ${updated.orderId || updated.id}`,
-                category: 'settlement_payout',
-                metadata: { withdrawalId: updated._id, transactionId }
-            });
-        }
+    if (!claimed) {
+        throw new ValidationError('Withdrawal is no longer pending (already processed)');
     }
 
-    return updated;
+    if (nextStatus === 'approved' || nextStatus === 'processed') {
+        const amount = Number(claimed.amount || 0);
+        if (amount > 0) {
+            try {
+                await debitWallet({
+                    entityType: 'deliveryBoy',
+                    entityId: claimed.deliveryPartnerId?._id || claimed.deliveryPartnerId,
+                    amount: amount,
+                    description: `Withdrawal Approved - ${claimed.orderId || claimed.id || claimed._id}`,
+                    category: 'settlement_payout',
+                    metadata: { withdrawalId: claimed._id, transactionId }
+                });
+            } catch (err) {
+                console.error(
+                    `Failed to debit wallet for delivery withdrawal ${claimed._id}:`,
+                    err?.message || err
+                );
+                await FoodDeliveryWithdrawal.findByIdAndUpdate(id, {
+                    $set: { status: 'pending' },
+                    $unset: {
+                        adminNote: 1,
+                        rejectionReason: 1,
+                        transactionId: 1,
+                        processedAt: 1,
+                    },
+                });
+                throw new ValidationError(
+                    err?.message || 'Failed to debit delivery wallet. Withdrawal left as pending.'
+                );
+            }
+        }
+
+        // Permanent payout history (idempotent; does not affect money path)
+        const performer = adminUser
+            ? await resolveActionPerformerSnapshot(adminUser)
+            : null;
+        await recordDeliveryWithdrawalPayment(claimed, performer, {
+            transactionId,
+            adminNote,
+        });
+    }
+
+    try {
+        const partnerId =
+            claimed.deliveryPartnerId?._id || claimed.deliveryPartnerId || existing.deliveryPartnerId;
+        const { notifyOwnersSafely } = await import('../../../../core/notifications/firebase.service.js');
+        const finalStatus = nextStatus === 'processed' ? 'approved' : nextStatus;
+        await notifyOwnersSafely(
+            [{ ownerType: 'DELIVERY_PARTNER', ownerId: partnerId }],
+            {
+                title: finalStatus === 'approved' ? 'Withdrawal approved' : 'Withdrawal rejected',
+                body:
+                    finalStatus === 'approved'
+                        ? `Your withdrawal of ₹${Number(claimed.amount || 0).toFixed(2)} has been approved.`
+                        : `Your withdrawal of ₹${Number(claimed.amount || 0).toFixed(2)} was rejected${
+                              rejectionReason ? `: ${rejectionReason}` : '.'
+                          }`,
+                data: {
+                    type: 'withdrawal_status',
+                    withdrawalId: String(claimed._id),
+                    status: finalStatus,
+                },
+            }
+        );
+    } catch (e) {
+        console.error('Failed to send delivery withdrawal status notification:', e?.message || e);
+    }
+
+    return claimed.toObject ? claimed.toObject() : claimed;
 }
 
 /**
@@ -7267,29 +7543,76 @@ export async function getDeliveryWallets(query = {}) {
 
 export async function updateDeliveryBoyWallet(dto) {
     const { deliveryId, pocketBalance, cashInHand } = dto;
-    const wallet = await getDeliveryPartnerWalletEnhanced(deliveryId);
-
-    // Adjust Pocket Balance via Bonus/Adjustment
-    const pocketDiff = Number(pocketBalance) - wallet.pocketBalance;
-    if (Math.abs(pocketDiff) > 0.01) {
-        await DeliveryBonusTransaction.create({
-            deliveryPartnerId: deliveryId,
-            amount: pocketDiff,
-            reason: 'Admin manual adjustment',
-            transactionId: generateBonusTransactionId()
-        });
+    if (!deliveryId || !mongoose.Types.ObjectId.isValid(String(deliveryId))) {
+        throw new ValidationError('Invalid delivery partner ID');
     }
 
-    // Adjust Cash In Hand via Deposit/Adjustment (Deposit reduces cashInHand)
-    const cashDiff = wallet.cashInHand - Number(cashInHand);
-    if (Math.abs(cashDiff) > 0.01) {
+    const targetPocket = Number(pocketBalance);
+    const targetCash = Number(cashInHand);
+    if (!Number.isFinite(targetPocket) || targetPocket < 0) {
+        throw new ValidationError('pocketBalance must be a non-negative number');
+    }
+    if (!Number.isFinite(targetCash) || targetCash < 0) {
+        throw new ValidationError('cashInHand must be a non-negative number');
+    }
+
+    const wallet = await getDeliveryPartnerWalletEnhanced(deliveryId);
+
+    // Adjust pocket via real wallet credit/debit (never orphan bonus rows that phantom-inflate pocket)
+    const pocketDiff =
+        Math.round((targetPocket - Number(wallet.pocketBalance || 0)) * 100) / 100;
+    if (Math.abs(pocketDiff) > 0.01) {
+        if (pocketDiff > 0) {
+            await creditWallet({
+                entityType: 'deliveryBoy',
+                entityId: deliveryId,
+                amount: pocketDiff,
+                description: 'Admin manual pocket adjustment',
+                category: 'admin_adjustment',
+                metadata: { source: 'updateDeliveryBoyWallet' },
+            });
+        } else {
+            try {
+                await debitWallet({
+                    entityType: 'deliveryBoy',
+                    entityId: deliveryId,
+                    amount: Math.abs(pocketDiff),
+                    description: 'Admin manual pocket adjustment',
+                    category: 'admin_adjustment',
+                    metadata: { source: 'updateDeliveryBoyWallet' },
+                });
+            } catch (err) {
+                throw new ValidationError(
+                    err?.message ||
+                        'Insufficient pocket balance for this adjustment (pending withdrawals may be locking funds)'
+                );
+            }
+        }
+    }
+
+    // Reduce cash-in-hand only by recording a Completed deposit. Increasing CIH is not supported here.
+    const cashDiff =
+        Math.round((Number(wallet.cashInHand || 0) - targetCash) * 100) / 100;
+    if (cashDiff > 0.01) {
+        if (cashDiff > Number(wallet.cashInHand || 0) + 0.009) {
+            throw new ValidationError(
+                `Cannot reduce cash-in-hand by ₹${cashDiff.toFixed(2)}; outstanding cash is ₹${Number(wallet.cashInHand || 0).toFixed(2)}`
+            );
+        }
         await FoodDeliveryCashDeposit.create({
             deliveryPartnerId: deliveryId,
             amount: cashDiff,
             status: 'Completed',
             paymentMethod: 'cash',
-            razorpayOrderId: 'manual_adj_' + Date.now()
+            depositType: 'online',
+            razorpayOrderId: `manual_adj_${String(deliveryId).slice(-8)}_${Date.now()}`,
+            razorpayPaymentId: null,
+            adminNote: 'Admin manual cash-in-hand adjustment',
         });
+    } else if (cashDiff < -0.01) {
+        throw new ValidationError(
+            'Cannot increase cash-in-hand via wallet adjust. It only increases when COD orders are delivered.'
+        );
     }
 
     const updated = await getDeliveryPartnerWalletEnhanced(deliveryId);
@@ -7299,7 +7622,7 @@ export async function updateDeliveryBoyWallet(dto) {
         pocketBalance: updated.pocketBalance,
         cashInHand: updated.cashInHand,
         remainingCashLimit: updated.availableCashLimit,
-        availableCashLimit: updated.availableCashLimit
+        availableCashLimit: updated.availableCashLimit,
     };
 }
 
@@ -7489,6 +7812,13 @@ export async function processRefund(orderId, refundAmount, refundTo) {
         );
     }
 
+    // Block customer refund before money moves if restaurant payout already settled
+    await foodTransactionService.assertRestaurantSettlementAllowsRefund(
+        order._id,
+        normalizedAmount,
+        totalAmount
+    );
+
     const existingRefund = order.payment?.refund || {};
     const requestedRefundMethod =
         existingRefund?.requestedMethod === 'wallet' || existingRefund?.requestedMethod === 'gateway'
@@ -7583,8 +7913,15 @@ export async function processRefund(orderId, refundAmount, refundTo) {
                 recordedByRole: 'ADMIN',
             }
         );
-    } catch (_err) {
-        // Keep the refund completed even if finance history sync needs follow-up.
+    } catch (err) {
+        // Settlement conflict should never happen after pre-check; surface other ledger failures.
+        if (err instanceof ValidationError) {
+            throw err;
+        }
+        console.error(
+            `Refund ledger sync failed for order ${order._id}:`,
+            err?.message || err
+        );
     }
 
     return order.toObject();
@@ -7758,6 +8095,22 @@ export async function updateCashPayRequestStatus(id, { status, adminNote, perfor
         throw new ValidationError(`Request has already been processed with status: ${existing.status}`);
     }
 
+    if (status === 'Completed') {
+        const partnerId = existing.deliveryPartnerId;
+        const wallet = await getDeliveryPartnerWalletEnhanced(partnerId);
+        const maxCompletable =
+            Math.round(
+                (Number(wallet.availableToDeposit || 0) + Number(existing.amount || 0)) * 100
+            ) / 100;
+        if (Number(existing.amount || 0) > maxCompletable + 0.009) {
+            throw new ValidationError(
+                `Cannot complete deposit of ₹${Number(existing.amount || 0).toFixed(2)}: ` +
+                    `remaining COD float is only ₹${maxCompletable.toFixed(2)} ` +
+                    `(₹${Number(wallet.pendingDepositAmount || 0).toFixed(2)} reserved in other pending deposits)`
+            );
+        }
+    }
+
     const updateFields = {
         status,
         adminNote,
@@ -7768,11 +8121,16 @@ export async function updateCashPayRequestStatus(id, { status, adminNote, perfor
         updateFields.adminId = performer.id;
     }
 
-    const updated = await FoodDeliveryCashDeposit.findByIdAndUpdate(
-        id,
+    // Atomic claim so concurrent Completes cannot double-apply
+    const updated = await FoodDeliveryCashDeposit.findOneAndUpdate(
+        { _id: id, status: 'Pending' },
         { $set: updateFields },
         { new: true }
     ).populate('deliveryPartnerId', 'name phone profilePartnerId').lean();
+
+    if (!updated) {
+        throw new ValidationError('Request is no longer pending (already processed)');
+    }
 
     return updated;
 }
@@ -7972,30 +8330,44 @@ export async function settleCODVerification(id, { action, adminNote, performer }
         throw new ValidationError(`Request cannot be processed because status is: ${deposit.status}`);
     }
 
-    const updateFields = {
-        adminNote,
-        processedAt: new Date()
-    };
-
     if (action === 'approve') {
-        updateFields.status = 'Completed';
-    } else if (action === 'reject') {
-        updateFields.status = 'Failed'; // Mark as Failed so it is settled as rejected
-    } else {
+        const wallet = await getDeliveryPartnerWalletEnhanced(deposit.deliveryPartnerId);
+        const maxCompletable =
+            Math.round(
+                (Number(wallet.availableToDeposit || 0) + Number(deposit.amount || 0)) * 100
+            ) / 100;
+        if (Number(deposit.amount || 0) > maxCompletable + 0.009) {
+            throw new ValidationError(
+                `Cannot approve COD deposit of ₹${Number(deposit.amount || 0).toFixed(2)}: ` +
+                    `remaining COD float is only ₹${maxCompletable.toFixed(2)}`
+            );
+        }
+    } else if (action !== 'reject') {
         throw new ValidationError('Invalid action. Must be approve or reject');
     }
+
+    const updateFields = {
+        adminNote,
+        processedAt: new Date(),
+        status: action === 'approve' ? 'Completed' : 'Failed',
+    };
 
     if (performer && performer.id) {
         updateFields.adminId = performer.id;
     }
 
-    const updated = await FoodDeliveryCashDeposit.findByIdAndUpdate(
-        id,
+    const updated = await FoodDeliveryCashDeposit.findOneAndUpdate(
+        { _id: id, status: 'Restaurant_Accepted' },
         { $set: updateFields },
         { new: true }
-    ).populate('deliveryPartnerId', 'name phone profilePartnerId')
+    )
+        .populate('deliveryPartnerId', 'name phone profilePartnerId')
         .populate('zoneHubRestaurantId', 'restaurantName')
         .lean();
+
+    if (!updated) {
+        throw new ValidationError('Request is no longer awaiting admin settlement');
+    }
 
     return updated;
 }

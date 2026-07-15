@@ -29,7 +29,8 @@ import {
 } from '../controllers/supportTicket.controller.js';
 import {
     createWithdrawalRequestController,
-    listMyWithdrawalsController
+    listMyWithdrawalsController,
+    cancelMyWithdrawalController
 } from '../controllers/withdrawal.controller.js';
 import {
     listCategoriesController,
@@ -188,6 +189,7 @@ router.post('/subscription-topup', authMiddleware, requireRestaurant, createTopu
 router.post('/verify-topup', authMiddleware, requireRestaurant, verifyTopupController);
 router.post('/withdraw', authMiddleware, requireRestaurant, createWithdrawalRequestController);
 router.get('/withdrawals', authMiddleware, requireRestaurant, listMyWithdrawalsController);
+router.post('/withdrawals/:id/cancel', authMiddleware, requireRestaurant, cancelMyWithdrawalController);
 router.post(
     '/profile/profile-image',
     authMiddleware,

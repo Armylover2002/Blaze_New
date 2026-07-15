@@ -95,6 +95,7 @@ const TaxReport = lazy(() => import("@food/pages/admin/reports/TaxReport"));
 const RestaurantVATReport = lazy(() => import("@food/pages/admin/reports/RestaurantVATReport"));
 // Transaction Management
 const RestaurantWithdraws = lazy(() => import("@food/pages/admin/transactions/RestaurantWithdraws"));
+const RestaurantWithdrawalLimit = lazy(() => import("@food/pages/admin/RestaurantWithdrawalLimit"));
 const WithdrawMethod = lazy(() => import("@food/pages/admin/transactions/WithdrawMethod"));
 const OnboardingFeeManagement = lazy(() => import("@food/pages/admin/transactions/OnboardingFeeManagement"));
 const OnboardingPayments = lazy(() => import("@food/pages/admin/transactions/OnboardingPayments"));
@@ -340,6 +341,7 @@ export default function AdminRouter() {
             <Route path="restaurant-vat-report" element={<RestaurantVATReport />} />
             
             <Route path="restaurant-withdraws" element={<RestaurantWithdraws />} />
+            <Route path="restaurant-withdrawal-limit" element={<RestaurantWithdrawalLimit />} />
             <Route path="withdraw-method" element={<WithdrawMethod />} />
             <Route path="onboarding-fee-management" element={<OnboardingFeeManagement />} />
             <Route path="onboarding-payments" element={<OnboardingPayments />} />
