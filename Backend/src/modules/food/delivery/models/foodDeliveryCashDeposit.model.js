@@ -58,7 +58,10 @@ const foodDeliveryCashDepositSchema = new mongoose.Schema({
         type: String,
         default: ''
     },
-    razorpayPaymentId: String,
+    razorpayPaymentId: {
+        type: String,
+        default: null
+    },
     adminId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User'
@@ -84,11 +87,55 @@ const foodDeliveryCashDepositSchema = new mongoose.Schema({
         ref: 'Seller',
         default: null
     }
-}, { 
-    collection: 'food_delivery_cash_deposits', 
-    timestamps: true 
+}, {
+    collection: 'food_delivery_cash_deposits',
+    timestamps: true
 });
 
 foodDeliveryCashDepositSchema.index({ createdAt: -1 });
 
-export const FoodDeliveryCashDeposit = mongoose.model('FoodDeliveryCashDeposit', foodDeliveryCashDepositSchema, 'food_delivery_cash_deposits');
+// One deposit per Razorpay payment / order — skips blanks (manual deposits)
+foodDeliveryCashDepositSchema.index(
+    { razorpayPaymentId: 1 },
+    {
+        unique: true,
+        name: 'uniq_razorpayPaymentId_nonzero',
+        partialFilterExpression: {
+            razorpayPaymentId: { $type: 'string', $gt: '' },
+        },
+    }
+);
+foodDeliveryCashDepositSchema.index(
+    { razorpayOrderId: 1 },
+    {
+        unique: true,
+        name: 'uniq_razorpayOrderId_nonzero',
+        partialFilterExpression: {
+            razorpayOrderId: { $type: 'string', $gt: '' },
+        },
+    }
+);
+
+export const FoodDeliveryCashDeposit = mongoose.model(
+    'FoodDeliveryCashDeposit',
+    foodDeliveryCashDepositSchema,
+    'food_delivery_cash_deposits'
+);
+
+let depositIndexPromise = null;
+
+/**
+ * autoIndex may be off in production — ensure unique payment keys exist.
+ */
+export async function ensureCashDepositIdempotencyIndexes() {
+    if (depositIndexPromise) return depositIndexPromise;
+    depositIndexPromise = (async () => {
+        try {
+            await FoodDeliveryCashDeposit.createIndexes();
+        } catch (err) {
+            depositIndexPromise = null;
+            throw err;
+        }
+    })();
+    return depositIndexPromise;
+}

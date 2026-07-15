@@ -5,6 +5,7 @@ import { FoodRestaurant } from '../../restaurant/models/restaurant.model.js';
 import { FoodTransaction } from '../models/foodTransaction.model.js';
 import { FoodDeliveryPartner } from '../../delivery/models/deliveryPartner.model.js';
 import { getDeliveryPartnerWallet } from "../../delivery/services/delivery.service.js";
+import { assertDeliveryPartnerCodHeadroom } from "../../delivery/services/deliveryFinance.service.js";
 import { SellerOrder } from '../../../quick-commerce/seller/models/sellerOrder.model.js';
 import {
   ValidationError,
@@ -320,6 +321,12 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
     'cancelled_by_restaurant',
     'cancelled_by_admin',
   ];
+
+  const preview = await FoodOrder.findOne(identity)
+    .select('payment pricing payableAmount totalAmount amount total orderStatus dispatch')
+    .lean();
+  if (!preview) throw new NotFoundError('Order not found');
+  await assertDeliveryPartnerCodHeadroom(deliveryPartnerId, preview);
 
   const statusHistoryEntry = {
     byRole: 'DELIVERY_PARTNER',

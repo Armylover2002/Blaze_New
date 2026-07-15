@@ -83,6 +83,7 @@ import { deductWalletBalance, refundWalletBalance } from '../../user/services/us
 import { getGlobalBranding } from '../../../common/services/globalBranding.service.js';
 import { roadDistanceKm, PAYMENT_QUEUE_ACTIONS } from './order.helpers.js';
 import { scorePointsByRoadDistance } from '../../../../services/roadDistance.service.js';
+import { assertDeliveryPartnerCodHeadroom } from '../../delivery/services/deliveryFinance.service.js';
 
 export {
   tryAutoAssign,
@@ -4688,6 +4689,9 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId, body = {})
   ) {
     throw new ValidationError("Order not ready for delivery assignment");
   }
+
+  // Prevent COD accept when order collect amount exceeds remaining cash limit
+  await assertDeliveryPartnerCodHeadroom(deliveryPartnerId, order);
 
   if (isSplitDispatchOrder(order)) {
     const requestedLegId = String(body?.legId || "").trim();

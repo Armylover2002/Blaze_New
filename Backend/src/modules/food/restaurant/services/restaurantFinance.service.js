@@ -175,16 +175,19 @@ export async function getRestaurantFinance(restaurantId, query = {}) {
 
     const referralBalance = Number(wallet?.referralEarnings || 0);
 
-    // Block only pending withdrawals from available balance.
-    // Approved/rejected requests are processed records and should not keep locking payout.
+    // Lock pending + in-flight (processing) withdrawals from available balance.
+    // Approved/rejected/cancelled are terminal and must not keep locking payout.
     const pendingWithdrawalsAgg = await FoodRestaurantWithdrawal.aggregate([
         {
             $match: {
                 restaurantId: rid,
                 $expr: {
-                    $eq: [{ $toLower: { $trim: { input: '$status' } } }, 'pending']
-                }
-            }
+                    $in: [
+                        { $toLower: { $trim: { input: '$status' } } },
+                        ['pending', 'processing'],
+                    ],
+                },
+            },
         },
         { $group: { _id: null, total: { $sum: '$amount' } } }
     ]);
