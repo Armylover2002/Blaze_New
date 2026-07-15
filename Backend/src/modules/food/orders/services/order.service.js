@@ -14,10 +14,15 @@ import { buildPaginationOptions, buildPaginatedResult } from '../../../../utils/
 import { FoodOffer } from '../../admin/models/offer.model.js';
 import { FoodOfferUsage } from '../../admin/models/offerUsage.model.js';
 import {
-    resolveRestaurantObjectId,
     validateAndApplyCoupon,
     consumeOrderCouponUsageOnDelivery,
 } from '../../shared/coupon.util.js';
+import {
+  resolveRestaurantDocument,
+  toNormalizedFoodRestaurantSource,
+  canonicalizeFoodItemSourceIds,
+  isMongoObjectIdString,
+} from '../../shared/restaurantIdentity.util.js';
 import {
     calculateDistanceKm,
     normalizeDeliveryAddress as normalizeDeliveryAddressGeo,
@@ -31,6 +36,13 @@ import {
     resolveRestaurantToUserRoadDistanceKm,
     resolveConfiguredDeliveryFeeFallback,
 } from '../../shared/delivery-fee.util.js';
+import {
+  evaluateFoodQuickDeliveryEligibility,
+  splitQuickDeliveryCharge,
+  isFoodQuickDeliveryMode,
+} from './quick-eligibility.service.js';
+import { computeFoodQuickEtaPromise } from './quick-eta.service.js';
+import { computePlatformNetProfitWithQuickFreeze } from '../utils/quickFinance.util.js';
 import { FoodItem } from '../../admin/models/food.model.js';
 import { FoodAddon } from '../../restaurant/models/foodAddon.model.js';
 import { SellerProduct } from '../../../quick-commerce/seller/models/sellerProduct.model.js';
@@ -59,10 +71,17 @@ import {
 } from '../helpers/razorpay.helper.js';
 import { getIO, rooms } from '../../../../config/socket.js';
 import { isPointInPolygon } from '../../../../utils/geo.js';
+import { addOrderJob, removeOrderJob, getOrderJobMeta } from '../../../../queues/producers/order.producer.js';
 import { addOrderJob } from '../../../../queues/producers/order.producer.js';
 import { addPaymentJob } from '../../../../queues/producers/payment.producer.js';
 import { fetchPolyline } from '../utils/googleMaps.js';
 import { getFirebaseDB } from '../../../../config/firebase.js';
+import {
+  SCHEDULE_ACTIVATE_LEAD_MINUTES,
+  SCHEDULE_MIN_LEAD_MINUTES,
+  SCHEDULE_MAX_DAYS_AHEAD,
+  SCHEDULE_FALLBACK_GRACE_MS,
+} from '../utils/scheduleConstants.js';
 import * as foodTransactionService from './foodTransaction.service.js';
 import { ensureDailyPassEligibility } from "../../subscriptions/services/wallet.service.js";
 import {
@@ -126,6 +145,13 @@ async function ensureRazorpayPaymentNotConsumed(paymentId, { currentFoodOrderId 
 
 /**
  * Fire-and-forget BullMQ enqueue for order lifecycle events.
+ * jobOptions (3rd arg) is passed to addOrderJob — e.g. { delay, jobId }.
+ * Never blocks API response; failures are logged only.
+ */
+function enqueueOrderEvent(action, payload = {}, jobOptions = {}) {
+    try {
+        void addOrderJob({ action, ...payload }, jobOptions).catch((err) => {
+            logger.warn(`BullMQ enqueue order event failed: ${action} - ${err?.message || err}`);
  * Payment settlement actions use the payment queue when BullMQ is enabled.
  * Never blocks API response; failures are logged only.
  */
@@ -183,6 +209,221 @@ function enqueueOrderEvent(action, payload = {}) {
     logger.warn(`BullMQ enqueue order event failed (sync): ${action} - ${err?.message || err}`);
     if (isPaymentAction) runSyncPaymentProcessor();
   }
+}
+
+function shouldHoldDispatchForScheduled(orderLike) {
+  return String(orderLike?.orderStatus || "").toLowerCase() === "scheduled";
+}
+
+/**
+ * Normalize/validate scheduledAt for Food Schedule Order.
+ * Returns null when dto has no schedule → ASAP path unchanged.
+ */
+function resolveValidatedScheduledAt(rawScheduledAt) {
+  if (rawScheduledAt === undefined || rawScheduledAt === null || rawScheduledAt === "") return null;
+
+  const scheduledAt = new Date(rawScheduledAt);
+  if (Number.isNaN(scheduledAt.getTime())) {
+    throw new ValidationError("Invalid scheduledAt datetime");
+  }
+
+  const now = Date.now();
+  const minLeadMs = Math.max(0, SCHEDULE_MIN_LEAD_MINUTES) * 60 * 1000;
+  if (scheduledAt.getTime() < now + minLeadMs) {
+    throw new ValidationError(
+      `Scheduled time must be at least ${SCHEDULE_MIN_LEAD_MINUTES} minutes from now`
+    );
+  }
+
+  const maxDay = new Date();
+  maxDay.setHours(0, 0, 0, 0);
+  maxDay.setDate(maxDay.getDate() + Math.max(0, SCHEDULE_MAX_DAYS_AHEAD) + 1);
+  const maxExclusive = maxDay.getTime();
+  if (scheduledAt.getTime() >= maxExclusive) {
+    throw new ValidationError(
+      `Scheduled time must be within the next ${SCHEDULE_MAX_DAYS_AHEAD} day(s)`
+    );
+  }
+
+  return scheduledAt;
+}
+
+async function assertRestaurantAllowsSchedule(restaurantOrId) {
+  if (!restaurantOrId) return;
+  // Prefer already-normalized restaurant from order entry (no refetch).
+  if (
+    typeof restaurantOrId === "object" &&
+    restaurantOrId.scheduleOrderEnabled !== undefined
+  ) {
+    if (restaurantOrId.scheduleOrderEnabled === false) {
+      throw new ValidationError("This restaurant is not accepting scheduled orders");
+    }
+    return;
+  }
+  const restaurant = await FoodRestaurant.findById(restaurantOrId)
+    .select("scheduleOrderEnabled")
+    .lean();
+  if (restaurant && restaurant.scheduleOrderEnabled === false) {
+    throw new ValidationError("This restaurant is not accepting scheduled orders");
+  }
+}
+
+function buildFoodScheduleJobId(orderMongoId) {
+  return `food-schedule-${String(orderMongoId || "").trim()}`;
+}
+
+/**
+ * PRIMARY activation path: enqueue BullMQ delayed job at schedule create time.
+ * Persists scheduleNotifyJobId immediately when Redis accepts the job.
+ * Returns null only when BullMQ/Redis cannot accept → Mongo fallback owns activation.
+ */
+async function scheduleOrderActivationJob(order) {
+  if (!order || String(order.orderStatus || "").toLowerCase() !== "scheduled" || !order.scheduledAt) {
+    return null;
+  }
+
+  const scheduledTime = new Date(order.scheduledAt).getTime();
+  if (!Number.isFinite(scheduledTime)) return null;
+
+  const leadMs = Math.max(0, SCHEDULE_ACTIVATE_LEAD_MINUTES) * 60 * 1000;
+  const delay = Math.max(0, scheduledTime - leadMs - Date.now());
+  const orderMongoId = order._id.toString();
+  const jobId = buildFoodScheduleJobId(orderMongoId);
+  const payload = {
+    orderId: order.orderId,
+    orderMongoId,
+  };
+
+  if (process.env.BULLMQ_ENABLED !== "true") {
+    logger.warn(
+      `Schedule activation deferred to fallback reconciler for ${order.orderId} (BULLMQ_ENABLED!=true)`
+    );
+    return null;
+  }
+
+  try {
+    const job = await addOrderJob(
+      { action: "NOTIFY_SCHEDULED_ORDER", ...payload },
+      { delay, jobId, removeOnComplete: true, removeOnFail: 50 }
+    );
+    if (!job) {
+      logger.error(
+        `PRIMARY schedule job NOT enqueued for ${order.orderId} (queue unavailable). Fallback reconciler will activate when due.`
+      );
+      return null;
+    }
+    const resolvedId = job?.id != null ? String(job.id) : jobId;
+    order.scheduleNotifyJobId = resolvedId;
+    await FoodOrder.updateOne(
+      { _id: order._id },
+      { $set: { scheduleNotifyJobId: resolvedId } }
+    );
+    logger.info(
+      `PRIMARY schedule job enqueued order=${order.orderId} delay=${delay}ms jobId=${resolvedId}`
+    );
+    return resolvedId;
+  } catch (err) {
+    logger.error(
+      `PRIMARY schedule job enqueue failed for ${order.orderId}: ${err?.message || err}. Fallback reconciler will activate when due.`
+    );
+    return null;
+  }
+}
+
+async function cancelScheduleActivationJob(orderLike) {
+  const mongoId = orderLike?._id?.toString?.() || "";
+  const jobIds = new Set(
+    [
+      orderLike?.scheduleNotifyJobId,
+      mongoId ? buildFoodScheduleJobId(mongoId) : null,
+    ].filter(Boolean)
+  );
+  for (const jobId of jobIds) {
+    await removeOrderJob(jobId);
+  }
+  if (orderLike?._id) {
+    await FoodOrder.updateOne(
+      { _id: orderLike._id },
+      { $set: { scheduleNotifyJobId: null } }
+    ).catch(() => {});
+  }
+}
+
+/**
+ * Fallback-only gate: when BullMQ is primary, activate via reconciler only if the
+ * delayed job is missing, failed, queue is down, or stuck past grace after due.
+ */
+async function shouldFallbackActivateScheduledOrder(orderRow) {
+  if (!orderRow?._id || !orderRow.scheduledAt) return false;
+
+  const leadMs = Math.max(0, SCHEDULE_ACTIVATE_LEAD_MINUTES) * 60 * 1000;
+  const activateAtMs = new Date(orderRow.scheduledAt).getTime() - leadMs;
+  if (!Number.isFinite(activateAtMs) || Date.now() < activateAtMs) {
+    return false;
+  }
+
+  if (process.env.BULLMQ_ENABLED !== "true") {
+    return true;
+  }
+
+  const deterministicId = buildFoodScheduleJobId(orderRow._id);
+  const storedId = orderRow.scheduleNotifyJobId
+    ? String(orderRow.scheduleNotifyJobId)
+    : null;
+
+  if (!storedId) {
+    logger.warn(
+      `Schedule fallback: missing scheduleNotifyJobId for ${orderRow.orderId || orderRow._id}`
+    );
+    return true;
+  }
+
+  const meta = await getOrderJobMeta(storedId);
+  const metaAlt =
+    storedId !== deterministicId ? await getOrderJobMeta(deterministicId) : meta;
+  const effective = meta.exists ? meta : metaAlt;
+
+  if (effective.queueUnavailable) {
+    logger.warn(
+      `Schedule fallback: queue unavailable for ${orderRow.orderId || orderRow._id}`
+    );
+    return true;
+  }
+
+  if (!effective.exists) {
+    logger.warn(
+      `Schedule fallback: BullMQ job missing for ${orderRow.orderId || orderRow._id} jobId=${storedId}`
+    );
+    return true;
+  }
+
+  const state = String(effective.state || "").toLowerCase();
+  if (state === "failed") {
+    logger.warn(
+      `Schedule fallback: BullMQ job failed for ${orderRow.orderId || orderRow._id}`
+    );
+    return true;
+  }
+
+  if (["delayed", "waiting", "wait", "active", "paused", "prioritized"].includes(state)) {
+    const overdueMs = Date.now() - activateAtMs;
+    if (overdueMs >= Math.max(0, SCHEDULE_FALLBACK_GRACE_MS)) {
+      logger.warn(
+        `Schedule fallback: job stuck state=${state} overdueMs=${overdueMs} for ${orderRow.orderId || orderRow._id}`
+      );
+      return true;
+    }
+    return false;
+  }
+
+  if (state === "completed") {
+    logger.warn(
+      `Schedule fallback: job completed but order still scheduled for ${orderRow.orderId || orderRow._id}`
+    );
+    return true;
+  }
+
+  return true;
 }
 
 
@@ -356,6 +597,9 @@ function applyCancellationTerminalState(order, { cancelledStatus, reason = "" } 
     order.deliveryState = {};
   order.deliveryState.currentPhase = "cancelled";
   order.deliveryState.status = "cancelled";
+
+  // Drop any pending schedule activation job (user/admin/restaurant cancel).
+  void cancelScheduleActivationJob(order);
 
   // Payment: for non-paid flows, keep it cancelled.
   if (order.payment && typeof order.payment === "object") {
@@ -1036,28 +1280,54 @@ function angleBetweenPickupVectors(userPoint, firstPoint, secondPoint) {
 }
 
 async function fetchPickupSourcesByType(items = []) {
-  const foodSourceIds = [...new Set(items.filter((item) => item.type === "food").map((item) => item.sourceId).filter(Boolean))];
-  const quickSourceIds = [...new Set(items.filter((item) => item.type === "quick").map((item) => item.sourceId).filter(Boolean))];
+  const foodSourceIds = [
+    ...new Set(
+      items
+        .filter((item) => item.type === "food")
+        .map((item) => item.sourceId)
+        .filter(Boolean)
+        .map((id) => String(id).trim()),
+    ),
+  ];
+  const quickSourceIds = [
+    ...new Set(
+      items
+        .filter((item) => item.type === "quick")
+        .map((item) => item.sourceId)
+        .filter(Boolean),
+    ),
+  ];
   const foodObjectIds = foodSourceIds
-    .filter((id) => mongoose.isValidObjectId(id))
+    .filter((id) => isMongoObjectIdString(id))
     .map((id) => new mongoose.Types.ObjectId(id));
-  const foodReadableIds = foodSourceIds
-    .filter((id) => /^REST\d{6}$/i.test(String(id)))
+  // Option B: any non-ObjectId inbound key is treated as business restaurantId.
+  const foodBusinessIds = foodSourceIds
+    .filter((id) => !isMongoObjectIdString(id))
     .map((id) => String(id).toUpperCase());
 
+  const restaurantQueryParts = [
+    ...(foodObjectIds.length ? [{ _id: { $in: foodObjectIds } }] : []),
+    ...(foodBusinessIds.length
+      ? [{ restaurantId: { $in: foodBusinessIds } }]
+      : []),
+  ];
+
   const [restaurants, sellers] = await Promise.all([
-    foodSourceIds.length
-      ? FoodRestaurant.find({
-          $or: [
-            ...(foodObjectIds.length ? [{ _id: { $in: foodObjectIds } }] : []),
-            ...(foodReadableIds.length ? [{ restaurantId: { $in: foodReadableIds } }] : []),
-          ],
-        })
-          .select("restaurantId restaurantName location addressLine1 area city state zoneId status commissionPercentage")
+    foodSourceIds.length && restaurantQueryParts.length
+      ? FoodRestaurant.find({ $or: restaurantQueryParts })
+          .select(
+            "restaurantId restaurantName location addressLine1 area city state zoneId status commissionPercentage quickDeliveryEnabled scheduleOrderEnabled isAcceptingOrders kitchenPrepMinutes",
+          )
           .lean()
       : [],
     quickSourceIds.length
-      ? Seller.find({ _id: { $in: quickSourceIds.filter((id) => mongoose.isValidObjectId(id)).map((id) => new mongoose.Types.ObjectId(id)) } })
+      ? Seller.find({
+          _id: {
+            $in: quickSourceIds
+              .filter((id) => isMongoObjectIdString(id))
+              .map((id) => new mongoose.Types.ObjectId(id)),
+          },
+        })
           .select("shopName name location shopInfo approvalStatus approved isActive")
           .lean()
       : [],
@@ -1065,25 +1335,11 @@ async function fetchPickupSourcesByType(items = []) {
 
   const sourceMap = new Map();
   for (const restaurant of restaurants) {
-    const normalizedRestaurant = {
-      type: "food",
-      sourceId: String(restaurant._id),
-      sourceName: restaurant.restaurantName || restaurant.name || "Restaurant",
-      status: restaurant.status,
-      location: restaurant.location,
-      zoneId: restaurant.zoneId || null,
-      commissionPercentage: resolveRestaurantCommissionPercentage(
-        restaurant.commissionPercentage,
-      ),
-      address:
-        restaurant.location?.address ||
-        restaurant.location?.formattedAddress ||
-        restaurant.addressLine1 ||
-        [restaurant.area, restaurant.city, restaurant.state].filter(Boolean).join(", "),
-    };
-    sourceMap.set(String(restaurant._id), normalizedRestaurant);
-    if (restaurant.restaurantId) {
-      sourceMap.set(String(restaurant.restaurantId).toUpperCase(), normalizedRestaurant);
+    const normalizedRestaurant = toNormalizedFoodRestaurantSource(restaurant);
+    if (!normalizedRestaurant) continue;
+    sourceMap.set(normalizedRestaurant.sourceId, normalizedRestaurant);
+    if (normalizedRestaurant.businessRestaurantId) {
+      sourceMap.set(normalizedRestaurant.businessRestaurantId, normalizedRestaurant);
     }
   }
   for (const seller of sellers) {
@@ -1105,15 +1361,75 @@ async function fetchPickupSourcesByType(items = []) {
   return sourceMap;
 }
 
+/**
+ * Single identity entry for food cart/order: load sources once, rewrite
+ * item.sourceId → Mongo _id, return map + primary restaurant.
+ */
+async function resolveFoodOrderSources(items = [], dtoRestaurantId = null) {
+  const sourceMap = await fetchPickupSourcesByType(items);
+  canonicalizeFoodItemSourceIds(items, sourceMap);
+
+  // Ensure dto.restaurantId is present even when cart items omit sourceId.
+  if (dtoRestaurantId) {
+    const dtoKey = String(dtoRestaurantId).trim();
+    const already =
+      sourceMap.get(dtoKey) ||
+      sourceMap.get(dtoKey.toUpperCase()) ||
+      sourceMap.get(dtoKey.toLowerCase());
+    if (!already) {
+      const doc = await resolveRestaurantDocument(dtoKey);
+      const normalized = toNormalizedFoodRestaurantSource(doc);
+      if (normalized) {
+        sourceMap.set(normalized.sourceId, normalized);
+        if (normalized.businessRestaurantId) {
+          sourceMap.set(normalized.businessRestaurantId, normalized);
+        }
+      }
+    }
+  }
+
+  const foodSourceIds = [
+    ...new Set(
+      items
+        .filter((item) => item.type === "food")
+        .map((item) => item.sourceId)
+        .filter(Boolean),
+    ),
+  ];
+
+  const primaryKey = dtoRestaurantId || foodSourceIds[0] || null;
+  let primaryRestaurant = primaryKey
+    ? sourceMap.get(String(primaryKey)) ||
+      sourceMap.get(String(primaryKey).toUpperCase())
+    : null;
+
+  // dto.restaurantId may be business code while items already canonicalized to _id
+  if (!primaryRestaurant && dtoRestaurantId) {
+    primaryRestaurant =
+      sourceMap.get(String(dtoRestaurantId).toUpperCase()) ||
+      sourceMap.get(String(dtoRestaurantId));
+  }
+  if (!primaryRestaurant && foodSourceIds[0]) {
+    primaryRestaurant = sourceMap.get(String(foodSourceIds[0]));
+  }
+
+  return { sourceMap, primaryRestaurant, foodSourceIds };
+}
+
 function buildPickupPointsFromItems(items = [], sourceMap = new Map()) {
   const grouped = new Map();
   for (const item of items) {
-    const key = `${item.type}:${item.sourceId}`;
+    const source =
+      sourceMap.get(String(item.sourceId)) ||
+      sourceMap.get(String(item.sourceId || "").toUpperCase()) ||
+      {};
+    // Always prefer canonical Mongo sourceId from the map (Option B).
+    const canonicalSourceId = String(source.sourceId || item.sourceId || "");
+    const key = `${item.type}:${canonicalSourceId}`;
     if (!grouped.has(key)) {
-      const source = sourceMap.get(String(item.sourceId)) || {};
       grouped.set(key, {
         pickupType: item.type,
-        sourceId: String(item.sourceId),
+        sourceId: canonicalSourceId,
         sourceName: item.sourceName || source.sourceName || "",
         address: source.address || "",
         location: source.location?.coordinates
@@ -2278,37 +2594,412 @@ export async function notifySplitDispatchOffersForOrder(orderId) {
   return { success: true };
 }
 
-/** Triggered by BullMQ 15 minutes before scheduledAt. */
-export async function processScheduledOrderNotification(orderMongoId) {
-  const order = await FoodOrder.findById(orderMongoId);
-  if (!order) return { success: false, reason: "Order not found" };
+/** Channel: worker → API for Instant-identical socket/FCM after BullMQ activation. */
 
-  // If order was cancelled or already confirmed, skip
-  if (order.orderStatus !== "scheduled") {
-    return { success: false, reason: `Order is in ${order.orderStatus} status` };
+export const FOOD_SCHEDULE_ACTIVATED_CHANNEL = "food:schedule:activated";
+
+
+
+async function publishScheduleActivatedEvent(orderMongoId) {
+
+  const payload = JSON.stringify({ orderMongoId: String(orderMongoId) });
+
+  try {
+
+    const { getRedisClient, createRedisClient } = await import(
+
+      "../../../../config/redis.js"
+
+    );
+
+    let redis = getRedisClient();
+
+    let owned = false;
+
+    if (!redis) {
+
+      redis = createRedisClient();
+
+      if (!redis) {
+
+        logger.error(
+
+          `Schedule activation notify bridge failed: Redis unavailable for ${orderMongoId}`
+
+        );
+
+        return false;
+
+      }
+
+      await redis.connect();
+
+      owned = true;
+
+    }
+
+    await redis.publish(FOOD_SCHEDULE_ACTIVATED_CHANNEL, payload);
+
+    if (owned) await redis.quit().catch(() => {});
+
+    logger.info(`Published ${FOOD_SCHEDULE_ACTIVATED_CHANNEL} for ${orderMongoId}`);
+
+    return true;
+
+  } catch (err) {
+
+    logger.error(
+
+      `publishScheduleActivatedEvent failed for ${orderMongoId}: ${err?.message || err}`
+
+    );
+
+    return false;
+
   }
 
-  // Update status to 'placed' (which is the state for orders waiting restaurant action)
-  order.orderStatus = "placed";
-  pushStatusHistory(order, {
-    byRole: "SYSTEM",
-    from: "scheduled",
-    to: "placed",
-    note: "Scheduled order activated for restaurant review (15m window reached)",
-  });
-  await order.save();
+}
 
-  // Now trigger the actual notifications
-  await notifyRestaurantNewOrder(order);
-  
-  const sellerOrders = order.orderType === "quick" || order.orderType === "mixed" 
-    ? await upsertSellerOrdersForParent(order)
-    : [];
-  if (sellerOrders.length > 0) {
-    await notifySellerNewOrders(order, sellerOrders);
+
+
+/**
+
+ * Instant-identical restaurant + customer notify after scheduled→placed.
+
+ * Safe to call once (Redis NX lock). Used by API process (has Socket.IO).
+
+ */
+
+export async function deliverScheduleActivationNotifications(orderDoc) {
+
+  if (!orderDoc?._id) return { success: false, reason: "Missing order" };
+
+  const orderMongoId = orderDoc._id.toString();
+
+
+
+  try {
+
+    const { getRedisClient } = await import("../../../../config/redis.js");
+
+    const redis = getRedisClient();
+
+    if (redis) {
+
+      const lockKey = `food:schedule:notify-lock:${orderMongoId}`;
+
+      const locked = await redis.set(lockKey, "1", { NX: true, EX: 86400 });
+
+      if (locked === null) {
+
+        logger.info(
+
+          `Schedule activation notify skipped (already delivered) order=${orderDoc.orderId || orderMongoId}`
+
+        );
+
+        return { success: true, skipped: true };
+
+      }
+
+    }
+
+  } catch (err) {
+
+    logger.warn(`Schedule notify lock skipped: ${err?.message || err}`);
+
   }
+
+
+
+  await notifyRestaurantNewOrder(orderDoc);
+
+
+
+  if (orderDoc.orderType === "quick" || orderDoc.orderType === "mixed") {
+
+    const sellerOrders = await upsertSellerOrdersForParent(orderDoc);
+
+    if (sellerOrders.length > 0) {
+
+      await notifySellerNewOrders(orderDoc, sellerOrders);
+
+    }
+
+  }
+
+
+
+  try {
+
+    const io = getIO();
+
+    if (io && orderDoc.userId) {
+
+      io.to(rooms.user(orderDoc.userId)).emit("order_status_update", {
+
+        orderId: orderDoc.orderId,
+
+        orderMongoId,
+
+        orderStatus: orderDoc.orderStatus,
+
+        status: orderDoc.orderStatus,
+
+        activatedAt: orderDoc.activatedAt,
+
+        scheduledAt: orderDoc.scheduledAt,
+
+        message: "Your scheduled order was sent to the restaurant",
+
+      });
+
+    }
+
+  } catch (err) {
+
+    logger.warn(`Schedule activation status socket failed: ${err?.message || err}`);
+
+  }
+
+
+
+  // Do NOT send customer "preparing" FCM here.
+  // That fires only when restaurant accepts / starts preparing (updateOrderStatusRestaurant).
 
   return { success: true };
+
+}
+
+
+
+/**
+
+ * API-side subscriber for worker-originated activations (sockets require API process).
+
+ */
+
+export async function handleScheduleActivatedBridgeMessage(raw) {
+
+  try {
+
+    const data = typeof raw === "string" ? JSON.parse(raw) : raw;
+
+    const orderMongoId = data?.orderMongoId;
+
+    if (!orderMongoId) return { success: false };
+
+    const order = await FoodOrder.findById(orderMongoId);
+
+    if (!order || String(order.orderStatus || "").toLowerCase() !== "placed") {
+
+      return { success: false, reason: "Order not placed" };
+
+    }
+
+    return deliverScheduleActivationNotifications(order);
+
+  } catch (err) {
+
+    logger.error(`handleScheduleActivatedBridgeMessage failed: ${err?.message || err}`);
+
+    return { success: false };
+
+  }
+
+}
+
+
+
+/** Triggered by BullMQ at T-lead (PRIMARY) or by fallback reconciler when job is missing/stuck. */
+
+export async function processScheduledOrderNotification(orderMongoId, options = {}) {
+
+  if (!orderMongoId) return { success: false, reason: "Missing order id" };
+
+
+
+  const source = String(options?.source || "unknown");
+
+  const deterministicJobId = buildFoodScheduleJobId(orderMongoId);
+
+
+
+  // Atomic CAS: only one winner if BullMQ + fallback race (or Redis job replay).
+
+  const activatedAt = new Date();
+
+  const order = await FoodOrder.findOneAndUpdate(
+
+    { _id: orderMongoId, orderStatus: "scheduled" },
+
+    {
+
+      $set: {
+
+        orderStatus: "placed",
+
+        activatedAt,
+
+        scheduleNotifyJobId: null,
+
+        // Delivery has not started — rider not assigned yet.
+        // en_route_to_pickup only after driver is assigned / heading to restaurant.
+
+        "deliveryState.currentPhase": "waiting_activation",
+
+        "deliveryState.status": "waiting_activation",
+
+      },
+
+      $push: {
+
+        statusHistory: {
+
+          at: activatedAt,
+
+          byRole: "SYSTEM",
+
+          from: "scheduled",
+
+          to: "placed",
+
+          note: `Scheduled order activated for restaurant review (${SCHEDULE_ACTIVATE_LEAD_MINUTES}m window reached) via ${source}`,
+
+        },
+
+      },
+
+    },
+
+    { new: true }
+
+  );
+
+
+
+  if (!order) {
+
+    await removeOrderJob(deterministicJobId);
+
+    return {
+
+      success: false,
+
+      alreadyHandled: true,
+
+      reason: "Order not found or not in scheduled status",
+
+    };
+
+  }
+
+
+
+  await removeOrderJob(deterministicJobId);
+
+
+
+  // Socket.IO lives on the API process. Worker bridges notify via Redis.
+
+  const io = getIO();
+
+  if (io) {
+
+    await deliverScheduleActivationNotifications(order);
+
+  } else {
+
+    const published = await publishScheduleActivatedEvent(order._id.toString());
+
+    if (!published) {
+
+      logger.error(
+
+        `Schedule activated in Mongo but notify bridge failed for ${order.orderId} — restaurant poll/FCM may recover`
+
+      );
+
+    }
+
+  }
+
+
+
+  logger.info(
+
+    `Schedule activated order=${order.orderId} source=${source} activatedAt=${activatedAt.toISOString()}`
+
+  );
+
+  return { success: true, source };
+
+}
+
+
+
+/**
+ * FALLBACK reconciler — must NEVER be the normal activation path when BullMQ is healthy.
+ * Activates only when the primary delayed job is missing/failed/stuck/queue-down.
+ * Idempotent via processScheduledOrderNotification CAS.
+ */
+export async function processDueScheduledFoodOrders(limit = 50) {
+  const leadMs = Math.max(0, SCHEDULE_ACTIVATE_LEAD_MINUTES) * 60 * 1000;
+  const dueBefore = new Date(Date.now() + leadMs);
+
+  // Repair legacy scheduled rows that still have Instant deliveryPhase default.
+  await FoodOrder.updateMany(
+    {
+      orderStatus: "scheduled",
+      "deliveryState.currentPhase": { $nin: ["waiting_activation", "cancelled"] },
+    },
+    {
+      $set: {
+        "deliveryState.currentPhase": "waiting_activation",
+        "deliveryState.status": "waiting_activation",
+      },
+    }
+  ).catch((err) => {
+    logger.warn(
+      `Failed to repair scheduled deliveryState phases: ${err?.message || err}`
+    );
+  });
+
+  const dueOrders = await FoodOrder.find({
+    orderStatus: "scheduled",
+    scheduledAt: { $ne: null, $lte: dueBefore },
+  })
+    .select("_id orderId scheduledAt scheduleNotifyJobId")
+    .sort({ scheduledAt: 1 })
+    .limit(Math.max(1, Math.min(200, Number(limit) || 50)))
+    .lean();
+
+  let processed = 0;
+  let skippedHealthyPrimary = 0;
+  for (const row of dueOrders) {
+    try {
+      const allowFallback = await shouldFallbackActivateScheduledOrder(row);
+      if (!allowFallback) {
+        skippedHealthyPrimary += 1;
+        continue;
+      }
+      const result = await processScheduledOrderNotification(row._id, {
+        source: "fallback_reconciler",
+      });
+      if (result?.success) processed += 1;
+    } catch (err) {
+      logger.error(
+        `processDueScheduledFoodOrders failed for ${row.orderId}: ${err?.message || err}`
+      );
+    }
+  }
+
+  if (processed > 0 || skippedHealthyPrimary > 0) {
+    logger.info(
+      `Food schedule fallback reconciler activated=${processed} skippedHealthyPrimary=${skippedHealthyPrimary} scanned=${dueOrders.length}`
+    );
+  }
+  return { processed, scanned: dueOrders.length, skippedHealthyPrimary };
 }
 
 export async function processOrderPostPaymentFulfillment(orderInput, options = {}) {
@@ -2328,23 +3019,14 @@ export async function processOrderPostPaymentFulfillment(orderInput, options = {
   }
 
   if (order.orderStatus === "scheduled" && order.scheduledAt) {
-    const now = Date.now();
-    const scheduledTime = new Date(order.scheduledAt).getTime();
-    const notificationTime = scheduledTime - 15 * 60 * 1000;
-    const delay = Math.max(0, notificationTime - now);
-
-    enqueueOrderEvent("NOTIFY_SCHEDULED_ORDER", {
-      orderId: order.orderId,
-      orderMongoId: order._id.toString(),
-    }, { delay });
-
-    logger.info(`Scheduled notification for verified order ${order.orderId} with delay of ${delay}ms`);
+    await scheduleOrderActivationJob(order);
   }
 
   if (
     (order.orderType === "food" || (order.orderType === "mixed" && order.dispatchPlan?.strategy === "single")) &&
     String(order.dispatch?.modeAtCreation || "manual") === "auto" &&
-    String(order.payment?.status || "").toLowerCase() === "paid"
+    String(order.payment?.status || "").toLowerCase() === "paid" &&
+    !shouldHoldDispatchForScheduled(order)
   ) {
     try {
       await tryAutoAssign(order._id);
@@ -2373,7 +3055,7 @@ export async function processOrderPostPaymentFulfillment(orderInput, options = {
 // Stale getDispatchSettings and updateDispatchSettings removed (now imported from order-dispatch.service.js)
 
 // ----- Calculate (validation + return pricing from payload) -----
-export async function calculateOrder(userId, dto) {
+export async function calculateOrder(userId, dto, options = {}) {
   const items = normalizeOrderItems(dto.items, dto.orderType);
   const hasFoodItems = items.some((item) => item.type === "food");
   const hasQuickItems = items.some((item) => item.type === "quick");
@@ -2383,6 +3065,30 @@ export async function calculateOrder(userId, dto) {
       : hasQuickItems
         ? "quick"
         : "food";
+  // Option B: resolve restaurant identity once (business code or Mongo _id).
+  // createOrder may pass preResolvedSources to avoid a duplicate restaurant load.
+  let sourceMap;
+  let primaryRestaurant;
+  if (options.preResolvedSources?.sourceMap) {
+    sourceMap = options.preResolvedSources.sourceMap;
+    canonicalizeFoodItemSourceIds(items, sourceMap);
+    primaryRestaurant =
+      options.preResolvedSources.primaryRestaurant ||
+      (dto.restaurantId
+        ? sourceMap.get(String(dto.restaurantId)) ||
+          sourceMap.get(String(dto.restaurantId).toUpperCase())
+        : null);
+    if (!primaryRestaurant) {
+      const foodId = items.find((i) => i.type === "food")?.sourceId;
+      primaryRestaurant = foodId ? sourceMap.get(String(foodId)) : null;
+    }
+  } else {
+    ({ sourceMap, primaryRestaurant } = await resolveFoodOrderSources(
+      items,
+      dto.restaurantId,
+    ));
+  }
+  await applyServerFoodItemPricing(items, sourceMap);
   const sourceMap = await fetchPickupSourcesByType(items);
   await applyServerItemPricing(items, sourceMap);
   const subtotal = items.reduce(
@@ -2466,19 +3172,11 @@ export async function calculateOrder(userId, dto) {
     };
   }
 
-  const foodSourceIds = [
-    ...new Set(
-      items
-        .filter((item) => item.type === "food")
-        .map((item) => item.sourceId)
-        .filter(Boolean),
-    ),
-  ];
-  const primaryRestaurantId = dto.restaurantId || foodSourceIds[0];
-  const primaryRestaurant = sourceMap.get(String(primaryRestaurantId));
+  // Identity already resolved + food item sourceIds canonicalized above.
   if (!primaryRestaurant) throw new ValidationError("Restaurant not found");
   if (primaryRestaurant.status !== "approved")
     throw new ValidationError("Restaurant not available");
+  const primaryRestaurantId = primaryRestaurant.sourceId;
 
   const inactiveQuickSource = [...sourceMap.values()].find(
     (source) =>
@@ -2593,7 +3291,10 @@ export async function calculateOrder(userId, dto) {
     ? items.filter(i => i.type === "food").reduce((s, i) => s + (Number(i.price) * Number(i.quantity)), 0)
     : subtotal;
 
-  const resolvedRestaurantObjectId = await resolveRestaurantObjectId(primaryRestaurantId);
+  // Use Mongo _id from the single entry resolve — no second identity lookup.
+  const resolvedRestaurantObjectId = primaryRestaurant?.sourceId
+    ? new mongoose.Types.ObjectId(String(primaryRestaurant.sourceId))
+    : null;
 
   let discount = 0;
   let appliedCoupon = null;
@@ -2625,16 +3326,22 @@ export async function calculateOrder(userId, dto) {
       ? Math.round(discountedSubtotal * (gstRate / 100))
       : 0;
   }
-  const quickDeliveryFee = orderType === "mixed"
+  // ----- Mixed cart: QC store delivery fee (Quick Commerce) — NEVER Food Quick surcharge -----
+  // Food Quick surcharge uses foodQuickDeliveryFee / pricing.quickDeliveryFee (food Instant only).
+  const qcStoreDeliveryFee = orderType === "mixed"
     ? calculateDeliveryFeeFromSettings(quickSubtotal, quickFeeDoc || undefined)
     : 0;
   const normalDeliveryFee =
-    orderType === "mixed" ? Math.max(deliveryFee, quickDeliveryFee) : deliveryFee;
+    orderType === "mixed" ? Math.max(deliveryFee, qcStoreDeliveryFee) : deliveryFee;
   const expressDeliveryFee =
-    orderType === "mixed" ? deliveryFee + quickDeliveryFee : deliveryFee;
+    orderType === "mixed" ? deliveryFee + qcStoreDeliveryFee : deliveryFee;
   const selectedDeliveryFee =
-    orderType === "mixed" ? normalDeliveryFee : deliveryFee;
-  const total = Math.max(
+    orderType === "mixed"
+      ? dto.deliveryFleet === "express"
+        ? expressDeliveryFee
+        : normalDeliveryFee
+      : deliveryFee;
+  let total = Math.max(
     0,
     subtotal + packagingFee + selectedDeliveryFee + platformFee + tax - discount,
   );
@@ -2673,6 +3380,87 @@ export async function calculateOrder(userId, dto) {
           },
         ]
       : [];
+
+  // ----- Food Quick Delivery — additive; Basic path untouched when deliveryMode≠quick -----
+  // Mixed-cart QC store fee is qcStoreDeliveryFee above — never reuse Food Quick names.
+  let foodQuickDeliveryFee = 0;
+  let foodQuickPlatformShare = 0;
+  let foodQuickRiderBonus = 0;
+  let foodQuickRiderShare = 0;
+  let foodQuickRestaurantShare = 0;
+  let foodQuickSharePcts = { platform: 0, rider: 0, restaurant: 0 };
+  let foodQuickFinanceVersion = "";
+  let foodDeliveryMode = "basic";
+  let foodQuickDeliveryMeta = null;
+  let etaPromise = null;
+
+  // Always attach gate metadata for Instant food (no fee impact) so Cart can show the Quick toggle.
+  if (orderType === "food" && !dto.scheduledAt) {
+    const quickEval = await evaluateFoodQuickDeliveryEligibility({
+      orderType,
+      restaurant: primaryRestaurant,
+      // Mongo _id only — never pass business REST###### into findById paths.
+      restaurantId: primaryRestaurant.sourceId,
+      zone: serviceZone?.zone || null,
+      zoneId: serviceZone?.zoneId || primaryRestaurant.zoneId || null,
+      feeSettings: feeDoc,
+      scheduledAt: dto.scheduledAt || null,
+      subtotal: foodItemSubtotal,
+      deliveryDistanceKm,
+    });
+    foodQuickDeliveryMeta = {
+      eligible: quickEval.eligible === true,
+      reason: quickEval.reason || "",
+      reasons: quickEval.reasons || [],
+      gates: quickEval.gates,
+      charge: Number(quickEval.settings?.charge) || 0,
+      maxDistanceKm: Number(quickEval.settings?.maxDistanceKm) || 0,
+      maxEtaMinutes: Number(quickEval.settings?.maxEtaMinutes) || 0,
+      defaultKitchenPrepMinutes:
+        Number(quickEval.settings?.defaultKitchenPrepMinutes) || 0,
+    };
+
+    // Only price Quick when client explicitly requests deliveryMode=quick.
+    // Non-quick food Instant continues with identical fee math as before.
+    if (isFoodQuickDeliveryMode(dto.deliveryMode) && quickEval.eligible) {
+      const eta = computeFoodQuickEtaPromise({
+        restaurant: primaryRestaurant,
+        deliveryDistanceKm,
+        quickSettings: quickEval.settings,
+        startsAt: new Date(),
+        // travelMinutes: plug Matrix duration here when available (no duplicate call).
+      });
+      if (!eta.eligibleByEta) {
+        foodQuickDeliveryMeta.eligible = false;
+        foodQuickDeliveryMeta.reason = eta.reason || "max_eta";
+        foodQuickDeliveryMeta.reasons = [
+          ...(foodQuickDeliveryMeta.reasons || []),
+          eta.reason || "max_eta",
+        ];
+      } else {
+        const split = splitQuickDeliveryCharge(quickEval.settings);
+        foodQuickDeliveryFee = split.quickDeliveryFee;
+        foodQuickPlatformShare = split.quickPlatformShare;
+        foodQuickRiderBonus = split.quickRiderBonus;
+        foodQuickRiderShare = split.quickRiderShare;
+        foodQuickRestaurantShare = split.quickRestaurantShare;
+        foodQuickSharePcts = split.quickSharePcts;
+        foodQuickFinanceVersion = split.quickFinanceVersion;
+        foodDeliveryMode = "quick";
+        total = Math.max(0, total + foodQuickDeliveryFee);
+        etaPromise = eta.etaPromise;
+        foodQuickDeliveryMeta.etaPromise = {
+          min: etaPromise.min,
+          max: etaPromise.max,
+          mid: etaPromise.mid,
+          engineVersion: etaPromise.engineVersion,
+          components: etaPromise.components,
+          sources: etaPromise.sources,
+        };
+      }
+    }
+  }
+
   return {
     pricing: {
       subtotal,
@@ -2696,22 +3484,37 @@ export async function calculateOrder(userId, dto) {
       deliveryFeeBreakdown,
       platformFee,
       discount,
+      /** Food Quick surcharge only (0 for Basic / QC / Mixed). */
+      quickDeliveryFee: foodQuickDeliveryFee,
+      quickPlatformShare: foodQuickPlatformShare,
+      quickRiderBonus: foodQuickRiderBonus,
+      quickRiderShare: foodQuickRiderShare,
+      quickRestaurantShare: foodQuickRestaurantShare,
+      quickSharePcts: foodQuickSharePcts,
+      quickFinanceVersion: foodQuickFinanceVersion,
+      /** Additive alias: Quick Commerce store delivery fee on mixed carts. */
+      qcDeliveryFee: orderType === "mixed" ? qcStoreDeliveryFee : 0,
       total,
       currency: "INR",
-        couponCode: appliedCoupon?.code || codeRaw || null,
-        appliedCoupon,
-        deliveryOptions,
-        pickupDistanceKm: eligibility.pickupDistanceKm,
-        combinedPickupEligible: eligibility.eligible,
-        mixedOrderDistanceLimit: eligibility.distanceLimitKm,
-        mixedOrderAngleLimit: eligibility.angleLimitDeg,
-        sameDirection: eligibility.sameDirection,
-        eligibilityReason: eligibility.reason,
-        pickupPoints,
-      },
+      couponCode: appliedCoupon?.code || codeRaw || null,
+      appliedCoupon,
+      deliveryOptions,
+      pickupDistanceKm: eligibility.pickupDistanceKm,
+      combinedPickupEligible: eligibility.eligible,
+      mixedOrderDistanceLimit: eligibility.distanceLimitKm,
+      mixedOrderAngleLimit: eligibility.angleLimitDeg,
+      sameDirection: eligibility.sameDirection,
+      eligibilityReason: eligibility.reason,
+      pickupPoints,
+      deliveryMode: foodDeliveryMode,
+      quickDelivery: foodQuickDeliveryMeta,
+      etaPromise,
+    },
     serviceZone: serviceZone
-      ? { zoneId: serviceZone.zoneId, status: serviceZone.status }
+      ? { zoneId: serviceZone.zoneId, status: serviceZone.status, zone: serviceZone.zone }
       : null,
+    /** Reuse fee doc downstream (createOrder) — avoid duplicate Mongo read. */
+    feeSettingsDoc: feeDoc || null,
   };
 }
 
@@ -2727,19 +3530,13 @@ export async function createOrder(userId, dto) {
       : hasQuickItems
         ? "quick"
         : "food";
-  const sourceMap = await fetchPickupSourcesByType(items);
-  const foodSourceIds = [
-    ...new Set(
-      items
-        .filter((item) => item.type === "food")
-        .map((item) => item.sourceId)
-        .filter(Boolean),
-    ),
-  ];
-  const primaryRestaurantId = dto.restaurantId || foodSourceIds[0] || null;
-  const primaryRestaurant = primaryRestaurantId
-    ? sourceMap.get(String(primaryRestaurantId))
-    : null;
+  // Single identity resolve for createOrder entry (Option B). calculateOrder
+  // re-resolves on its own item copy for pricing — same contract, Mongo sourceId.
+  const { sourceMap, primaryRestaurant } = await resolveFoodOrderSources(
+    items,
+    dto.restaurantId,
+  );
+  const primaryRestaurantId = primaryRestaurant?.sourceId || null;
   if (hasFoodItems) {
     if (!primaryRestaurant) throw new ValidationError("Restaurant not found");
     if (primaryRestaurant.status !== "approved")
@@ -2837,20 +3634,47 @@ export async function createOrder(userId, dto) {
   ]
     .map((code) => (code ? String(code).trim().toUpperCase() : ""))
     .find(Boolean) || "";
-  const { pricing: serverPricing, serviceZone: detectedServiceZone } = await calculateOrder(userId, {
-    orderType,
-    items: dto.items,
-    address: deliveryAddress,
-    deliveryAddressId:
-      dto.deliveryAddressId ||
-      dto.address?._id ||
-      dto.address?.id ||
-      undefined,
-    restaurantId: dto.restaurantId || primaryRestaurantId || undefined,
-    zoneId: dto.zoneId,
-    couponCode: couponCodeFromClient,
-    deliveryFleet: requestedDeliveryFleet,
-  });
+  const requestedFoodDeliveryMode = isFoodQuickDeliveryMode(dto.deliveryMode)
+    ? "quick"
+    : "basic";
+  if (requestedFoodDeliveryMode === "quick" && dto.scheduledAt) {
+    throw new ValidationError("Quick Delivery cannot be combined with Schedule Order");
+  }
+
+  const {
+    pricing: serverPricing,
+    serviceZone: detectedServiceZone,
+    feeSettingsDoc: calcFeeDoc,
+  } = await calculateOrder(
+    userId,
+    {
+      orderType,
+      items: dto.items,
+      address: deliveryAddress,
+      deliveryAddressId:
+        dto.deliveryAddressId ||
+        dto.address?._id ||
+        dto.address?.id ||
+        undefined,
+      restaurantId: primaryRestaurantId || undefined,
+      zoneId: dto.zoneId,
+      couponCode: couponCodeFromClient,
+      deliveryFleet: requestedDeliveryFleet,
+      deliveryMode: requestedFoodDeliveryMode,
+      scheduledAt: dto.scheduledAt,
+    },
+    {
+      preResolvedSources: { sourceMap, primaryRestaurant },
+    },
+  );
+
+  // Soft fallback (aligned with calculateOrder): if client asked for Quick but gates
+  // failed, serverPricing.deliveryMode stays "basic" and Quick fee is 0. Do NOT 400 —
+  // production-safe for races, admin disable, and older clients. Hard reject remains
+  // only for Schedule∩Quick (validated above / in DTO).
+  const quickFallbackApplied =
+    requestedFoodDeliveryMode === "quick" &&
+    String(serverPricing.deliveryMode || "basic") !== "quick";
 
   let resolvedDeliveryFee = Math.max(0, Number(serverPricing.deliveryFee || 0));
   let resolvedTotal = Math.max(0, Number(serverPricing.total || 0));
@@ -2937,11 +3761,35 @@ export async function createOrder(userId, dto) {
     discount: Math.max(0, Number(serverPricing.discount || 0)),
     restaurantCommissionPercentage: commissionPercentage,
     restaurantCommission,
+    quickDeliveryFee: Math.max(0, Number(serverPricing.quickDeliveryFee || 0)),
+    quickPlatformShare: Math.max(0, Number(serverPricing.quickPlatformShare || 0)),
+    quickRiderBonus: Math.max(0, Number(serverPricing.quickRiderBonus || 0)),
+    quickRiderShare: Math.max(
+      0,
+      Number(
+        serverPricing.quickRiderShare ?? serverPricing.quickRiderBonus ?? 0,
+      ),
+    ),
+    quickRestaurantShare: Math.max(
+      0,
+      Number(serverPricing.quickRestaurantShare || 0),
+    ),
+    quickSharePcts: {
+      platform: Math.max(0, Number(serverPricing.quickSharePcts?.platform || 0)),
+      rider: Math.max(0, Number(serverPricing.quickSharePcts?.rider || 0)),
+      restaurant: Math.max(
+        0,
+        Number(serverPricing.quickSharePcts?.restaurant || 0),
+      ),
+    },
+    quickFinanceVersion: String(serverPricing.quickFinanceVersion || ""),
     total: resolvedTotal,
     currency: String(serverPricing.currency || "INR"),
     couponCode: serverPricing.couponCode || couponCodeFromClient || null,
     appliedCoupon: serverPricing.appliedCoupon || undefined,
   };
+  const orderDeliveryMode =
+    String(serverPricing.deliveryMode || "basic") === "quick" ? "quick" : "basic";
   if (normalizedPricing.totalDeliveryFee < normalizedPricing.deliveryFee) {
     normalizedPricing.totalDeliveryFee = normalizedPricing.deliveryFee;
   }
@@ -2963,7 +3811,8 @@ export async function createOrder(userId, dto) {
       normalizedPricing.tax +
       normalizedPricing.packagingFee +
       normalizedPricing.deliveryFee +
-      normalizedPricing.platformFee -
+      normalizedPricing.platformFee +
+      normalizedPricing.quickDeliveryFee -
       normalizedPricing.discount,
   );
   normalizedPricing.total = recomputedTotal;
@@ -2977,9 +3826,12 @@ export async function createOrder(userId, dto) {
   };
 
   let distanceKm = null;
-  const feeDocForRider = await FoodFeeSettings.findOne({ isActive: { $ne: false } })
-    .sort({ createdAt: -1 })
-    .lean();
+  // Reuse fee settings from calculateOrder — avoid duplicate Mongo hot-path read.
+  const feeDocForRider =
+    calcFeeDoc ||
+    (await FoodFeeSettings.findOne({ isActive: { $ne: false } })
+      .sort({ createdAt: -1 })
+      .lean());
   const feeSettingsForRider = normalizeFoodFeeSettings(feeDocForRider);
 
   if (
@@ -2997,30 +3849,60 @@ export async function createOrder(userId, dto) {
 
   const riderDistanceKm =
     normalizedPricing.deliveryDistanceKm ?? distanceKm ?? null;
-  const riderEarning =
+  const baseRiderEarning =
     orderType === "food" || orderType === "quick" || orderType === "mixed"
       ? calculateRiderEarning(feeSettingsForRider, riderDistanceKm)
       : 0;
-
-  const activeFeeSettings =
-    orderType === "mixed" && dispatchStrategy === "express_split"
-      ? await FoodFeeSettings.findOne({ isActive: { $ne: false } })
-          .sort({ createdAt: -1 })
-          .lean()
-      : null;
-  const quickDeliveryFeeBase =
-    orderType === "mixed" && dispatchStrategy === "express_split"
-      ? Number(activeFeeSettings?.deliveryFee || 25)
+  const quickRiderBonus =
+    orderDeliveryMode === "quick"
+      ? Math.max(0, Number(normalizedPricing.quickRiderBonus || 0))
       : 0;
-  const quickLegDeliveryFee =
+  const quickPlatformShare =
+    orderDeliveryMode === "quick"
+      ? Math.max(0, Number(normalizedPricing.quickPlatformShare || 0))
+      : 0;
+  const riderEarning = Math.max(0, baseRiderEarning + quickRiderBonus);
+
+  // Mixed express_split: QC store leg uses qcDeliveryFee / legacy fee settings deliveryFee.
+  const qcLegDeliveryFee =
     orderType === "mixed" && dispatchStrategy === "express_split"
-      ? quickDeliveryFeeBase
+      ? Number(feeDocForRider?.deliveryFee || 25)
       : 0;
   const foodLegDeliveryFee =
     orderType === "mixed" && dispatchStrategy === "express_split"
-      ? Math.max(0, Number(normalizedPricing.deliveryFee || 0) - quickLegDeliveryFee)
+      ? Math.max(0, Number(normalizedPricing.deliveryFee || 0) - qcLegDeliveryFee)
       : 0;
 
+  /**
+   * FINANCE FREEZE — Food Quick Charge accounting (deliveryMode === 'quick'):
+   *   Customer pays:    pricing.quickDeliveryFee
+   *   Platform gets:    pricing.quickPlatformShare
+   *   Rider gets:       pricing.quickRiderShare (= quickRiderBonus BC alias)
+   *   Restaurant gets:  pricing.quickRestaurantShare — frozen here; realized
+   *                     into restaurant settlement ONLY after successful delivery
+   *                     (never restaurant wallet at create).
+   * Invariant: platform + rider + restaurant shares ≈ quickDeliveryFee
+   *
+   * platformProfit uses quickPlatformShare (NOT full quickDeliveryFee) and
+   * subtracts baseRiderEarning only (quickRiderBonus already paid to rider).
+   * When Basic / missing restaurantSharePct: restaurant share 0 → identical BC.
+   */
+  const deliveryFeeForProfit = Number.isFinite(normalizedPricing.totalDeliveryFee)
+    ? normalizedPricing.totalDeliveryFee
+    : Number.isFinite(normalizedPricing.deliveryFee)
+      ? normalizedPricing.deliveryFee
+      : 0;
+  const platformProfit = computePlatformNetProfitWithQuickFreeze({
+    deliveryFee: deliveryFeeForProfit,
+    platformFee: Number.isFinite(normalizedPricing.platformFee)
+      ? normalizedPricing.platformFee
+      : 0,
+    restaurantCommission: Number(normalizedPricing.restaurantCommission) || 0,
+    sellerCommission: 0,
+    quickPlatformShare,
+    baseRiderShare: baseRiderEarning,
+    adminDiscountShare: 0,
+  });
   const platformProfit = Math.max(
     0,
     (Number.isFinite(normalizedPricing.totalDeliveryFee)
@@ -3055,7 +3937,7 @@ export async function createOrder(userId, dto) {
         deliveryFee:
           dispatchStrategy === "express_split"
             ? point.pickupType === "quick"
-              ? quickLegDeliveryFee
+              ? qcLegDeliveryFee
               : foodLegDeliveryFee
             : 0,
         riderEarning: legRiderEarning,
@@ -3077,6 +3959,13 @@ export async function createOrder(userId, dto) {
 
   await populateDispatchLegPartnerCandidates(dispatchPlan, pickupPoints);
 
+  const resolvedScheduledAt = resolveValidatedScheduledAt(dto.scheduledAt);
+  if (resolvedScheduledAt && hasFoodItems && primaryRestaurant) {
+    await assertRestaurantAllowsSchedule(primaryRestaurant);
+  }
+  const isScheduledOrder = Boolean(resolvedScheduledAt);
+  const initialOrderStatus = isScheduledOrder ? "scheduled" : "created";
+
   const order = new FoodOrder({
     orderType,
     orderId,
@@ -3093,8 +3982,36 @@ export async function createOrder(userId, dto) {
     pickupPoints,
     ...(deliveryAddress ? { deliveryAddress } : {}),
     pricing: normalizedPricing,
+    deliveryMode: orderDeliveryMode,
+    ...(orderDeliveryMode === "quick" && serverPricing.etaPromise
+      ? {
+          etaPromise: {
+            min: serverPricing.etaPromise.min,
+            max: serverPricing.etaPromise.max,
+            mid: serverPricing.etaPromise.mid,
+            startsAt: serverPricing.etaPromise.startsAt || new Date(),
+            endsAt: serverPricing.etaPromise.endsAt || null,
+            prepMinutes: serverPricing.etaPromise.prepMinutes,
+            kitchenPrepMinutes:
+              serverPricing.etaPromise.kitchenPrepMinutes ??
+              serverPricing.etaPromise.prepMinutes,
+            assignmentMinutes: serverPricing.etaPromise.assignmentMinutes ?? null,
+            pickupMinutes: serverPricing.etaPromise.pickupMinutes ?? null,
+            travelMinutes: serverPricing.etaPromise.travelMinutes,
+            bufferMinutes: serverPricing.etaPromise.bufferMinutes,
+            engineVersion: serverPricing.etaPromise.engineVersion || "food-quick-eta-v2",
+            slaClock: serverPricing.etaPromise.slaClock || "placed",
+            prepSource: serverPricing.etaPromise.prepSource || "",
+            travelSource: serverPricing.etaPromise.travelSource || "",
+            assignmentSource: serverPricing.etaPromise.assignmentSource || "",
+            rejectionReason: serverPricing.etaPromise.rejectionReason || "",
+            components: serverPricing.etaPromise.components || undefined,
+            sources: serverPricing.etaPromise.sources || undefined,
+          },
+        }
+      : {}),
     payment,
-    orderStatus: dto.scheduledAt ? "scheduled" : "created",
+    orderStatus: initialOrderStatus,
     ...(orderType === "food" || orderType === "mixed"
       ? { dispatch: { modeAtCreation: dispatchMode, status: "unassigned" } }
       : {}),
@@ -3104,8 +4021,8 @@ export async function createOrder(userId, dto) {
         at: new Date(),
         byRole: "SYSTEM",
         from: "",
-        to: "created",
-        note: "Order placed",
+        to: initialOrderStatus,
+        note: isScheduledOrder ? "Scheduled order placed" : "Order placed",
       },
     ],
     note: dto.note || "",
@@ -3116,7 +4033,18 @@ export async function createOrder(userId, dto) {
         : orderType === "food"
           ? dto.deliveryFleet || "standard"
           : "quick",
-    scheduledAt: dto.scheduledAt ? new Date(dto.scheduledAt) : null,
+    scheduledAt: resolvedScheduledAt,
+    activatedAt: null,
+    scheduleNotifyJobId: null,
+    // Scheduled orders have not started delivery; Instant keeps schema default.
+    ...(isScheduledOrder
+      ? {
+          deliveryState: {
+            currentPhase: "waiting_activation",
+            status: "waiting_activation",
+          },
+        }
+      : {}),
     riderEarning,
     platformProfit,
   });
@@ -3207,7 +4135,9 @@ export async function createOrder(userId, dto) {
     await notifyOwnersSafely([{ ownerType: "USER", ownerId: userId }], {
       title: isAwaitingOnlinePayment
         ? "Complete Payment to Confirm Order"
-        : orderType === "mixed"
+        : isScheduledOrder
+          ? "Scheduled Order Confirmed!"
+          : orderType === "mixed"
           ? "Mixed Order Confirmed!"
           : orderType === "quick"
           ? "Quick Order Confirmed!"
@@ -3218,7 +4148,9 @@ export async function createOrder(userId, dto) {
           : orderType === "quick"
           ? `Order #${orderId} is created. Please complete payment to confirm your quick order.`
           : `Order #${orderId} is created. Please complete payment to send it to ${primaryRestaurant?.sourceName || "the restaurant"}.`
-        : orderType === "mixed"
+        : isScheduledOrder
+          ? `Your order #${orderId} is scheduled for ${new Date(resolvedScheduledAt).toLocaleString()}. We'll notify the restaurant closer to the time.`
+          : orderType === "mixed"
           ? `Your mixed order #${orderId} has been placed successfully.`
           : orderType === "quick"
           ? `Your quick order #${orderId} has been placed successfully.`
@@ -3227,37 +4159,35 @@ export async function createOrder(userId, dto) {
       data: {
         type: isAwaitingOnlinePayment
           ? "order_created_pending_payment"
-          : "order_created",
+          : isScheduledOrder
+            ? "schedule_confirmed"
+            : "order_created",
         orderId: String(orderId),
         orderMongoId: order._id?.toString?.() || "",
         link: `/food/user/orders/${order._id?.toString?.() || ""}`,
       },
     });
 
-    // Restaurant gets new-order request only when payment flow is eligible.
+    // Restaurant gets new-order request only when payment flow is eligible (not while scheduled).
     if (hasFoodItems) {
       await notifyRestaurantNewOrder(order);
     }
     if (hasQuickItems) {
       await notifySellerNewOrders(order, sellerOrders);
     }
-
-    // Schedule delayed notification if it's a scheduled order
-    if (order.orderStatus === "scheduled" && order.scheduledAt) {
-      const now = Date.now();
-      const scheduledTime = new Date(order.scheduledAt).getTime();
-      const notificationTime = scheduledTime - 15 * 60 * 1000;
-      const delay = Math.max(0, notificationTime - now);
-
-      enqueueOrderEvent("NOTIFY_SCHEDULED_ORDER", {
-        orderId: order.orderId,
-        orderMongoId: order._id.toString(),
-      }, { delay });
-      
-      logger.info(`Scheduled notification for order ${order.orderId} with delay of ${delay}ms`);
-    }
   } catch {
-    // Don't block order placement on socket failures.
+    // Don't block order placement on socket/notification failures.
+  }
+
+  // PRIMARY BullMQ enqueue must NOT be swallowed by notification catch above.
+  if (order.orderStatus === "scheduled" && order.scheduledAt) {
+    try {
+      await scheduleOrderActivationJob(order);
+    } catch (err) {
+      logger.error(
+        `scheduleOrderActivationJob crashed for ${order.orderId}: ${err?.message || err}`
+      );
+    }
   }
 
   if (
@@ -3265,7 +4195,8 @@ export async function createOrder(userId, dto) {
     dispatchMode === "auto" &&
     (isCash ||
       order.payment.status === "paid" ||
-      order.payment.status === "cod_pending")
+      order.payment.status === "cod_pending") &&
+    !shouldHoldDispatchForScheduled(order)
   ) {
     try {
       await tryAutoAssign(order._id);
@@ -3275,7 +4206,23 @@ export async function createOrder(userId, dto) {
   }
 
   const saved = order.toObject();
-  return { order: saved, razorpay: razorpayPayload };
+  return {
+    order: saved,
+    razorpay: razorpayPayload,
+    ...(quickFallbackApplied
+      ? {
+          quickDeliveryFallback: {
+            requested: true,
+            applied: false,
+            deliveryMode: "basic",
+            reason:
+              serverPricing?.quickDelivery?.reason ||
+              "Quick Delivery unavailable; order placed as Basic Delivery",
+            gates: serverPricing?.quickDelivery?.gates || null,
+          },
+        }
+      : {}),
+  };
 }
 
 // ----- Verify payment -----
@@ -3455,6 +4402,97 @@ export async function getOrderById(
   return sanitizeOrderForExternal(order);
 }
 
+// --- AUTO REFUND HELPER ---
+async function autoProcessRefund(order, source) {
+    if (!order || !order.payment || order.payment.status !== 'paid') return false;
+    
+    const paymentMethod = String(order.payment.method || '').trim().toLowerCase();
+    const isOnlinePaid = ['razorpay', 'razorpay_qr'].includes(paymentMethod);
+    const isWalletPaid = paymentMethod === 'wallet';
+    
+    if (!isOnlinePaid && !isWalletPaid) return false;
+    
+    const amount = Number(order.pricing?.total || 0);
+    if (!Number.isFinite(amount) || amount <= 0) return false;
+    
+    if (order.payment.status === 'refunded' || order.payment.refund?.status === 'processed') return false;
+    
+    let processed = false;
+    let refundId = '';
+    
+    try {
+        if (isWalletPaid) {
+            await refundWalletBalance(
+                order.userId,
+                amount,
+                'Order cancelled',
+                {
+                    orderId: String(order._id),
+                    orderReadableId: String(order.orderId || ''),
+                    source: `auto_refund_${source}`
+                }
+            );
+            processed = true;
+            refundId = `wallet_refund_${Date.now()}`;
+        } else if (isOnlinePaid) {
+            const paymentId = order.payment.razorpay?.paymentId;
+            if (paymentId) {
+                const refundResult = await initiateRazorpayRefund(paymentId, amount);
+                if (refundResult && refundResult.success) {
+                    processed = true;
+                    refundId = refundResult.refundId;
+                }
+            }
+        }
+        
+        if (processed) {
+            order.payment.status = 'refunded';
+            order.payment.refund = {
+                status: 'processed',
+                amount: amount,
+                refundId: refundId,
+                requestedMethod: isWalletPaid ? 'wallet' : 'gateway',
+                processedMethod: isWalletPaid ? 'wallet' : 'gateway',
+                requestedAt: new Date(),
+                processedAt: new Date(),
+                requestedByUser: source === 'user',
+                reason: 'Automatic refund on cancellation'
+            };
+            
+            if (order.userId) {
+                try {
+                    await sendNotificationToOwner(
+                        { ownerType: 'USER', ownerId: order.userId },
+                        {
+                            title: 'Refund Processed! 💸',
+                            body: `Your refund of ₹${amount} for cancelled Order #${order.orderId} has been automatically processed.`,
+                            data: { type: 'refund_processed', orderId: String(order.orderId) }
+                        }
+                    );
+                } catch (e) {
+                    logger.warn(`Failed to notify user of auto-refund: ${e?.message}`);
+                }
+            }
+            return true;
+        } else {
+            order.payment.refund = {
+                status: 'failed',
+                amount: amount,
+                reason: 'Automatic refund failed'
+            };
+            return false;
+        }
+    } catch (err) {
+        logger.error(`[AutoRefund] Failed for order ${order._id}: ${err.message}`);
+        order.payment.refund = {
+            status: 'failed',
+            amount: amount,
+            reason: `Error: ${err.message}`
+        };
+        return false;
+    }
+}
+
 export async function cancelOrder(orderId, userId, reason, refundTo) {
   const identity = buildOrderIdentityFilter(orderId);
   if (!identity) throw new ValidationError("Order id required");
@@ -3466,7 +4504,7 @@ export async function cancelOrder(orderId, userId, reason, refundTo) {
   if (!order) throw new NotFoundError("Order not found");
 
   const orderStatus = String(order.orderStatus || "").trim().toLowerCase();
-  const alwaysCancelableStatuses = ["created", "placed"];
+  const alwaysCancelableStatuses = ["created", "placed", "scheduled"];
   const cancelWindowStatuses = ["confirmed", "preparing", "ready_for_pickup", "picked_up"];
   const dispatchStatus = String(order.dispatch?.status || "").trim().toLowerCase();
   const hasAcceptedDeliveryPartner =
@@ -3493,8 +4531,14 @@ export async function cancelOrder(orderId, userId, reason, refundTo) {
     }
   }
 
+  // Cancel activation job before flipping status (race-safe best effort).
+  if (orderStatus === "scheduled") {
+    await cancelScheduleActivationJob(order);
+  }
+
   const from = order.orderStatus;
   order.orderStatus = "cancelled_by_user";
+  order.scheduleNotifyJobId = null;
   safePushStatusHistory(order, {
     byRole: "USER",
     byId: userId,
@@ -3573,6 +4617,10 @@ export async function cancelOrder(orderId, userId, reason, refundTo) {
       reason: reason || "",
       processedAt: null,
     };
+  }
+  // User-cancelled online/wallet refunds are handled automatically
+  if (["paid", "refunded"].includes(order.payment.status)) {
+    await autoProcessRefund(order, 'user');
   } else if (!["paid", "refunded"].includes(order.payment.status)) {
     // For COD or unpaid online orders, mark payment as cancelled
     order.payment.status = "cancelled";
@@ -3937,7 +4985,9 @@ export async function updateOrderStatusRestaurant(
       body = `Unfortunately, your order has been cancelled by the restaurant.${refundDetail}`;
       
       // Update payment status for cancellation
-      if (!isOnlinePaid) {
+      if (["paid", "refunded"].includes(order.payment?.status)) {
+        await autoProcessRefund(order, 'restaurant');
+      } else if (!isOnlinePaid) {
         order.payment.status = "cancelled";
       }
 
@@ -4307,12 +5357,13 @@ export async function updateOrderStatusAdmin(orderId, adminId, orderStatus, reas
   // - Wallet payment: credit back to user wallet immediately.
   // - Razorpay payment: initiate Razorpay refund (full amount).
   if (
-    order.orderStatus === "cancelled_by_admin" &&
-    order.userId &&
-    order.payment &&
-    (!order.payment?.refund || order.payment?.refund?.status !== "processed") &&
-    order.payment?.status !== "refunded"
+    order.orderStatus === "cancelled_by_admin"
   ) {
+    if (["paid", "refunded"].includes(order.payment?.status)) {
+      await autoProcessRefund(order, 'admin');
+    } else if (!["paid", "refunded"].includes(String(order.payment?.status || ""))) {
+      // COD/unpaid orders: keep payment cancelled marker consistent.
+      order.payment.status = "cancelled";
     const paymentMethod = String(order.payment?.method || "").trim().toLowerCase();
     const totalAmount = Number(order.pricing?.total || 0);
     const canRefundAmount = Number.isFinite(totalAmount) && totalAmount > 0;
@@ -4407,6 +5458,8 @@ export async function updateOrderStatusAdmin(orderId, adminId, orderStatus, reas
       } catch (_) {}
     }
   }
+
+  await order.save();
 
   // Emit the same canonical realtime event so all panels converge.
   try {
@@ -4765,6 +5818,16 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId, body = {})
   order.dispatch.status = "accepted";
   if (!order.dispatch.assignedAt) order.dispatch.assignedAt = new Date();
   order.dispatch.acceptedAt = new Date();
+  // Rider now heading to restaurant — start Instant delivery phase.
+  if (!order.deliveryState || typeof order.deliveryState !== "object") {
+    order.deliveryState = {};
+  }
+  if (
+    !order.deliveryState.currentPhase ||
+    order.deliveryState.currentPhase === "waiting_activation"
+  ) {
+    order.deliveryState.currentPhase = "en_route_to_pickup";
+  }
   pushStatusHistory(order, {
     byRole: "DELIVERY_PARTNER",
     byId: deliveryPartnerId,
@@ -5598,6 +6661,8 @@ async function buildListOrdersAdminFilter(query = {}) {
   const startDateRaw = typeof query.startDate === "string" ? query.startDate.trim() : "";
   const endDateRaw = typeof query.endDate === "string" ? query.endDate.trim() : "";
   const search = typeof query.search === "string" ? query.search.trim() : "";
+  const deliveryModeRaw =
+    typeof query.deliveryMode === "string" ? query.deliveryMode.trim().toLowerCase() : "";
 
   if (rawStatus && rawStatus !== "all") {
     switch (rawStatus) {
@@ -5641,7 +6706,8 @@ async function buildListOrdersAdminFilter(query = {}) {
         filter.orderStatus = { $in: ["created", "confirmed", "delivered"] };
         break;
       case "scheduled":
-        filter.scheduledAt = { $ne: null };
+        // Prefer current scheduled lifecycle, not historical scheduledAt remnants.
+        filter.orderStatus = "scheduled";
         break;
     }
   }
@@ -5662,6 +6728,13 @@ async function buildListOrdersAdminFilter(query = {}) {
   }
   if (userIdRaw && mongoose.Types.ObjectId.isValid(userIdRaw)) {
     filter.userId = new mongoose.Types.ObjectId(userIdRaw);
+  }
+
+  if (deliveryModeRaw === "quick" || deliveryModeRaw === "basic") {
+    filter.deliveryMode = deliveryModeRaw;
+  } else if (deliveryModeRaw === "sla_breached") {
+    filter.deliveryMode = "quick";
+    filter["sla.breached"] = true;
   }
 
   if (startDateRaw || endDateRaw) {
@@ -5710,13 +6783,14 @@ async function aggregateListOrdersAdminStatusSummary(filter) {
         displayStatus: {
           $switch: {
             branches: [
-              { case: { $in: ["$orderStatus", [null, "", "created", "confirmed"]] }, then: "Pending" },
+              { case: { $eq: ["$orderStatus", "scheduled"] }, then: "Scheduled" },
+              { case: { $in: ["$orderStatus", [null, "", "created", "placed", "confirmed"]] }, then: "Pending" },
               { case: { $in: ["$orderStatus", ["preparing", "ready_for_pickup"]] }, then: "Processing" },
               { case: { $eq: ["$orderStatus", "picked_up"] }, then: "Food On The Way" },
               { case: { $eq: ["$orderStatus", "delivered"] }, then: "Delivered" },
               { case: { $eq: ["$orderStatus", "cancelled_by_restaurant"] }, then: "Canceled" },
               {
-                case: { $in: ["$orderStatus", ["cancelled_by_user", "cancelled_by_admin"]] },
+                case: { $in: ["$orderStatus", ["cancelled_by_user", "cancelled_by_admin", "cancelled_by_system"]] },
                 then: "Canceled",
               },
             ],

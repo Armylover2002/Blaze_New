@@ -24,6 +24,7 @@ import * as foodTransactionService from './foodTransaction.service.js';
 import * as dispatchService from './order-dispatch.service.js';
 import * as quickOrderService from '../../../quick-commerce/services/quickOrder.service.js';
 import { emitQuickCommerceStatusUpdate } from '../../../quick-commerce/services/quickStatusRealtime.service.js';
+import { addOrderJob } from '../../../../queues/producers/order.producer.js';
 import {
   buildOrderIdentityFilter,
   emitDeliveryDropOtpToUser,
@@ -348,6 +349,8 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
         'dispatch.status': 'accepted',
         'dispatch.assignedAt': now,
         'dispatch.acceptedAt': now,
+        // Rider assigned — leave waiting_activation and start pickup transit.
+        'deliveryState.currentPhase': 'en_route_to_pickup',
       },
       $push: {
         statusHistory: statusHistoryEntry,
@@ -953,6 +956,16 @@ export async function completeDelivery(orderId, deliveryPartnerId, body = {}) {
     note: `Delivery completed. Prev status: ${prevPayStatus}`,
   });
 
+  // Restaurant Quick Share → settlement component only (never restaurant wallet).
+  // Idempotent; no-op when share is 0 / missing (historical orders).
+  try {
+    await foodTransactionService.realizeFoodQuickRestaurantShare(order);
+  } catch (err) {
+    logger.warn(
+      `[QuickFinance] realize restaurant share failed for ${order.orderId || order._id}: ${err?.message || err}`,
+    );
+  }
+
   if (order.orderType === 'quick' || order.orderType === 'mixed') {
     void quickOrderService.syncSellerOrderFromDelivery(order._id, 'delivered')
       .catch(err => logger.warn(`Seller order sync (delivery) failed: ${err?.message}`));
@@ -970,9 +983,22 @@ export async function completeDelivery(orderId, deliveryPartnerId, body = {}) {
     logger.error(`Error running post-delivery cash limit sweep: ${e.message}`);
   }
 
+  if (String(order.deliveryMode || '').toLowerCase() === 'quick') {
+    void addOrderJob(
+      {
+        action: 'QUICK_SLA_COMPENSATE',
+        orderMongoId: order._id?.toString?.(),
+        orderId: order.orderId,
+      },
+      { jobId: `food-quick-sla-${order._id}`, delay: 2000 },
+    ).catch((err) =>
+      logger.warn(`[QuickSLA] enqueue failed: ${err?.message || err}`),
+    );
+  }
+
   enqueueOrderEvent('delivery_completed', {
     orderMongoId: order._id?.toString?.(),
-    orderId: order._id.toString(),
+    orderId: order.orderId || order._id.toString(),
     restaurantId: order.restaurantId,
     deliveryPartnerId,
     paymentMethod: payMethod,
@@ -980,7 +1006,9 @@ export async function completeDelivery(orderId, deliveryPartnerId, body = {}) {
     paymentStatus: order.payment?.status,
     riderEarning: order.riderEarning || 0,
     platformProfit: order.platformProfit || 0,
-    total: order.pricing?.total || 0
+    total: order.pricing?.total || 0,
+    deliveryMode: order.deliveryMode || 'basic',
+    quickRiderBonus: Number(order.pricing?.quickRiderBonus || 0) || 0,
   });
   return sanitizeOrderForExternal(order);
 }

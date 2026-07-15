@@ -40,14 +40,34 @@ export const processOrderJob = async (job) => {
         }
     }
 
-    // Handle Scheduled Order Activation
+    // Handle Scheduled Order Activation (PRIMARY path — T−lead delayed job)
     if (action === 'NOTIFY_SCHEDULED_ORDER') {
-        try {
-            const { processScheduledOrderNotification } = await import('../../modules/food/orders/services/order.service.js');
-            await processScheduledOrderNotification(orderMongoId);
-        } catch (err) {
-            logger.error(`[BullMQ:order] NOTIFY_SCHEDULED_ORDER failed: ${err.message}`);
+        const { processScheduledOrderNotification } = await import('../../modules/food/orders/services/order.service.js');
+        const result = await processScheduledOrderNotification(orderMongoId, {
+            source: 'bullmq',
+        });
+        // Already activated / cancelled → ack job (no retry spam when Redis returns)
+        if (result?.alreadyHandled) {
+            logger.info(
+                `[BullMQ:order] NOTIFY_SCHEDULED_ORDER skipped (alreadyHandled) orderMongoId=${orderMongoId}`
+            );
+            return { processed: true, action, jobId: job.id, skipped: true };
         }
+        if (!result?.success) {
+            throw new Error(result?.reason || 'NOTIFY_SCHEDULED_ORDER failed');
+        }
+    }
+
+    // Food Quick Delivery SLA compensation (wallet / pending refund)
+    if (action === 'QUICK_SLA_COMPENSATE') {
+        const { processQuickSlaCompensation } = await import(
+            '../../modules/food/orders/services/quick-sla.service.js'
+        );
+        const result = await processQuickSlaCompensation(orderMongoId);
+        if (!result?.success && !result?.alreadyHandled) {
+            throw new Error(result?.reason || 'QUICK_SLA_COMPENSATE failed');
+        }
+        return { processed: true, action, jobId: job.id, ...result };
     }
 
     // Porter scheduled dispatch

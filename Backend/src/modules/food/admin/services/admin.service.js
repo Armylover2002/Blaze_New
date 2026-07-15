@@ -26,6 +26,7 @@ import { FoodEarningAddon } from '../models/earningAddon.model.js';
 import { FoodEarningAddonHistory } from '../models/earningAddonHistory.model.js';
 import { FoodDeliveryCommissionRule } from '../models/deliveryCommissionRule.model.js';
 import { FoodFeeSettings } from '../models/feeSettings.model.js';
+import { normalizeQuickDeliverySettings, mergeQuickDeliveryForAdminSave } from '../../orders/utils/quickDeliveryConstants.js';
 import { FeedbackExperience } from '../models/feedbackExperience.model.js';
 import { FoodUser } from '../../../../core/users/user.model.js';
 import { FoodAdmin } from '../../../../core/admin/admin.model.js';
@@ -709,7 +710,72 @@ export async function getDashboardStats(query = {}) {
                         $sum: {
                             $cond: [{ $eq: ['$orderStatus', 'delivered'] }, { $ifNull: ['$platformProfit', 0] }, 0]
                         }
-                    }
+                    },
+                    quickOrders: {
+                        $sum: {
+                            $cond: [{ $eq: ['$deliveryMode', 'quick'] }, 1, 0]
+                        }
+                    },
+                    quickDelivered: {
+                        $sum: {
+                            $cond: [
+                                {
+                                    $and: [
+                                        { $eq: ['$deliveryMode', 'quick'] },
+                                        { $eq: ['$orderStatus', 'delivered'] },
+                                    ],
+                                },
+                                1,
+                                0,
+                            ],
+                        },
+                    },
+                    quickFeeRevenue: {
+                        $sum: {
+                            $cond: [
+                                { $eq: ['$deliveryMode', 'quick'] },
+                                { $ifNull: ['$pricing.quickDeliveryFee', 0] },
+                                0,
+                            ],
+                        },
+                    },
+                    quickSlaBreached: {
+                        $sum: {
+                            $cond: [
+                                {
+                                    $and: [
+                                        { $eq: ['$deliveryMode', 'quick'] },
+                                        { $eq: ['$sla.breached', true] },
+                                    ],
+                                },
+                                1,
+                                0,
+                            ],
+                        },
+                    },
+                    quickSlaCompensated: {
+                        $sum: {
+                            $cond: [
+                                {
+                                    $and: [
+                                        { $eq: ['$deliveryMode', 'quick'] },
+                                        { $gt: [{ $ifNull: ['$sla.compensationAmount', 0] }, 0] },
+                                    ],
+                                },
+                                1,
+                                0,
+                            ],
+                        },
+                    },
+                    quickSlaCompensationPaid: {
+                        $sum: {
+                            $cond: [
+                                { $eq: ['$deliveryMode', 'quick'] },
+                                { $ifNull: ['$sla.compensationAmount', 0] },
+                                0,
+                            ],
+                        },
+                    },
                 }
             }
         ]),
@@ -925,6 +991,33 @@ export async function getDashboardStats(query = {}) {
             pending: Number(totals.pendingOnly || 0),
             processing: Number(totals.processing || 0),
             completed: Number(totals.delivered || 0)
+        },
+        quickDelivery: {
+            orders: Number(totals.quickOrders || 0),
+            delivered: Number(totals.quickDelivered || 0),
+            feeRevenue: Number(totals.quickFeeRevenue || 0),
+            attachmentRate:
+                Number(totals.totalOrders || 0) > 0
+                    ? Number(
+                        (
+                            (Number(totals.quickOrders || 0) /
+                                Number(totals.totalOrders || 1)) *
+                            100
+                        ).toFixed(1),
+                    )
+                    : 0,
+            slaBreachRate:
+                Number(totals.quickDelivered || 0) > 0
+                    ? Number(
+                        (
+                            (Number(totals.quickSlaBreached || 0) /
+                                Number(totals.quickDelivered || 1)) *
+                            100
+                        ).toFixed(1),
+                    )
+                    : 0,
+            slaCompensatedOrders: Number(totals.quickSlaCompensated || 0),
+            slaCompensationPaid: Number(totals.quickSlaCompensationPaid || 0),
         },
         monthlyData,
         liveSignals: finalLiveSignals
@@ -2350,7 +2443,14 @@ export async function toggleDeliveryCommissionRuleStatus(id, status) {
 // ----- Fee Settings (admin) -----
 export async function getFeeSettings() {
     const doc = await FoodFeeSettings.findOne({ isActive: { $ne: false } }).sort({ createdAt: -1 }).lean();
-    return { feeSettings: doc || null };
+    if (!doc) return { feeSettings: null };
+    // Normalize Quick Delivery for Admin get (business + internals). FE maps business only.
+    return {
+        feeSettings: {
+            ...doc,
+            quickDelivery: normalizeQuickDeliverySettings(doc.quickDelivery),
+        },
+    };
 }
 
 export async function upsertFeeSettings(body) {
@@ -2396,6 +2496,14 @@ export async function upsertFeeSettings(body) {
         else if (body.gstRate !== undefined) $set.gstRate = body.gstRate;
         if (body.mixedOrderDistanceLimit !== undefined) $set.mixedOrderDistanceLimit = body.mixedOrderDistanceLimit;
         if (body.mixedOrderAngleLimit !== undefined) $set.mixedOrderAngleLimit = body.mixedOrderAngleLimit;
+        if (body.quickDelivery !== undefined) {
+            // Admin business fields only should mutate ops knobs; preserve existing
+            // engineering/dispatch/SLA internals already stored in DB.
+            $set.quickDelivery = mergeQuickDeliveryForAdminSave(
+                existing.quickDelivery,
+                body.quickDelivery,
+            );
+        }
 
         if (body.isActive !== undefined) $set.isActive = body.isActive;
 
@@ -2429,6 +2537,9 @@ export async function upsertFeeSettings(body) {
     if (body.gstRate !== undefined && body.gstRate !== null) payload.gstRate = body.gstRate;
     if (body.mixedOrderDistanceLimit !== undefined) payload.mixedOrderDistanceLimit = body.mixedOrderDistanceLimit;
     if (body.mixedOrderAngleLimit !== undefined) payload.mixedOrderAngleLimit = body.mixedOrderAngleLimit;
+    if (body.quickDelivery !== undefined) {
+        payload.quickDelivery = mergeQuickDeliveryForAdminSave(null, body.quickDelivery);
+    }
 
     const created = await FoodFeeSettings.create(payload);
     return created.toObject();
@@ -3287,6 +3398,34 @@ export async function updateRestaurantById(id, body = {}) {
 
     if (body.isAcceptingOrders !== undefined) {
         doc.isAcceptingOrders = parseBooleanLike(body.isAcceptingOrders, 'isAcceptingOrders');
+    }
+
+    if (body.quickDeliveryEnabled !== undefined) {
+        doc.quickDeliveryEnabled = parseBooleanLike(body.quickDeliveryEnabled, 'quickDeliveryEnabled');
+    }
+
+    if (body.kitchenPrepMinutes !== undefined) {
+        if (body.kitchenPrepMinutes === null || body.kitchenPrepMinutes === '') {
+            doc.kitchenPrepMinutes = undefined;
+            doc.set('kitchenPrepMinutes', undefined);
+        } else {
+            const {
+                parseKitchenPrepMinutes,
+                KITCHEN_PREP_MINUTES_MIN,
+                KITCHEN_PREP_MINUTES_MAX,
+            } = await import('../../orders/utils/quickDeliveryConstants.js');
+            const parsed = parseKitchenPrepMinutes(body.kitchenPrepMinutes);
+            if (!Number.isFinite(parsed)) {
+                throw new ValidationError(
+                    `kitchenPrepMinutes must be an integer between ${KITCHEN_PREP_MINUTES_MIN} and ${KITCHEN_PREP_MINUTES_MAX}`,
+                );
+            }
+            doc.kitchenPrepMinutes = parsed;
+        }
+    }
+
+    if (body.scheduleOrderEnabled !== undefined) {
+        doc.scheduleOrderEnabled = parseBooleanLike(body.scheduleOrderEnabled, 'scheduleOrderEnabled');
     }
 
     if (body.cuisines !== undefined) {
@@ -6847,7 +6986,8 @@ export async function createZone(body) {
         serviceLocation: (body.serviceLocation && body.serviceLocation.trim()) || name,
         unit: body.unit === 'miles' ? 'miles' : 'kilometer',
         coordinates: normalized,
-        isActive: body.isActive !== false
+        isActive: body.isActive !== false,
+        quickDeliveryEnabled: body.quickDeliveryEnabled === true,
     });
     await zone.save();
     return { zone: zone.toObject() };
@@ -6863,6 +7003,9 @@ export async function updateZone(id, body) {
     if (body.serviceLocation !== undefined) zone.serviceLocation = String(body.serviceLocation).trim();
     if (body.unit !== undefined) zone.unit = body.unit === 'miles' ? 'miles' : 'kilometer';
     if (body.isActive !== undefined) zone.isActive = body.isActive !== false;
+    if (body.quickDeliveryEnabled !== undefined) {
+        zone.quickDeliveryEnabled = body.quickDeliveryEnabled === true;
+    }
     if (Array.isArray(body.coordinates) && body.coordinates.length >= 3) {
         const normalizedCoords = [];
         for (const c of body.coordinates) {

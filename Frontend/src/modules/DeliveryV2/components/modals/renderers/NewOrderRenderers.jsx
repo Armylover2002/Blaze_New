@@ -96,6 +96,10 @@ const FoodOrderRenderer = ({ order, distanceKm, etaMins, timeLeft }) => {
   const returnLabels = getReturnPickupStopLabels();
   const pickupPoints = normalizePickupPoints(order);
   const earnings = order.earnings || order.riderEarning || order.tripEarning || order.walletEarning || 0;
+  const isFoodQuick =
+    order?.isFoodQuickDelivery === true ||
+    String(order?.deliveryMode || '').toLowerCase() === 'quick';
+  const quickBonus = Number(order?.quickRiderBonus || 0) || 0;
   
   const restaurantName = order?.restaurantName || order?.restaurant_name || order?.restaurantId?.restaurantName || order?.restaurantId?.name || 'Restaurant';
   const restaurantAddress = order?.restaurantAddress || order?.restaurant_address || order?.restaurantId?.location?.address || 'Address not available';
@@ -109,16 +113,22 @@ const FoodOrderRenderer = ({ order, distanceKm, etaMins, timeLeft }) => {
 
   const deliveryAddress = order?.deliveryAddress || {};
   const customerAddress = formatDeliveryAddressText(deliveryAddress, order.customerAddress || order.customer_address || '') || 'Location not available';
+  const badges = [];
+  if (isMixedOrder(order)) badges.push('Mixed Order');
+  if (isFoodQuick) {
+    badges.push('Food Quick');
+    if (quickBonus > 0) badges.push(`+₹${Math.round(quickBonus)} Quick Bonus`);
+  }
   
   return (
     <>
       <BaseOrderHeader 
-        title={isReturnPickup ? (order.tripLabel || 'Return Pickup') : 'Incoming Food Order'} 
-        subtitle={isReturnPickup ? 'Customer → Seller' : null}
-        badges={isMixedOrder(order) ? ['Mixed Order'] : []}
+        title={isReturnPickup ? (order.tripLabel || 'Return Pickup') : (isFoodQuick ? 'Quick Food Order' : 'Incoming Food Order')} 
+        subtitle={isReturnPickup ? 'Customer → Seller' : (isFoodQuick ? 'Priority Offer' : null)}
+        badges={badges}
         earnings={earnings} 
         timeLeft={timeLeft} 
-        bgColor="bg-[#FF0000]"
+        bgColor={isFoodQuick ? 'bg-emerald-600' : 'bg-[#FF0000]'}
         orderId={order?.orderId || order?._id}
       />
       <BaseOrderBody 

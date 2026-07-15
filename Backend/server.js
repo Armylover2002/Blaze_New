@@ -20,6 +20,7 @@ let expireOffersInterval = null;
 let fssaiExpiryInterval = null;
 let porterCouponLifecycleInterval = null;
 let porterScheduledDispatchInterval = null;
+let foodScheduledReconcileInterval = null;
 
 const gracefulShutdown = async (signal) => {
     logger.info(`${signal} received, starting graceful shutdown`);
@@ -36,6 +37,7 @@ const gracefulShutdown = async (signal) => {
             if (fssaiExpiryInterval) clearInterval(fssaiExpiryInterval);
             if (porterCouponLifecycleInterval) clearInterval(porterCouponLifecycleInterval);
             if (porterScheduledDispatchInterval) clearInterval(porterScheduledDispatchInterval);
+            if (foodScheduledReconcileInterval) clearInterval(foodScheduledReconcileInterval);
             logger.info('Graceful shutdown complete');
             process.exit(0);
         } catch (err) {
@@ -65,6 +67,31 @@ const startServer = async () => {
 
         if (config.redisEnabled) {
             await connectRedis();
+            try {
+                const { createRedisClient } = await import('./src/config/redis.js');
+                const {
+                    FOOD_SCHEDULE_ACTIVATED_CHANNEL,
+                    handleScheduleActivatedBridgeMessage,
+                } = await import('./src/modules/food/orders/services/order.service.js');
+                const scheduleSub = createRedisClient();
+                if (scheduleSub) {
+                    await scheduleSub.connect();
+                    await scheduleSub.subscribe(FOOD_SCHEDULE_ACTIVATED_CHANNEL, (message) => {
+                        void handleScheduleActivatedBridgeMessage(message).catch((err) => {
+                            logger.error(
+                                `Schedule activated bridge handler failed: ${err?.message || err}`
+                            );
+                        });
+                    });
+                    logger.info(
+                        `Subscribed to ${FOOD_SCHEDULE_ACTIVATED_CHANNEL} for worker→API schedule notify`
+                    );
+                }
+            } catch (err) {
+                logger.warn(
+                    `Schedule activated Redis bridge not started: ${err?.message || err}`
+                );
+            }
         }
         
         // 5a. Watchdog: Recover stuck orders from previous run
@@ -139,6 +166,21 @@ const startServer = async () => {
         };
         runPorterScheduledDispatch();
         porterScheduledDispatchInterval = setInterval(runPorterScheduledDispatch, 60 * 1000);
+
+        const runFoodScheduledReconcile = async () => {
+            try {
+                // FALLBACK ONLY — activates when BullMQ job is missing/stuck/failed.
+                // Healthy delayed jobs are skipped (primary path = order worker).
+                const { processDueScheduledFoodOrders } = await import(
+                    './src/modules/food/orders/services/order.service.js'
+                );
+                await processDueScheduledFoodOrders();
+            } catch (err) {
+                logger.error(`Food scheduled reconcile error: ${err.message}`);
+            }
+        };
+        runFoodScheduledReconcile();
+        foodScheduledReconcileInterval = setInterval(runFoodScheduledReconcile, 60 * 1000);
 
         process.on('SIGINT', () => gracefulShutdown('SIGINT'));
         process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));

@@ -21,6 +21,7 @@ export default function ViewZone() {
   const [mapError, setMapError] = useState("")
   const [zone, setZone] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [savingQuick, setSavingQuick] = useState(false)
 
   // Memoize zone dependencies to keep dependency array stable
 const zoneId = useMemo(() => zone?._id || null, [zone?._id])
@@ -32,6 +33,24 @@ const coordinatesLength = useMemo(() => zone?.coordinates?.length || 0, [zone?.c
     loadGoogleMaps()
   }, [id])
 
+  const handleQuickDeliveryToggle = async (next) => {
+    if (!zone?._id && !id) return
+    const previous = zone?.quickDeliveryEnabled === true
+    setZone((z) => (z ? { ...z, quickDeliveryEnabled: next } : z))
+    setSavingQuick(true)
+    try {
+      const response = await adminAPI.updateZone(id, { quickDeliveryEnabled: next })
+      if (response.data?.success && response.data.data?.zone) {
+        setZone(response.data.data.zone)
+      }
+    } catch (error) {
+      setZone((z) => (z ? { ...z, quickDeliveryEnabled: previous } : z))
+      debugError("Error updating Quick Delivery:", error)
+      alert(error?.response?.data?.message || "Failed to update Quick Delivery")
+    } finally {
+      setSavingQuick(false)
+    }
+  }
   // Trigger map resize when component is fully mounted
   useEffect(() => {
     if (mapInstanceRef.current && !mapLoading) {
@@ -394,6 +413,23 @@ const coordinatesLength = useMemo(() => zone?.coordinates?.length || 0, [zone?.c
                   }`}>
                     {zone.isActive ? "Active" : "Inactive"}
                   </span>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-1">Quick Delivery</label>
+                  <label className="inline-flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={zone.quickDeliveryEnabled === true}
+                      disabled={savingQuick}
+                      onChange={(e) => handleQuickDeliveryToggle(e.target.checked)}
+                      className="h-4 w-4 rounded border-slate-300 text-green-600 focus:ring-green-500"
+                    />
+                    {zone.quickDeliveryEnabled === true ? "Enabled" : "Disabled"}
+                  </label>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Zone enable only. Max Quick distance is configured in Global Fee Settings.
+                  </p>
                 </div>
 
                 {zone.coordinates && zone.coordinates.length > 0 && (

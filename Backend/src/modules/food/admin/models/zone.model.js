@@ -67,6 +67,15 @@ const zoneSchema = new mongoose.Schema(
             default: true,
             index: true
         },
+        /**
+         * Food Quick Delivery zone gate (Phase 2.1).
+         * Opt-in. Missing/undefined ⇒ false. Not used by calculateOrder until Phase 2.2+.
+         */
+        quickDeliveryEnabled: {
+            type: Boolean,
+            default: false,
+            index: true,
+        },
         zoneHubId: {
             type: mongoose.Schema.Types.ObjectId,
             ref: 'FoodRestaurant',
@@ -81,6 +90,7 @@ const zoneSchema = new mongoose.Schema(
 
 zoneSchema.index({ isActive: 1, name: 1 });
 zoneSchema.index({ country: 1, name: 1 });
+zoneSchema.index({ isActive: 1, quickDeliveryEnabled: 1 });
 zoneSchema.index({ geometry: '2dsphere' }, { sparse: true });
 
 zoneSchema.pre('save', async function saveZoneGeometryAndValidateOverlap(next) {

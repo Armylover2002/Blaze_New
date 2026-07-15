@@ -4,6 +4,10 @@ import { FoodRestaurant } from '../models/restaurant.model.js';
 import { FoodItem } from '../../admin/models/food.model.js';
 import { FoodCategory } from '../../admin/models/category.model.js';
 import { getFoodDisplayPrice, getFoodDisplayOtherPrice, serializeFoodVariants } from '../../admin/services/foodVariant.service.js';
+import {
+    backfillLegacyCategoryWorkflow,
+    isCategoryVisibleInPublicMenu
+} from '../../shared/categoryWorkflow.js';
 import { ItemSlotTiming } from '../models/itemSlotTiming.model.js';
 import {
     buildSlotTimingMap,
