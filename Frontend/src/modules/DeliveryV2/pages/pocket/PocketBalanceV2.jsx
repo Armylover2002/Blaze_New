@@ -27,8 +27,10 @@ export const PocketBalanceV2 = () => {
      cashCollected: 0,
      deductions: 0,
      withdrawalLimit: 100,
+     maxWithdrawalLimit: null,
      withdrawableAmount: 0,
-     canWithdraw: false
+     canWithdraw: false,
+     disabledReason: ''
   });
   const [withdrawSubmitting, setWithdrawSubmitting] = useState(false);
 
@@ -42,14 +44,27 @@ export const PocketBalanceV2 = () => {
           deliveryAPI.getWallet()
         ]);
         
-        const profile = profileRes?.data?.data?.profile || {};
         const summary = earningsRes?.data?.data?.summary || {};
         const wallet = walletRes?.data?.data?.wallet || {};
         
         // Use wallet data from backend instead of non-existent profile.walletBalance
         const pocketBalance = Number(wallet.pocketBalance) || 0;
         const withdrawalLimit = Number(wallet.deliveryWithdrawalLimit) || 100;
-        const withdrawableAmount = pocketBalance; // Backend pocketBalance is already the withdrawable amount
+        const rawMax = wallet.deliveryMaxWithdrawalLimit;
+        const maxWithdrawalLimit =
+          rawMax != null && Number(rawMax) > 0 ? Number(rawMax) : null;
+        // Cap request amount at max when pocket exceeds max limit
+        const withdrawableAmount =
+          maxWithdrawalLimit != null
+            ? Math.min(pocketBalance, maxWithdrawalLimit)
+            : pocketBalance;
+        const canWithdraw = withdrawableAmount >= withdrawalLimit;
+        let disabledReason = '';
+        if (pocketBalance <= 0) {
+          disabledReason = 'Withdrawable amount is ₹0';
+        } else if (withdrawableAmount < withdrawalLimit) {
+          disabledReason = `Minimum withdrawal requirement is ₹${withdrawalLimit}`;
+        }
 
         setWalletState({
            pocketBalance: pocketBalance,
@@ -59,8 +74,10 @@ export const PocketBalanceV2 = () => {
            cashCollected: Number(wallet.cashInHand) || 0,
            deductions: 0, // Mocked
            withdrawalLimit,
+           maxWithdrawalLimit,
            withdrawableAmount,
-           canWithdraw: withdrawableAmount >= withdrawalLimit
+           canWithdraw,
+           disabledReason
         });
       } catch (err) {
         toast.error('Failed to load pocket details');
@@ -83,10 +100,23 @@ export const PocketBalanceV2 = () => {
         return;
      }
 
+     const amount = walletState.withdrawableAmount;
+     if (amount < walletState.withdrawalLimit) {
+        toast.error(`Minimum withdrawal amount is ₹${walletState.withdrawalLimit}`);
+        return;
+     }
+     if (
+       walletState.maxWithdrawalLimit != null &&
+       amount > walletState.maxWithdrawalLimit
+     ) {
+        toast.error(`Maximum withdrawal amount is ₹${walletState.maxWithdrawalLimit}`);
+        return;
+     }
+
      setWithdrawSubmitting(true);
      try {
         const res = await deliveryAPI.createWithdrawalRequest({
-           amount: walletState.withdrawableAmount,
+           amount,
            paymentMethod: 'bank_transfer'
         });
         if (res?.data?.success) {
@@ -94,7 +124,7 @@ export const PocketBalanceV2 = () => {
            goBack();
         }
      } catch (err) {
-        toast.error("Withdrawal failed");
+        toast.error(err?.response?.data?.message || "Withdrawal failed");
      } finally {
         setWithdrawSubmitting(false);
      }
@@ -134,7 +164,7 @@ export const PocketBalanceV2 = () => {
                   <div>
                      <p className="text-xs font-bold">Withdraw currently disabled</p>
                      <p className="text-[10px] font-medium opacity-80 leading-tight mt-1">
-                        {walletState.withdrawableAmount <= 0 ? 'Withdrawable amount is ₹0' : `Minimum withdrawal requirement is ₹${walletState.withdrawalLimit}`}
+                        {walletState.disabledReason || `Minimum withdrawal requirement is ₹${walletState.withdrawalLimit}`}
                      </p>
                   </div>
                </div>
@@ -174,7 +204,16 @@ export const PocketBalanceV2 = () => {
                 <DetailRow 
                    label="Min. withdrawal amount" 
                    value={formatCurrency(walletState.withdrawalLimit)} 
-                   subLabel="Withdrawal allowed only when withdrawable amount reaches this limit."
+                   subLabel="Withdrawal allowed only when amount is at least this limit."
+                />
+                <DetailRow 
+                   label="Max. withdrawal amount" 
+                   value={
+                     walletState.maxWithdrawalLimit != null
+                       ? formatCurrency(walletState.maxWithdrawalLimit)
+                       : 'Unlimited'
+                   } 
+                   subLabel="Single withdrawal cannot exceed this amount."
                 />
                 <DetailRow label="Withdrawable amount" value={formatCurrency(walletState.withdrawableAmount)} />
              </div>

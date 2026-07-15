@@ -34,6 +34,13 @@ export default function HubFinance() {
   const [loadingWithdrawals, setLoadingWithdrawals] = useState(false)
   const [referralStats, setReferralStats] = useState(null)
 
+  const minWithdrawalLimit = Number(financeData?.withdrawalLimits?.min) || 1
+  const rawMaxWithdrawal = financeData?.withdrawalLimits?.max
+  const maxWithdrawalLimit =
+    rawMaxWithdrawal != null && Number(rawMaxWithdrawal) > 0
+      ? Number(rawMaxWithdrawal)
+      : null
+
   // Fetch finance data on mount
   useEffect(() => {
     const fetchFinanceData = async () => {
@@ -1291,13 +1298,23 @@ export default function HubFinance() {
                   <p className="text-sm text-gray-600 mb-2">
                     Available Balance: <span className="font-semibold text-gray-900">₹{(financeData?.earnings?.availableBalance || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                   </p>
+                  <p className="text-xs text-gray-500 mb-3">
+                    Min: ₹{minWithdrawalLimit.toLocaleString('en-IN')}
+                    {maxWithdrawalLimit != null
+                      ? ` · Max: ₹${maxWithdrawalLimit.toLocaleString('en-IN')}`
+                      : ' · Max: Unlimited'}
+                  </p>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Enter Amount to Withdraw
                   </label>
                   <input
                     type="number"
-                    min="0.01"
-                    max={financeData?.earnings?.availableBalance || 0}
+                    min={minWithdrawalLimit}
+                    max={
+                      maxWithdrawalLimit != null
+                        ? Math.min(maxWithdrawalLimit, financeData?.earnings?.availableBalance || 0)
+                        : (financeData?.earnings?.availableBalance || 0)
+                    }
                     step="0.01"
                     value={withdrawalAmount}
                     onChange={(e) => setWithdrawalAmount(e.target.value)}
@@ -1306,6 +1323,12 @@ export default function HubFinance() {
                   />
                   {withdrawalAmount && parseFloat(withdrawalAmount) > (financeData?.earnings?.availableBalance || 0) && (
                     <p className="text-sm text-red-600 mt-1">Amount cannot exceed available balance</p>
+                  )}
+                  {withdrawalAmount && parseFloat(withdrawalAmount) > 0 && parseFloat(withdrawalAmount) < minWithdrawalLimit && (
+                    <p className="text-sm text-red-600 mt-1">Minimum withdrawal amount is ₹{minWithdrawalLimit}</p>
+                  )}
+                  {withdrawalAmount && maxWithdrawalLimit != null && parseFloat(withdrawalAmount) > maxWithdrawalLimit && (
+                    <p className="text-sm text-red-600 mt-1">Maximum withdrawal amount is ₹{maxWithdrawalLimit}</p>
                   )}
                 </div>
 
@@ -1324,6 +1347,14 @@ export default function HubFinance() {
                       const amount = parseFloat(withdrawalAmount)
                       if (!amount || amount <= 0) {
                         alert('Please enter a valid amount')
+                        return
+                      }
+                      if (amount < minWithdrawalLimit) {
+                        alert(`Minimum withdrawal amount is ₹${minWithdrawalLimit}`)
+                        return
+                      }
+                      if (maxWithdrawalLimit != null && amount > maxWithdrawalLimit) {
+                        alert(`Maximum withdrawal amount is ₹${maxWithdrawalLimit}`)
                         return
                       }
                       if (amount > (financeData?.earnings?.availableBalance || 0)) {
@@ -1361,7 +1392,14 @@ export default function HubFinance() {
                         setSubmittingWithdrawal(false)
                       }
                     }}
-                    disabled={submittingWithdrawal || !withdrawalAmount || parseFloat(withdrawalAmount) <= 0 || parseFloat(withdrawalAmount) > (financeData?.earnings?.availableBalance || 0)}
+                    disabled={
+                      submittingWithdrawal ||
+                      !withdrawalAmount ||
+                      parseFloat(withdrawalAmount) <= 0 ||
+                      parseFloat(withdrawalAmount) < minWithdrawalLimit ||
+                      (maxWithdrawalLimit != null && parseFloat(withdrawalAmount) > maxWithdrawalLimit) ||
+                      parseFloat(withdrawalAmount) > (financeData?.earnings?.availableBalance || 0)
+                    }
                     className="flex-1 px-4 py-3 bg-black text-white rounded-lg font-medium hover:bg-gray-800 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed"
                   >
                     {submittingWithdrawal ? 'Submitting...' : 'Submit Request'}

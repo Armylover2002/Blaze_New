@@ -14,7 +14,8 @@ const foodRestaurantWithdrawalSchema = new mongoose.Schema({
     },
     status: {
         type: String,
-        enum: ['pending', 'approved', 'rejected'],
+        // processing = claimed for settle; still locks available balance until approved/reverted
+        enum: ['pending', 'processing', 'approved', 'rejected', 'cancelled'],
         default: 'pending',
         index: true
     },
@@ -31,7 +32,9 @@ const foodRestaurantWithdrawalSchema = new mongoose.Schema({
     adminNote: String,
     rejectionReason: String,
     transactionId: String, // Final bank transaction reference from admin
-    processedAt: Date
+    processedAt: Date,
+    /** Set inside settle txn so approve retries after crash do not re-consume shares */
+    ledgerSettled: { type: Boolean, default: false },
 }, { 
     collection: 'food_restaurant_withdrawals', 
     timestamps: true 

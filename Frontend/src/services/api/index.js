@@ -1013,6 +1013,16 @@ export const adminAPI = {
       contextModule: "admin",
     }),
 
+  /** Restaurant Withdrawal Limits (admin) — separate from delivery */
+  getRestaurantWithdrawalLimit: () =>
+    apiClient.get("/food/admin/restaurant-withdrawal-limit", {
+      contextModule: "admin",
+    }),
+  updateRestaurantWithdrawalLimit: (body) =>
+    apiClient.patch("/food/admin/restaurant-withdrawal-limit", body ?? {}, {
+      contextModule: "admin",
+    }),
+
   /** Delivery Emergency Help (admin) */
   getEmergencyHelp: () =>
     apiClient.get("/food/admin/delivery-emergency-help", {
@@ -1161,6 +1171,11 @@ export const restaurantAPI = {
   /** Submit a real withdrawal request to the backend. */
   createWithdrawalRequest: (amount) =>
     apiClient.post("/food/restaurant/withdraw", { amount: Number(amount) }, {
+      contextModule: "restaurant"
+    }),
+  /** Cancel a pending restaurant withdrawal. */
+  cancelWithdrawalRequest: (id) =>
+    apiClient.post(`/food/restaurant/withdrawals/${id}/cancel`, {}, {
       contextModule: "restaurant"
     }),
   /** List withdrawal history for current restaurant. */

@@ -243,6 +243,7 @@ export const adminSidebarMenu = [
     permissionKey: "transaction_management",
     items: [
       { type: "link", label: "Restaurant Withdraws", permissionKey: "restaurant_withdraws", path: "/admin/food/restaurant-withdraws", icon: "CreditCard" },
+      { type: "link", label: "Restaurant Withdrawal Limits", permissionKey: "restaurant_withdraws", path: "/admin/food/restaurant-withdrawal-limit", icon: "Wallet" },
       { type: "link", label: "Onboarding Fee Management", permissionKey: "restaurant_withdraws", path: "/admin/food/onboarding-fee-management", icon: "Settings" },
       { type: "link", label: "Onboarding Payments", permissionKey: "restaurant_withdraws", path: "/admin/food/onboarding-payments", icon: "Receipt" },
     ],
