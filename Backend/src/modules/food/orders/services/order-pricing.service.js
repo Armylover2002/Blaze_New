@@ -1,3 +1,8 @@
+/**
+ * Internal alternate Food order pricing calculator (Feature branch).
+ * NOT wired to production routes — live pricing uses `calculateOrder` in order.service.js.
+ * Kept restored for merge reconstruction / future wiring.
+ */
 import mongoose from 'mongoose';
 import { FoodOrder } from '../models/order.model.js';
 import { FoodFeeSettings } from '../../admin/models/feeSettings.model.js';
@@ -339,15 +344,4 @@ export async function calculateOrderPricing(userId, dto) {
       appliedCoupon,
     },
   };
-import { ValidationError } from '../../../../core/auth/errors.js';
-
-/**
- * Deprecated alternate calculator.
- * Kept only so old imports fail closed instead of trusting client item prices.
- * Live pricing must go through `calculateOrder` in `order.service.js`.
- */
-export async function calculateOrderPricing() {
-  throw new ValidationError(
-    'Deprecated order calculator is disabled. Use calculateOrder (order.service) which resolves item prices and fees server-side.',
-  );
 }

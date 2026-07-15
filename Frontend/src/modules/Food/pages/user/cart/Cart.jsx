@@ -1239,11 +1239,10 @@ export default function Cart() {
   const platformFee = pricing?.platformFee ?? Number(feeSettings.platformFee || 0)
   const packagingFee = pricing?.packagingFee ?? Number(feeSettings.packagingFee || 0)
   const gstCharges = pricing?.tax ?? Math.round(subtotal * (Number(feeSettings.gstRate || 0) / 100))
-  const discount = pricing?.discount ?? (appliedCoupon ? Math.min(appliedCoupon.discount, subtotal * 0.5) : 0)
-  const totalBeforeDiscount = subtotal + deliveryFee + platformFee + gstCharges + quickDeliveryFee
   // Never invent coupon caps — wait for server pricing for actual discount.
   const discount = pricing?.discount ?? 0
-  const totalBeforeDiscount = subtotal + deliveryFee + platformFee + packagingFee + gstCharges
+  const totalBeforeDiscount =
+    subtotal + deliveryFee + platformFee + packagingFee + gstCharges + quickDeliveryFee
   const total = pricing?.total ?? (totalBeforeDiscount - discount)
 
   // Calculate other platform total for comparison
@@ -1697,19 +1696,6 @@ export default function Cart() {
           if (result.softFallback) {
             placeOrderDeliveryType = "standard"
           }
-      let resolvedPricing = null
-      try {
-        const pricingResponse = await orderAPI.calculateOrder({
-          orderType: "food",
-          items: cart.map(mapOrderItem),
-          restaurantId: restaurantData?.restaurantId || restaurantData?._id || restaurantId || undefined,
-          address: defaultAddress,
-          deliveryAddressId: resolvedDeliveryAddressId,
-          couponCode: appliedCoupon?.code || couponCode || undefined,
-        })
-        resolvedPricing = pricingResponse?.data?.data?.pricing || null
-        if (resolvedPricing) {
-          setPricing(resolvedPricing)
         }
       } catch (pricingError) {
         debugWarn("Could not refresh pricing before order placement:", pricingError)

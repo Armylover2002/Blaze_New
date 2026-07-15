@@ -46,6 +46,7 @@ export default function FeeSettings() {
       deliveryFee: src?.deliveryFee ?? "",
       deliveryFeeRanges: src?.deliveryFeeRanges || [],
       platformFee: src?.platformFee ?? "",
+      packagingFee: src?.packagingFee ?? "",
       gstRate: src?.gstRate ?? "",
       quickDelivery: {
         ...defaultQuickDeliveryBusiness(),
@@ -162,13 +163,6 @@ export default function FeeSettings() {
       const response = await adminAPI.getFeeSettings()
       if (response.data.success && response.data.data.feeSettings) {
         setFeeSettings(mapFeeSettingsFromApi(response.data.data.feeSettings))
-        setFeeSettings({
-          deliveryFee: response.data.data.feeSettings.deliveryFee ?? "",
-          deliveryFeeRanges: response.data.data.feeSettings.deliveryFeeRanges || [],
-          platformFee: response.data.data.feeSettings.platformFee ?? "",
-          packagingFee: response.data.data.feeSettings.packagingFee ?? "",
-          gstRate: response.data.data.feeSettings.gstRate ?? "",
-        })
       } else if (response.data.success && response.data.data.feeSettings === null) {
         // Not configured yet - keep empty fields (no defaults for basic fees).
         setFeeSettings({
@@ -243,13 +237,6 @@ export default function FeeSettings() {
         const saved = response?.data?.data?.feeSettings
         if (saved) {
           setFeeSettings(mapFeeSettingsFromApi(saved))
-          setFeeSettings({
-            deliveryFee: saved.deliveryFee ?? "",
-            deliveryFeeRanges: saved.deliveryFeeRanges ?? [],
-            platformFee: saved.platformFee ?? "",
-            packagingFee: saved.packagingFee ?? "",
-            gstRate: saved.gstRate ?? "",
-          })
         }
         return true
       } else {

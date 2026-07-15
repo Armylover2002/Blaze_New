@@ -34,16 +34,12 @@ function runSyncPaymentProcessor(action, payload = {}) {
 }
 
 /**
- * Fire-and-forget BullMQ enqueue. Third argument is BullMQ job options (e.g. { delay, jobId }).
- * ADR-FOOD-001-Q-BULL
+ * Fire-and-forget BullMQ enqueue for order lifecycle events.
+ * Payment settlement actions use the payment queue when BullMQ is enabled.
+ * jobOptions (3rd arg) is passed to addOrderJob — e.g. { delay, jobId }.
+ * Never blocks API response; failures are logged only.
  */
 export function enqueueOrderEvent(action, payload = {}, jobOptions = {}) {
-  try {
-    void addOrderJob({ action, ...payload }, jobOptions).catch((err) => {
- * Fire-and-forget enqueue for order lifecycle events.
- * Payment settlement actions go to the payment queue when BullMQ is enabled.
- */
-export function enqueueOrderEvent(action, payload = {}) {
   const isPaymentAction = PAYMENT_QUEUE_ACTIONS.includes(action);
 
   try {
@@ -78,7 +74,7 @@ export function enqueueOrderEvent(action, payload = {}) {
       return;
     }
 
-    void addOrderJob({ action, ...payload }).catch((err) => {
+    void addOrderJob({ action, ...payload }, jobOptions).catch((err) => {
       logger.warn(`BullMQ enqueue order event failed: ${action} - ${err?.message || err}`);
     });
   } catch (err) {

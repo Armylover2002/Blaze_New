@@ -72,7 +72,6 @@ import {
 import { getIO, rooms } from '../../../../config/socket.js';
 import { isPointInPolygon } from '../../../../utils/geo.js';
 import { addOrderJob, removeOrderJob, getOrderJobMeta } from '../../../../queues/producers/order.producer.js';
-import { addOrderJob } from '../../../../queues/producers/order.producer.js';
 import { addPaymentJob } from '../../../../queues/producers/payment.producer.js';
 import { fetchPolyline } from '../utils/googleMaps.js';
 import { getFirebaseDB } from '../../../../config/firebase.js';
@@ -100,7 +99,7 @@ import { DISPATCH_DOCUMENT_TYPES } from '../../../quick-commerce/utils/dispatchD
 import * as returnPickupDelivery from '../../../quick-commerce/services/returnPickupDelivery.service.js';
 import { deductWalletBalance, refundWalletBalance } from '../../user/services/userWallet.service.js';
 import { getGlobalBranding } from '../../../common/services/globalBranding.service.js';
-import { roadDistanceKm, PAYMENT_QUEUE_ACTIONS } from './order.helpers.js';
+import { roadDistanceKm, PAYMENT_QUEUE_ACTIONS, enqueueOrderEvent } from './order.helpers.js';
 import { scorePointsByRoadDistance } from '../../../../services/roadDistance.service.js';
 
 export {
@@ -140,74 +139,6 @@ async function ensureRazorpayPaymentNotConsumed(paymentId, { currentFoodOrderId 
 
   if (foodExisting || porterExisting) {
     throw new ValidationError("Razorpay payment already consumed");
-  }
-}
-
-/**
- * Fire-and-forget BullMQ enqueue for order lifecycle events.
- * jobOptions (3rd arg) is passed to addOrderJob — e.g. { delay, jobId }.
- * Never blocks API response; failures are logged only.
- */
-function enqueueOrderEvent(action, payload = {}, jobOptions = {}) {
-    try {
-        void addOrderJob({ action, ...payload }, jobOptions).catch((err) => {
-            logger.warn(`BullMQ enqueue order event failed: ${action} - ${err?.message || err}`);
- * Payment settlement actions use the payment queue when BullMQ is enabled.
- * Never blocks API response; failures are logged only.
- */
-function enqueueOrderEvent(action, payload = {}) {
-  const isPaymentAction = PAYMENT_QUEUE_ACTIONS.includes(action);
-
-  const runSyncPaymentProcessor = () => {
-    import('../../../../queues/processors/payment.processor.js')
-      .then(({ processPaymentJob }) => {
-        logger.info(`[BullMQ:fallback] Running sync payment processor for action=${action}`);
-        processPaymentJob({
-          data: { action, ...payload },
-          id: `sync_${action}_${payload.orderMongoId || Date.now()}`,
-        }).catch((err) => {
-          logger.error(`[BullMQ:fallback] Sync payment processor failed: ${err.message}`);
-        });
-      })
-      .catch((err) => {
-        logger.error(`[BullMQ:fallback] Failed to import payment processor: ${err.message}`);
-      });
-  };
-
-  try {
-    if (isPaymentAction) {
-      if (process.env.BULLMQ_ENABLED === 'true') {
-        const jobOpts = {};
-        if (payload.orderMongoId) {
-          jobOpts.jobId = `payment_${action}_${payload.orderMongoId}`;
-        }
-        void addPaymentJob({ action, ...payload }, jobOpts)
-          .then((job) => {
-            if (!job) runSyncPaymentProcessor();
-          })
-          .catch((err) => {
-            const msg = String(err?.message || err);
-            if (/JobId|already exists|already existed/i.test(msg)) {
-              logger.info(
-                `[BullMQ] Payment job already present for action=${action} order=${payload.orderMongoId || ''}`,
-              );
-              return;
-            }
-            logger.warn(`BullMQ enqueue payment event failed: ${action} - ${msg}`);
-            runSyncPaymentProcessor();
-          });
-      } else {
-        runSyncPaymentProcessor();
-      }
-      return;
-    }
-
-    void addOrderJob({ action, ...payload }).catch((err) => {
-      logger.warn(`BullMQ enqueue order event failed: ${action} - ${err?.message || err}`);
-    });
-  } catch (err) {
-    logger.warn(`BullMQ enqueue order event failed (sync): ${action} - ${err?.message || err}`);
-    if (isPaymentAction) runSyncPaymentProcessor();
   }
 }
 
@@ -3088,8 +3019,6 @@ export async function calculateOrder(userId, dto, options = {}) {
       dto.restaurantId,
     ));
   }
-  await applyServerFoodItemPricing(items, sourceMap);
-  const sourceMap = await fetchPickupSourcesByType(items);
   await applyServerItemPricing(items, sourceMap);
   const subtotal = items.reduce(
     (sum, it) => sum + (Number(it.price) || 0) * (Number(it.quantity) || 1),
@@ -3892,7 +3821,7 @@ export async function createOrder(userId, dto) {
     : Number.isFinite(normalizedPricing.deliveryFee)
       ? normalizedPricing.deliveryFee
       : 0;
-  const platformProfit = computePlatformNetProfitWithQuickFreeze({
+  let platformProfit = computePlatformNetProfitWithQuickFreeze({
     deliveryFee: deliveryFeeForProfit,
     platformFee: Number.isFinite(normalizedPricing.platformFee)
       ? normalizedPricing.platformFee
@@ -3903,17 +3832,10 @@ export async function createOrder(userId, dto) {
     baseRiderShare: baseRiderEarning,
     adminDiscountShare: 0,
   });
-  const platformProfit = Math.max(
+  // GST collected from customer attributed to platform for remittance/reporting.
+  platformProfit = Math.max(
     0,
-    (Number.isFinite(normalizedPricing.totalDeliveryFee)
-      ? normalizedPricing.totalDeliveryFee
-      : Number.isFinite(normalizedPricing.deliveryFee)
-        ? normalizedPricing.deliveryFee
-        : 0) +
-      (Number.isFinite(normalizedPricing.platformFee) ? normalizedPricing.platformFee : 0) +
-      (Number(normalizedPricing.restaurantCommission) || 0) +
-      (Number(normalizedPricing.tax) || 0) -
-      riderEarning,
+    (Number(platformProfit) || 0) + (Number(normalizedPricing.tax) || 0),
   );
 
   const dispatchLegs = await Promise.all(
@@ -5175,93 +5097,8 @@ export async function updateOrderStatusRestaurant(
         to: orderStatus
     });
 
-    // Automated refund on restaurant cancel (Razorpay + wallet), before ledger sync.
+    // Refund already handled via autoProcessRefund earlier in this function.
     const isCancellationStatus = String(orderStatus).includes("cancel") || isTerminalCancelStatus(orderStatus);
-    if (
-      isCancellationStatus &&
-      order.payment?.status === "paid" &&
-      (!order.payment?.refund || order.payment?.refund?.status !== "processed")
-    ) {
-      const cancelPayMethod = String(order.payment?.method || "").trim().toLowerCase();
-      const cancelRefundAmount = Number(order.pricing?.total || 0);
-
-      if (cancelPayMethod === "wallet" && cancelRefundAmount > 0 && order.userId) {
-        try {
-          await refundWalletBalance(
-            order.userId,
-            cancelRefundAmount,
-            "Order refund",
-            {
-              orderId: String(order._id),
-              orderReadableId: String(order.orderId || ""),
-              source: "restaurant_cancel_refund",
-            },
-          );
-          order.payment = order.payment || {};
-          order.payment.status = "refunded";
-          order.payment.refund = {
-            status: "processed",
-            amount: cancelRefundAmount,
-            refundId: `wallet_refund_${order._id}`,
-            requestedMethod: "wallet",
-            processedMethod: "wallet",
-            requestedAt: new Date(),
-            requestedByUser: false,
-            reason: String(reason || ""),
-            processedAt: new Date(),
-          };
-        } catch (err) {
-          console.error(`Automated wallet refund failed for Order ${orderId} (Restaurant Cancel):`, err);
-          order.payment = order.payment || {};
-          order.payment.refund = {
-            status: "failed",
-            amount: cancelRefundAmount,
-            requestedMethod: "wallet",
-            processedMethod: "wallet",
-          };
-        }
-        await order.save();
-      } else if (
-        cancelPayMethod === "razorpay" &&
-        order.payment?.razorpay?.paymentId
-      ) {
-        try {
-          const refundResult = await initiateRazorpayRefund(
-            order.payment.razorpay.paymentId,
-            cancelRefundAmount,
-            {
-              idempotencyKey: `food_refund_${String(order._id)}_rest_cancel_${Math.round(Number(cancelRefundAmount) * 100)}`,
-              notes: { orderId: String(order.orderId || order._id), source: 'restaurant_cancel' },
-            },
-          );
-
-          if (refundResult.success) {
-            order.payment = order.payment || {};
-            order.payment.status = "refunded";
-            order.payment.refund = {
-              status: "processed",
-              amount: cancelRefundAmount,
-              refundId: refundResult.refundId,
-              processedAt: new Date()
-            };
-          } else {
-            order.payment = order.payment || {};
-            order.payment.refund = {
-              status: "failed",
-              amount: cancelRefundAmount
-            };
-          }
-        } catch (err) {
-          console.error(`Automated refund failed for Order ${orderId} (Restaurant Cancel):`, err);
-          order.payment = order.payment || {};
-          order.payment.refund = {
-            status: "failed",
-            amount: cancelRefundAmount,
-          };
-        }
-        await order.save();
-      }
-    }
 
     // Remove cancelled orders from restaurant payout eligibility (never leave as captured).
     if (isCancellationStatus || String(order.orderStatus || "").includes("cancel")) {
@@ -5356,106 +5193,12 @@ export async function updateOrderStatusAdmin(orderId, adminId, orderStatus, reas
   // ✅ Automated refund on ADMIN cancel (same behavior as restaurant-cancel)
   // - Wallet payment: credit back to user wallet immediately.
   // - Razorpay payment: initiate Razorpay refund (full amount).
-  if (
-    order.orderStatus === "cancelled_by_admin"
-  ) {
+  if (order.orderStatus === "cancelled_by_admin") {
     if (["paid", "refunded"].includes(order.payment?.status)) {
-      await autoProcessRefund(order, 'admin');
+      await autoProcessRefund(order, "admin");
     } else if (!["paid", "refunded"].includes(String(order.payment?.status || ""))) {
       // COD/unpaid orders: keep payment cancelled marker consistent.
       order.payment.status = "cancelled";
-    const paymentMethod = String(order.payment?.method || "").trim().toLowerCase();
-    const totalAmount = Number(order.pricing?.total || 0);
-    const canRefundAmount = Number.isFinite(totalAmount) && totalAmount > 0;
-
-    try {
-      if (paymentMethod === "wallet" && canRefundAmount) {
-        await refundWalletBalance(
-          order.userId,
-          totalAmount,
-          "Order refund",
-          {
-            orderId: String(order._id),
-            orderReadableId: String(order.orderId || ""),
-            source: "admin_auto_refund",
-            refundTransactionId: `wallet_refund_${String(order._id)}_full`,
-          },
-        );
-        order.payment.status = "refunded";
-        order.payment.refund = {
-          status: "processed",
-          amount: totalAmount,
-          refundId: `wallet_refund_${String(order._id)}_full`,
-          requestedMethod: "wallet",
-          processedMethod: "wallet",
-          requestedAt: new Date(),
-          requestedByUser: false,
-          reason: String(reason || ""),
-          processedAt: new Date(),
-        };
-        await order.save();
-      } else if (
-        ["razorpay", "razorpay_qr"].includes(paymentMethod) &&
-        order.payment?.status === "paid" &&
-        order.payment?.razorpay?.paymentId &&
-        canRefundAmount
-      ) {
-        const refundResult = await initiateRazorpayRefund(
-          order.payment.razorpay.paymentId,
-          totalAmount,
-          {
-            idempotencyKey: `food_refund_${String(order._id)}_admin_full_${Math.round(Number(totalAmount) * 100)}`,
-            notes: { orderId: String(order.orderId || order._id), source: 'admin_cancel' },
-          },
-        );
-
-        if (refundResult?.success) {
-          order.payment.status = "refunded";
-          order.payment.refund = {
-            status: "processed",
-            amount: totalAmount,
-            refundId: refundResult.refundId || "",
-            requestedMethod: "gateway",
-            processedMethod: "gateway",
-            requestedAt: new Date(),
-            requestedByUser: false,
-            reason: String(reason || ""),
-            processedAt: new Date(),
-          };
-        } else {
-          order.payment.refund = {
-            status: "failed",
-            amount: totalAmount,
-            requestedMethod: "gateway",
-            processedMethod: "gateway",
-            requestedAt: new Date(),
-            requestedByUser: false,
-            reason: String(reason || ""),
-          };
-        }
-        await order.save();
-      } else if (!["paid", "refunded"].includes(String(order.payment?.status || ""))) {
-        // COD/unpaid orders: keep payment cancelled marker consistent.
-        order.payment.status = "cancelled";
-        await order.save();
-      }
-    } catch (err) {
-      logger.warn(
-        `Automated refund failed for Order ${orderId} (Admin Cancel): ${err?.message || err}`,
-      );
-      try {
-        if (canRefundAmount) {
-          order.payment.refund = {
-            status: "failed",
-            amount: totalAmount,
-            requestedMethod: paymentMethod === "wallet" ? "wallet" : "gateway",
-            requestedAt: new Date(),
-            requestedByUser: false,
-            reason: String(reason || ""),
-          };
-          await order.save();
-        }
-      } catch (_) {}
     }
   }
 

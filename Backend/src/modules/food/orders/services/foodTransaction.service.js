@@ -110,6 +110,15 @@ export async function createInitialTransaction(order) {
      * riderShare on the order already includes quickRiderBonus — use base rider for P&L.
      */
     const baseRiderShare = Math.max(0, (Number(riderShare) || 0) - quickRiderBonus);
+    const taxAmount = Number(order.pricing?.tax || 0) || 0;
+    /**
+     * FINANCE FREEZE — Food Quick Charge:
+     * Platform gets quickPlatformShare only (never full quickDeliveryFee).
+     * GST collected from customer is attributed to platform for remittance.
+     * Restaurant Quick Share is snapshotted but NOT added to restaurantShare
+     * until successful delivery (realizeFoodQuickRestaurantShare).
+     * riderShare on the order already includes quickRiderBonus — use base rider for P&L.
+     */
     let platformNetProfit = computePlatformNetProfitWithQuickFreeze({
       deliveryFee: totalDeliveryFee,
       platformFee: order.pricing?.platformFee || 0,
@@ -119,16 +128,7 @@ export async function createInitialTransaction(order) {
       baseRiderShare,
       adminDiscountShare,
     });
-    const taxAmount = Number(order.pricing?.tax || 0) || 0;
-    // GST collected from customer is attributed to platform for remittance/reporting.
-    let platformNetProfit =
-        (order.pricing?.platformFee || 0) +
-        totalDeliveryFee -
-        riderShare +
-        restaurantCommission +
-        sellerCommission +
-        taxAmount;
-    platformNetProfit = Math.max(0, platformNetProfit - adminDiscountShare);
+    platformNetProfit = Math.max(0, Number(platformNetProfit) || 0) + taxAmount;
 
     restaurantNet = Math.round((Number(restaurantNet) || 0) * 100) / 100;
     platformNetProfit = Math.round((Number(platformNetProfit) || 0) * 100) / 100;
@@ -282,6 +282,9 @@ export async function realizeFoodQuickRestaurantShare(order) {
     );
 
     return updated;
+}
+
+/**
  * True when the linked order is delivered and eligible for restaurant payout.
  */
 export function isOrderDeliveredForSettlement(orderLike) {
