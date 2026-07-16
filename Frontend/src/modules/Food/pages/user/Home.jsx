@@ -105,6 +105,7 @@ import { PorterProvider } from "../../../porter/user/context/BookingContext";
 import PromoRow from "@food/components/user/home/PromoRow";
 import { optimizeCloudinaryUrl } from "../../../../shared/utils/cloudinaryUtils";
 import VegModePopups from "@food/components/user/VegModePopups";
+import AdvertisementSection from "@food/components/user/home/AdvertisementSection";
 
 import * as imgUtils from "@food/utils/imageUtils";
 import { useFoodHomeData } from "@food/hooks/useFoodHomeData";
@@ -217,6 +218,7 @@ export default function Home() {
     restaurants,
     landing,
     meta,
+    advertisements,
     actions,
     state
   } = useFoodHomeData({
@@ -416,6 +418,10 @@ export default function Home() {
             </Suspense>
 
             <Suspense fallback={null}>
+              <AdvertisementSection advertisements={advertisements} BACKEND_ORIGIN={BACKEND_ORIGIN} />
+            </Suspense>
+
+            <Suspense fallback={null}>
               <RecommendedSection recommendedForYouRestaurants={meta.recommended} />
             </Suspense>
 
@@ -470,6 +476,7 @@ export default function Home() {
                 hasMoreRestaurants={restaurants.hasMore}
                 loadMoreRestaurants={actions.loadMoreRestaurants}
                 restaurantLoadMoreRef={restaurantLoadMoreRef}
+                advertisements={advertisements}
               />
             </Suspense>
         </div>

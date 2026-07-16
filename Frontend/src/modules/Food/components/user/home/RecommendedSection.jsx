@@ -229,7 +229,7 @@ const RecommendedSection = memo(({ recommendedForYouRestaurants }) => {
             >
               <div className="relative h-32 sm:h-36 bg-gray-100 shrink-0">
                 <img
-                  src={product.image || product.imageUrl || "https://via.placeholder.com/150"}
+                  src={product.image || product.imageUrl || "https://placehold.co/150x150/png?text=No+Image"}
                   alt={product.name}
                   className="w-full h-full object-cover"
                   loading="lazy"

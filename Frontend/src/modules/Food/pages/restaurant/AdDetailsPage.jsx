@@ -2,7 +2,6 @@ import { useState, useEffect } from "react"
 import { motion } from "framer-motion"
 import { useNavigate, useParams } from "react-router-dom"
 import useRestaurantBackNavigation from "@food/hooks/useRestaurantBackNavigation"
-import Lenis from "lenis"
 import {
   ArrowLeft,
   Calendar,
@@ -24,26 +23,6 @@ export default function AdDetailsPage() {
   const [showMenu, setShowMenu] = useState(false)
   const [adData, setAdData] = useState(null)
   const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    const lenis = new Lenis({
-      duration: 1.2,
-      easing: (t) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
-      smoothWheel: true,
-    })
-
-    function raf(time) {
-      lenis.raf(time)
-      requestAnimationFrame(raf)
-    }
-
-    requestAnimationFrame(raf)
-
-    return () => {
-      lenis.destroy()
-    }
-  }, [])
-
   useEffect(() => {
     let cancelled = false
     const load = async () => {
