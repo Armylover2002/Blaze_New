@@ -6472,15 +6472,23 @@ export async function creditEarningAddonHistory(historyId, notes) {
     doc.creditedNotes = typeof notes === 'string' ? notes.trim() : '';
     await doc.save();
 
-    // 2. Credit the wallet
+    // 2. Credit the wallet (same fields as deliveryBoy creditWallet path:
+    //    balance + totalEarnings — via existing creditWallet, not direct $inc)
     if (amountToCredit > 0) {
-        await FoodDeliveryWallet.findOneAndUpdate(
-            { deliveryPartnerId: doc.deliveryPartnerId },
-            { $inc: { balance: amountToCredit, totalEarnings: amountToCredit } },
-            { upsert: true }
-        );
+        await creditWallet({
+            entityType: 'deliveryBoy',
+            entityId: doc.deliveryPartnerId,
+            amount: amountToCredit,
+            description: `Earning Addon: ${doc.offerId?.title || 'Offer Reward'}`,
+            category: 'adjustment',
+            metadata: {
+                source: 'earning_addon_credit',
+                historyId: String(doc._id),
+                offerId: doc.offerId?._id ? String(doc.offerId._id) : undefined,
+            },
+        });
 
-        // 3. Create a transaction for ledger
+        // 3. Create a transaction for bonus/addon admin ledger (unchanged side ledger)
         try {
             await DeliveryBonusTransaction.create({
                 deliveryPartnerId: doc.deliveryPartnerId,
@@ -7568,7 +7576,8 @@ export async function updateDeliveryBoyWallet(dto) {
                 entityId: deliveryId,
                 amount: pocketDiff,
                 description: 'Admin manual pocket adjustment',
-                category: 'admin_adjustment',
+                // Must match Transaction.category enum (transaction.model.js)
+                category: 'adjustment',
                 metadata: { source: 'updateDeliveryBoyWallet' },
             });
         } else {
@@ -7578,7 +7587,8 @@ export async function updateDeliveryBoyWallet(dto) {
                     entityId: deliveryId,
                     amount: Math.abs(pocketDiff),
                     description: 'Admin manual pocket adjustment',
-                    category: 'admin_adjustment',
+                    // Must match Transaction.category enum (transaction.model.js)
+                    category: 'adjustment',
                     metadata: { source: 'updateDeliveryBoyWallet' },
                 });
             } catch (err) {
