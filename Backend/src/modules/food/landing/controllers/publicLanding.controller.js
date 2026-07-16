@@ -4,6 +4,7 @@ import { FoodHeroBanner } from '../models/heroBanner.model.js';
 import { FoodUnder250Banner } from '../models/under250Banner.model.js';
 import { FoodExploreIcon } from '../models/exploreIcon.model.js';
 import { FoodRestaurant } from '../../restaurant/models/restaurant.model.js';
+import { FoodAdvertisement } from '../../admin/models/advertisement.model.js';
 import { sendResponse } from '../../../../utils/response.js';
 
 /** Public hero banners for user home: active only, sorted */
@@ -65,6 +66,28 @@ export const getPublicGourmetController = async (req, res, next) => {
             priority: d.priority
         })).filter((r) => r && r._id);
         return sendResponse(res, 200, 'Gourmet restaurants fetched', { restaurants });
+    } catch (error) {
+        next(error);
+    }
+};
+
+export const getPublicAdvertisementsController = async (req, res, next) => {
+    try {
+        const now = new Date();
+        const query = {
+            status: 'Approved',
+            isDeleted: false,
+            $and: [
+                { $or: [{ startDate: null }, { startDate: { $lte: now } }] },
+                { $or: [{ endDate: null }, { endDate: { $gte: now } }] }
+            ]
+        };
+
+        const docs = await FoodAdvertisement.find(query)
+            .sort({ priority: 1, createdAt: -1 })
+            .lean();
+
+        return sendResponse(res, 200, 'Public advertisements fetched', { advertisements: docs });
     } catch (error) {
         next(error);
     }

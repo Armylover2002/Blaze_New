@@ -32,7 +32,8 @@ import {
     getPublicUnder250BannersController,
     getPublicExploreIconsController,
     getPublicGourmetController,
-    getPublicLandingSettingsController
+    getPublicLandingSettingsController,
+    getPublicAdvertisementsController
 } from '../controllers/publicLanding.controller.js';
 import { detectZonePublicController, listZonesPublicController, listZonesNearbyPublicController } from '../controllers/zonePublic.controller.js';
 import { getPublicEnvController } from '../controllers/publicEnv.controller.js';
@@ -195,6 +196,7 @@ router.get('/hero-banners/under-250/public', cacheResponse(300, 'landing_under25
 router.get('/explore-icons/public', cacheResponse(300, 'landing_explore'), getPublicExploreIconsController);
 router.get('/hero-banners/gourmet/public', cacheResponse(300, 'landing_gourmet'), getPublicGourmetController);
 router.get('/landing/settings/public', cacheResponse(300, 'landing_settings'), getPublicLandingSettingsController);
+router.get('/advertisements/public', cacheResponse(300, 'landing_advertisements'), getPublicAdvertisementsController);
 router.get('/zones/detect', detectZonePublicController);
 router.get('/zones/nearby', listZonesNearbyPublicController);
 router.get('/zones/public', cacheResponse(600, 'landing_zones'), listZonesPublicController);

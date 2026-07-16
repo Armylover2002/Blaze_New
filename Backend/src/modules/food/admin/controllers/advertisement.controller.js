@@ -7,6 +7,7 @@ import {
     deleteAdminAdvertisement
 } from '../../restaurant/services/advertisement.service.js';
 import { sendResponse } from '../../../../utils/response.js';
+import { invalidateCache } from '../../../../middleware/cache.js';
 
 export const listAdminAdvertisementsController = async (req, res, next) => {
     try {
@@ -20,6 +21,7 @@ export const listAdminAdvertisementsController = async (req, res, next) => {
 export const createAdminAdvertisementController = async (req, res, next) => {
     try {
         const ad = await createAdminAdvertisement(req.body || {}, req.files || {});
+        invalidateCache('landing_advertisements*');
         return sendResponse(res, 201, 'Advertisement created successfully', ad);
     } catch (error) {
         next(error);
@@ -38,6 +40,7 @@ export const listAdminAdvertisementRequestsController = async (req, res, next) =
 export const updateAdminAdvertisementStatusController = async (req, res, next) => {
     try {
         const updated = await updateAdminAdvertisementStatus(req.params.id, req.body?.status);
+        invalidateCache('landing_advertisements*');
         return sendResponse(res, 200, 'Advertisement status updated', updated);
     } catch (error) {
         next(error);
@@ -47,6 +50,7 @@ export const updateAdminAdvertisementStatusController = async (req, res, next) =
 export const updateAdminAdvertisementPriorityController = async (req, res, next) => {
     try {
         const updated = await updateAdminAdvertisementPriority(req.params.id, req.body?.priority);
+        invalidateCache('landing_advertisements*');
         return sendResponse(res, 200, 'Advertisement priority updated', updated);
     } catch (error) {
         next(error);
@@ -56,6 +60,7 @@ export const updateAdminAdvertisementPriorityController = async (req, res, next)
 export const deleteAdminAdvertisementController = async (req, res, next) => {
     try {
         const result = await deleteAdminAdvertisement(req.params.id);
+        invalidateCache('landing_advertisements*');
         return sendResponse(res, 200, 'Advertisement deleted successfully', result);
     } catch (error) {
         next(error);

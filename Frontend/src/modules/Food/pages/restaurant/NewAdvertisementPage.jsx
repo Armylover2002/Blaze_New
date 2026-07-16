@@ -24,10 +24,12 @@ export default function NewAdvertisementPage() {
   const navigate = useNavigate()
   const goBack = useRestaurantBackNavigation()
   const [showCategoryDropdown, setShowCategoryDropdown] = useState(false)
-  const [showValidityPicker, setShowValidityPicker] = useState(false)
+  const [showStartDatePicker, setShowStartDatePicker] = useState(false)
+  const [showEndDatePicker, setShowEndDatePicker] = useState(false)
   const [formData, setFormData] = useState({
     category: "Video Promotion",
-    validity: "",
+    startDate: "",
+    endDate: "",
     title: "",
     description: "",
     fileDescription: "",
@@ -36,31 +38,14 @@ export default function NewAdvertisementPage() {
   const [uploadedFile, setUploadedFile] = useState(null)
   const [uploadedVideo, setUploadedVideo] = useState(null)
   const categoryRef = useRef(null)
-  const validityRef = useRef(null)
+  const startDateRef = useRef(null)
+  const endDateRef = useRef(null)
   const fileInputRef = useRef(null)
   const videoInputRef = useRef(null)
   const [isPhotoPickerOpen, setIsPhotoPickerOpen] = useState(false)
   const [submitting, setSubmitting] = useState(false)
 
-  // Lenis smooth scrolling
-  useEffect(() => {
-    const lenis = new Lenis({
-      duration: 1.2,
-      easing: (t) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
-      smoothWheel: true,
-    })
 
-    function raf(time) {
-      lenis.raf(time)
-      requestAnimationFrame(raf)
-    }
-
-    requestAnimationFrame(raf)
-
-    return () => {
-      lenis.destroy()
-    }
-  }, [])
 
   // Close dropdowns when clicking outside
   useEffect(() => {
@@ -68,8 +53,11 @@ export default function NewAdvertisementPage() {
       if (categoryRef.current && !categoryRef.current.contains(event.target)) {
         setShowCategoryDropdown(false)
       }
-      if (validityRef.current && !validityRef.current.contains(event.target)) {
-        setShowValidityPicker(false)
+      if (startDateRef.current && !startDateRef.current.contains(event.target)) {
+        setShowStartDatePicker(false)
+      }
+      if (endDateRef.current && !endDateRef.current.contains(event.target)) {
+        setShowEndDatePicker(false)
       }
     }
 
@@ -115,9 +103,15 @@ export default function NewAdvertisementPage() {
 
   const handleFileUpload = (e, type) => {
     const file = e.target.files[0]
+    if (!file) return
+
     if (type === "file") {
       handleFileSelect(file)
     } else if (type === "video") {
+      if (file.size > 5 * 1024 * 1024) {
+        toast.error("Video size too large. Max 5MB allowed.")
+        return
+      }
       setUploadedVideo(file)
     }
   }
@@ -138,8 +132,8 @@ export default function NewAdvertisementPage() {
       toast.error("Title is required")
       return
     }
-    if (!formData.validity.trim()) {
-      toast.error("Validity is required")
+    if (!formData.startDate.trim() || !formData.endDate.trim()) {
+      toast.error("Start Date and End Date are required")
       return
     }
     if (formData.category === "Video Promotion" && !uploadedVideo) {
@@ -161,7 +155,7 @@ export default function NewAdvertisementPage() {
       payload.append("description", formData.description || "")
       payload.append("adsType", formData.category)
       payload.append("category", formData.category)
-      payload.append("validity", formData.validity.trim())
+      payload.append("validity", `${formData.startDate.trim()} to ${formData.endDate.trim()}`)
       payload.append("fileDescription", formData.fileDescription || "")
       payload.append("videoDescription", formData.videoDescription || "")
       if (uploadedFile) payload.append("image", uploadedFile)
@@ -236,36 +230,70 @@ export default function NewAdvertisementPage() {
               </div>
 
               {/* Validity Field */}
-              <div className="relative" ref={validityRef}>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Validity <span className="text-red-500">*</span>
-                </label>
-                <button
-                  onClick={() => setShowValidityPicker(!showValidityPicker)}
-                  className="w-full flex items-center justify-between px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg hover:bg-gray-100 transition-colors"
-                >
-                  <span className={`text-sm ${formData.validity ? 'text-gray-900' : 'text-gray-400'}`}>
-                    {formData.validity || "Select date"}
-                  </span>
-                  <Calendar className="w-5 h-5 text-[#ff8100]" />
-                </button>
-                {showValidityPicker && (
-                  <motion.div
-                    initial={{ opacity: 0, y: -10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="absolute top-full left-0 right-0 mt-2 bg-white border border-gray-200 rounded-lg shadow-lg z-50 p-4"
+              <div className="grid grid-cols-2 gap-4">
+                <div className="relative" ref={startDateRef}>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Start Date <span className="text-red-500">*</span>
+                  </label>
+                  <button
+                    onClick={() => setShowStartDatePicker(!showStartDatePicker)}
+                    className="w-full flex items-center justify-between px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg hover:bg-gray-100 transition-colors"
                   >
-                    <input
-                      type="date"
-                      value={formData.validity}
-                      onChange={(e) => {
-                        handleInputChange("validity", e.target.value)
-                        setShowValidityPicker(false)
-                      }}
-                      className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#ff8100]"
-                    />
-                  </motion.div>
-                )}
+                    <span className={`text-sm ${formData.startDate ? 'text-gray-900' : 'text-gray-400'}`}>
+                      {formData.startDate || "Select start"}
+                    </span>
+                    <Calendar className="w-5 h-5 text-[#ff8100]" />
+                  </button>
+                  {showStartDatePicker && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="absolute top-full left-0 right-0 mt-2 bg-white border border-gray-200 rounded-lg shadow-lg z-50 p-4"
+                    >
+                      <input
+                        type="date"
+                        value={formData.startDate}
+                        onChange={(e) => {
+                          handleInputChange("startDate", e.target.value)
+                          setShowStartDatePicker(false)
+                        }}
+                        className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#ff8100]"
+                      />
+                    </motion.div>
+                  )}
+                </div>
+
+                <div className="relative" ref={endDateRef}>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    End Date <span className="text-red-500">*</span>
+                  </label>
+                  <button
+                    onClick={() => setShowEndDatePicker(!showEndDatePicker)}
+                    className="w-full flex items-center justify-between px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg hover:bg-gray-100 transition-colors"
+                  >
+                    <span className={`text-sm ${formData.endDate ? 'text-gray-900' : 'text-gray-400'}`}>
+                      {formData.endDate || "Select end"}
+                    </span>
+                    <Calendar className="w-5 h-5 text-[#ff8100]" />
+                  </button>
+                  {showEndDatePicker && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="absolute top-full left-0 right-0 mt-2 bg-white border border-gray-200 rounded-lg shadow-lg z-50 p-4"
+                    >
+                      <input
+                        type="date"
+                        value={formData.endDate}
+                        onChange={(e) => {
+                          handleInputChange("endDate", e.target.value)
+                          setShowEndDatePicker(false)
+                        }}
+                        className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#ff8100]"
+                      />
+                    </motion.div>
+                  )}
+                </div>
               </div>
 
               {/* Title Field */}
@@ -430,7 +458,8 @@ export default function NewAdvertisementPage() {
             onClick={() => {
               setFormData({
                 category: "Video Promotion",
-                validity: "",
+                startDate: "",
+                endDate: "",
                 title: "",
                 description: "",
                 fileDescription: "",

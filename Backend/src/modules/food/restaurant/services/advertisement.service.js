@@ -19,7 +19,7 @@ function parseValidity(validity) {
     if (!raw) return { validity: '', startDate: null, endDate: null };
 
     // Supports "YYYY-MM-DD" or "YYYY-MM-DD to YYYY-MM-DD"
-    const parts = raw.split(/\s+to\s+|\s*-\s*/i).map((p) => p.trim()).filter(Boolean);
+    const parts = raw.split(/\s+to\s+|\s+-\s+/i).map((p) => p.trim()).filter(Boolean);
     const start = parts[0] ? new Date(parts[0]) : null;
     const end = parts[1] ? new Date(parts[1]) : start ? new Date(parts[0]) : null;
 

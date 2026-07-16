@@ -3,24 +3,31 @@ import { useNavigate } from "react-router-dom"
 import { X, Search, Clock, Loader2, Mic } from "lucide-react"
 import { Button } from "@food/components/ui/button"
 import { Input } from "@food/components/ui/input"
-import { restaurantAPI } from "@food/api"
+import { restaurantAPI, searchAPI } from "@food/api"
 
 const SEARCH_HISTORY_KEY = "user_recent_searches_v1"
 
 export default function SearchOverlay({ isOpen, onClose, searchValue, onSearchChange }) {
   const navigate = useNavigate()
   const inputRef = useRef(null)
-  const [allFoods, setAllFoods] = useState([])
   const [filteredFoods, setFilteredFoods] = useState([])
   const [recentSuggestions, setRecentSuggestions] = useState([])
   const [loadingFoods, setLoadingFoods] = useState(false)
   const [isListening, setIsListening] = useState(false)
+  const [debouncedSearch, setDebouncedSearch] = useState(searchValue)
 
   useEffect(() => {
     if (isOpen && inputRef.current) {
       inputRef.current.focus()
     }
   }, [isOpen])
+
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedSearch(searchValue)
+    }, 300)
+    return () => clearTimeout(handler)
+  }, [searchValue])
 
   useEffect(() => {
     if (!isOpen) return
@@ -38,79 +45,66 @@ export default function SearchOverlay({ isOpen, onClose, searchValue, onSearchCh
       }
       setRecentSuggestions([])
     }
+    loadRecentSuggestions()
+  }, [isOpen])
+
+  useEffect(() => {
+    if (!isOpen) return
 
     const getImageUrl = (value) => {
       if (!value) return ""
       if (typeof value === "string") return value
       if (typeof value === "object") {
-        return (
-          value.url ||
-          value.secure_url ||
-          value.imageUrl ||
-          value.image ||
-          value.src ||
-          ""
-        )
+        return value.url || value.secure_url || value.imageUrl || value.image || value.src || ""
       }
       return ""
     }
 
-    const fetchItemsFromDB = async () => {
+    const fetchSearch = async () => {
       setLoadingFoods(true)
       try {
-        const [dishesRes, restaurantsRes] = await Promise.all([
-          restaurantAPI.getPublicDishes({ limit: 800 }).catch(() => null),
-          restaurantAPI.getRestaurants().catch(() => null)
-        ])
+        const res = await searchAPI.unifiedSearch({ q: debouncedSearch, limit: 30 })
+        const data = res.data?.data?.restaurants || []
         
-        const dishes =
-          dishesRes?.data?.data?.dishes ||
-          dishesRes?.data?.dishes ||
-          []
-
-        const restaurants =
-          restaurantsRes?.data?.data?.restaurants ||
-          restaurantsRes?.data?.restaurants ||
-          []
-
-        const normalizedDishes = (Array.isArray(dishes) ? dishes : [])
-          .filter((dish) => dish?.name)
-          .map((dish, index) => ({
-            id: dish?.id || dish?._id || `dish-${index}`,
-            name: String(dish.name).trim(),
-            image: getImageUrl(dish?.image),
-            type: 'dish'
-          }))
-
-        const normalizedRestaurants = (Array.isArray(restaurants) ? restaurants : [])
-          .filter((rest) => rest?.name)
-          .map((rest, index) => {
-            const coverImages = rest.coverImages && rest.coverImages.length > 0
-              ? rest.coverImages.map(img => img.url || img).filter(Boolean)
-              : []
-            const fallbackImages = rest.menuImages && rest.menuImages.length > 0
-              ? rest.menuImages.map(img => img.url || img).filter(Boolean)
-              : []
-            const image = coverImages[0] || fallbackImages[0] || rest.profileImage?.url || ""
-            return {
-              id: rest?.id || rest?._id || rest?.restaurantId || `rest-${index}`,
-              name: String(rest.name).trim(),
-              image: getImageUrl(image),
-              type: 'restaurant'
-            }
-          })
-
-        setAllFoods([...normalizedRestaurants, ...normalizedDishes])
+        const formatted = []
+        data.forEach(item => {
+          if (item.matchType === 'food' || item.matchType === 'dish' || item.matchedDish) {
+             formatted.push({
+               id: item.matchedDishId || `food-${item._id}`,
+               name: String(item.matchedDish || item.restaurantName).trim(),
+               image: getImageUrl(item.matchedDishImage) || getImageUrl(item.profileImage?.url),
+               type: 'dish',
+             })
+          } else {
+             formatted.push({
+               id: item._id || item.restaurantId,
+               name: String(item.restaurantName || item.name).trim(),
+               image: getImageUrl(item.profileImage?.url) || getImageUrl(item.coverImages?.[0]),
+               type: 'restaurant',
+             })
+          }
+        })
+        
+        const unique = []
+        const names = new Set()
+        for (const item of formatted) {
+           const lowerName = item.name.toLowerCase()
+           if (!names.has(lowerName)) {
+              names.add(lowerName)
+              unique.push(item)
+           }
+        }
+        
+        setFilteredFoods(unique)
       } catch {
-        setAllFoods([])
+        setFilteredFoods([])
       } finally {
         setLoadingFoods(false)
       }
     }
 
-    loadRecentSuggestions()
-    fetchItemsFromDB()
-  }, [isOpen])
+    fetchSearch()
+  }, [debouncedSearch, isOpen])
 
   useEffect(() => {
     const handleEscape = (e) => {
@@ -129,17 +123,6 @@ export default function SearchOverlay({ isOpen, onClose, searchValue, onSearchCh
       document.body.style.overflow = "unset"
     }
   }, [isOpen, onClose])
-
-  useEffect(() => {
-    if (searchValue.trim() === "") {
-      setFilteredFoods(allFoods)
-    } else {
-      const filtered = allFoods.filter((food) =>
-        food.name.toLowerCase().includes(searchValue.toLowerCase())
-      )
-      setFilteredFoods(filtered)
-    }
-  }, [searchValue, allFoods])
 
   const saveRecentSearch = (term) => {
     const value = String(term || "").trim()

@@ -30,7 +30,14 @@ import {
   Loader2,
   Package,
   Shield,
+  Facebook,
+  Instagram,
+  Twitter,
+  Linkedin,
+  Youtube,
 } from "lucide-react";
+
+import { getCachedSettings } from "@common/utils/businessSettings";
 
 import AnimatedPage from "@food/components/user/AnimatedPage";
 import { Card, CardContent } from "@food/components/ui/card";
@@ -72,6 +79,9 @@ export default function Profile() {
   const routeSearchParams = new URLSearchParams(routerLocation.search);
   const companyName = useCompanyName();
   const { theme, setTheme } = useTheme();
+  
+  const settings = getCachedSettings();
+  const socialLinks = settings?.socialLinks || {};
   const isSharedProfile = routerLocation.pathname.startsWith("/profile");
   const profileSource = routeSearchParams.get("from");
 
@@ -1628,6 +1638,37 @@ export default function Profile() {
             )}
           </div>
         </div>
+
+        {/* Social Links Section */}
+        {(socialLinks.facebook || socialLinks.instagram || socialLinks.twitter || socialLinks.linkedin || socialLinks.youtube) && (
+          <div className="mb-8 pb-8 flex justify-center items-center gap-6">
+            {socialLinks.facebook && (
+              <a href={socialLinks.facebook} target="_blank" rel="noopener noreferrer" className="text-gray-500 hover:text-blue-600 dark:text-gray-400 dark:hover:text-blue-500 transition-colors">
+                <Facebook className="h-6 w-6" />
+              </a>
+            )}
+            {socialLinks.instagram && (
+              <a href={socialLinks.instagram} target="_blank" rel="noopener noreferrer" className="text-gray-500 hover:text-pink-600 dark:text-gray-400 dark:hover:text-pink-500 transition-colors">
+                <Instagram className="h-6 w-6" />
+              </a>
+            )}
+            {socialLinks.twitter && (
+              <a href={socialLinks.twitter} target="_blank" rel="noopener noreferrer" className="text-gray-500 hover:text-blue-400 dark:text-gray-400 dark:hover:text-blue-300 transition-colors">
+                <Twitter className="h-6 w-6" />
+              </a>
+            )}
+            {socialLinks.linkedin && (
+              <a href={socialLinks.linkedin} target="_blank" rel="noopener noreferrer" className="text-gray-500 hover:text-blue-700 dark:text-gray-400 dark:hover:text-blue-600 transition-colors">
+                <Linkedin className="h-6 w-6" />
+              </a>
+            )}
+            {socialLinks.youtube && (
+              <a href={socialLinks.youtube} target="_blank" rel="noopener noreferrer" className="text-gray-500 hover:text-red-600 dark:text-gray-400 dark:hover:text-red-500 transition-colors">
+                <Youtube className="h-6 w-6" />
+              </a>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Veg Mode Popup */}

@@ -1,3 +1,4 @@
+/* eslint-disable react/prop-types */
 import { memo } from "react";
 import { Link } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
@@ -12,8 +13,10 @@ import {
   Star,
   Timer,
 } from "lucide-react";
-import PromoRow from "@food/components/user/home/PromoRow";
+import { useZone } from "@food/hooks/useZone";
 import OptimizedImage from "@food/components/OptimizedImage";
+import AdvertisementSection from "./AdvertisementSection";
+import PromoRow from "@food/components/user/home/PromoRow";
 import { Button } from "@food/components/ui/button";
 import { Card, CardContent } from "@food/components/ui/card";
 import {
@@ -193,6 +196,7 @@ function FoodHomeContent({
   loadMoreRestaurants,
   hasMoreRestaurants,
   restaurantLoadMoreRef,
+  advertisements,
 }) {
   return (
     <motion.div
@@ -252,6 +256,8 @@ function FoodHomeContent({
           ))}
         </div>
       </div>
+
+      <AdvertisementSection advertisements={advertisements} BACKEND_ORIGIN={BACKEND_ORIGIN} />
 
       {HeroBannerSection}
 

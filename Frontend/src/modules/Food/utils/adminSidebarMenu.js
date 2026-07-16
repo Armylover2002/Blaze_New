@@ -126,6 +126,17 @@ export const adminSidebarMenu = [
         path: "/admin/food/coupons-request",
         icon: "FileCheck",
       },
+      {
+        type: "expandable",
+        label: "Advertisements",
+        permissionKey: "advertisement",
+        icon: "Megaphone",
+        subItems: [
+          { label: "New Advertisement", path: "/admin/food/advertisement/new", permissionKey: "new" },
+          { label: "Advertisement List", path: "/admin/food/advertisement", permissionKey: "list" },
+          { label: "Advertisement Requests", path: "/admin/food/advertisement/requests", permissionKey: "requests" },
+        ],
+      },
     ],
   },
   {
