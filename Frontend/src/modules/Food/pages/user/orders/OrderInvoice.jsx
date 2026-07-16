@@ -66,6 +66,26 @@ export default function OrderInvoice() {
     )
   }
 
+  const toMoney = (value) => {
+    const num = Number(value)
+    return Number.isFinite(num) ? num : 0
+  }
+  const formatMoney = (value) => `₹${toMoney(value).toFixed(2)}`
+  const pricing = order.pricing || {}
+  const invoiceSubtotal = toMoney(pricing.subtotal ?? order.subtotal)
+  const invoiceDeliveryFee = toMoney(pricing.deliveryFee ?? order.deliveryFee)
+  const invoicePlatformFee = toMoney(pricing.platformFee ?? order.platformFee)
+  const invoiceTax = toMoney(pricing.tax ?? order.tax)
+  const invoiceDiscount = toMoney(pricing.discount ?? order.discount)
+  const invoicePackaging = toMoney(pricing.packagingFee ?? order.packagingFee)
+  const invoiceTotal = toMoney(pricing.total ?? order.total ?? order.totalAmount)
+  const orderStatus = String(order.orderStatus || order.status || "placed")
+  const paymentMethodLabel = String(
+    order.payment?.method || order.paymentMethod?.type || order.paymentMethod || "N/A",
+  ).toUpperCase()
+  const invoiceId = order.orderId || order.id || orderId
+  const orderItems = Array.isArray(order.items) ? order.items : []
+
   const formatDate = (dateString) => {
     const date = new Date(dateString)
     return date.toLocaleDateString('en-US', {
@@ -85,7 +105,7 @@ export default function OrderInvoice() {
       <!DOCTYPE html>
       <html>
         <head>
-          <title>Invoice - ${order.id}</title>
+          <title>Invoice - ${invoiceId}</title>
           <style>
             body {
               font-family: Arial, sans-serif;
@@ -176,7 +196,7 @@ export default function OrderInvoice() {
               </Link>
               <div>
                 <h1 className="text-lg sm:text-xl md:text-2xl font-bold">Invoice</h1>
-                <p className="text-muted-foreground text-sm sm:text-base">Order {order.id}</p>
+                <p className="text-muted-foreground text-sm sm:text-base">Order {invoiceId}</p>
               </div>
             </div>
             <div className="flex gap-2 no-print">
@@ -219,7 +239,7 @@ export default function OrderInvoice() {
                     </p>
                   </div>
                   <Badge className="bg-[#FF0000] text-white text-sm sm:text-base md:text-lg px-3 sm:px-4 py-1.5 sm:py-2 w-fit">
-                    {order.status.toUpperCase()}
+                    {orderStatus.toUpperCase()}
                   </Badge>
                 </div>
               </div>
@@ -228,19 +248,19 @@ export default function OrderInvoice() {
               <div className="invoice-details grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 md:gap-8 mt-4 sm:mt-6">
                 <div>
                   <h3 className="font-bold mb-2 text-sm sm:text-base">Bill To:</h3>
-                  <p className="text-xs sm:text-sm">{order.address?.street}</p>
-                  {order.address?.additionalDetails && (
-                    <p className="text-xs sm:text-sm">{order.address.additionalDetails}</p>
+                  <p className="text-xs sm:text-sm">{order.address?.street || order.deliveryAddress?.street}</p>
+                  {(order.address?.additionalDetails || order.deliveryAddress?.additionalDetails) && (
+                    <p className="text-xs sm:text-sm">{order.address?.additionalDetails || order.deliveryAddress?.additionalDetails}</p>
                   )}
                   <p className="text-xs sm:text-sm">
-                    {order.address?.city}, {order.address?.state} {order.address?.zipCode}
+                    {order.address?.city || order.deliveryAddress?.city}, {order.address?.state || order.deliveryAddress?.state} {order.address?.zipCode || order.deliveryAddress?.zipCode || order.deliveryAddress?.pincode}
                   </p>
                 </div>
                 <div className="text-left sm:text-right">
                   <h3 className="font-bold mb-2 text-sm sm:text-base">Invoice Details:</h3>
-                  <p className="text-xs sm:text-sm"><strong>Invoice #:</strong> {order.id}</p>
+                  <p className="text-xs sm:text-sm"><strong>Invoice #:</strong> {invoiceId}</p>
                   <p className="text-xs sm:text-sm"><strong>Date:</strong> {formatDate(order.createdAt)}</p>
-                  <p className="text-xs sm:text-sm"><strong>Payment:</strong> {order.paymentMethod?.type?.toUpperCase() || "Card"}</p>
+                  <p className="text-xs sm:text-sm"><strong>Payment:</strong> {paymentMethodLabel}</p>
                 </div>
               </div>
 
@@ -258,12 +278,15 @@ export default function OrderInvoice() {
                       </tr>
                     </thead>
                     <tbody>
-                      {order.items.map((item) => (
-                        <tr key={item.id} className="border-b">
+                      {orderItems.map((item, idx) => {
+                        const unitPrice = toMoney(item.price)
+                        const qty = toMoney(item.quantity || 1) || 1
+                        return (
+                        <tr key={item.id || item._id || idx} className="border-b">
                           <td className="px-2 sm:px-3 py-2 sm:py-3">
                             <div className="flex items-center gap-2 sm:gap-3">
                               <img
-                                src={item.image}
+                                src={item.image || item.imageUrl || ""}
                                 alt={item.name}
                                 className="w-8 h-8 sm:w-12 sm:h-12 object-cover rounded flex-shrink-0"
                               />
@@ -273,16 +296,16 @@ export default function OrderInvoice() {
                                   <span className="text-xs text-gray-500">{item.variantName}</span>
                                 ) : null}
                                 <span className="text-muted-foreground sm:hidden text-xs">
-                                  Qty: {item.quantity} � ${item.price.toFixed(2)}
+                                  Qty: {qty} · {formatMoney(unitPrice)}
                                 </span>
                               </div>
                             </div>
                           </td>
-                          <td className="px-2 sm:px-3 py-2 sm:py-3 text-center hidden sm:table-cell">{item.quantity}</td>
-                          <td className="px-2 sm:px-3 py-2 sm:py-3 text-right hidden md:table-cell">${item.price.toFixed(2)}</td>
-                          <td className="px-2 sm:px-3 py-2 sm:py-3 text-right font-medium">${(item.price * item.quantity).toFixed(2)}</td>
+                          <td className="px-2 sm:px-3 py-2 sm:py-3 text-center hidden sm:table-cell">{qty}</td>
+                          <td className="px-2 sm:px-3 py-2 sm:py-3 text-right hidden md:table-cell">{formatMoney(unitPrice)}</td>
+                          <td className="px-2 sm:px-3 py-2 sm:py-3 text-right font-medium">{formatMoney(unitPrice * qty)}</td>
                         </tr>
-                      ))}
+                      )})}
                     </tbody>
                   </table>
                 </div>
@@ -292,19 +315,37 @@ export default function OrderInvoice() {
               <div className="total-section mt-4 sm:mt-6">
                 <div className="total-row flex justify-between text-xs sm:text-sm sm:text-base py-1 sm:py-2">
                   <span>Subtotal:</span>
-                  <span>${order.subtotal.toFixed(2)}</span>
+                  <span>{formatMoney(invoiceSubtotal)}</span>
                 </div>
                 <div className="total-row flex justify-between text-xs sm:text-sm sm:text-base py-1 sm:py-2">
                   <span>Delivery Fee:</span>
-                  <span>${order.deliveryFee.toFixed(2)}</span>
+                  <span>{formatMoney(invoiceDeliveryFee)}</span>
                 </div>
+                {invoicePlatformFee > 0 && (
+                  <div className="total-row flex justify-between text-xs sm:text-sm sm:text-base py-1 sm:py-2">
+                    <span>Platform Fee:</span>
+                    <span>{formatMoney(invoicePlatformFee)}</span>
+                  </div>
+                )}
+                {invoicePackaging > 0 && (
+                  <div className="total-row flex justify-between text-xs sm:text-sm sm:text-base py-1 sm:py-2">
+                    <span>Packaging:</span>
+                    <span>{formatMoney(invoicePackaging)}</span>
+                  </div>
+                )}
                 <div className="total-row flex justify-between text-xs sm:text-sm sm:text-base py-1 sm:py-2">
                   <span>Tax:</span>
-                  <span>${order.tax.toFixed(2)}</span>
+                  <span>{formatMoney(invoiceTax)}</span>
                 </div>
+                {invoiceDiscount > 0 && (
+                  <div className="total-row flex justify-between text-xs sm:text-sm sm:text-base py-1 sm:py-2">
+                    <span>Discount:</span>
+                    <span>- {formatMoney(invoiceDiscount)}</span>
+                  </div>
+                )}
                 <div className="grand-total flex justify-between text-base sm:text-lg md:text-xl md:text-2xl pt-2 sm:pt-3 mt-2 sm:mt-3 border-t-2 border-[#FF0000]">
                   <span>Total:</span>
-                  <span>${order.total.toFixed(2)}</span>
+                  <span>{formatMoney(invoiceTotal)}</span>
                 </div>
               </div>
 
@@ -319,7 +360,7 @@ export default function OrderInvoice() {
 
         <ScrollReveal delay={0.2}>
           <div className="flex flex-col sm:flex-row gap-2 sm:gap-4 no-print">
-            {order.status !== 'scheduled' && (
+            {orderStatus !== 'scheduled' && (
               <Link to={`/user/orders/${orderId}`} className="flex-1">
                 <Button variant="outline" className="w-full text-sm sm:text-base h-10 sm:h-11">
                   Track Order

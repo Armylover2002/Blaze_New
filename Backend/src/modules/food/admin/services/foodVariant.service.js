@@ -83,34 +83,32 @@ export const serializeFoodVariants = (value = []) =>
 export const hasFoodVariants = (value = {}) => serializeFoodVariants(value?.variants || value?.variations || []).length > 0;
 
 export const getFoodDisplayPrice = (value = {}) => {
-    // Prefer the stored price if it's a valid positive number
-    const price = Number(value?.price);
-    if (Number.isFinite(price) && price > 0) {
-        return price;
-    }
-
     const variants = serializeFoodVariants(value?.variants || value?.variations || []);
     if (variants.length > 0) {
         return Math.min(...variants.map((entry) => Number(entry.price) || 0));
+    }
+
+    const price = Number(value?.price);
+    if (Number.isFinite(price) && price > 0) {
+        return price;
     }
 
     return 0;
 };
 
 export const getFoodDisplayOtherPrice = (value = {}) => {
-    // Prefer the stored otherPrice if it's a valid positive number
-    const otherPrice = Number(value?.otherPrice);
-    if (Number.isFinite(otherPrice) && otherPrice > 0) {
-        return otherPrice;
-    }
-
     const variants = serializeFoodVariants(value?.variants || value?.variations || []);
     if (variants.length > 0) {
         const validOtherPrices = variants
             .map((entry) => Number(entry.otherPrice) || 0)
             .filter((p) => p > 0);
-        
+
         return validOtherPrices.length > 0 ? Math.min(...validOtherPrices) : 0;
+    }
+
+    const otherPrice = Number(value?.otherPrice);
+    if (Number.isFinite(otherPrice) && otherPrice > 0) {
+        return otherPrice;
     }
 
     return 0;

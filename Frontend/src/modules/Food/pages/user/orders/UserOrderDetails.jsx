@@ -20,6 +20,8 @@ import { toast } from "sonner"
 import { jsPDF } from "jspdf"
 import autoTable from "jspdf-autotable"
 import { getCompanyNameAsync } from "@common/utils/businessSettings"
+import { formatScheduledAtShort } from "@food/utils/scheduleTime"
+import { isFoodQuickOrder, formatQuickEtaWindow } from "@food/utils/quickDelivery"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -455,14 +457,25 @@ export default function UserOrderDetails() {
               {order.status === "delivered"
                 ? "Order was delivered"
                 : order.status === "scheduled"
-                ? `Scheduled for ${new Date(order.scheduledAt).toLocaleString("en-US", {
-                    day: "numeric",
-                    month: "short",
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })}`
+                ? (() => {
+                    const label = formatScheduledAtShort(order.scheduledAt)
+                    return label ? `Scheduled for ${label}` : "Order scheduled"
+                  })()
                 : "Order status: " + (order.status || "Processing")}
             </h2>
+            {isFoodQuickOrder(order) && (
+              <p className="text-xs font-semibold text-emerald-700 mt-1">
+                Quick Delivery
+                {formatQuickEtaWindow(order.etaPromise)
+                  ? ` · Promise ${formatQuickEtaWindow(order.etaPromise)}`
+                  : ""}
+              </p>
+            )}
+            {order?.sla?.breached && Number(order?.sla?.compensationAmount) > 0 && (
+              <p className="text-xs font-medium text-amber-700 mt-1">
+                SLA wallet credit ₹{Math.round(Number(order.sla.compensationAmount))}
+              </p>
+            )}
           </div>
         </div>
 
@@ -612,15 +625,25 @@ export default function UserOrderDetails() {
             </div>
             <div className="flex justify-between">
               <span className="text-gray-400 font-medium">Delivery fee</span>
-              {pricing.deliveryFee === 0 && (
-                <span className="text-[#FF0000] text-[10px] font-bold border border-[#FF0000] px-1 rounded ml-1">
-                  FREE
+              <div className="flex items-center gap-1">
+                {pricing.deliveryFee === 0 && (
+                  <span className="text-[#FF0000] text-[10px] font-bold border border-[#FF0000] px-1 rounded">
+                    FREE
+                  </span>
+                )}
+                <span className="text-[#FF0000] font-medium uppercase">
+                  {pricing.deliveryFee ? `₹${Number(pricing.deliveryFee).toFixed(2)}` : "Free"}
                 </span>
-              )}
-              <span className="text-[#FF0000] font-medium uppercase">
-                {pricing.deliveryFee ? `₹${Number(pricing.deliveryFee).toFixed(2)}` : "Free"}
-              </span>
+              </div>
             </div>
+            {Number(pricing.quickDeliveryFee || 0) > 0 && (
+              <div className="flex justify-between">
+                <span className="text-gray-500">Quick Delivery</span>
+                <span className="text-gray-800 font-medium">
+                  ₹{Number(pricing.quickDeliveryFee).toFixed(2)}
+                </span>
+              </div>
+            )}
             <div className="flex justify-between">
               <span className="text-gray-500">Platform fee</span>
               <span className="text-gray-800">

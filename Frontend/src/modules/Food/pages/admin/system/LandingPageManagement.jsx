@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from "react"
-import { Upload, Trash2, Image as ImageIcon, Loader2, AlertCircle, CheckCircle2, ArrowUp, ArrowDown, Layout, Tag, UtensilsCrossed, ChefHat, Megaphone, Search } from "lucide-react"
+import { Upload, Trash2, Image as ImageIcon, Loader2, AlertCircle, CheckCircle2, ArrowUp, ArrowDown, Layout, Tag, ChefHat, Megaphone, Search } from "lucide-react"
 import api from "@food/api"
 import { adminAPI } from "@food/api"
 import { getModuleToken } from "@food/utils/auth"
@@ -74,6 +74,9 @@ export default function LandingPageManagement() {
   const [bannersDeleting, setBannersDeleting] = useState(null)
   const [bannerZoneDrafts, setBannerZoneDrafts] = useState({})
   const [bannerZoneSavingId, setBannerZoneSavingId] = useState(null)
+  const [bannerLinkDrafts, setBannerLinkDrafts] = useState({})
+  const [bannerRestaurantDrafts, setBannerRestaurantDrafts] = useState({})
+  const [bannerLinkSavingId, setBannerLinkSavingId] = useState(null)
   const bannersFileInputRef = useRef(null)
   const [zones, setZones] = useState([])
   const [zonesLoading, setZonesLoading] = useState(false)
@@ -103,14 +106,6 @@ export default function LandingPageManagement() {
   const [under250BannersUploadProgress, setUnder250BannersUploadProgress] = useState({ current: 0, total: 0 })
   const [under250BannersDeleting, setUnder250BannersDeleting] = useState(null)
   const under250BannersFileInputRef = useRef(null)
-
-  // Dining Banners
-  const [diningBanners, setDiningBanners] = useState([])
-  const [diningBannersLoading, setDiningBannersLoading] = useState(true)
-  const [diningBannersUploading, setDiningBannersUploading] = useState(false)
-  const [diningBannersUploadProgress, setDiningBannersUploadProgress] = useState({ current: 0, total: 0 })
-  const [diningBannersDeleting, setDiningBannersDeleting] = useState(null)
-  const diningBannersFileInputRef = useRef(null)
 
   // Settings
   const [settings, setSettings] = useState({ exploreMoreHeading: "Explore More", recommendedRestaurantIds: [] })
@@ -186,7 +181,6 @@ export default function LandingPageManagement() {
     fetchBanners()
     fetchZones()
     fetchUnder250Banners()
-    fetchDiningBanners()
     fetchAllRestaurants()
     fetchSettings()
   }, [])
@@ -217,6 +211,21 @@ export default function LandingPageManagement() {
         setBannerZoneDrafts(
           nextBanners.reduce((acc, banner) => {
             acc[banner._id] = typeof banner.zoneId === 'string' ? banner.zoneId : ''
+            return acc
+          }, {})
+        )
+        setBannerLinkDrafts(
+          nextBanners.reduce((acc, banner) => {
+            acc[banner._id] = typeof banner.ctaLink === 'string' ? banner.ctaLink : ''
+            return acc
+          }, {})
+        )
+        setBannerRestaurantDrafts(
+          nextBanners.reduce((acc, banner) => {
+            acc[banner._id] = banner.linkedRestaurantId
+              || (Array.isArray(banner.linkedRestaurantIds) && banner.linkedRestaurantIds[0]
+                ? String(banner.linkedRestaurantIds[0]._id || banner.linkedRestaurantIds[0])
+                : '')
             return acc
           }, {})
         )
@@ -389,6 +398,20 @@ export default function LandingPageManagement() {
     }))
   }
 
+  const handleBannerLinkDraftChange = (bannerId, nextLink) => {
+    setBannerLinkDrafts((prev) => ({
+      ...prev,
+      [bannerId]: nextLink,
+    }))
+  }
+
+  const handleBannerRestaurantDraftChange = (bannerId, nextRestaurantId) => {
+    setBannerRestaurantDrafts((prev) => ({
+      ...prev,
+      [bannerId]: nextRestaurantId,
+    }))
+  }
+
   const handleSaveBannerZone = async (bannerId) => {
     try {
       setBannerZoneSavingId(bannerId)
@@ -410,6 +433,37 @@ export default function LandingPageManagement() {
       setErrorSafely(err.response?.data?.message || 'Failed to save banner zone.')
     } finally {
       setBannerZoneSavingId(null)
+    }
+  }
+
+  const handleSaveBannerDestination = async (bannerId) => {
+    try {
+      setBannerLinkSavingId(bannerId)
+      setError(null)
+      setSuccess(null)
+      const ctaLink = typeof bannerLinkDrafts[bannerId] === 'string' ? bannerLinkDrafts[bannerId].trim() : ''
+      const linkedRestaurantId = typeof bannerRestaurantDrafts[bannerId] === 'string'
+        ? bannerRestaurantDrafts[bannerId].trim()
+        : ''
+      const response = await api.patch(
+        `/food/hero-banners/${bannerId}`,
+        {
+          ctaLink,
+          linkedRestaurantId,
+          linkedRestaurantIds: linkedRestaurantId ? [linkedRestaurantId] : [],
+        },
+        getAuthConfig()
+      )
+
+      if (response.data.success) {
+        setSuccess('Banner destination saved successfully!')
+        await fetchBanners()
+        setTimeout(() => setSuccess(null), 3000)
+      }
+    } catch (err) {
+      setErrorSafely(err.response?.data?.message || 'Failed to save banner destination.')
+    } finally {
+      setBannerLinkSavingId(null)
     }
   }
 
@@ -927,129 +981,8 @@ export default function LandingPageManagement() {
     }
   }
 
-  // ==================== DINING BANNERS ====================
-  const fetchDiningBanners = async () => {
-    try {
-      setDiningBannersLoading(true)
-      setError(null)
-      const response = await api.get('/food/hero-banners/dining', getAuthConfig())
-      if (response.data.success) {
-        setDiningBanners(response.data.data.banners || [])
-      }
-    } catch (err) {
-      if (err.response?.status === 401) {
-        setDiningBanners([])
-        setError(null)
-      } else if (err.response?.status === 404) {
-        setDiningBanners([])
-        setError(null)
-      } else {
-        const errorMessage = err.response?.data?.message || 'Failed to load dining banners'
-        setErrorSafely(errorMessage)
-      }
-    } finally {
-      setDiningBannersLoading(false)
-    }
-  }
 
-  const handleDiningBannerFileSelect = (e) => {
-    const files = Array.from(e.target?.files || e.files || [])
-    if (files.length === 0) return
-    if (files.length > 5) {
-      setError('You can upload a maximum of 5 images at once')
-      return
-    }
-    uploadDiningBanners(files)
-  }
-
-  const uploadDiningBanners = async (files) => {
-    try {
-      const adminToken = getModuleToken('admin')
-      if (!adminToken || adminToken.trim() === '' || adminToken === 'null' || adminToken === 'undefined') {
-        setErrorSafely('Authentication required. Please login again.')
-        return
-      }
-
-      setDiningBannersUploading(true)
-      setError(null)
-      setSuccess(null)
-      setDiningBannersUploadProgress({ current: 0, total: files.length })
-
-      const formData = new FormData()
-      files.forEach((file) => {
-        formData.append('images', file)
-      })
-
-      const response = await api.post('/food/hero-banners/dining/multiple', formData, getAuthConfig({
-        headers: { 'Content-Type': 'multipart/form-data' },
-      }))
-
-      if (response.data.success) {
-        setSuccess(`${response.data.data.banners?.length || files.length} dining banner(s) uploaded successfully!`)
-        await fetchDiningBanners()
-        setTimeout(() => setSuccess(null), 3000)
-      }
-    } catch (err) {
-      const errorMessage = err.response?.data?.message || 'Failed to upload dining banners'
-      setErrorSafely(errorMessage)
-      setDiningBannersUploadProgress({ current: 0, total: 0 })
-    } finally {
-      setDiningBannersUploading(false)
-    }
-  }
-
-  const handleDeleteDiningBanner = async (id) => {
-    try {
-      setDiningBannersDeleting(id)
-      setError(null)
-      setSuccess(null)
-      const response = await api.delete(`/food/hero-banners/dining/${id}`, getAuthConfig())
-      if (response.data.success) {
-        setSuccess('Dining banner deleted successfully!')
-        await fetchDiningBanners()
-        setTimeout(() => setSuccess(null), 3000)
-      }
-    } catch (err) {
-      setErrorSafely(err.response?.data?.message || 'Failed to delete banner.')
-    } finally {
-      setDiningBannersDeleting(null)
-    }
-  }
-
-  const handleToggleDiningBannerStatus = async (id, currentStatus) => {
-    try {
-      setError(null)
-      setSuccess(null)
-      const response = await api.patch(`/food/hero-banners/dining/${id}/status`, {}, getAuthConfig())
-      if (response.data.success) {
-        setSuccess(`Banner ${currentStatus ? 'deactivated' : 'activated'} successfully!`)
-        await fetchDiningBanners()
-        setTimeout(() => setSuccess(null), 3000)
-      }
-    } catch (err) {
-      setErrorSafely(err.response?.data?.message || 'Failed to update banner status.')
-    }
-  }
-
-  const handleDiningBannerOrderChange = async (id, direction) => {
-    const banner = diningBanners.find(b => b._id === id)
-    if (!banner) return
-    const newOrder = direction === 'up' ? banner.order - 1 : banner.order + 1
-    const otherBanner = diningBanners.find(b => b.order === newOrder && b._id !== id)
-    if (!otherBanner && newOrder < 0) return
-    try {
-      setError(null)
-      await api.patch(`/food/hero-banners/dining/${id}/order`, { order: newOrder }, getAuthConfig())
-      if (otherBanner) {
-        await api.patch(`/food/hero-banners/dining/${otherBanner._id}/order`, { order: banner.order }, getAuthConfig())
-      }
-      await fetchDiningBanners()
-    } catch (err) {
-      setErrorSafely('Failed to update banner order.')
-    }
-  }
-
-  // ==================== SETTINGS ====================
+    // ==================== SETTINGS ====================
   const fetchSettings = async () => {
     try {
       setSettingsLoading(true)
@@ -1250,7 +1183,6 @@ export default function LandingPageManagement() {
   const tabs = [
     { id: 'banners', label: 'Hero Banners', icon: ImageIcon },
     { id: 'under-250', label: '250 Banner', icon: Tag },
-    { id: 'dining', label: 'Dining', icon: UtensilsCrossed },
     { id: 'explore-more', label: 'Explore More', icon: Layout },
   ]
 
@@ -1470,6 +1402,39 @@ export default function LandingPageManagement() {
                             <p className="mt-2 text-xs text-slate-500">Loading available zones...</p>
                           )}
                         </div>
+                        <div className="mt-3 border-t border-slate-200 pt-3 space-y-2">
+                          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Click destination</p>
+                          <select
+                            value={bannerRestaurantDrafts[banner._id] ?? ''}
+                            onChange={(e) => handleBannerRestaurantDraftChange(banner._id, e.target.value)}
+                            disabled={restaurantsLoading || bannerLinkSavingId === banner._id}
+                            className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-50"
+                          >
+                            <option value="">No linked restaurant</option>
+                            {allRestaurants.map((restaurant) => (
+                              <option key={restaurant._id} value={restaurant._id}>
+                                {restaurant.name || restaurant.restaurantName || restaurant._id}
+                              </option>
+                            ))}
+                          </select>
+                          <input
+                            type="text"
+                            value={bannerLinkDrafts[banner._id] ?? ''}
+                            onChange={(e) => handleBannerLinkDraftChange(banner._id, e.target.value)}
+                            disabled={bannerLinkSavingId === banner._id}
+                            placeholder="Or CTA path/URL (e.g. /user/offers)"
+                            className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-50"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => handleSaveBannerDestination(banner._id)}
+                            disabled={bannerLinkSavingId === banner._id}
+                            className="inline-flex h-10 w-full items-center justify-center rounded-lg bg-blue-600 px-4 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            {bannerLinkSavingId === banner._id ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                            Save destination
+                          </button>
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -1594,123 +1559,6 @@ export default function LandingPageManagement() {
             </div>
           </>
         )}
-
-        {/* Dining Banner Tab */}
-        {activeTab === 'dining' && (
-          <>
-            {/* Upload Section */}
-            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-6">
-              <h2 className="text-lg font-bold text-slate-900 mb-4">Upload New Dining Banner(s)</h2>
-              <div
-                className="border-2 border-dashed border-blue-300 rounded-lg p-8 text-center bg-blue-50/30 cursor-pointer transition-colors hover:border-blue-400 hover:bg-blue-50/50"
-                onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                onDrop={(e) => {
-                  e.preventDefault()
-                  e.stopPropagation()
-                  const files = Array.from(e.dataTransfer.files)
-                  if (files.length > 0) handleDiningBannerFileSelect({ files })
-                }}
-                onClick={() => diningBannersFileInputRef.current?.click()}
-              >
-                <input
-                  ref={diningBannersFileInputRef}
-                  type="file"
-                  accept="image/png, image/jpeg, image/webp"
-                  multiple
-                  onChange={handleDiningBannerFileSelect}
-                  className="hidden"
-                  disabled={diningBannersUploading}
-                />
-                {diningBannersUploading ? (
-                  <div className="flex flex-col items-center gap-3">
-                    <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
-                    <p className="text-blue-600 font-medium">
-                      Uploading image {diningBannersUploadProgress.current} of {diningBannersUploadProgress.total}...
-                    </p>
-                    {diningBannersUploadProgress.total > 0 && (
-                      <div className="w-full max-w-xs">
-                        <div className="w-full bg-blue-200 rounded-full h-2">
-                          <div
-                            className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-                            style={{ width: `${(diningBannersUploadProgress.current / diningBannersUploadProgress.total) * 100}%` }}
-                          />
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <div className="flex flex-col items-center gap-3">
-                    <Upload className="w-8 h-8 text-blue-600" />
-                    <div>
-                      <button
-                        type="button"
-                        onClick={(e) => { e.stopPropagation(); diningBannersFileInputRef.current?.click(); }}
-                        className="text-blue-600 font-medium hover:text-blue-700 underline"
-                      >
-                        Click to upload
-                      </button>
-                      <span className="text-slate-600"> or drag and drop</span>
-                    </div>
-                    <p className="text-xs text-slate-500">PNG, JPG, WEBP up to 5MB each (Max 5 images at once)</p>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Banners List */}
-            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-              <h2 className="text-lg font-bold text-slate-900 mb-4">Banner List ({diningBanners.length})</h2>
-              {diningBannersLoading ? (
-                <div className="flex items-center justify-center py-12">
-                  <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
-                </div>
-              ) : diningBanners.length === 0 ? (
-                <div className="text-center py-12 text-slate-500">
-                  <UtensilsCrossed className="w-12 h-12 mx-auto mb-3 text-slate-400" />
-                  <p>No dining banners uploaded yet.</p>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {diningBanners.map((banner, index) => (
-                    <div key={banner._id} className="border border-slate-200 rounded-lg overflow-hidden hover:shadow-md transition-shadow">
-                      <div className="relative aspect-video bg-slate-100">
-                        <img src={banner.imageUrl} alt={`Dining Banner ${index + 1}`} className="w-full h-full object-cover" />
-                        <div className="absolute top-2 right-2">
-                          <span className={`px-2 py-1 rounded text-xs font-medium ${banner.isActive ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>
-                            {banner.isActive ? 'Active' : 'Inactive'}
-                          </span>
-                        </div>
-                        <div className="absolute top-2 left-2">
-                          <span className="px-2 py-1 rounded text-xs font-medium bg-blue-100 text-blue-800">Order: {banner.order}</span>
-                        </div>
-                      </div>
-                      <div className="p-4 bg-white">
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-1">
-                            <button onClick={() => handleDiningBannerOrderChange(banner._id, 'up')} disabled={index === 0} className="p-1.5 rounded hover:bg-slate-100 disabled:opacity-50">
-                              <ArrowUp className="w-4 h-4 text-slate-600" />
-                            </button>
-                            <button onClick={() => handleDiningBannerOrderChange(banner._id, 'down')} disabled={index === diningBanners.length - 1} className="p-1.5 rounded hover:bg-slate-100 disabled:opacity-50">
-                              <ArrowDown className="w-4 h-4 text-slate-600" />
-                            </button>
-                          </div>
-                          <button onClick={() => handleToggleDiningBannerStatus(banner._id, banner.isActive)} className={`px-3 py-1.5 rounded text-sm font-medium ${banner.isActive ? 'bg-yellow-100 text-yellow-800' : 'bg-green-100 text-green-800'}`}>
-                            {banner.isActive ? 'Deactivate' : 'Activate'}
-                          </button>
-                          <button onClick={() => handleDeleteDiningBanner(banner._id)} disabled={diningBannersDeleting === banner._id} className="p-1.5 rounded hover:bg-red-100 text-red-600 disabled:opacity-50">
-                            {diningBannersDeleting === banner._id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </>
-        )}
-
 
         {/* Explore More Tab */}
         {activeTab === 'explore-more' && (

@@ -151,6 +151,32 @@ const restaurantSchema = new mongoose.Schema(
       default: true,
       index: true,
     },
+    /** When false, customers cannot place scheduled (future-slot) food orders. Missing → treat as true. */
+    scheduleOrderEnabled: {
+      type: Boolean,
+      default: true,
+    },
+    /**
+     * Food Quick Delivery restaurant gate (Phase 2.1).
+     * Opt-in. Missing/undefined ⇒ false. Not used by calculateOrder until Phase 2.2+.
+     */
+    quickDeliveryEnabled: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    /**
+     * Average kitchen preparation minutes for Food Quick ETA only.
+     * Does NOT include rider travel or customer delivery time.
+     * Null/undefined → platform fee_settings.quickDelivery.defaultKitchenPrepMinutes.
+     * Never confused with estimatedDeliveryTime(Minutes) (listing / Basic UX).
+     */
+    kitchenPrepMinutes: {
+      type: Number,
+      min: 1,
+      max: 90,
+      default: undefined,
+    },
     panNumber: {
       type: String,
     },
@@ -260,11 +286,6 @@ const restaurantSchema = new mongoose.Schema(
       set: normalizeRatingValue,
     },
     totalRatings: { type: Number, default: 0, min: 0 },
-    diningSettings: {
-      isEnabled: { type: Boolean, default: false },
-      maxGuests: { type: Number, default: 6 },
-      diningType: { type: String, default: "family-dining" },
-    },
     menu: {
       sections: { type: Array, default: [] },
     },

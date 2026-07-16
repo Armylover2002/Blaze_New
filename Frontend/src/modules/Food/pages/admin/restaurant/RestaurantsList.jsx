@@ -207,6 +207,7 @@ export default function RestaurantsList() {
     openingTime: "",
     closingTime: "",
     isActive: true,
+    quickDeliveryEnabled: false,
   })
   const [detailsFieldErrors, setDetailsFieldErrors] = useState({})
   const [profileImageFile, setProfileImageFile] = useState(null)
@@ -1147,6 +1148,7 @@ export default function RestaurantsList() {
         openingTime: "",
         closingTime: "",
         isActive: true,
+        quickDeliveryEnabled: false,
       }
     }
 
@@ -1180,6 +1182,7 @@ export default function RestaurantsList() {
       openingTime: openingTimeValue,
       closingTime: closingTimeValue,
       isActive: restaurant.isActive !== false,
+      quickDeliveryEnabled: restaurant.quickDeliveryEnabled === true,
     }
   }
 
@@ -1269,6 +1272,7 @@ export default function RestaurantsList() {
         openingTime: normalizedOpeningTime,
         closingTime: normalizedClosingTime,
         isActive: detailsForm.isActive,
+        quickDeliveryEnabled: detailsForm.quickDeliveryEnabled === true,
       }
 
       if (profileImage) {
@@ -2023,6 +2027,31 @@ export default function RestaurantsList() {
                         Restaurant is active
                       </label>
                     </div>
+                    <div className="md:col-span-2 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-semibold text-slate-900">Quick Delivery</p>
+                          <p className="text-xs text-slate-500 mt-1">
+                            Restaurant opt-in. Customers see Quick when Global fee settings and Zone are also enabled.
+                          </p>
+                        </div>
+                        <label className="inline-flex items-center gap-2 text-sm text-slate-700 cursor-pointer shrink-0">
+                          <input
+                            id="restaurant-quick-delivery"
+                            type="checkbox"
+                            checked={detailsForm.quickDeliveryEnabled === true}
+                            onChange={(e) =>
+                              setDetailsForm((prev) => ({
+                                ...prev,
+                                quickDeliveryEnabled: e.target.checked,
+                              }))
+                            }
+                            className="h-4 w-4 rounded border-slate-300 text-green-600"
+                          />
+                          Enabled
+                        </label>
+                      </div>
+                    </div>
                   </div>
                 </div>
               )}
@@ -2048,7 +2077,6 @@ export default function RestaurantsList() {
                 const estimatedDeliveryTimeVal = r?.estimatedDeliveryTime || r?.onboarding?.step4?.estimatedDeliveryTime || ""
                 const featuredDishVal = r?.featuredDish || r?.onboarding?.step4?.featuredDish || ""
                 const featuredPriceVal = r?.featuredPrice ?? r?.onboarding?.step4?.featuredPrice
-                const diningSettingsVal = r?.diningSettings || r?.onboarding?.step4?.diningSettings || null
                 const panDocumentUrl = typeof r?.panImage === "string" ? r.panImage : (r?.panImage?.url || r?.onboarding?.step3?.pan?.image?.url || "")
                 const gstDocumentUrl = typeof r?.gstImage === "string" ? r.gstImage : (r?.gstImage?.url || r?.onboarding?.step3?.gst?.image?.url || "")
                 const fssaiDocumentUrl = typeof r?.fssaiImage === "string" ? r.fssaiImage : (r?.fssaiImage?.url || r?.onboarding?.step3?.fssai?.image?.url || "")
@@ -2242,6 +2270,12 @@ export default function RestaurantsList() {
                             <p className="text-sm font-medium text-slate-900">{estimatedDeliveryTimeVal}</p>
                           </div>
                         )}
+                        <div>
+                          <p className="text-xs text-slate-500 mb-1">Quick Delivery</p>
+                          <p className="text-sm font-medium text-slate-900">
+                            {r?.quickDeliveryEnabled === true ? "Enabled" : "Off"}
+                          </p>
+                        </div>
                         {openDaysVal && (
                           <div>
                             <p className="text-xs text-slate-500 mb-1">Open Days</p>

@@ -17,6 +17,25 @@ const withQuickSession = (config = {}) => ({
 const quickGetWithDedupe = (url, params = {}, options = {}) =>
   getWithDedupe(url, params, withQuickSession(options));
 
+const mapGeocodeResponse = (res, fallbackPlaceId = "") => {
+  const data = res?.data?.data ?? {};
+  const lat = Number(data.latitude ?? data.lat);
+  const lng = Number(data.longitude ?? data.lng);
+  return {
+    ...res,
+    data: {
+      ...res.data,
+      result: {
+        ...data,
+        location:
+          Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null,
+        formattedAddress: data.formattedAddress || "",
+        placeId: data.placeId || fallbackPlaceId || "",
+      },
+    },
+  };
+};
+
 export const customerApi = {
   getProfile: () =>
     axiosInstance.get("/auth/me", withQuickSession()).then((res) => {
@@ -116,10 +135,24 @@ export const customerApi = {
   getWalletBalance: () => axiosInstance.get("/quick-commerce/wallet/balance", withQuickSession()),
   getWalletTransactions: (params) => quickGetWithDedupe("/quick-commerce/wallet/transactions", params),
   geocodeAddress: (address) =>
+    axiosInstance
+      .get(
+        `/quick-commerce/location/geocode?address=${encodeURIComponent(address)}`,
+        withQuickSession(),
+      )
+      .then((res) => mapGeocodeResponse(res)),
+  reverseGeocode: (lat, lng) =>
     axiosInstance.get(
-      `/quick-commerce/location/geocode?address=${encodeURIComponent(address)}`,
+      `/quick-commerce/location/reverse-geocode?lat=${encodeURIComponent(lat)}&lng=${encodeURIComponent(lng)}`,
       withQuickSession()
     ),
+  geocodePlaceId: (placeId) =>
+    axiosInstance
+      .get(
+        `/quick-commerce/location/geocode-place?placeId=${encodeURIComponent(placeId)}`,
+        withQuickSession(),
+      )
+      .then((res) => mapGeocodeResponse(res, placeId)),
 
   getWishlist: (params) => quickGetWithDedupe("/quick-commerce/wishlist", params),
   addToWishlist: (data) => {

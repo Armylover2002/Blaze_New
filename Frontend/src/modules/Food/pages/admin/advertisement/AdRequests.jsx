@@ -1,15 +1,17 @@
-import { useState, useMemo } from "react"
+import { useState, useMemo, useEffect, useCallback } from "react"
 import { Search, Settings, MoreVertical, Building2, Download, ChevronDown, Filter, FileDown, FileSpreadsheet, FileText, Code, Eye, CheckCircle2, XCircle } from "lucide-react"
-import { emptyAdRequests } from "@food/utils/adminFallbackData"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger } from "@food/components/ui/dropdown-menu"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@food/components/ui/dialog"
 import SettingsDialog from "@food/components/admin/orders/SettingsDialog"
 import { exportAdvertisementsToCSV, exportAdvertisementsToExcel, exportAdvertisementsToPDF, exportAdvertisementsToJSON } from "@food/components/admin/advertisements/advertisementsExportUtils"
+import { adminAPI } from "@food/api"
+import { toast } from "sonner"
 
 export default function AdRequests() {
   const [activeTab, setActiveTab] = useState("new")
   const [searchQuery, setSearchQuery] = useState("")
-  const [requests, setRequests] = useState(emptyAdRequests)
+  const [requests, setRequests] = useState([])
+  const [loading, setLoading] = useState(true)
   const [isFilterOpen, setIsFilterOpen] = useState(false)
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
   const [isViewOpen, setIsViewOpen] = useState(false)
@@ -27,6 +29,24 @@ export default function AdRequests() {
     duration: true,
     actions: true,
   })
+
+  const fetchRequests = useCallback(async () => {
+    try {
+      setLoading(true)
+      const response = await adminAPI.getAdvertisementRequests()
+      const data = response?.data?.data
+      setRequests(Array.isArray(data) ? data : [])
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to load advertisement requests")
+      setRequests([])
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    fetchRequests()
+  }, [fetchRequests])
 
   const columnsConfig = {
     si: "Serial Number",
@@ -100,16 +120,24 @@ export default function AdRequests() {
     setIsViewOpen(true)
   }
 
-  const handleApprove = (sl) => {
-    setRequests(requests.map(r => 
-      r.sl === sl ? { ...r, status: "approved" } : r
-    ))
+  const handleApprove = async (request) => {
+    try {
+      await adminAPI.updateAdvertisementStatus(request._id, "Approved")
+      toast.success("Advertisement approved")
+      await fetchRequests()
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to approve advertisement")
+    }
   }
 
-  const handleDeny = (sl) => {
-    setRequests(requests.map(r => 
-      r.sl === sl ? { ...r, status: "denied" } : r
-    ))
+  const handleDeny = async (request) => {
+    try {
+      await adminAPI.updateAdvertisementStatus(request._id, "Rejected")
+      toast.success("Advertisement denied")
+      await fetchRequests()
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to deny advertisement")
+    }
   }
 
   const toggleColumn = (key) => {
@@ -340,14 +368,14 @@ export default function AdRequests() {
                               <>
                                 <DropdownMenuSeparator />
                                 <DropdownMenuItem 
-                                  onClick={() => handleApprove(request.sl)}
+                                  onClick={() => handleApprove(request)}
                                   className="cursor-pointer text-emerald-600"
                                 >
                                   <CheckCircle2 className="w-4 h-4 mr-2" />
                                   Approve
                                 </DropdownMenuItem>
                                 <DropdownMenuItem 
-                                  onClick={() => handleDeny(request.sl)}
+                                  onClick={() => handleDeny(request)}
                                   className="cursor-pointer text-red-600"
                                 >
                                   <XCircle className="w-4 h-4 mr-2" />

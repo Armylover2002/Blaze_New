@@ -2,6 +2,13 @@ import mongoose from 'mongoose';
 import { FoodItem } from '../../admin/models/food.model.js';
 import { getFoodDisplayPrice, serializeFoodVariants } from '../../admin/services/foodVariant.service.js';
 import { listApprovedRestaurants } from './restaurant.service.js';
+import { ItemSlotTiming } from '../models/itemSlotTiming.model.js';
+import {
+    buildSlotTimingMap,
+    isFoodVisibleForSlotTiming,
+    loadSlotTimingsForRestaurants,
+    serializeItemSlotTiming
+} from './itemSlotTiming.util.js';
 
 const MAX_UNDER_250_PRICE = 250;
 const MAX_RESTAURANTS = 1000;
@@ -86,13 +93,27 @@ export async function listUnder250Restaurants(query = {}) {
         isAvailable: { $ne: false },
     })
         .select(
-            'restaurantId categoryId categoryName category name description price otherPrice variants image images foodType isAvailable'
+            'restaurantId categoryId categoryName category name description price otherPrice variants image images foodType isAvailable itemSlotTimingId'
         )
         .sort({ createdAt: -1 })
         .limit(MAX_FOOD_ITEMS)
         .lean();
 
+    const slotTimings = await loadSlotTimingsForRestaurants(objectIds, ItemSlotTiming);
+    const slotTimingsByRestaurant = new Map();
+    slotTimings.forEach((slot) => {
+        const key = String(slot.restaurantId);
+        if (!slotTimingsByRestaurant.has(key)) slotTimingsByRestaurant.set(key, []);
+        slotTimingsByRestaurant.get(key).push(slot);
+    });
+    const referenceDate = new Date();
+
     for (const food of foods) {
+        const restaurantSlots = slotTimingsByRestaurant.get(String(food.restaurantId)) || [];
+        if (!isFoodVisibleForSlotTiming(food, buildSlotTimingMap(restaurantSlots), referenceDate)) {
+            continue;
+        }
+
         const displayPrice = getFoodDisplayPrice(food);
         if (!Number.isFinite(displayPrice) || displayPrice <= 0 || displayPrice > MAX_UNDER_250_PRICE) {
             continue;
@@ -111,6 +132,9 @@ export async function listUnder250Restaurants(query = {}) {
             restaurant.fallbackImage ||
             '';
 
+        const slotId = food?.itemSlotTimingId ? String(food.itemSlotTimingId) : '';
+        const slotDoc = slotId ? buildSlotTimingMap(restaurantSlots).get(slotId) : null;
+
         restaurant.menuItems.push({
             id: String(food._id),
             _id: food._id,
@@ -125,6 +149,8 @@ export async function listUnder250Restaurants(query = {}) {
             sectionName,
             subsectionName: '',
             variants: serializeFoodVariants(food.variants),
+            itemSlotTimingId: slotId || null,
+            itemSlotTiming: slotDoc ? serializeItemSlotTiming(slotDoc) : null,
         });
     }
 

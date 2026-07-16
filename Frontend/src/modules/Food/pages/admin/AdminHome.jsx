@@ -195,6 +195,11 @@ export default function AdminHome() {
   const deliveryFeeTotal = dashboardData?.deliveryFee?.total || 0
   const gstTotal = dashboardData?.gst?.total || 0
   const totalAdminEarnings = dashboardData?.totalAdminEarnings || 0
+  const quickKpis = dashboardData?.quickDelivery || {}
+  const quickFeeRevenue = Number(quickKpis.feeRevenue || 0)
+  const quickOrdersCount = Number(quickKpis.orders || 0)
+  const quickAttachRate = Number(quickKpis.attachmentRate || 0)
+  const quickSlaBreachRate = Number(quickKpis.slaBreachRate || 0)
 
   // Additional stats
   const totalRestaurants = dashboardData?.restaurants?.total || 0
@@ -330,6 +335,14 @@ export default function AdminHome() {
             helper={`Total delivery fees: ${periodLabel}`}
             icon={<Truck className="h-5 w-5" />}
             to="/admin/food/transaction-report"
+            canAccess={canAccessPath}
+          />
+          <StatCard
+            title="Quick Delivery"
+            value={formatCurrency(quickFeeRevenue)}
+            helper={`${quickOrdersCount.toLocaleString("en-IN")} orders · ${quickAttachRate}% attach · SLA breach ${quickSlaBreachRate}%`}
+            icon={<Activity className="h-5 w-5" />}
+            to="/admin/food/orders/all"
             canAccess={canAccessPath}
           />
           <StatCard

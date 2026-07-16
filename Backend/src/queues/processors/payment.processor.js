@@ -61,25 +61,33 @@ async function handleDeliveryCompleted(data) {
     // 1. Credit delivery partner wallet with their earning
     if (deliveryPartnerId && riderEarning > 0) {
         try {
-            await creditWallet({
+            const creditResult = await creditWallet({
                 entityType: 'deliveryBoy',
                 entityId: deliveryPartnerId,
                 amount: riderEarning,
                 description: `Order ${orderId} - delivery earning`,
                 category: 'delivery_earning',
                 orderId: orderMongoId,
-                metadata: { orderId, paymentMethod }
+                metadata: {
+                    orderId,
+                    paymentMethod,
+                    // Informative only — amount already includes quickRiderBonus when applicable
+                    deliveryMode: data.deliveryMode || 'basic',
+                    quickRiderBonus: Number(data.quickRiderBonus || 0) || 0,
+                }
             });
 
-            // Increment delivery count
-            const { FoodDeliveryWallet } = await import('../../modules/food/delivery/models/deliveryWallet.model.js');
-            const mongoose = await import('mongoose');
-            await FoodDeliveryWallet.updateOne(
-                { deliveryPartnerId: new mongoose.default.Types.ObjectId(deliveryPartnerId) },
-                { $inc: { totalDeliveries: 1 } }
-            );
+            // Increment delivery count only on first successful credit.
+            if (!creditResult?.alreadyProcessed) {
+                const { FoodDeliveryWallet } = await import('../../modules/food/delivery/models/deliveryWallet.model.js');
+                const mongoose = await import('mongoose');
+                await FoodDeliveryWallet.updateOne(
+                    { deliveryPartnerId: new mongoose.default.Types.ObjectId(deliveryPartnerId) },
+                    { $inc: { totalDeliveries: 1 } }
+                );
+            }
 
-            logger.info(`[PaymentProcessor] Delivery partner ${deliveryPartnerId} credited ${riderEarning} for order ${orderId}`);
+            logger.info(`[PaymentProcessor] Delivery partner ${deliveryPartnerId} credited ${riderEarning} for order ${orderId}${creditResult?.alreadyProcessed ? ' (idempotent)' : ''}`);
         } catch (err) {
             logger.error(`[PaymentProcessor] Failed to credit delivery partner: ${err.message}`);
         }
@@ -88,7 +96,7 @@ async function handleDeliveryCompleted(data) {
     // 2. Credit admin/platform wallet with platform profit
     if (platformProfit > 0) {
         try {
-            await creditWallet({
+            const creditResult = await creditWallet({
                 entityType: 'admin',
                 entityId: 'platform',
                 amount: platformProfit,
@@ -97,7 +105,7 @@ async function handleDeliveryCompleted(data) {
                 orderId: orderMongoId,
                 metadata: { orderId, paymentMethod, riderEarning }
             });
-            logger.info(`[PaymentProcessor] Platform credited ${platformProfit} for order ${orderId}`);
+            logger.info(`[PaymentProcessor] Platform credited ${platformProfit} for order ${orderId}${creditResult?.alreadyProcessed ? ' (idempotent)' : ''}`);
         } catch (err) {
             logger.error(`[PaymentProcessor] Failed to credit platform: ${err.message}`);
         }

@@ -6,38 +6,81 @@ import {
 } from "../../../../core/notifications/firebase.service.js";
 import { getIO, rooms } from '../../../../config/socket.js';
 import { addOrderJob } from '../../../../queues/producers/order.producer.js';
+import { addPaymentJob } from '../../../../queues/producers/payment.producer.js';
 
-export function enqueueOrderEvent(action, payload = {}) {
+/** Actions that must be processed by the payment worker (wallet credits / refunds). */
+export const PAYMENT_QUEUE_ACTIONS = [
+  'delivery_completed',
+  'order_cancelled',
+  'order_cancelled_by_user',
+  'order_cancelled_by_watchdog',
+  'payment_verified',
+];
+
+function runSyncPaymentProcessor(action, payload = {}) {
+  import('../../../../queues/processors/payment.processor.js')
+    .then(({ processPaymentJob }) => {
+      logger.info(`[BullMQ:fallback] Running sync payment processor for action=${action}`);
+      processPaymentJob({
+        data: { action, ...payload },
+        id: `sync_${action}_${payload.orderMongoId || Date.now()}`,
+      }).catch((err) => {
+        logger.error(`[BullMQ:fallback] Sync payment processor failed: ${err.message}`);
+      });
+    })
+    .catch((err) => {
+      logger.error(`[BullMQ:fallback] Failed to import payment processor: ${err.message}`);
+    });
+}
+
+/**
+ * Fire-and-forget BullMQ enqueue for order lifecycle events.
+ * Payment settlement actions use the payment queue when BullMQ is enabled.
+ * jobOptions (3rd arg) is passed to addOrderJob — e.g. { delay, jobId }.
+ * Never blocks API response; failures are logged only.
+ */
+export function enqueueOrderEvent(action, payload = {}, jobOptions = {}) {
+  const isPaymentAction = PAYMENT_QUEUE_ACTIONS.includes(action);
+
   try {
-    void addOrderJob({ action, ...payload }).catch((err) => {
+    if (isPaymentAction) {
+      if (process.env.BULLMQ_ENABLED === 'true') {
+        const jobOpts = {};
+        if (payload.orderMongoId) {
+          // Deduplicate concurrent enqueues for the same order+action.
+          jobOpts.jobId = `payment_${action}_${payload.orderMongoId}`;
+        }
+        void addPaymentJob({ action, ...payload }, jobOpts)
+          .then((job) => {
+            if (!job) {
+              // Queue unavailable despite BullMQ flag — still settle credits.
+              runSyncPaymentProcessor(action, payload);
+            }
+          })
+          .catch((err) => {
+            const msg = String(err?.message || err);
+            if (/JobId|already exists|already existed/i.test(msg)) {
+              logger.info(
+                `[BullMQ] Payment job already present for action=${action} order=${payload.orderMongoId || ''}`,
+              );
+              return;
+            }
+            logger.warn(`BullMQ enqueue payment event failed: ${action} - ${msg}`);
+            runSyncPaymentProcessor(action, payload);
+          });
+      } else {
+        runSyncPaymentProcessor(action, payload);
+      }
+      return;
+    }
+
+    void addOrderJob({ action, ...payload }, jobOptions).catch((err) => {
       logger.warn(`BullMQ enqueue order event failed: ${action} - ${err?.message || err}`);
     });
   } catch (err) {
     logger.warn(`BullMQ enqueue order event failed (sync): ${action} - ${err?.message || err}`);
-  }
-
-  // Synchronous fallback in development or when BullMQ is disabled
-  if (process.env.BULLMQ_ENABLED !== 'true') {
-    if ([
-      'delivery_completed',
-      'order_cancelled',
-      'order_cancelled_by_user',
-      'order_cancelled_by_watchdog',
-      'payment_verified',
-    ].includes(action)) {
-      import('../../../../queues/processors/payment.processor.js')
-        .then(({ processPaymentJob }) => {
-          logger.info(`[BullMQ:fallback] Running sync payment processor for action=${action}`);
-          processPaymentJob({
-            data: { action, ...payload },
-            id: `sync_${action}_${Date.now()}`
-          }).catch((err) => {
-            logger.error(`[BullMQ:fallback] Sync payment processor failed: ${err.message}`);
-          });
-        })
-        .catch((err) => {
-          logger.error(`[BullMQ:fallback] Failed to import payment processor: ${err.message}`);
-        });
+    if (isPaymentAction) {
+      runSyncPaymentProcessor(action, payload);
     }
   }
 }
@@ -59,6 +102,15 @@ export function haversineKm(lat1, lon1, lat2, lon2) {
 export async function roadDistanceKm(lat1, lon1, lat2, lon2) {
   const { getRoadDistanceKmValue } = await import('../../../../services/roadDistance.service.js');
   return getRoadDistanceKmValue(
+    { lat: lat1, lng: lon1 },
+    { lat: lat2, lng: lon2 },
+  );
+}
+
+/** Full road distance result including whether the value is an estimate. */
+export async function roadDistanceDetails(lat1, lon1, lat2, lon2) {
+  const { getRoadDistanceKm } = await import('../../../../services/roadDistance.service.js');
+  return getRoadDistanceKm(
     { lat: lat1, lng: lon1 },
     { lat: lat2, lng: lon2 },
   );
@@ -387,6 +439,24 @@ export function buildDeliverySocketPayload(orderDoc, restaurantDoc = null) {
     dispatch: order?.dispatch,
     createdAt: order?.createdAt,
     updatedAt: order?.updatedAt,
+    // Food Quick Delivery (deliveryMode) — distinct from QC orderType:quick
+    deliveryMode: String(order?.deliveryMode || 'basic'),
+    isFoodQuickDelivery: String(order?.deliveryMode || '').toLowerCase() === 'quick',
+    quickRiderBonus: Number(order?.pricing?.quickRiderBonus || 0) || 0,
+    quickRiderShare:
+      Number(
+        order?.pricing?.quickRiderShare ?? order?.pricing?.quickRiderBonus ?? 0,
+      ) || 0,
+    quickRestaurantShare: Number(order?.pricing?.quickRestaurantShare || 0) || 0,
+    quickDeliveryFee: Number(order?.pricing?.quickDeliveryFee || 0) || 0,
+    quickPlatformShare: Number(order?.pricing?.quickPlatformShare || 0) || 0,
+    quickSharePcts: order?.pricing?.quickSharePcts || null,
+    quickFinanceVersion: String(order?.pricing?.quickFinanceVersion || ''),
+    etaPromise: order?.etaPromise || null,
+    offerTimeoutSec:
+      String(order?.deliveryMode || '').toLowerCase() === 'quick'
+        ? Number(order?.dispatch?.offerTimeoutSec || 45) || 45
+        : Number(order?.dispatch?.offerTimeoutSec || 60) || 60,
   };
 
   if (isQuickOrder && seller?._id) {
@@ -423,6 +493,8 @@ export function buildDeliverySocketPayload(orderDoc, restaurantDoc = null) {
 }
 
 export function canExposeOrderToRestaurant(orderLike) {
+  // Hold restaurant exposure while still scheduled (mirror order.service).
+  if (String(orderLike?.orderStatus || '').toLowerCase() === 'scheduled') return false;
   const method = String(orderLike?.payment?.method || "").toLowerCase();
   const status = String(orderLike?.payment?.status || "").toLowerCase();
   if (["cash", "wallet"].includes(method)) return true;
@@ -432,6 +504,7 @@ export function canExposeOrderToRestaurant(orderLike) {
 export async function notifyRestaurantNewOrder(orderDoc) {
   try {
     if (!orderDoc || !canExposeOrderToRestaurant(orderDoc)) return;
+    if (String(orderDoc.orderStatus || '').toLowerCase() === 'scheduled') return;
 
     const io = getIO();
     if (io) {
@@ -446,15 +519,21 @@ export async function notifyRestaurantNewOrder(orderDoc) {
       io.to(rooms.restaurant(orderDoc.restaurantId)).emit("new_order", payload);
     }
 
+    const isFoodQuick =
+      String(orderDoc.deliveryMode || "").toLowerCase() === "quick";
     await notifyOwnersSafely(
       [{ ownerType: "RESTAURANT", ownerId: orderDoc.restaurantId }],
       {
-        title: "New order received",
-        body: `Order #${orderDoc.order_id || orderDoc._id} is waiting for review.`,
+        title: isFoodQuick ? "New Quick Delivery order" : "New order received",
+        body: isFoodQuick
+          ? `PRIORITY: Quick order #${orderDoc.orderId || orderDoc.order_id || orderDoc._id} — prep ASAP.`
+          : `Order #${orderDoc.order_id || orderDoc._id} is waiting for review.`,
         data: {
           type: "new_order",
           orderId: orderDoc._id.toString(),
           orderMongoId: orderDoc._id?.toString?.() || "",
+          deliveryMode: String(orderDoc.deliveryMode || "basic"),
+          isFoodQuickDelivery: isFoodQuick,
           link: `/restaurant/orders/${orderDoc._id?.toString?.() || ""}`,
         },
       },
@@ -466,6 +545,8 @@ export async function notifyRestaurantNewOrder(orderDoc) {
 
 export const STATUS_PRIORITY = {
   created: 10,
+  scheduled: 12,
+  placed: 15,
   confirmed: 20,
   preparing: 30,
   ready_for_pickup: 40,
@@ -476,6 +557,7 @@ export const STATUS_PRIORITY = {
   cancelled_by_user: 100,
   cancelled_by_restaurant: 100,
   cancelled_by_admin: 100,
+  cancelled_by_system: 100,
 };
 
 /**

@@ -1,10 +1,11 @@
 import apiClient from '@/services/api/axios.js';
 import { calculateDistance as haversineFallbackKm } from '@/modules/Food/utils/common.js';
+import { getQuickSessionId } from '@/modules/quickCommerce/user/services/quickApi.js';
 
 const CACHE_TTL_MS = 30 * 60 * 1000;
 const CACHE_MAX_SIZE = 500;
 
-/** @type {Map<string, { value: number, expiresAt: number }>} */
+/** @type {Map<string, { value: { distanceKm: number, estimated: boolean }, expiresAt: number }>} */
 const cache = new Map();
 
 const roundCoord = (value) => {
@@ -27,6 +28,7 @@ const readCache = (key) => {
 };
 
 const writeCache = (key, value) => {
+  if (!value || value.estimated) return;
   if (cache.size >= CACHE_MAX_SIZE) {
     const oldest = cache.keys().next().value;
     if (oldest) cache.delete(oldest);
@@ -40,10 +42,22 @@ const fallbackDistanceKm = (lat1, lng1, lat2, lng2) => {
   return Math.round(straight * 1.3 * 100) / 100;
 };
 
+const mapsRequestConfig = () => {
+  const headers = {};
+  try {
+    const sessionId = getQuickSessionId();
+    if (sessionId) headers['x-quick-session'] = sessionId;
+  } catch {
+    // ignore session lookup errors
+  }
+  return { headers };
+};
+
 /**
- * Road/travel distance in km via backend Google Distance Matrix proxy.
+ * Road/travel distance details via backend Google Distance Matrix proxy.
+ * @returns {Promise<{ distanceKm: number|null, estimated: boolean }|null>}
  */
-export async function getRoadDistanceKm(lat1, lng1, lat2, lng2) {
+export async function getRoadDistanceDetails(lat1, lng1, lat2, lng2) {
   const aLat = Number(lat1);
   const aLng = Number(lng1);
   const bLat = Number(lat2);
@@ -57,6 +71,7 @@ export async function getRoadDistanceKm(lat1, lng1, lat2, lng2) {
 
   try {
     const response = await apiClient.get('/common/maps/distance', {
+      ...mapsRequestConfig(),
       params: {
         originLat: aLat,
         originLng: aLng,
@@ -65,17 +80,27 @@ export async function getRoadDistanceKm(lat1, lng1, lat2, lng2) {
       },
     });
     const distanceKm = Number(response?.data?.data?.distanceKm);
+    const estimated = Boolean(response?.data?.data?.estimated);
     if (Number.isFinite(distanceKm)) {
-      writeCache(key, distanceKm);
-      return distanceKm;
+      const value = { distanceKm, estimated };
+      writeCache(key, value);
+      return value;
     }
   } catch {
     // Fall through to local estimate when routing service is unavailable.
   }
 
   const fallback = fallbackDistanceKm(aLat, aLng, bLat, bLng);
-  if (fallback != null) writeCache(key, fallback);
-  return fallback;
+  if (fallback == null) return null;
+  return { distanceKm: fallback, estimated: true };
+}
+
+/**
+ * Road/travel distance in km via backend Google Distance Matrix proxy.
+ */
+export async function getRoadDistanceKm(lat1, lng1, lat2, lng2) {
+  const details = await getRoadDistanceDetails(lat1, lng1, lat2, lng2);
+  return details?.distanceKm ?? null;
 }
 
 /**
@@ -97,16 +122,9 @@ export async function getRoadDistancesFromOrigin(originLat, originLng, destinati
     if (!Number.isFinite(dest.lat) || !Number.isFinite(dest.lng)) return null;
     const key = cacheKey(lat, lng, dest.lat, dest.lng);
     const cached = readCache(key);
-    if (cached != null) return cached;
+    if (cached != null) return cached.distanceKm;
 
-    const uncachedIndex = normalized
-      .slice(0, index)
-      .filter((item, i) => {
-        if (!Number.isFinite(item.lat) || !Number.isFinite(item.lng)) return false;
-        return readCache(cacheKey(lat, lng, item.lat, item.lng)) == null;
-      }).length;
-
-    return { dest, uncachedIndex, key, pending: true };
+    return { dest, uncachedIndex: index, key, pending: true };
   });
 
   const uncached = results
@@ -119,23 +137,26 @@ export async function getRoadDistancesFromOrigin(originLat, originLng, destinati
         originLat: lat,
         originLng: lng,
         destinations: uncached.map((item) => ({ lat: item.dest.lat, lng: item.dest.lng })),
-      });
+      }, mapsRequestConfig());
       const distances = response?.data?.data?.distances || [];
       uncached.forEach((item, i) => {
         const distanceKm = Number(distances[i]?.distanceKm);
+        const estimated = Boolean(distances[i]?.estimated);
         const value = Number.isFinite(distanceKm)
-          ? distanceKm
-          : fallbackDistanceKm(lat, lng, item.dest.lat, item.dest.lng);
+          ? { distanceKm, estimated }
+          : (() => {
+              const fallback = fallbackDistanceKm(lat, lng, item.dest.lat, item.dest.lng);
+              return fallback != null ? { distanceKm: fallback, estimated: true } : null;
+            })();
         if (value != null) {
           writeCache(item.key, value);
-          results[item.index] = value;
+          results[item.index] = value.distanceKm;
         }
       });
     } catch {
       uncached.forEach((item) => {
         const fallback = fallbackDistanceKm(lat, lng, item.dest.lat, item.dest.lng);
         if (fallback != null) {
-          writeCache(item.key, fallback);
           results[item.index] = fallback;
         }
       });

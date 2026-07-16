@@ -6,6 +6,7 @@ import { FoodRestaurantWallet } from '../models/restaurantWallet.model.js';
 import { FoodRestaurantWithdrawal } from '../models/foodRestaurantWithdrawal.model.js';
 import { FoodDailyPass } from '../../subscriptions/models/foodDailyPass.model.js';
 import { FoodWalletLedger } from '../../subscriptions/models/foodWalletLedger.model.js';
+import { getRestaurantWithdrawalLimitSettings } from '../../admin/services/admin.service.js';
 import dayjs from 'dayjs';
 import timezone from 'dayjs/plugin/timezone.js';
 import utc from 'dayjs/plugin/utc.js';
@@ -72,6 +73,42 @@ function parseISODateParamEnd(v) {
     return d;
 }
 
+/** Only delivered orders may contribute to restaurant payout eligibility. */
+function isDeliveredOrderForPayout(orderLike) {
+    if (!orderLike || typeof orderLike !== 'object') return false;
+    const status = String(orderLike.orderStatus || '').trim().toLowerCase();
+    if (status === 'delivered') return true;
+    const phase = String(
+        orderLike.deliveryState?.currentPhase || orderLike.deliveryState?.status || ''
+    )
+        .trim()
+        .toLowerCase();
+    return phase === 'delivered';
+}
+
+function mapTransactionToCycleOrder(tx) {
+    const order = tx.orderId || {};
+    const items = Array.isArray(order.items) ? order.items : [];
+    const foodNames = items.map((it) => it?.name).filter(Boolean).join(', ');
+    const orderTotalExclTax = Math.max(
+        0,
+        Number(order?.pricing?.total ?? 0) - Number(order?.pricing?.tax ?? 0) || 0
+    );
+    return {
+        orderId: order?.orderId || tx.orderReadableId,
+        createdAt: tx.createdAt,
+        items,
+        foodNames,
+        orderTotal: orderTotalExclTax,
+        totalAmount: tx.amounts?.totalCustomerPaid || 0,
+        payout: tx.amounts?.restaurantShare || 0,
+        commission: tx.amounts?.restaurantCommission || tx.pricing?.restaurantCommission || 0,
+        paymentMethod: tx.paymentMethod || order?.payment?.method,
+        orderStatus: order?.orderStatus || order?.deliveryState?.currentPhase || order?.deliveryState?.status,
+        status: tx.status
+    };
+}
+
 export async function getRestaurantFinance(restaurantId, query = {}) {
     if (!restaurantId || !mongoose.Types.ObjectId.isValid(restaurantId)) return null;
     const rid = new mongoose.Types.ObjectId(restaurantId);
@@ -89,55 +126,47 @@ export async function getRestaurantFinance(restaurantId, query = {}) {
 
     const nowWindow = getFixedCurrentCycleWindow(new Date());
 
-    // Current cycle: sum ledger payouts in the fixed window.
-    const currentTransactions = await FoodTransaction.find({
+    // Current cycle: sum ledger payouts in the fixed window (delivered orders only).
+    const currentTransactionsRaw = await FoodTransaction.find({
         restaurantId: rid,
-        status: { $in: ['captured', 'authorized'] },
+        status: { $in: ['captured'] },
         createdAt: { $gte: nowWindow.start, $lte: nowWindow.end }
     })
-        .populate('orderId', 'orderId createdAt items pricing deliveryState orderStatus')
+        .populate('orderId', 'orderId createdAt items pricing deliveryState orderStatus payment')
         .sort({ createdAt: -1 })
         .lean();
 
-    const currentCycleOrders = currentTransactions.map((tx) => {
-        const order = tx.orderId || {};
-        const items = Array.isArray(order.items) ? order.items : [];
-        const foodNames = items.map((it) => it?.name).filter(Boolean).join(', ');
-        const orderTotalExclTax = Math.max(
-            0,
-            Number(order?.pricing?.total ?? 0) - Number(order?.pricing?.tax ?? 0) || 0
-        );
-        return {
-            orderId: order?.orderId || tx.orderReadableId,
-            createdAt: tx.createdAt,
-            items,
-            foodNames,
-            orderTotal: orderTotalExclTax,
-            totalAmount: tx.amounts?.totalCustomerPaid || 0,
-            payout: tx.amounts?.restaurantShare || 0,
-            commission: tx.amounts?.restaurantCommission || tx.pricing?.restaurantCommission || 0,
-            paymentMethod: tx.paymentMethod || order?.payment?.method,
-            orderStatus: order?.orderStatus || order?.deliveryState?.currentPhase || order?.deliveryState?.status,
-            status: tx.status
-        };
-    });
+    const currentTransactions = currentTransactionsRaw.filter((tx) =>
+        isDeliveredOrderForPayout(tx.orderId)
+    );
+
+    const currentCycleOrders = currentTransactions.map(mapTransactionToCycleOrder);
 
     const currentCycleEstimatedPayout = currentCycleOrders.reduce(
         (sum, o) => sum + (Number(o.payout) || 0),
         0
     );
 
-    // Calculate global estimated payout (all unsettled transactions)
-    const allUnsettledTransactions = await FoodTransaction.find({
+    // Global estimated payout: unsettled + delivered only (excludes cancelled / in-progress).
+    const allUnsettledTransactionsRaw = await FoodTransaction.find({
         restaurantId: rid,
-        status: { $in: ['captured', 'authorized'] },
+        status: { $in: ['captured'] },
         'settlement.isRestaurantSettled': { $ne: true }
-    }).select('amounts.restaurantShare').lean();
+    })
+        .populate('orderId', 'orderStatus deliveryState')
+        .select('amounts.restaurantShare settlement.restaurantSettledAmount orderId')
+        .lean();
 
-    const globalEstimatedPayout = allUnsettledTransactions.reduce(
-        (sum, tx) => sum + (Number(tx.amounts?.restaurantShare) || 0),
-        0
+    const allUnsettledTransactions = allUnsettledTransactionsRaw.filter((tx) =>
+        isDeliveredOrderForPayout(tx.orderId)
     );
+
+    // Use open (unsettled) share only — partial withdrawals must not hide leftover earnings
+    const globalEstimatedPayout = allUnsettledTransactions.reduce((sum, tx) => {
+        const share = Number(tx.amounts?.restaurantShare) || 0;
+        const settled = Number(tx.settlement?.restaurantSettledAmount) || 0;
+        return sum + Math.max(0, share - settled);
+    }, 0);
 
     // Fetch referral earnings from wallet for withdrawal eligibility
     const wallet = await FoodRestaurantWallet.findOne({ restaurantId: rid })
@@ -146,16 +175,19 @@ export async function getRestaurantFinance(restaurantId, query = {}) {
 
     const referralBalance = Number(wallet?.referralEarnings || 0);
 
-    // Block only pending withdrawals from available balance.
-    // Approved/rejected requests are processed records and should not keep locking payout.
+    // Lock pending + in-flight (processing) withdrawals from available balance.
+    // Approved/rejected/cancelled are terminal and must not keep locking payout.
     const pendingWithdrawalsAgg = await FoodRestaurantWithdrawal.aggregate([
         {
             $match: {
                 restaurantId: rid,
                 $expr: {
-                    $eq: [{ $toLower: { $trim: { input: '$status' } } }, 'pending']
-                }
-            }
+                    $in: [
+                        { $toLower: { $trim: { input: '$status' } } },
+                        ['pending', 'processing'],
+                    ],
+                },
+            },
         },
         { $group: { _id: null, total: { $sum: '$amount' } } }
     ]);
@@ -187,44 +219,32 @@ export async function getRestaurantFinance(restaurantId, query = {}) {
 
     let pastCyclesResult = { orders: [], totalOrders: 0 };
     if (startDate && endDate) {
-        const pastTransactions = await FoodTransaction.find({
+        const pastTransactionsRaw = await FoodTransaction.find({
             restaurantId: rid,
-            status: { $in: ['captured', 'authorized'] },
+            status: { $in: ['captured'] },
             createdAt: { $gte: startDate, $lte: endDate }
         })
-            .populate('orderId', 'orderId createdAt items pricing deliveryState orderStatus')
+            .populate('orderId', 'orderId createdAt items pricing deliveryState orderStatus payment')
             .sort({ createdAt: -1 })
             .lean();
 
-        const pastCycleOrders = pastTransactions.map((tx) => {
-            const order = tx.orderId || {};
-            const items = Array.isArray(order.items) ? order.items : [];
-            const foodNames = items.map((it) => it?.name).filter(Boolean).join(', ');
-            const orderTotalExclTax = Math.max(
-                0,
-                Number(order?.pricing?.total ?? 0) - Number(order?.pricing?.tax ?? 0) || 0
-            );
-
-            return {
-                orderId: order?.orderId || tx.orderReadableId,
-                createdAt: tx.createdAt,
-                items,
-                foodNames,
-                orderTotal: orderTotalExclTax,
-                totalAmount: tx.amounts?.totalCustomerPaid || 0,
-                payout: tx.amounts?.restaurantShare || 0,
-                commission: tx.amounts?.restaurantCommission || tx.pricing?.restaurantCommission || 0,
-                paymentMethod: tx.paymentMethod || order?.payment?.method,
-                orderStatus: order?.orderStatus || order?.deliveryState?.currentPhase || order?.deliveryState?.status,
-                status: tx.status
-            };
-        });
+        const pastCycleOrders = pastTransactionsRaw
+            .filter((tx) => isDeliveredOrderForPayout(tx.orderId))
+            .map(mapTransactionToCycleOrder);
 
         pastCyclesResult = {
             orders: pastCycleOrders,
             totalOrders: pastCycleOrders.length
         };
     }
+
+    const limitSettings = await getRestaurantWithdrawalLimitSettings();
+    const restaurantMinWithdrawalLimit = Number(limitSettings.restaurantMinWithdrawalLimit) || 1;
+    const restaurantMaxWithdrawalLimit =
+        limitSettings.restaurantMaxWithdrawalLimit != null &&
+        Number(limitSettings.restaurantMaxWithdrawalLimit) > 0
+            ? Number(limitSettings.restaurantMaxWithdrawalLimit)
+            : null;
 
     return {
         restaurant: {
@@ -237,6 +257,10 @@ export async function getRestaurantFinance(restaurantId, query = {}) {
             pendingPayout: globalEstimatedPayout,
             referralEarnings: referralBalance,
             totalEarnings: Number(wallet?.totalEarnings || 0)
+        },
+        withdrawalLimits: {
+            min: restaurantMinWithdrawalLimit,
+            max: restaurantMaxWithdrawalLimit
         },
         currentCycle,
         invoiceSummary,

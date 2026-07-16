@@ -1,5 +1,5 @@
 import { Link, useLocation } from "react-router-dom"
-import { Tag, User, Truck, UtensilsCrossed } from "lucide-react"
+import { Tag, User, Truck } from "lucide-react"
 import { isModuleAuthenticated } from "@food/utils/auth"
 
 export default function BottomNavigation() {
@@ -10,7 +10,6 @@ export default function BottomNavigation() {
   const redirectTo = `${location.pathname || "/food/user"}${location.search || ""}${location.hash || ""}`
 
   // Check active routes - support both /user/* and /* paths
-  const isDining = pathname === "/food/dining" || pathname.startsWith("/food/user/dining")
   const isUnder250 = pathname === "/food/under-250" || pathname.startsWith("/food/user/under-250")
   const isSharedFoodProfile =
     (pathname === "/profile" || pathname.startsWith("/profile/")) &&
@@ -20,14 +19,12 @@ export default function BottomNavigation() {
     pathname.startsWith("/food/user/profile") ||
     isSharedFoodProfile
   const isDelivery =
-    !isDining &&
     !isUnder250 &&
     !isProfile &&
     (pathname === "/food" ||
       pathname === "/food/" ||
       pathname === "/food/user" ||
       (pathname.startsWith("/food/user") &&
-        !pathname.includes("/dining") &&
         !pathname.includes("/under-250") &&
         !pathname.includes("/profile")))
 
@@ -54,26 +51,6 @@ export default function BottomNavigation() {
             Delivery
           </span>
           {isDelivery && (
-            <div className="absolute top-0 left-0 right-0 h-0.5 bg-primary-orange dark:bg-primary-orange rounded-b-full" />
-          )}
-        </Link>
-
-        {/* Divider */}
-        <div className="h-8 w-px bg-gray-300 dark:bg-gray-700" />
-
-        {/* Dining Tab */}
-        <Link
-          to="/food/user/dining"
-          className={`flex flex-1 flex-col items-center gap-1.5 px-2 sm:px-3 py-2 transition-all duration-200 relative ${isDining
-              ? "text-primary-orange dark:text-primary-orange"
-              : "text-gray-600 dark:text-gray-400"
-            }`}
-        >
-          <UtensilsCrossed className={`h-5 w-5 ${isDining ? "text-primary-orange dark:text-primary-orange" : "text-gray-600 dark:text-gray-400"}`} strokeWidth={2} />
-          <span className={`text-xs sm:text-sm font-medium ${isDining ? "text-primary-orange dark:text-primary-orange font-semibold" : "text-gray-600 dark:text-gray-400"}`}>
-            Dining
-          </span>
-          {isDining && (
             <div className="absolute top-0 left-0 right-0 h-0.5 bg-primary-orange dark:bg-primary-orange rounded-b-full" />
           )}
         </Link>

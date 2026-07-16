@@ -4,8 +4,25 @@ import { FoodRestaurant } from '../models/restaurant.model.js';
 import { FoodItem } from '../../admin/models/food.model.js';
 import { FoodCategory } from '../../admin/models/category.model.js';
 import { getFoodDisplayPrice, getFoodDisplayOtherPrice, serializeFoodVariants } from '../../admin/services/foodVariant.service.js';
+import {
+    backfillLegacyCategoryWorkflow,
+    isCategoryVisibleInPublicMenu
+} from '../../shared/categoryWorkflow.js';
+import { ItemSlotTiming } from '../models/itemSlotTiming.model.js';
+import {
+    buildSlotTimingMap,
+    filterFoodsByActiveSlotTimings,
+    isFoodVisibleForSlotTiming,
+    loadSlotTimingsForRestaurants,
+    serializeItemSlotTiming
+} from './itemSlotTiming.util.js';
 
-const buildMenuFromFoods = async (foods = [], filterPublicOnly = false) => {
+const buildMenuFromFoods = async (foods = [], filterPublicOnly = false, options = {}) => {
+    const { slotTimings = [], referenceDate = new Date(), applySlotFilter = false } = options;
+    const slotMap = buildSlotTimingMap(slotTimings);
+    const visibleFoods = applySlotFilter
+        ? filterFoodsByActiveSlotTimings(foods, slotTimings, referenceDate)
+        : foods;
     const categoryIds = Array.from(
         new Set(
             (foods || [])
@@ -20,22 +37,25 @@ const buildMenuFromFoods = async (foods = [], filterPublicOnly = false) => {
 
     const categoryDocs = categoryIds.length
         ? await FoodCategory.find({ _id: { $in: categoryIds } })
-            .select('name image sortOrder isActive approvalStatus')
+            .select('name image sortOrder isActive approvalStatus isApproved approvedAt restaurantId createdByRestaurantId')
             .lean()
         : [];
+    if (categoryDocs.length) {
+        await backfillLegacyCategoryWorkflow(categoryDocs, { persist: false });
+    }
     const categoryMap = new Map(categoryDocs.map((doc) => [String(doc._id), doc]));
 
     const allowedCategories = new Set();
     if (filterPublicOnly) {
         for (const doc of categoryDocs) {
-            if (doc.isActive !== false && doc.approvalStatus === 'approved') {
+            if (isCategoryVisibleInPublicMenu(doc)) {
                 allowedCategories.add(String(doc._id));
             }
         }
     }
 
     const byCategory = new Map();
-    for (const food of foods) {
+    for (const food of visibleFoods) {
         const categoryId = food?.categoryId ? String(food.categoryId) : '';
         
         if (filterPublicOnly && categoryId && !allowedCategories.has(categoryId)) {
@@ -55,6 +75,9 @@ const buildMenuFromFoods = async (foods = [], filterPublicOnly = false) => {
                 items: []
             });
         }
+
+        const slotId = food?.itemSlotTimingId ? String(food.itemSlotTimingId) : '';
+        const slotDoc = slotId ? slotMap.get(slotId) : null;
 
         byCategory.get(groupKey).items.push({
             id: String(food._id),
@@ -80,6 +103,9 @@ const buildMenuFromFoods = async (foods = [], filterPublicOnly = false) => {
             approvedAt: food.approvedAt,
             rejectedAt: food.rejectedAt,
             preparationTime: food.preparationTime || '',
+            itemSlotTimingId: slotId || null,
+            itemSlotTiming: slotDoc ? serializeItemSlotTiming(slotDoc) : null,
+            isSlotActive: slotDoc ? isFoodVisibleForSlotTiming(food, slotMap, referenceDate) : true,
             createdAt: food.createdAt,
             updatedAt: food.updatedAt
         });
@@ -125,7 +151,8 @@ export async function getRestaurantMenu(restaurantId) {
         .sort({ createdAt: -1 })
         .limit(5000)
         .lean();
-    return buildMenuFromFoods(foods);
+    const slotTimings = await ItemSlotTiming.find({ restaurantId }).sort({ startTime: 1, name: 1 }).lean();
+    return buildMenuFromFoods(foods, false, { slotTimings });
 }
 
 export async function updateRestaurantMenu(restaurantId, body = {}) {
@@ -164,7 +191,14 @@ export async function getPublicApprovedRestaurantMenu(restaurantIdOrSlug) {
         .sort({ createdAt: -1 })
         .limit(2000)
         .lean();
-    return buildMenuFromFoods(foods, true);
+    const slotTimings = await ItemSlotTiming.find({ restaurantId: restaurant._id })
+        .sort({ startTime: 1, name: 1 })
+        .lean();
+    return buildMenuFromFoods(foods, true, {
+        slotTimings,
+        applySlotFilter: true,
+        referenceDate: new Date()
+    });
 }
 
 const MAX_BATCH_MENU_IDS = 50;
@@ -203,10 +237,22 @@ export async function getPublicMenusBatch(restaurantIds = []) {
         restaurantId: { $in: approvedObjectIds },
         approvalStatus: 'approved',
     })
-        .select('restaurantId categoryId categoryName category name image')
+        .select('restaurantId categoryId categoryName category name image itemSlotTimingId')
         .sort({ createdAt: -1 })
         .limit(5000)
         .lean();
+
+    const slotTimings = await loadSlotTimingsForRestaurants(
+        approvedObjectIds.map((id) => String(id)),
+        ItemSlotTiming
+    );
+    const slotTimingsByRestaurant = new Map();
+    slotTimings.forEach((slot) => {
+        const key = String(slot.restaurantId);
+        if (!slotTimingsByRestaurant.has(key)) slotTimingsByRestaurant.set(key, []);
+        slotTimingsByRestaurant.get(key).push(slot);
+    });
+    const referenceDate = new Date();
 
     const categoryIds = Array.from(
         new Set(
@@ -216,13 +262,18 @@ export async function getPublicMenusBatch(restaurantIds = []) {
         )
     );
     const categoryDocs = categoryIds.length
-        ? await FoodCategory.find({ _id: { $in: categoryIds } }).select('name image isActive approvalStatus').lean()
+        ? await FoodCategory.find({ _id: { $in: categoryIds } })
+            .select('name image isActive approvalStatus isApproved approvedAt restaurantId createdByRestaurantId')
+            .lean()
         : [];
+    if (categoryDocs.length) {
+        await backfillLegacyCategoryWorkflow(categoryDocs, { persist: false });
+    }
     const categoryMap = new Map(categoryDocs.map((doc) => [String(doc._id), doc]));
 
     const allowedCategories = new Set();
     for (const doc of categoryDocs) {
-        if (doc.isActive !== false && doc.approvalStatus === 'approved') {
+        if (isCategoryVisibleInPublicMenu(doc)) {
             allowedCategories.add(String(doc._id));
         }
     }
@@ -230,6 +281,11 @@ export async function getPublicMenusBatch(restaurantIds = []) {
     const menusByRestaurant = new Map();
 
     for (const food of foods) {
+        const restaurantSlots = slotTimingsByRestaurant.get(String(food.restaurantId)) || [];
+        if (!isFoodVisibleForSlotTiming(food, buildSlotTimingMap(restaurantSlots), referenceDate)) {
+            continue;
+        }
+
         const categoryId = food?.categoryId ? String(food.categoryId) : '';
         if (categoryId && !allowedCategories.has(categoryId)) {
             continue;

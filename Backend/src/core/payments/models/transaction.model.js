@@ -90,5 +90,19 @@ const transactionSchema = new mongoose.Schema(
 transactionSchema.index({ entityType: 1, entityId: 1, createdAt: -1 });
 transactionSchema.index({ orderId: 1, entityType: 1 });
 transactionSchema.index({ paymentId: 1, type: 1 });
+/** Prevent double-credit of delivery/platform earnings for the same order. */
+transactionSchema.index(
+    { orderId: 1, entityType: 1, category: 1 },
+    {
+        unique: true,
+        name: 'uniq_order_entity_category_delivery_credits',
+        partialFilterExpression: {
+            orderId: { $type: 'objectId' },
+            type: 'credit',
+            status: 'completed',
+            category: { $in: ['delivery_earning', 'platform_fee'] },
+        },
+    }
+);
 
 export const Transaction = mongoose.model('Transaction', transactionSchema);

@@ -5,6 +5,7 @@ import {
   getFoodVariants,
   hasFoodVariants,
 } from "@food/utils/foodVariants";
+import ItemSlotAvailabilityNote from "@food/components/user/ItemSlotAvailabilityNote";
 import { FOOD_IMAGE_FALLBACK, RUPEE_SYMBOL } from "./restaurantDetailsUtils";
 
 function VegIndicator({ isVeg }) {
@@ -112,6 +113,8 @@ export default function RestaurantDishCard({
         <div className="mt-2">
           <PriceBlock item={item} />
         </div>
+
+        <ItemSlotAvailabilityNote item={item} className="mt-1.5" />
 
         {item.description && (
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-2 line-clamp-2 leading-relaxed">

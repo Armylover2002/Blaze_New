@@ -1,7 +1,10 @@
 import mongoose from "mongoose";
 import { FoodOrder } from "../../orders/models/order.model.js";
 import { FoodDeliveryWithdrawal } from "../models/foodDeliveryWithdrawal.model.js";
-import { FoodDeliveryCashDeposit } from "../models/foodDeliveryCashDeposit.model.js";
+import {
+  FoodDeliveryCashDeposit,
+  ensureCashDepositIdempotencyIndexes,
+} from "../models/foodDeliveryCashDeposit.model.js";
 import { FoodDeliveryPartner } from "../models/deliveryPartner.model.js";
 import { uploadImageBuffer } from "../../../../services/cloudinary.service.js";
 import { DeliveryBonusTransaction } from "../../admin/models/deliveryBonusTransaction.model.js";
@@ -55,51 +58,62 @@ export const getDeliveryPartnerWalletEnhanced = async (deliveryPartnerId) => {
     if (completedOrders.length > 0) {
       const orderIds = completedOrders.map(o => o._id);
       const existingTxns = await Transaction.find({
-        entityType: "deliveryBoy",
-        entityId: partnerId,
-        category: "delivery_earning",
-        orderId: { $in: orderIds }
-      }).select("orderId").lean();
+        orderId: { $in: orderIds },
+        type: "credit",
+        status: "completed",
+        category: { $in: ["delivery_earning", "platform_fee"] },
+      }).select("orderId category entityType").lean();
 
-      const creditedOrderIds = new Set(existingTxns.map(t => String(t.orderId)));
+      const riderCredited = new Set(
+        existingTxns
+          .filter((t) => t.category === "delivery_earning" && t.entityType === "deliveryBoy")
+          .map((t) => String(t.orderId))
+      );
+      const platformCredited = new Set(
+        existingTxns
+          .filter((t) => t.category === "platform_fee" && t.entityType === "admin")
+          .map((t) => String(t.orderId))
+      );
 
       for (const order of completedOrders) {
-        if (!creditedOrderIds.has(String(order._id))) {
-          const riderEarning = order.riderEarning || order.pricing?.deliveryFee || 0;
-          const platformProfit = order.platformProfit || 0;
+        const orderKey = String(order._id);
+        const riderEarning = Number(order.riderEarning || 0);
+        const platformProfit = Number(order.platformProfit || 0);
 
-          if (riderEarning > 0) {
-            await creditWallet({
-              entityType: 'deliveryBoy',
-              entityId: partnerId,
-              amount: riderEarning,
-              description: `Order ${order.orderId || order._id} - delivery earning (self-heal)`,
-              category: 'delivery_earning',
-              orderId: order._id,
-              metadata: { orderId: order.orderId, paymentMethod: order.payment?.method }
-            });
+        if (!riderCredited.has(orderKey) && riderEarning > 0) {
+          const creditResult = await creditWallet({
+            entityType: 'deliveryBoy',
+            entityId: partnerId,
+            amount: riderEarning,
+            description: `Order ${order.orderId || order._id} - delivery earning (self-heal)`,
+            category: 'delivery_earning',
+            orderId: order._id,
+            metadata: { orderId: order.orderId, paymentMethod: order.payment?.method }
+          });
 
+          if (!creditResult?.alreadyProcessed) {
             await FoodDeliveryWallet.updateOne(
               { deliveryPartnerId: partnerId },
               { $inc: { totalDeliveries: 1 } }
             );
             logger.info(`Self-healed credit for delivery partner ${partnerId} order ${order._id}`);
           }
+        }
 
-          if (platformProfit > 0) {
-            try {
-              await creditWallet({
-                entityType: 'admin',
-                entityId: 'platform',
-                amount: platformProfit,
-                description: `Order ${order.orderId || order._id} - platform profit (self-heal)`,
-                category: 'platform_fee',
-                orderId: order._id,
-                metadata: { orderId: order.orderId, paymentMethod: order.payment?.method, riderEarning }
-              });
-            } catch (err) {
-              logger.error(`Self-heal platform profit failed for order ${order._id}: ${err.message}`);
-            }
+        // Heal platform profit independently (even if rider credit already exists).
+        if (!platformCredited.has(orderKey) && platformProfit > 0) {
+          try {
+            await creditWallet({
+              entityType: 'admin',
+              entityId: 'platform',
+              amount: platformProfit,
+              description: `Order ${order.orderId || order._id} - platform profit (self-heal)`,
+              category: 'platform_fee',
+              orderId: order._id,
+              metadata: { orderId: order.orderId, paymentMethod: order.payment?.method, riderEarning }
+            });
+          } catch (err) {
+            logger.error(`Self-heal platform profit failed for order ${order._id}: ${err.message}`);
           }
         }
       }
@@ -108,8 +122,8 @@ export const getDeliveryPartnerWalletEnhanced = async (deliveryPartnerId) => {
     logger.error(`Self-healing delivery wallet credits failed: ${err.message}`);
   }
 
-  // 2. In local development, auto-reject pending withdrawals to allow continuous testing of withdrawal flow
-  if (process.env.NODE_ENV === 'development') {
+  // Optional test helper only — never gate on NODE_ENV alone (mis-set prod would wipe pendings)
+  if (process.env.AUTO_REJECT_PENDING_DELIVERY_WITHDRAWALS === 'true') {
     try {
       const pendingWithdrawalsCount = await FoodDeliveryWithdrawal.countDocuments({
         deliveryPartnerId: partnerId,
@@ -118,9 +132,9 @@ export const getDeliveryPartnerWalletEnhanced = async (deliveryPartnerId) => {
       if (pendingWithdrawalsCount > 0) {
         await FoodDeliveryWithdrawal.updateMany(
           { deliveryPartnerId: partnerId, status: 'pending' },
-          { $set: { status: 'rejected', rejectionReason: 'Auto-rejected in development environment for testing' } }
+          { $set: { status: 'rejected', rejectionReason: 'Auto-rejected for testing (AUTO_REJECT_PENDING_DELIVERY_WITHDRAWALS)' } }
         );
-        logger.info(`Auto-rejected ${pendingWithdrawalsCount} pending withdrawals for partner ${partnerId} in development`);
+        logger.info(`Auto-rejected ${pendingWithdrawalsCount} pending withdrawals for partner ${partnerId}`);
       }
     } catch (err) {
       logger.error(`Auto-rejecting pending withdrawals failed: ${err.message}`);
@@ -133,6 +147,7 @@ export const getDeliveryPartnerWalletEnhanced = async (deliveryPartnerId) => {
     totalBonusAgg,
     cashCollectedAgg,
     totalDepositedCashAgg,
+    reservedDepositsAgg,
     pendingWithdrawalsAgg,
     transactionsResult,
     totalDeliveries,
@@ -164,7 +179,6 @@ export const getDeliveryPartnerWalletEnhanced = async (deliveryPartnerId) => {
                   amount: { $ifNull: ["$amount", 0] },
                   total: { $ifNull: ["$total", 0] },
                   pricingTotal: { $ifNull: ["$pricing.total", 0] },
-                  platformFee: { $ifNull: ["$pricing.platformFee", 0] },
                 },
                 in: {
                   $max: [
@@ -174,18 +188,7 @@ export const getDeliveryPartnerWalletEnhanced = async (deliveryPartnerId) => {
                     "$$totalAmount",
                     "$$amount",
                     "$$total",
-                    {
-                      $add: [
-                        "$$pricingTotal",
-                        {
-                          $cond: [
-                            { $gt: ["$$platformFee", 0] },
-                            "$$platformFee",
-                            0,
-                          ],
-                        },
-                      ],
-                    },
+                    "$$pricingTotal",
                   ],
                 },
               },
@@ -200,6 +203,27 @@ export const getDeliveryPartnerWalletEnhanced = async (deliveryPartnerId) => {
         $group: {
           _id: null,
           depositedCash: { $sum: { $ifNull: ["$amount", 0] } },
+        },
+      },
+    ]),
+    // Pending / hub-accepted deposits reserve float until Completed or Failed
+    FoodDeliveryCashDeposit.aggregate([
+      {
+        $match: {
+          deliveryPartnerId: partnerId,
+          status: {
+            $in: [
+              "Pending",
+              "Restaurant_Accepted",
+              "Seller_Accepted",
+            ],
+          },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          reservedCash: { $sum: { $ifNull: ["$amount", 0] } },
         },
       },
     ]),
@@ -242,12 +266,23 @@ export const getDeliveryPartnerWalletEnhanced = async (deliveryPartnerId) => {
     (Number(cashCollectedAgg?.[0]?.cashCollected) || 0) + Number(porterCashCollected || 0);
   const totalDepositedCash =
     Number(totalDepositedCashAgg?.[0]?.depositedCash) || 0;
+  // Outstanding COD float (Completed deposits only) — used for cash-limit headroom
   const cashInHand = Math.max(0, grossCashCollected - totalDepositedCash);
+  const pendingDepositAmount =
+    Math.round((Number(reservedDepositsAgg?.[0]?.reservedCash) || 0) * 100) / 100;
+  // New deposits may only cover unreserved outstanding float
+  const availableToDeposit = Math.max(
+    0,
+    Math.round((cashInHand - pendingDepositAmount) * 100) / 100,
+  );
 
   const pendingWithdrawals = Number(pendingWithdrawalsAgg?.[0]?.total) || 0;
   const totalCashLimit = Number(cashLimitSettings.deliveryCashLimit) || 0;
   const deliveryWithdrawalLimit =
     Number(cashLimitSettings.deliveryWithdrawalLimit) || 100;
+  const rawMax = cashLimitSettings.deliveryMaxWithdrawalLimit;
+  const deliveryMaxWithdrawalLimit =
+    rawMax != null && Number(rawMax) > 0 ? Number(rawMax) : null;
 
   const effectiveWalletBalance =
     Number(wallet.balance || 0) + missingBonusBalance;
@@ -281,6 +316,8 @@ export const getDeliveryPartnerWalletEnhanced = async (deliveryPartnerId) => {
     totalBalance: (wallet.totalEarnings || 0) + effectiveBonus,
     pocketBalance,
     cashInHand,
+    pendingDepositAmount,
+    availableToDeposit,
     totalWithdrawn: wallet.totalSettled || 0,
     pendingWithdrawals,
     totalEarned: wallet.totalEarnings || 0,
@@ -288,52 +325,148 @@ export const getDeliveryPartnerWalletEnhanced = async (deliveryPartnerId) => {
     totalCashLimit,
     availableCashLimit: Math.max(0, totalCashLimit - cashInHand),
     deliveryWithdrawalLimit,
+    deliveryMaxWithdrawalLimit,
     totalDeliveries: (Number(totalDeliveries) || 0) + Number(porterDeliveries || 0),
     subscriptionBalance: Number(wallet.subscriptionBalance || 0),
     transactions,
   };
 };
 
+/** COD methods that increase rider cash-in-hand on delivery */
+const COD_PAYMENT_METHODS = new Set(["cash", "cod", "cash_on_delivery"]);
+
+/**
+ * Amount the partner would collect in cash for this order (0 if prepaid / unknown).
+ */
+export function resolveOrderCodCollectAmount(order) {
+  const method = String(order?.payment?.method || "")
+    .trim()
+    .toLowerCase();
+  if (!COD_PAYMENT_METHODS.has(method)) return 0;
+
+  const candidates = [
+    order?.payment?.amountDue,
+    order?.payableAmount,
+    order?.totalAmount,
+    order?.amount,
+    order?.total,
+    order?.pricing?.total,
+  ]
+    .map((v) => Number(v))
+    .filter((n) => Number.isFinite(n) && n > 0);
+
+  if (!candidates.length) return 0;
+  return Math.round(Math.max(...candidates) * 100) / 100;
+}
+
+/**
+ * Block accept when this COD order would push the rider past available cash limit.
+ * Prepaid orders are always allowed.
+ */
+export async function assertDeliveryPartnerCodHeadroom(
+  deliveryPartnerId,
+  order,
+) {
+  const codAmount = resolveOrderCodCollectAmount(order);
+  if (!(codAmount > 0)) return { codAmount: 0, skipped: true };
+
+  const wallet = await getDeliveryPartnerWalletEnhanced(deliveryPartnerId);
+  const available = Number(wallet.availableCashLimit || 0);
+  const totalLimit = Number(wallet.totalCashLimit || 0);
+
+  if (totalLimit === 0) {
+    throw new ValidationError(
+      "Cash collection is blocked. Deposit outstanding cash or contact support before accepting COD orders.",
+    );
+  }
+
+  if (codAmount > available + 0.009) {
+    throw new ValidationError(
+      `Cannot accept this COD order of ₹${codAmount.toFixed(2)}. ` +
+        `Available cash limit is ₹${available.toFixed(2)} ` +
+        `(cash in hand ₹${Number(wallet.cashInHand || 0).toFixed(2)} / limit ₹${totalLimit.toFixed(2)}). ` +
+        "Please deposit cash first.",
+    );
+  }
+
+  return { codAmount, available, skipped: false };
+};
+
 /**
  * Submits a new withdrawal request for a delivery partner.
+ * Serializes concurrent creates per partner so pending totals cannot oversubscribe pocket balance.
  */
 export const requestDeliveryWithdrawal = async (deliveryPartnerId, payload) => {
   const { amount, bankDetails, paymentMethod = "bank_transfer" } = payload;
   if (!amount || amount < 1) throw new ValidationError("Invalid amount");
 
-  const wallet = await getDeliveryPartnerWalletEnhanced(deliveryPartnerId);
-  if (amount < wallet.deliveryWithdrawalLimit) {
-    throw new ValidationError(
-      `Minimum withdrawal amount is ₹${wallet.deliveryWithdrawalLimit}`,
-    );
-  }
-  if (amount > wallet.pocketBalance) {
-    throw new ValidationError("Insufficient balance for this withdrawal");
+  if (!mongoose.Types.ObjectId.isValid(deliveryPartnerId)) {
+    throw new ValidationError("Invalid delivery partner ID");
   }
 
-  const partner = await FoodDeliveryPartner.findById(deliveryPartnerId).lean();
+  const partnerId = new mongoose.Types.ObjectId(deliveryPartnerId);
+  const partner = await FoodDeliveryPartner.findById(partnerId).lean();
   if (!partner) throw new ValidationError("Delivery partner not found");
 
-  const withdrawal = await FoodDeliveryWithdrawal.create({
-    deliveryPartnerId,
-    amount,
-    paymentMethod,
-    bankDetails: bankDetails || {
-      accountNumber: partner.bankAccountNumber,
-      ifscCode: partner.bankIfscCode,
-      bankName: partner.bankName,
-      accountHolderName: partner.bankAccountHolderName,
-    },
-    upiId: partner.upiId,
-    upiQrCode: partner.upiQrCode,
-    status: "pending",
-  });
+  const session = await mongoose.startSession();
+  let withdrawal;
+  try {
+    await session.withTransaction(async () => {
+      await FoodDeliveryWallet.findOneAndUpdate(
+        { deliveryPartnerId: partnerId },
+        { $setOnInsert: { deliveryPartnerId: partnerId } },
+        { upsert: true, session, new: true }
+      );
+
+      const wallet = await getDeliveryPartnerWalletEnhanced(deliveryPartnerId);
+      if (amount < wallet.deliveryWithdrawalLimit) {
+        throw new ValidationError(
+          `Minimum withdrawal amount is ₹${wallet.deliveryWithdrawalLimit}`,
+        );
+      }
+      if (
+        wallet.deliveryMaxWithdrawalLimit != null &&
+        amount > wallet.deliveryMaxWithdrawalLimit
+      ) {
+        throw new ValidationError(
+          `Maximum withdrawal amount is ₹${wallet.deliveryMaxWithdrawalLimit}`,
+        );
+      }
+      if (amount > wallet.pocketBalance) {
+        throw new ValidationError("Insufficient balance for this withdrawal");
+      }
+
+      const [created] = await FoodDeliveryWithdrawal.create(
+        [
+          {
+            deliveryPartnerId: partnerId,
+            amount,
+            paymentMethod,
+            bankDetails: bankDetails || {
+              accountNumber: partner.bankAccountNumber,
+              ifscCode: partner.bankIfscCode,
+              bankName: partner.bankName,
+              accountHolderName: partner.bankAccountHolderName,
+            },
+            upiId: partner.upiId,
+            upiQrCode: partner.upiQrCode,
+            status: "pending",
+          },
+        ],
+        { session },
+      );
+      withdrawal = created;
+    });
+  } finally {
+    session.endSession();
+  }
 
   return withdrawal;
 };
 
 /**
- * Creates a Razorpay order for cash deposit.
+ * Creates a Razorpay order for cash deposit and persists a Pending intent
+ * bound to this delivery partner (prevents payment hijack across partners).
  */
 export const createDeliveryCashDepositOrder = async (
   deliveryPartnerId,
@@ -344,38 +477,72 @@ export const createDeliveryCashDepositOrder = async (
     throw new ValidationError("Amount must be at least ₹1");
   }
 
+  if (!deliveryPartnerId || !mongoose.Types.ObjectId.isValid(String(deliveryPartnerId))) {
+    throw new ValidationError("Invalid delivery partner ID");
+  }
+
+  await ensureCashDepositIdempotencyIndexes();
+
+  const partnerOid = new mongoose.Types.ObjectId(String(deliveryPartnerId));
   const wallet = await getDeliveryPartnerWalletEnhanced(deliveryPartnerId);
-  if (amount > wallet.cashInHand) {
-    throw new ValidationError("Deposit amount cannot exceed cash in hand");
+  if (amount > wallet.availableToDeposit) {
+    throw new ValidationError(
+      `Deposit amount cannot exceed available cash to deposit (₹${Number(wallet.availableToDeposit || 0).toFixed(2)}; ₹${Number(wallet.pendingDepositAmount || 0).toFixed(2)} already reserved in pending deposits)`
+    );
   }
 
   const amountPaise = Math.round(amount * 100);
   const receipt = `cash_deposit_${String(deliveryPartnerId).slice(-8)}_${Date.now()}`;
 
+  let orderId;
+  let orderAmountPaise = amountPaise;
+  let currency = "INR";
+  let key = getRazorpayKeyId() || "rzp_test_dummy";
+
   if (!isRazorpayConfigured()) {
-    return {
-      razorpay: {
-        key: getRazorpayKeyId() || "rzp_test_dummy",
-        orderId: `order_dev_${Date.now()}`,
-        amount: amountPaise,
-        currency: "INR",
-      },
-    };
+    orderId = `order_dev_${Date.now()}_${String(deliveryPartnerId).slice(-6)}`;
+  } else {
+    const order = await createRazorpayOrder(amountPaise, "INR", receipt);
+    orderId = String(order.id);
+    orderAmountPaise = Number(order.amount) || amountPaise;
+    currency = order.currency || "INR";
+    key = getRazorpayKeyId();
   }
 
-  const order = await createRazorpayOrder(amountPaise, "INR", receipt);
+  try {
+    await FoodDeliveryCashDeposit.create({
+      deliveryPartnerId: partnerOid,
+      amount,
+      paymentMethod: isRazorpayConfigured() ? "razorpay" : "cash",
+      depositType: "online",
+      status: "Pending",
+      razorpayOrderId: orderId,
+      razorpayPaymentId: null,
+    });
+  } catch (err) {
+    const isDup =
+      err?.code === 11000 || String(err?.message || "").includes("E11000");
+    if (isDup) {
+      throw new ValidationError(
+        "A deposit order with this reference already exists — please retry",
+      );
+    }
+    throw err;
+  }
+
   return {
     razorpay: {
-      key: getRazorpayKeyId(),
-      orderId: String(order.id),
-      amount: Number(order.amount) || amountPaise,
-      currency: order.currency || "INR",
+      key,
+      orderId,
+      amount: orderAmountPaise,
+      currency,
     },
   };
 };
 
 /**
- * Verifies a cash deposit payment.
+ * Verifies a cash deposit payment against the Pending intent created for this partner.
+ * Idempotent under concurrency: unique razorpayPaymentId / razorpayOrderId + duplicate-key replay.
  */
 export const verifyDeliveryCashDepositPayment = async (
   deliveryPartnerId,
@@ -390,16 +557,74 @@ export const verifyDeliveryCashDepositPayment = async (
   if (!signature && isRazorpayConfigured())
     throw new ValidationError("razorpaySignature is required");
 
-  const existing = await FoodDeliveryCashDeposit.findOne({
-    deliveryPartnerId,
-    $or: [{ razorpayPaymentId: paymentId }, { razorpayOrderId: orderId }],
+  await ensureCashDepositIdempotencyIndexes();
+
+  const partnerOid = new mongoose.Types.ObjectId(String(deliveryPartnerId));
+
+  const loadWallet = () => getDeliveryPartnerWalletEnhanced(deliveryPartnerId);
+
+  const assertOwnCompleted = (doc) => {
+    if (!doc) return null;
+    if (String(doc.deliveryPartnerId) !== String(deliveryPartnerId)) {
+      throw new ValidationError(
+        "This payment was already used for another deposit",
+      );
+    }
+    return doc;
+  };
+
+  // Global replay by payment id (any partner)
+  const completedByPayment = await FoodDeliveryCashDeposit.findOne({
+    razorpayPaymentId: paymentId,
+    status: "Completed",
+  }).lean();
+  if (completedByPayment) {
+    return {
+      deposit: assertOwnCompleted(completedByPayment),
+      wallet: await loadWallet(),
+    };
+  }
+
+  // Replay by order id for this partner
+  const completedByOrder = await FoodDeliveryCashDeposit.findOne({
+    deliveryPartnerId: partnerOid,
+    razorpayOrderId: orderId,
+    status: "Completed",
+  }).lean();
+  if (completedByOrder) {
+    return {
+      deposit: completedByOrder,
+      wallet: await loadWallet(),
+    };
+  }
+
+  // Must have a Pending intent created by this partner for this Razorpay order
+  const intent = await FoodDeliveryCashDeposit.findOne({
+    deliveryPartnerId: partnerOid,
+    razorpayOrderId: orderId,
+    depositType: "online",
+    status: "Pending",
   }).lean();
 
-  if (existing?.status === "Completed") {
-    return {
-      deposit: existing,
-      wallet: await getDeliveryPartnerWalletEnhanced(deliveryPartnerId),
-    };
+  if (!intent) {
+    // Another partner owns this order id (or no order was created)
+    const foreignIntent = await FoodDeliveryCashDeposit.findOne({
+      razorpayOrderId: orderId,
+      depositType: "online",
+    })
+      .select("deliveryPartnerId status")
+      .lean();
+    if (
+      foreignIntent &&
+      String(foreignIntent.deliveryPartnerId) !== String(deliveryPartnerId)
+    ) {
+      throw new ValidationError(
+        "This deposit order belongs to another delivery partner",
+      );
+    }
+    throw new ValidationError(
+      "No pending deposit order found — create a deposit order first",
+    );
   }
 
   const isValid = isRazorpayConfigured()
@@ -431,37 +656,73 @@ export const verifyDeliveryCashDepositPayment = async (
     throw new ValidationError("amount is required");
   }
 
-  const wallet = await getDeliveryPartnerWalletEnhanced(deliveryPartnerId);
-  if (resolvedAmount > wallet.cashInHand) {
-    throw new ValidationError("Deposit amount cannot exceed cash in hand");
+  const intentAmount = Number(intent.amount || 0);
+  if (Math.abs(resolvedAmount - intentAmount) > 0.5) {
+    throw new ValidationError(
+      `Payment amount ₹${resolvedAmount} does not match deposit order ₹${intentAmount}`,
+    );
   }
 
-  const deposit = existing
-    ? await FoodDeliveryCashDeposit.findByIdAndUpdate(
-        existing._id,
-        {
-          $set: {
-            amount: resolvedAmount,
-            paymentMethod: isRazorpayConfigured() ? "razorpay" : "cash",
-            status: "Completed",
-            razorpayOrderId: orderId,
-            razorpayPaymentId: paymentId,
-          },
-        },
-        { new: true },
-      )
-    : await FoodDeliveryCashDeposit.create({
-        deliveryPartnerId,
-        amount: resolvedAmount,
-        paymentMethod: isRazorpayConfigured() ? "razorpay" : "cash",
-        status: "Completed",
-        razorpayOrderId: orderId,
+  const wallet = await loadWallet();
+  // This Pending intent is already reserved — allow up to availableToDeposit + intent
+  const maxCompletable =
+    Math.round(
+      (Number(wallet.availableToDeposit || 0) + Number(intent.amount || 0)) * 100
+    ) / 100;
+  if (resolvedAmount > maxCompletable + 0.009) {
+    throw new ValidationError(
+      `Deposit amount exceeds remaining COD float (available ₹${maxCompletable.toFixed(2)})`
+    );
+  }
+
+  const completionFields = {
+    amount: resolvedAmount,
+    paymentMethod: isRazorpayConfigured() ? "razorpay" : "cash",
+    status: "Completed",
+    razorpayOrderId: orderId,
+    razorpayPaymentId: paymentId,
+    depositType: "online",
+  };
+
+  // Only promote THIS partner's Pending intent for this order
+  const deposit = await FoodDeliveryCashDeposit.findOneAndUpdate(
+    {
+      _id: intent._id,
+      deliveryPartnerId: partnerOid,
+      razorpayOrderId: orderId,
+      status: "Pending",
+    },
+    { $set: completionFields },
+    { new: true },
+  );
+
+  if (!deposit) {
+    // Concurrent verify completed it, or intent disappeared
+    const raced =
+      (await FoodDeliveryCashDeposit.findOne({
         razorpayPaymentId: paymentId,
-      });
+        status: "Completed",
+      }).lean()) ||
+      (await FoodDeliveryCashDeposit.findOne({
+        deliveryPartnerId: partnerOid,
+        razorpayOrderId: orderId,
+        status: "Completed",
+      }).lean());
+
+    if (raced) {
+      return {
+        deposit: assertOwnCompleted(raced),
+        wallet: await loadWallet(),
+      };
+    }
+    throw new ValidationError(
+      "Deposit order is no longer pending — please refresh",
+    );
+  }
 
   return {
-    deposit,
-    wallet: await getDeliveryPartnerWalletEnhanced(deliveryPartnerId),
+    deposit: deposit.toObject ? deposit.toObject() : deposit,
+    wallet: await loadWallet(),
   };
 };
 
@@ -477,8 +738,10 @@ export const submitDeliveryManualDeposit = async (deliveryPartnerId, payload, fi
   }
 
   const wallet = await getDeliveryPartnerWalletEnhanced(deliveryPartnerId);
-  if (amount > wallet.cashInHand) {
-    throw new ValidationError("Deposit amount cannot exceed cash in hand");
+  if (amount > wallet.availableToDeposit) {
+    throw new ValidationError(
+      `Deposit amount cannot exceed available cash to deposit (₹${Number(wallet.availableToDeposit || 0).toFixed(2)}; ₹${Number(wallet.pendingDepositAmount || 0).toFixed(2)} already reserved in pending deposits)`
+    );
   }
 
   const validTypes = ['admin_bank', 'admin_upi', 'admin_qr', 'zone_hub', 'quick_zone_hub'];

@@ -12,6 +12,7 @@ export default function SettingsDialog({ isOpen, onOpenChange, visibleColumns, t
     orderId: "Order ID",
     orderDate: "Order Date",
     orderType: "Order Type",
+    deliveryMode: "Food Delivery Mode",
     orderOtp: "Order OTP",
     customer: "Customer Information",
     restaurant: "Restaurant",

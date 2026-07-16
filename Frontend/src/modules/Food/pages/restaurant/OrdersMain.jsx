@@ -19,11 +19,9 @@ import {
   Loader2,
   Calendar,
   Clock,
-  Users,
   MessageSquare,
   Check,
   Phone,
-  Hash,
   User,
   Lock,
   Unlock,
@@ -32,7 +30,6 @@ import {
   Utensils,
   Search,
   Menu,
-  Home,
   CheckCircle2,
   Inbox,
 } from "lucide-react";
@@ -40,7 +37,11 @@ import { toast } from "sonner";
 import BottomNavOrders from "@food/components/restaurant/BottomNavOrders";
 import RestaurantNavbar from "@food/components/restaurant/RestaurantNavbar";
 import notificationSound from "@food/assets/audio/alert.mp3";
-import { restaurantAPI, diningAPI } from "@food/api";
+import { restaurantAPI } from "@food/api";
+import {
+  formatScheduledAtShort,
+  parseValidDate,
+} from "@food/utils/scheduleTime";
 import { useRestaurantNotifications } from "@food/hooks/useRestaurantNotifications";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -59,7 +60,6 @@ const filterTabs = [
   { id: "ready", label: "Ready", icon: Check },
   { id: "out-for-delivery", label: "Out for delivery", icon: Package },
   { id: "scheduled", label: "Scheduled", icon: Calendar },
-  { id: "table-booking", label: "Table Booking", icon: Home },
   { id: "completed", label: "Completed", icon: CheckCircle2 },
   { id: "cancelled", label: "Cancelled", icon: X },
 ];
@@ -76,12 +76,21 @@ const allOrdersStatusPriority = {
   cancelled: 7,
 };
 
-const getAllOrdersTimestamp = (order) =>
-  order?.cancelledAt ||
-  order?.deliveredAt ||
-  order?.updatedAt ||
-  order?.createdAt ||
-  new Date().toISOString();
+const getAllOrdersTimestamp = (order) => {
+  const status = String(order?.status || order?.orderStatus || "").toLowerCase();
+  // Only while still scheduled: list clock must show scheduledAt (not createdAt).
+  if (status === "scheduled") {
+    const scheduled = parseValidDate(order.scheduledAt);
+    if (scheduled) return scheduled.toISOString();
+  }
+  return (
+    order?.cancelledAt ||
+    order?.deliveredAt ||
+    order?.updatedAt ||
+    order?.createdAt ||
+    new Date().toISOString()
+  );
+};
 
 const getRestaurantVisibleItems = (items = []) => {
   const normalizedItems = Array.isArray(items) ? items : [];
@@ -100,14 +109,21 @@ const buildOrderItemsSummary = (items = []) =>
 const getOrderPreviewItem = (items = []) =>
   getRestaurantVisibleItems(items)[0] || null;
 
-const transformOrderForList = (order) => ({
+const transformOrderForList = (order) => {
+  const status = String(order.status || order.orderStatus || "pending").toLowerCase();
+  const displayTs =
+    status === "scheduled" && parseValidDate(order.scheduledAt)
+      ? order.scheduledAt
+      : getAllOrdersTimestamp(order);
+  const isFoodQuick = String(order.deliveryMode || "").toLowerCase() === "quick";
+  return {
   orderId: order.orderId || order._id,
   mongoId: order._id,
   status: order.status || "pending",
   customerName: order.userId?.name || order.customerName || "Customer",
   type: "Home Delivery",
   tableOrToken: null,
-  timePlaced: new Date(getAllOrdersTimestamp(order)).toLocaleDateString(
+  timePlaced: new Date(displayTs).toLocaleDateString(
     "en-US",
     {
       month: "short",
@@ -116,7 +132,11 @@ const transformOrderForList = (order) => ({
       minute: "2-digit",
     },
   ),
-  eta: null,
+  scheduledAt: order.scheduledAt || null,
+  eta: order.etaPromise?.max || null,
+  deliveryMode: order.deliveryMode || "basic",
+  isFoodQuickDelivery: isFoodQuick,
+  etaPromise: order.etaPromise || null,
   itemsSummary: buildOrderItemsSummary(order.items),
   photoUrl: getOrderPreviewItem(order.items)?.image || null,
   photoAlt: getOrderPreviewItem(order.items)?.name || "Order",
@@ -126,9 +146,11 @@ const transformOrderForList = (order) => ({
   preparingTimestamp: order.tracking?.preparing?.timestamp
     ? new Date(order.tracking.preparing.timestamp)
     : new Date(order.createdAt || Date.now()),
-  initialETA: order.estimatedDeliveryTime || 30,
+  initialETA: order.etaPromise?.max || order.estimatedDeliveryTime || 30,
   sortTimestamp: new Date(getAllOrdersTimestamp(order)).getTime(),
-});
+  kitchenPriority: isFoodQuick ? 0 : 1,
+};
+};
 
 // Completed Orders List Component
 function CompletedOrders({ onSelectOrder, refreshToken = 0, searchQuery = "" }) {
@@ -582,183 +604,6 @@ function CancelledOrders({ onSelectOrder, refreshToken = 0, searchQuery = "" }) 
   );
 }
 
-// Table Bookings List Component
-function TableBookings({ searchQuery = "" }) {
-  const [bookings, setBookings] = useState([]);
-  const [loading, setLoading] = useState(true);
-
-  const fetchBookings = async () => {
-    try {
-      const res = await restaurantAPI.getCurrentRestaurant();
-      const restaurant =
-        res.data?.data?.restaurant || res.data?.restaurant || res.data?.data;
-      const restaurantId = restaurant?._id || restaurant?.id;
-
-      if (restaurantId) {
-        const response = await diningAPI.getRestaurantBookings(restaurant);
-        if (response.data.success) {
-          setBookings(response.data.data);
-        }
-      }
-    } catch (error) {
-      debugError("Error fetching table bookings:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchBookings();
-    const interval = setInterval(fetchBookings, 10000);
-    return () => clearInterval(interval);
-  }, []);
-
-  const handleUpdateStatus = async (bookingId, nextStatus) => {
-    try {
-      await diningAPI.updateBookingStatusRestaurant(bookingId, nextStatus);
-      toast.success(`Booking ${nextStatus}`);
-      fetchBookings();
-    } catch (error) {
-      toast.error("Failed to update booking status");
-    }
-  };
-
-  if (loading)
-    return (
-      <div className="text-center py-10 text-gray-400">Loading bookings...</div>
-    );
-
-  const filteredBookings = bookings.filter(b => {
-    if (!searchQuery) return true;
-    const q = searchQuery.toLowerCase();
-    return (
-      String(b.bookingId || b._id || "").toLowerCase().includes(q) ||
-      String(b.user?.name || "").toLowerCase().includes(q) ||
-      String(b.user?.phone || "").toLowerCase().includes(q)
-    );
-  });
-
-  return (
-    <div className="pt-4 pb-6 px-1">
-      <div className="flex items-baseline justify-between mb-4 px-1">
-        <h2 className="text-base font-semibold text-black">Table Bookings</h2>
-        <span className="text-xs text-gray-500">{filteredBookings.length} total</span>
-      </div>
-
-      {filteredBookings.length === 0 ? (
-        <div className="text-center py-12 bg-white rounded-2xl border border-gray-200">
-          <p className="text-gray-400 text-sm">No table bookings yet</p>
-        </div>
-      ) : (
-        <div className="space-y-4">
-          {filteredBookings.map((booking) => (
-            <div
-              key={booking._id}
-              className="bg-white rounded-[2rem] p-5 border border-gray-100 shadow-sm transition-all hover:shadow-md">
-              {/* Header: Avatar, Name, ID and Status */}
-              <div className="flex justify-between items-start mb-5">
-                <div className="flex gap-3 items-center">
-                  <div className="h-12 w-12 rounded-full bg-[#111827] flex items-center justify-center text-white text-lg font-bold">
-                    {booking.user?.name?.charAt(0).toUpperCase() || "U"}
-                  </div>
-                  <div>
-                    <h3 className="text-[15px] font-bold text-gray-900 leading-tight">
-                      {booking.user?.name}
-                    </h3>
-                    <p className="text-[11px] font-bold text-[#94A3B8] flex items-center gap-0.5 mt-0.5">
-                      <Hash className="w-3 h-3" />
-                      {booking.bookingId || booking._id?.slice(-8).toUpperCase()}
-                    </p>
-                  </div>
-                </div>
-                <span
-                  className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${booking.status === "confirmed"
-                    ? "bg-[#FF0000] text-white"
-                    : booking.status === "pending"
-                      ? "bg-[#FFF9E7] text-[#D97706]"
-                      : booking.status === "checked-in"
-                        ? "bg-red-100 text-red-700"
-                        : booking.status === "completed"
-                          ? "bg-blue-100 text-blue-700"
-                          : "bg-gray-100 text-gray-600"
-                    }`}>
-                  {booking.status === "pending" ? "Pending" : booking.status}
-                </span>
-              </div>
-
-              {/* Info Grid */}
-              <div className="grid grid-cols-2 gap-x-4 gap-y-3 bg-[#F8FAFC] p-4 rounded-2xl border border-gray-50 mb-5">
-                <div className="flex items-center gap-2.5">
-                  <div className="h-7 w-7 rounded-lg bg-white flex items-center justify-center shadow-sm">
-                    <Calendar className="w-3.5 h-3.5 text-[#3B82F6]" />
-                  </div>
-                  <span className="text-[12px] font-semibold text-gray-700">
-                    {new Date(booking.date).toLocaleDateString("en-GB", {
-                      day: "2-digit",
-                      month: "short",
-                    })}
-                  </span>
-                </div>
-                <div className="flex items-center gap-2.5">
-                  <div className="h-7 w-7 rounded-lg bg-white flex items-center justify-center shadow-sm">
-                    <Clock className="w-3.5 h-3.5 text-[#3B82F6]" />
-                  </div>
-                  <span className="text-[12px] font-semibold text-gray-700">
-                    {booking.timeSlot}
-                  </span>
-                </div>
-                <div className="flex items-center gap-2.5">
-                  <div className="h-7 w-7 rounded-lg bg-white flex items-center justify-center shadow-sm">
-                    <Users className="w-3.5 h-3.5 text-[#3B82F6]" />
-                  </div>
-                  <span className="text-[12px] font-semibold text-gray-700">
-                    {booking.guests} Guests
-                  </span>
-                </div>
-                <div className="flex items-center gap-2.5">
-                  <div className="h-7 w-7 rounded-lg bg-white flex items-center justify-center shadow-sm">
-                    <Phone className="w-3.5 h-3.5 text-[#3B82F6]" />
-                  </div>
-                  <span className="text-[12px] font-semibold text-gray-700">
-                    {booking.user?.phone || "No phone"}
-                  </span>
-                </div>
-              </div>
-
-              {booking.specialRequest && (
-                <div className="mb-5 p-3 bg-blue-50/50 rounded-xl border border-blue-100/30">
-                  <p className="text-[11px] text-blue-700 italic flex items-start gap-1.5">
-                    <MessageSquare className="w-3.5 h-3.5 mt-0.5 shrink-0" />
-                    <span>{booking.specialRequest}</span>
-                  </p>
-                </div>
-              )}
-
-              {/* Action Buttons */}
-              <div className="flex gap-3">
-                {String(booking.status || "").toLowerCase() === "pending" && (
-                  <button
-                    onClick={() => handleUpdateStatus(booking._id, "confirmed")}
-                    className="flex-1 bg-[#FF0000] text-white py-3 rounded-2xl text-[13px] font-bold hover:bg-[#E64D02] transition-all active:scale-[0.98] shadow-sm shadow-[#FF0000]/10 uppercase tracking-wide">
-                    Accept
-                  </button>
-                )}
-                {String(booking.status || "").toLowerCase() === "pending" && (
-                  <button
-                    onClick={() => handleUpdateStatus(booking._id, "cancelled")}
-                    className="flex-1 bg-[#F1F5F9] text-[#64748B] py-3 rounded-2xl text-[13px] font-bold hover:bg-gray-200 transition-all active:scale-[0.98] uppercase tracking-wide">
-                    Decline
-                  </button>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
 function AllOrders({ onSelectOrder, onCancel, searchQuery = "" }) {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -780,6 +625,8 @@ function AllOrders({ onSelectOrder, onCancel, searchQuery = "" }) {
           const transformedOrders = response.data.data.orders
             .map(transformOrderForList)
             .sort((a, b) => {
+              const quickDiff = (a.kitchenPriority ?? 1) - (b.kitchenPriority ?? 1);
+              if (quickDiff !== 0) return quickDiff;
               const priorityDiff =
                 (allOrdersStatusPriority[a.status] ?? 999) -
                 (allOrdersStatusPriority[b.status] ?? 999);
@@ -1223,7 +1070,7 @@ export default function OrdersMain() {
 
       if (isFutureScheduled) {
         toast.info(
-          `New scheduled order received for ${new Date(scheduledAt).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}`,
+          `New scheduled order received for ${formatScheduledAtShort(newOrder.scheduledAt) || "later"}`,
         );
         requestOrdersRefresh();
         return; // Do not show the immediate popup
@@ -1307,18 +1154,26 @@ export default function OrdersMain() {
           const targetOrders = response.data.data.orders.filter((order) => {
             if (hasOrderBeenShown(order)) return false;
 
-            const isConfirmed = order.status === "confirmed";
-            const isCreatedScheduled =
-              order.status === "created" && order.scheduledAt;
+            const status = String(order.status || order.orderStatus || "").toLowerCase();
+
+            // Never Instant-popup while still waiting for BullMQ activation.
+            if (status === "scheduled") return false;
+
+            const isConfirmed = status === "confirmed";
 
             if (isConfirmed && !order.scheduledAt) return true; // ordinary confirmed fallback
 
+            // After PRIMARY/fallback activation → placed. Same Instant popup surface.
+            if (order.scheduledAt && status === "placed") {
+              return true;
+            }
+
+            // Legacy remnant: created/confirmed with scheduledAt near window.
             if (
               order.scheduledAt &&
-              (order.status === "created" || order.status === "confirmed")
+              (status === "created" || status === "confirmed")
             ) {
               const scheduledTime = new Date(order.scheduledAt).getTime();
-              // Show popup if scheduled time is <= 15 mins from now
               if (scheduledTime <= now + 15 * 60000) return true;
             }
 
@@ -2026,9 +1881,7 @@ export default function OrdersMain() {
             searchQuery={searchQuery}
           />
         );
-      case "table-booking":
-        return <TableBookings searchQuery={searchQuery} />;
-      case "cancelled":
+case "cancelled":
         return (
           <CancelledOrders
             onSelectOrder={handleSelectOrder}
@@ -2531,15 +2384,8 @@ export default function OrdersMain() {
                         </p>
                         <p className="text-sm font-bold text-[#FF0000]">
                           For{" "}
-                          {new Date(
-                            currentPopupOrder.scheduledAt,
-                          ).toLocaleString("en-US", {
-                            day: "numeric",
-                            month: "short",
-                            hour: "2-digit",
-                            minute: "2-digit",
-                            hour12: true,
-                          })}
+                          {formatScheduledAtShort(currentPopupOrder.scheduledAt) ||
+                            "Scheduled time"}
                         </p>
                       </div>
                     </div>
@@ -3090,6 +2936,8 @@ const OrderCard = memo(function OrderCard({
   photoAlt,
   deliveryPartnerId,
   dispatchStatus,
+  isFoodQuickDelivery = false,
+  deliveryMode,
   onSelect,
   onCancel,
   onMarkReady,
@@ -3103,7 +2951,7 @@ const OrderCard = memo(function OrderCard({
     .replace(/\b\w/g, (c) => c.toUpperCase());
 
   return (
-    <div className="w-full bg-white rounded-2xl p-4 mb-3 border border-gray-100/80 shadow-[0_2px_10px_rgba(0,0,0,0.01)] hover:shadow-md transition-shadow relative flex flex-col gap-3 cursor-pointer group"
+    <div className={`w-full bg-white rounded-2xl p-4 mb-3 border shadow-[0_2px_10px_rgba(0,0,0,0.01)] hover:shadow-md transition-shadow relative flex flex-col gap-3 cursor-pointer group ${isFoodQuickDelivery ? "border-emerald-300 ring-1 ring-emerald-100" : "border-gray-100/80"}`}
       onClick={() =>
         onSelect?.({
           orderId,
@@ -3118,14 +2966,23 @@ const OrderCard = memo(function OrderCard({
           paymentMethod,
           deliveryPartnerId,
           dispatchStatus,
+          isFoodQuickDelivery,
+          deliveryMode,
         })
       }>
       
       {/* Top Row: Order ID & Status */}
       <div className="flex justify-between items-start">
-        <span className="text-sm font-bold text-gray-900 tracking-tight truncate mr-2">
-          #{orderId}
-        </span>
+        <div className="flex items-center gap-2 min-w-0 mr-2">
+          <span className="text-sm font-bold text-gray-900 tracking-tight truncate">
+            #{orderId}
+          </span>
+          {isFoodQuickDelivery && (
+            <span className="inline-flex items-center rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider shrink-0">
+              Quick · Priority
+            </span>
+          )}
+        </div>
         <div className="flex items-center gap-2 flex-shrink-0">
           <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[9px] font-bold uppercase tracking-wider ${isReady ? "bg-green-50 text-green-700" : "bg-gray-50 text-gray-600"}`}>
              <span className={`w-1 h-1 rounded-full ${isReady ? "bg-green-500" : "bg-gray-400"}`} />
@@ -3260,7 +3117,10 @@ function PreparingOrders({
           );
 
           const transformedOrders = preparingOrders.map((order) => {
-            const initialETA = order.estimatedDeliveryTime || 30; // in minutes
+            const isFoodQuick =
+              String(order.deliveryMode || "").toLowerCase() === "quick";
+            const initialETA =
+              order.etaPromise?.max || order.estimatedDeliveryTime || 30; // in minutes
             const preparingTimestamp = order.tracking?.preparing?.timestamp
               ? new Date(order.tracking.preparing.timestamp)
               : new Date(order.createdAt); // Fallback to createdAt if preparing timestamp not available
@@ -3288,8 +3148,11 @@ function PreparingOrders({
               dispatchStatus: order.dispatch?.status || null,
               paymentMethod:
                 order.paymentMethod || order.payment?.method || null,
+              deliveryMode: order.deliveryMode || "basic",
+              isFoodQuickDelivery: isFoodQuick,
+              kitchenPriority: isFoodQuick ? 0 : 1,
             };
-          });
+          }).sort((a, b) => (a.kitchenPriority ?? 1) - (b.kitchenPriority ?? 1));
 
           if (isMounted) {
             setOrders(transformedOrders);
@@ -3824,26 +3687,29 @@ function ScheduledOrders({ onSelectOrder, refreshToken = 0, searchQuery = "" }) 
 
         if (response.data?.success && response.data.data?.orders) {
           const scheduledOrders = response.data.data.orders.filter(
-            (order) => order.status === "scheduled",
+            (order) =>
+              String(order.status || order.orderStatus || "").toLowerCase() ===
+              "scheduled",
           );
 
-          const transformedOrders = scheduledOrders.map((order) => ({
+          const transformedOrders = scheduledOrders.map((order) => {
+            const scheduledLabel =
+              formatScheduledAtShort(order.scheduledAt) || "Scheduled";
+            return {
             orderId: order.orderId || order._id,
             mongoId: order._id,
-            status: order.status || "scheduled",
+            status: order.status || order.orderStatus || "scheduled",
             customerName: order.userId?.name || "Customer",
             type: order.deliveryFleet === "standard" ? "Home Delivery" : "Express Delivery",
             tableOrToken: null,
-            timePlaced: new Date(order.createdAt).toLocaleTimeString("en-US", {
-              hour: "2-digit",
-              minute: "2-digit",
-            }),
+            timePlaced: `For: ${scheduledLabel}`,
             scheduledAt: order.scheduledAt,
             itemsSummary: buildOrderItemsSummary(order.items),
             photoUrl: getOrderPreviewItem(order.items)?.image || null,
             photoAlt: getOrderPreviewItem(order.items)?.name || "Order",
             paymentMethod: order.paymentMethod || order.payment?.method || null,
-          }));
+          };
+          });
 
           setOrders(transformedOrders);
         } else {
@@ -3903,17 +3769,10 @@ function ScheduledOrders({ onSelectOrder, refreshToken = 0, searchQuery = "" }) 
       ) : (
         <div>
           {filteredOrders.map((order) => {
-            const scheduledTime = new Date(order.scheduledAt).toLocaleString("en-US", {
-              day: "numeric",
-              month: "short",
-              hour: "2-digit",
-              minute: "2-digit",
-            });
             return (
               <OrderCard
                 key={order.orderId || order.mongoId}
                 {...order}
-                timePlaced={`For: ${scheduledTime}`}
                 onSelect={onSelectOrder}
               />
             );

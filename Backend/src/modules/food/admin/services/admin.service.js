@@ -12,6 +12,11 @@ import { FoodCategory } from '../models/category.model.js';
 import { FoodItem } from '../models/food.model.js';
 import { FoodOffer } from '../models/offer.model.js';
 import { FoodOfferUsage } from '../models/offerUsage.model.js';
+import {
+    COUPON_OWNER_TYPES,
+    claimCouponCodeReservation,
+    releaseCouponCodeReservation
+} from '../../shared/couponCodeRegistry.util.js';
 import { DeliveryBonusTransaction } from '../models/deliveryBonusTransaction.model.js';
 import { DeliveryBonusAuditLog } from '../models/deliveryBonusAuditLog.model.js';
 import { DeliveryBonusIdempotency } from '../models/deliveryBonusIdempotency.model.js';
@@ -21,11 +26,13 @@ import { FoodEarningAddon } from '../models/earningAddon.model.js';
 import { FoodEarningAddonHistory } from '../models/earningAddonHistory.model.js';
 import { FoodDeliveryCommissionRule } from '../models/deliveryCommissionRule.model.js';
 import { FoodFeeSettings } from '../models/feeSettings.model.js';
+import { normalizeQuickDeliverySettings, mergeQuickDeliveryForAdminSave } from '../../orders/utils/quickDeliveryConstants.js';
 import { FeedbackExperience } from '../models/feedbackExperience.model.js';
 import { FoodUser } from '../../../../core/users/user.model.js';
 import { FoodAdmin } from '../../../../core/admin/admin.model.js';
 import { FoodRefreshToken } from '../../../../core/refreshTokens/refreshToken.model.js';
 import { FoodDeliveryCashLimit } from '../models/deliveryCashLimit.model.js';
+import { FoodRestaurantWithdrawalLimit } from '../models/restaurantWithdrawalLimit.model.js';
 import { FoodDeliveryEmergencyHelp } from '../models/deliveryEmergencyHelp.model.js';
 import { FoodReferralSettings } from '../models/referralSettings.model.js';
 import { FoodReferralLog } from '../models/referralLog.model.js';
@@ -61,6 +68,7 @@ import { getDeliveryPartnerWalletEnhanced } from '../../delivery/services/delive
 import {
     backfillLegacyCategoryWorkflow,
     categoryAllowsFoodType,
+    ensureUniqueCategoryName,
     normalizeCategoryFoodTypeScope,
     serializeCategoryForResponse
 } from '../../shared/categoryWorkflow.js';
@@ -80,6 +88,10 @@ import {
 } from '../utils/dashboardStatsCache.js';
 import { sendNotificationToOwner } from '../../../../core/notifications/firebase.service.js';
 import { resolveActionPerformerSnapshot } from '../../../../core/utils/performer.js';
+import {
+    recordRestaurantWithdrawalPayment,
+    recordDeliveryWithdrawalPayment,
+} from './withdrawalPaymentHistory.service.js';
 
 const parseBooleanLike = (value, fieldName) => {
     if (typeof value === 'boolean') return value;
@@ -703,7 +715,72 @@ export async function getDashboardStats(query = {}) {
                         $sum: {
                             $cond: [{ $eq: ['$orderStatus', 'delivered'] }, { $ifNull: ['$platformProfit', 0] }, 0]
                         }
-                    }
+                    },
+                    quickOrders: {
+                        $sum: {
+                            $cond: [{ $eq: ['$deliveryMode', 'quick'] }, 1, 0]
+                        }
+                    },
+                    quickDelivered: {
+                        $sum: {
+                            $cond: [
+                                {
+                                    $and: [
+                                        { $eq: ['$deliveryMode', 'quick'] },
+                                        { $eq: ['$orderStatus', 'delivered'] },
+                                    ],
+                                },
+                                1,
+                                0,
+                            ],
+                        },
+                    },
+                    quickFeeRevenue: {
+                        $sum: {
+                            $cond: [
+                                { $eq: ['$deliveryMode', 'quick'] },
+                                { $ifNull: ['$pricing.quickDeliveryFee', 0] },
+                                0,
+                            ],
+                        },
+                    },
+                    quickSlaBreached: {
+                        $sum: {
+                            $cond: [
+                                {
+                                    $and: [
+                                        { $eq: ['$deliveryMode', 'quick'] },
+                                        { $eq: ['$sla.breached', true] },
+                                    ],
+                                },
+                                1,
+                                0,
+                            ],
+                        },
+                    },
+                    quickSlaCompensated: {
+                        $sum: {
+                            $cond: [
+                                {
+                                    $and: [
+                                        { $eq: ['$deliveryMode', 'quick'] },
+                                        { $gt: [{ $ifNull: ['$sla.compensationAmount', 0] }, 0] },
+                                    ],
+                                },
+                                1,
+                                0,
+                            ],
+                        },
+                    },
+                    quickSlaCompensationPaid: {
+                        $sum: {
+                            $cond: [
+                                { $eq: ['$deliveryMode', 'quick'] },
+                                { $ifNull: ['$sla.compensationAmount', 0] },
+                                0,
+                            ],
+                        },
+                    },
                 }
             }
         ]),
@@ -919,6 +996,33 @@ export async function getDashboardStats(query = {}) {
             pending: Number(totals.pendingOnly || 0),
             processing: Number(totals.processing || 0),
             completed: Number(totals.delivered || 0)
+        },
+        quickDelivery: {
+            orders: Number(totals.quickOrders || 0),
+            delivered: Number(totals.quickDelivered || 0),
+            feeRevenue: Number(totals.quickFeeRevenue || 0),
+            attachmentRate:
+                Number(totals.totalOrders || 0) > 0
+                    ? Number(
+                        (
+                            (Number(totals.quickOrders || 0) /
+                                Number(totals.totalOrders || 1)) *
+                            100
+                        ).toFixed(1),
+                    )
+                    : 0,
+            slaBreachRate:
+                Number(totals.quickDelivered || 0) > 0
+                    ? Number(
+                        (
+                            (Number(totals.quickSlaBreached || 0) /
+                                Number(totals.quickDelivered || 1)) *
+                            100
+                        ).toFixed(1),
+                    )
+                    : 0,
+            slaCompensatedOrders: Number(totals.quickSlaCompensated || 0),
+            slaCompensationPaid: Number(totals.quickSlaCompensationPaid || 0),
         },
         monthlyData,
         liveSignals: finalLiveSignals
@@ -2343,12 +2447,19 @@ export async function toggleDeliveryCommissionRuleStatus(id, status) {
 
 // ----- Fee Settings (admin) -----
 export async function getFeeSettings() {
-    const doc = await FoodFeeSettings.findOne({ isActive: true }).sort({ createdAt: -1 }).lean();
-    return { feeSettings: doc || null };
+    const doc = await FoodFeeSettings.findOne({ isActive: { $ne: false } }).sort({ createdAt: -1 }).lean();
+    if (!doc) return { feeSettings: null };
+    // Normalize Quick Delivery for Admin get (business + internals). FE maps business only.
+    return {
+        feeSettings: {
+            ...doc,
+            quickDelivery: normalizeQuickDeliverySettings(doc.quickDelivery),
+        },
+    };
 }
 
 export async function upsertFeeSettings(body) {
-    const existing = await FoodFeeSettings.findOne({ isActive: true }).sort({ createdAt: -1 });
+    const existing = await FoodFeeSettings.findOne({ isActive: { $ne: false } }).sort({ createdAt: -1 });
     if (existing) {
         const $set = {};
         const $unset = {};
@@ -2383,10 +2494,21 @@ export async function upsertFeeSettings(body) {
         if (body.platformFee === null) $unset.platformFee = 1;
         else if (body.platformFee !== undefined) $set.platformFee = body.platformFee;
 
+        if (body.packagingFee === null) $unset.packagingFee = 1;
+        else if (body.packagingFee !== undefined) $set.packagingFee = body.packagingFee;
+
         if (body.gstRate === null) $unset.gstRate = 1;
         else if (body.gstRate !== undefined) $set.gstRate = body.gstRate;
         if (body.mixedOrderDistanceLimit !== undefined) $set.mixedOrderDistanceLimit = body.mixedOrderDistanceLimit;
         if (body.mixedOrderAngleLimit !== undefined) $set.mixedOrderAngleLimit = body.mixedOrderAngleLimit;
+        if (body.quickDelivery !== undefined) {
+            // Admin business fields only should mutate ops knobs; preserve existing
+            // engineering/dispatch/SLA internals already stored in DB.
+            $set.quickDelivery = mergeQuickDeliveryForAdminSave(
+                existing.quickDelivery,
+                body.quickDelivery,
+            );
+        }
 
         if (body.isActive !== undefined) $set.isActive = body.isActive;
 
@@ -2416,17 +2538,22 @@ export async function upsertFeeSettings(body) {
     if (body.sponsorRules !== undefined) payload.sponsorRules = body.sponsorRules ?? [];
     if (body.deliveryDistanceSlabs !== undefined) payload.deliveryDistanceSlabs = body.deliveryDistanceSlabs ?? [];
     if (body.platformFee !== undefined && body.platformFee !== null) payload.platformFee = body.platformFee;
+    if (body.packagingFee !== undefined && body.packagingFee !== null) payload.packagingFee = body.packagingFee;
     if (body.gstRate !== undefined && body.gstRate !== null) payload.gstRate = body.gstRate;
     if (body.mixedOrderDistanceLimit !== undefined) payload.mixedOrderDistanceLimit = body.mixedOrderDistanceLimit;
     if (body.mixedOrderAngleLimit !== undefined) payload.mixedOrderAngleLimit = body.mixedOrderAngleLimit;
+    if (body.quickDelivery !== undefined) {
+        payload.quickDelivery = mergeQuickDeliveryForAdminSave(null, body.quickDelivery);
+    }
 
     const created = await FoodFeeSettings.create(payload);
     return created.toObject();
 }
 
 // ----- Referral Settings (admin) -----
-export async function getReferralSettings() {
-    const doc = await FoodReferralSettings.findOne({ isActive: true }).sort({ createdAt: -1 }).lean();
+export async function getReferralSettings({ includeInactive = false } = {}) {
+    const filter = includeInactive ? {} : { isActive: true };
+    const doc = await FoodReferralSettings.findOne(filter).sort({ createdAt: -1 }).lean();
     return { referralSettings: doc || null };
 }
 
@@ -2445,8 +2572,11 @@ const normalizeReferralSection = (incoming, fallback = {}) => {
 };
 
 export async function upsertReferralSettings(body = {}) {
-    const existing = await FoodReferralSettings.findOne({ isActive: true }).sort({ createdAt: -1 });
+    // Always target the latest settings doc (including inactive) so deactivate
+    // does not orphan the config and force a new document on the next save.
+    const existing = await FoodReferralSettings.findOne({}).sort({ createdAt: -1 });
     const existingObj = existing?.toObject?.() || existing || {};
+    const wasActive = existingObj.isActive !== false;
 
     // Merge only provided sections/fields so a partial PUT cannot zero other roles.
     const formattedData = {
@@ -2456,17 +2586,26 @@ export async function upsertReferralSettings(body = {}) {
         isActive: body.isActive !== undefined ? Boolean(body.isActive) : (existingObj.isActive !== false)
     };
 
+    let saved;
     if (existing) {
-        const updated = await FoodReferralSettings.findByIdAndUpdate(
+        saved = await FoodReferralSettings.findByIdAndUpdate(
             existing._id,
             { $set: formattedData },
             { new: true }
         ).lean();
-        return updated;
+    } else {
+        saved = (await FoodReferralSettings.create(formattedData)).toObject();
     }
 
-    const created = await FoodReferralSettings.create(formattedData);
-    return created.toObject();
+    // Deactivating the program must cancel open restaurant payouts, not only block new invites.
+    if (wasActive && formattedData.isActive === false) {
+        await FoodReferralLog.updateMany(
+            { role: 'RESTAURANT', status: 'pending' },
+            { $set: { status: 'rejected', reason: 'program_inactive' } }
+        );
+    }
+
+    return saved;
 }
 
 // ----- Safety / Emergency Reports (admin) -----
@@ -2606,12 +2745,26 @@ export async function getContactMessages(query = {}) {
 }
 
 // ----- Delivery Cash Limit (admin) -----
+function normalizeMaxWithdrawalLimit(value) {
+    if (value === undefined || value === null || value === '') return null;
+    const n = Number(value);
+    if (!Number.isFinite(n) || n <= 0) return null;
+    return n;
+}
+
 export async function getDeliveryCashLimitSettings() {
     const doc = await FoodDeliveryCashLimit.findOne({ isActive: true }).sort({ createdAt: -1 }).lean();
-    const settings = doc || { deliveryCashLimit: 0, deliveryWithdrawalLimit: 100, isActive: true };
+    const settings = doc || {
+        deliveryCashLimit: 0,
+        deliveryWithdrawalLimit: 100,
+        deliveryMaxWithdrawalLimit: null,
+        isActive: true
+    };
     return {
         deliveryCashLimit: Number(settings.deliveryCashLimit) || 0,
-        deliveryWithdrawalLimit: Number(settings.deliveryWithdrawalLimit) || 100
+        deliveryWithdrawalLimit: Number(settings.deliveryWithdrawalLimit) || 100,
+        // Legacy docs without this field → null (unlimited)
+        deliveryMaxWithdrawalLimit: normalizeMaxWithdrawalLimit(settings.deliveryMaxWithdrawalLimit)
     };
 }
 
@@ -2619,26 +2772,89 @@ export async function upsertDeliveryCashLimitSettings(body = {}) {
     const existing = await FoodDeliveryCashLimit.findOne({ isActive: true }).sort({ createdAt: -1 });
     const nextCashLimit = body.deliveryCashLimit;
     const nextWithdrawalLimit = body.deliveryWithdrawalLimit;
+    const nextMaxWithdrawalLimit = body.deliveryMaxWithdrawalLimit;
 
     if (existing) {
         if (nextCashLimit !== undefined) existing.deliveryCashLimit = Math.max(0, Number(nextCashLimit) || 0);
         if (nextWithdrawalLimit !== undefined) existing.deliveryWithdrawalLimit = Math.max(0, Number(nextWithdrawalLimit) || 0);
+        if (nextMaxWithdrawalLimit !== undefined) {
+            existing.deliveryMaxWithdrawalLimit = normalizeMaxWithdrawalLimit(nextMaxWithdrawalLimit);
+        }
+        const effectiveMin = Number(existing.deliveryWithdrawalLimit) || 0;
+        const effectiveMax = normalizeMaxWithdrawalLimit(existing.deliveryMaxWithdrawalLimit);
+        if (effectiveMax != null && effectiveMax < effectiveMin) {
+            throw new ValidationError(
+                'Maximum withdrawal limit must be greater than or equal to minimum withdrawal limit'
+            );
+        }
         await existing.save();
         return {
             deliveryCashLimit: existing.deliveryCashLimit,
-            deliveryWithdrawalLimit: existing.deliveryWithdrawalLimit
+            deliveryWithdrawalLimit: existing.deliveryWithdrawalLimit,
+            deliveryMaxWithdrawalLimit: normalizeMaxWithdrawalLimit(existing.deliveryMaxWithdrawalLimit)
         };
     }
 
     const created = await FoodDeliveryCashLimit.create({
         deliveryCashLimit: nextCashLimit !== undefined ? Math.max(0, Number(nextCashLimit) || 0) : 0,
         deliveryWithdrawalLimit: nextWithdrawalLimit !== undefined ? Math.max(0, Number(nextWithdrawalLimit) || 0) : 100,
+        deliveryMaxWithdrawalLimit:
+            nextMaxWithdrawalLimit !== undefined ? normalizeMaxWithdrawalLimit(nextMaxWithdrawalLimit) : null,
         isActive: true
     });
 
     return {
         deliveryCashLimit: created.deliveryCashLimit,
-        deliveryWithdrawalLimit: created.deliveryWithdrawalLimit
+        deliveryWithdrawalLimit: created.deliveryWithdrawalLimit,
+        deliveryMaxWithdrawalLimit: normalizeMaxWithdrawalLimit(created.deliveryMaxWithdrawalLimit)
+    };
+}
+
+// ----- Restaurant Withdrawal Limits (admin) — separate from delivery -----
+export async function getRestaurantWithdrawalLimitSettings() {
+    const doc = await FoodRestaurantWithdrawalLimit.findOne({ isActive: true }).sort({ createdAt: -1 }).lean();
+    const settings = doc || {
+        restaurantMinWithdrawalLimit: 1,
+        restaurantMaxWithdrawalLimit: null,
+        isActive: true
+    };
+    return {
+        restaurantMinWithdrawalLimit: Number(settings.restaurantMinWithdrawalLimit) || 1,
+        restaurantMaxWithdrawalLimit: normalizeMaxWithdrawalLimit(settings.restaurantMaxWithdrawalLimit)
+    };
+}
+
+export async function upsertRestaurantWithdrawalLimitSettings(body = {}) {
+    const existing = await FoodRestaurantWithdrawalLimit.findOne({ isActive: true }).sort({ createdAt: -1 });
+    const nextMin = body.restaurantMinWithdrawalLimit;
+    const nextMax = body.restaurantMaxWithdrawalLimit;
+
+    if (existing) {
+        if (nextMin !== undefined) existing.restaurantMinWithdrawalLimit = Math.max(0, Number(nextMin) || 0);
+        if (nextMax !== undefined) existing.restaurantMaxWithdrawalLimit = normalizeMaxWithdrawalLimit(nextMax);
+        const effectiveMin = Number(existing.restaurantMinWithdrawalLimit) || 0;
+        const effectiveMax = normalizeMaxWithdrawalLimit(existing.restaurantMaxWithdrawalLimit);
+        if (effectiveMax != null && effectiveMax < effectiveMin) {
+            throw new ValidationError(
+                'Maximum withdrawal limit must be greater than or equal to minimum withdrawal limit'
+            );
+        }
+        await existing.save();
+        return {
+            restaurantMinWithdrawalLimit: existing.restaurantMinWithdrawalLimit,
+            restaurantMaxWithdrawalLimit: normalizeMaxWithdrawalLimit(existing.restaurantMaxWithdrawalLimit)
+        };
+    }
+
+    const created = await FoodRestaurantWithdrawalLimit.create({
+        restaurantMinWithdrawalLimit: nextMin !== undefined ? Math.max(0, Number(nextMin) || 0) : 1,
+        restaurantMaxWithdrawalLimit: nextMax !== undefined ? normalizeMaxWithdrawalLimit(nextMax) : null,
+        isActive: true
+    });
+
+    return {
+        restaurantMinWithdrawalLimit: created.restaurantMinWithdrawalLimit,
+        restaurantMaxWithdrawalLimit: normalizeMaxWithdrawalLimit(created.restaurantMaxWithdrawalLimit)
     };
 }
 
@@ -3266,6 +3482,34 @@ export async function updateRestaurantById(id, body = {}) {
         doc.isAcceptingOrders = parseBooleanLike(body.isAcceptingOrders, 'isAcceptingOrders');
     }
 
+    if (body.quickDeliveryEnabled !== undefined) {
+        doc.quickDeliveryEnabled = parseBooleanLike(body.quickDeliveryEnabled, 'quickDeliveryEnabled');
+    }
+
+    if (body.kitchenPrepMinutes !== undefined) {
+        if (body.kitchenPrepMinutes === null || body.kitchenPrepMinutes === '') {
+            doc.kitchenPrepMinutes = undefined;
+            doc.set('kitchenPrepMinutes', undefined);
+        } else {
+            const {
+                parseKitchenPrepMinutes,
+                KITCHEN_PREP_MINUTES_MIN,
+                KITCHEN_PREP_MINUTES_MAX,
+            } = await import('../../orders/utils/quickDeliveryConstants.js');
+            const parsed = parseKitchenPrepMinutes(body.kitchenPrepMinutes);
+            if (!Number.isFinite(parsed)) {
+                throw new ValidationError(
+                    `kitchenPrepMinutes must be an integer between ${KITCHEN_PREP_MINUTES_MIN} and ${KITCHEN_PREP_MINUTES_MAX}`,
+                );
+            }
+            doc.kitchenPrepMinutes = parsed;
+        }
+    }
+
+    if (body.scheduleOrderEnabled !== undefined) {
+        doc.scheduleOrderEnabled = parseBooleanLike(body.scheduleOrderEnabled, 'scheduleOrderEnabled');
+    }
+
     if (body.cuisines !== undefined) {
         if (Array.isArray(body.cuisines)) {
             doc.cuisines = body.cuisines
@@ -3586,20 +3830,24 @@ export async function createCategory(body) {
     if (!foodTypeScope) {
         throw new ValidationError('Category diet type must be Veg or Non-Veg');
     }
+    const zoneId =
+        body.zoneId && String(body.zoneId).trim()
+            ? (() => {
+                const zid = String(body.zoneId).trim();
+                if (zid === 'global') return undefined;
+                if (!mongoose.Types.ObjectId.isValid(zid)) throw new ValidationError('Invalid zoneId');
+                return new mongoose.Types.ObjectId(zid);
+            })()
+            : undefined;
+
+    await ensureUniqueCategoryName(name, { restaurantId: null, zoneId });
+
     const doc = new FoodCategory({
         name,
         image: typeof body.image === 'string' ? body.image.trim() : '',
         type: typeof body.type === 'string' ? body.type.trim() : '',
         foodTypeScope,
-        zoneId:
-            body.zoneId && String(body.zoneId).trim()
-                ? (() => {
-                    const zid = String(body.zoneId).trim();
-                    if (zid === 'global') return undefined;
-                    if (!mongoose.Types.ObjectId.isValid(zid)) throw new ValidationError('Invalid zoneId');
-                    return new mongoose.Types.ObjectId(zid);
-                })()
-                : undefined,
+        zoneId,
         isActive: body.isActive !== false,
         sortOrder: Number.isFinite(Number(body.sortOrder)) ? Number(body.sortOrder) : 0,
         // Admin-created categories are globally available immediately.
@@ -3671,6 +3919,13 @@ export async function makeCategoryGlobal(id) {
     doc.rejectionReason = '';
     doc.globalizedAt = new Date();
     doc.approvedAt = doc.approvedAt || new Date();
+
+    await ensureUniqueCategoryName(doc.name, {
+        restaurantId: null,
+        zoneId: undefined,
+        excludeCategoryId: doc._id
+    });
+
     await doc.save();
     return doc.toObject();
 }
@@ -3720,6 +3975,13 @@ export async function updateCategory(id, body) {
     if (!doc.createdByRestaurantId && doc.restaurantId) {
         doc.createdByRestaurantId = doc.restaurantId;
     }
+
+    await ensureUniqueCategoryName(doc.name, {
+        restaurantId: doc.restaurantId || null,
+        zoneId: doc.zoneId || null,
+        excludeCategoryId: doc._id
+    });
+
     await doc.save();
 
     const nextIsActive = doc.isActive !== false;
@@ -4327,13 +4589,6 @@ export async function createRestaurantByAdmin(body, performer = null) {
         featuredDish: toStr(body.featuredDish),
         featuredPrice: typeof body.featuredPrice === 'number' ? body.featuredPrice : (parseFloat(body.featuredPrice) || undefined),
         offer: toStr(body.offer),
-        diningSettings: body.diningSettings && typeof body.diningSettings === 'object'
-            ? {
-                isEnabled: Boolean(body.diningSettings.isEnabled),
-                maxGuests: Math.max(1, parseInt(body.diningSettings.maxGuests, 10) || 6),
-                diningType: toStr(body.diningSettings.diningType) || 'family-dining'
-            }
-            : undefined,
         status: 'approved',
         approvedAt: new Date(),
         approvedBy: performer || undefined
@@ -4474,59 +4729,121 @@ export async function approveRestaurant(id, performer = null) {
 
     if (updated) {
         // --- Referral Reward Crediting ---
+        // Re-validate platform settings at payout, then claim + credit + count
+        // in one transaction (no double-pay; disabled/zeroed programs cannot pay).
         try {
-            const referralLog = await FoodReferralLog.findOne({
-                refereeId: updated._id,
-                role: 'RESTAURANT',
-                status: 'pending'
-            });
+            const session = await mongoose.startSession();
+            try {
+                await session.withTransaction(async () => {
+                    const pending = await FoodReferralLog.findOne({
+                        refereeId: updated._id,
+                        role: 'RESTAURANT',
+                        status: 'pending'
+                    }).session(session);
+                    if (!pending) return;
 
-            if (referralLog) {
-                const referrerReward = Number(referralLog.referrerRewardAmount) || 0;
-                const refereeReward = Number(referralLog.refereeRewardAmount) || 0;
+                    const settingsDoc = await FoodReferralSettings.findOne({ isActive: true })
+                        .sort({ createdAt: -1 })
+                        .session(session)
+                        .lean();
 
-                // Credit Referrer
-                if (referrerReward > 0) {
-                    await FoodRestaurantWallet.findOneAndUpdate(
-                        { restaurantId: referralLog.referrerId },
+                    const referrerReward = Math.max(0, Number(settingsDoc?.restaurant?.referrerReward) || 0);
+                    const refereeReward = Math.max(0, Number(settingsDoc?.restaurant?.refereeReward) || 0);
+                    const limit = Math.max(0, Number(settingsDoc?.restaurant?.limit) || 0);
+
+                    const referrer = await FoodRestaurant.findById(pending.referrerId)
+                        .select('_id status')
+                        .session(session)
+                        .lean();
+
+                    let rejectReason = null;
+                    if (!settingsDoc) rejectReason = 'program_inactive';
+                    else if (!referrer) rejectReason = 'referrer_not_found';
+                    else if (referrer.status !== 'approved') rejectReason = 'referrer_not_approved';
+                    else if (referrerReward <= 0 && refereeReward <= 0) rejectReason = 'reward_disabled';
+                    else if (limit <= 0) rejectReason = 'limit_disabled';
+
+                    if (rejectReason) {
+                        await FoodReferralLog.updateOne(
+                            { _id: pending._id, status: 'pending' },
+                            { $set: { status: 'rejected', reason: rejectReason } },
+                            { session }
+                        );
+                        return;
+                    }
+
+                    // Atomic hard gate: only credit if referrer is still approved and has slots.
+                    const slotReserved = await FoodRestaurant.findOneAndUpdate(
                         {
-                            $inc: {
-                                balance: referrerReward,
-                                totalEarnings: referrerReward,
-                                referralEarnings: referrerReward
+                            _id: pending.referrerId,
+                            status: 'approved',
+                            referralCount: { $lt: limit }
+                        },
+                        { $inc: { referralCount: 1 } },
+                        { new: true, session }
+                    );
+                    if (!slotReserved) {
+                        await FoodReferralLog.updateOne(
+                            { _id: pending._id, status: 'pending' },
+                            { $set: { status: 'rejected', reason: 'limit_reached' } },
+                            { session }
+                        );
+                        return;
+                    }
+
+                    // Claim with current settings amounts (not signup-time freeze).
+                    const claimed = await FoodReferralLog.findOneAndUpdate(
+                        { _id: pending._id, status: 'pending' },
+                        {
+                            $set: {
+                                status: 'credited',
+                                rewardAmount: referrerReward,
+                                referrerRewardAmount: referrerReward,
+                                refereeRewardAmount: refereeReward
                             }
                         },
-                        { upsert: true }
+                        { new: true, session }
                     );
-                }
+                    if (!claimed) {
+                        // Lost the race — release the reserved slot.
+                        await FoodRestaurant.updateOne(
+                            { _id: pending.referrerId },
+                            { $inc: { referralCount: -1 } },
+                            { session }
+                        );
+                        return;
+                    }
 
-                // Credit Referee (Approved Restaurant)
-                if (refereeReward > 0) {
-                    await FoodRestaurantWallet.findOneAndUpdate(
-                        { restaurantId: updated._id },
-                        {
-                            $inc: {
-                                balance: refereeReward,
-                                totalEarnings: refereeReward,
-                                referralEarnings: refereeReward
-                            }
-                        },
-                        { upsert: true }
-                    );
-                }
+                    if (referrerReward > 0) {
+                        await FoodRestaurantWallet.findOneAndUpdate(
+                            { restaurantId: claimed.referrerId },
+                            {
+                                $inc: {
+                                    balance: referrerReward,
+                                    totalEarnings: referrerReward,
+                                    referralEarnings: referrerReward
+                                }
+                            },
+                            { upsert: true, session }
+                        );
+                    }
 
-                // Count against limit for any successful credit (referrer and/or referee reward).
-                const marked = await FoodReferralLog.findOneAndUpdate(
-                    { _id: referralLog._id, status: 'pending' },
-                    { $set: { status: 'credited' } },
-                    { new: true }
-                );
-                if (marked) {
-                    await FoodRestaurant.updateOne(
-                        { _id: referralLog.referrerId },
-                        { $inc: { referralCount: 1 } }
-                    );
-                }
+                    if (refereeReward > 0) {
+                        await FoodRestaurantWallet.findOneAndUpdate(
+                            { restaurantId: updated._id },
+                            {
+                                $inc: {
+                                    balance: refereeReward,
+                                    totalEarnings: refereeReward,
+                                    referralEarnings: refereeReward
+                                }
+                            },
+                            { upsert: true, session }
+                        );
+                    }
+                });
+            } finally {
+                await session.endSession();
             }
         } catch (e) {
             console.error('Referral crediting failed on approval:', e);
@@ -4675,10 +4992,9 @@ export async function getAllOffers(_query = {}) {
     const offers = list.map((o, index) => {
         const now = Date.now();
         const startTs = o.startDate ? new Date(o.startDate).getTime() : null;
-        const endTs = o.endDate ? new Date(o.endDate).getTime() : null;
 
         const isScheduled = Boolean(startTs && now < startTs);
-        const isExpired = Boolean(endTs && now >= endTs);
+        const isExpired = isOfferEndDateExpired(o.endDate);
 
         const restaurantName =
             o.restaurantScope === 'selected'
@@ -4719,6 +5035,9 @@ export async function getAllOffers(_query = {}) {
             usedCount: o.usedCount ?? 0,
             isFirstOrderOnly: Boolean(o.isFirstOrderOnly),
             restaurantScope: o.restaurantScope,
+            restaurantDbId: o.restaurantId
+                ? String(o.restaurantId?._id || o.restaurantId)
+                : null,
             createdByRole: o.createdByRole || 'ADMIN',
         };
     });
@@ -4727,10 +5046,7 @@ export async function getAllOffers(_query = {}) {
 }
 
 export async function createAdminOffer(body) {
-    const existing = await FoodOffer.findOne({ couponCode: body.couponCode }).lean();
-    if (existing) {
-        throw new ValidationError('Coupon code already exists');
-    }
+    await assertUniquePlatformCouponCode(body.couponCode);
 
     const doc = await FoodOffer.create({
         couponCode: body.couponCode,
@@ -4752,6 +5068,20 @@ export async function createAdminOffer(body) {
         adminBearPercentage: 100,
         restaurantBearPercentage: 0
     });
+
+    try {
+        await claimCouponCodeReservation({
+            ownerType: COUPON_OWNER_TYPES.PLATFORM_OFFER,
+            ownerId: doc._id,
+            couponCode: doc.couponCode,
+        });
+    } catch (error) {
+        await FoodOffer.findByIdAndDelete(doc._id);
+        if (error?.code === 11000) {
+            throw new ValidationError('Coupon code already exists');
+        }
+        throw error;
+    }
 
     if (doc.restaurantScope === 'selected' && doc.restaurantId) {
         try {
@@ -4777,6 +5107,145 @@ export async function createAdminOffer(body) {
     return doc.toObject();
 }
 
+async function invalidateOffersCacheSafely(context) {
+    try {
+        const { invalidateCache } = await import('../../../../middleware/cache.js');
+        await invalidateCache('offers*');
+    } catch (err) {
+        console.error(`Failed to invalidate offers cache on ${context}:`, err);
+    }
+}
+
+async function assertUniquePlatformCouponCode(couponCode, excludeId = null) {
+    const normalizedCode = String(couponCode || '').trim().toUpperCase();
+    if (!normalizedCode) {
+        throw new ValidationError('Coupon code is required');
+    }
+
+    const duplicateOfferFilter = { couponCode: normalizedCode };
+    if (excludeId) {
+        duplicateOfferFilter._id = { $ne: new mongoose.Types.ObjectId(String(excludeId)) };
+    }
+
+    const { RestaurantCoupon } = await import('../models/restaurantCoupon.model.js');
+    const [offerExists, restaurantCouponExists] = await Promise.all([
+        FoodOffer.findOne(duplicateOfferFilter).select('_id').lean(),
+        RestaurantCoupon.findOne({ couponCode: normalizedCode }).select('_id').lean(),
+    ]);
+
+    if (offerExists || restaurantCouponExists) {
+        throw new ValidationError('Coupon code already exists');
+    }
+}
+
+/** End-of-day semantics: an offer is only expired once its endDate is before today. */
+function isOfferEndDateExpired(endDate, now = new Date()) {
+    if (!endDate) return false;
+    const startOfToday = new Date(now);
+    startOfToday.setHours(0, 0, 0, 0);
+    return new Date(endDate) < startOfToday;
+}
+
+export async function updateAdminOffer(id, body) {
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) return null;
+
+    const existing = await FoodOffer.findById(id).lean();
+    if (!existing) return null;
+    const restoreOfferState = {
+        couponCode: existing.couponCode,
+        discountType: existing.discountType,
+        discountValue: existing.discountValue,
+        customerScope: existing.customerScope,
+        restaurantScope: existing.restaurantScope,
+        restaurantId: existing.restaurantId ?? null,
+        minOrderValue: existing.minOrderValue ?? 0,
+        maxDiscount: existing.maxDiscount ?? null,
+        usageLimit: existing.usageLimit ?? null,
+        perUserLimit: existing.perUserLimit ?? null,
+        startDate: existing.startDate ?? null,
+        endDate: existing.endDate ?? null,
+        isFirstOrderOnly: Boolean(existing.isFirstOrderOnly),
+        status: existing.status,
+    };
+
+    if (body.couponCode && body.couponCode !== existing.couponCode) {
+        await assertUniquePlatformCouponCode(body.couponCode, existing._id);
+    }
+
+    // Preserve the existing lifecycle state unless the new end date forces inactivity.
+    let status = existing.status;
+    if (isOfferEndDateExpired(body.endDate)) {
+        status = 'inactive';
+    }
+
+    const updated = await FoodOffer.findByIdAndUpdate(
+        id,
+        {
+            $set: {
+                couponCode: body.couponCode,
+                discountType: body.discountType,
+                discountValue: body.discountValue,
+                customerScope: body.customerScope,
+                restaurantScope: body.restaurantScope,
+                restaurantId: body.restaurantScope === 'selected' ? body.restaurantId : null,
+                minOrderValue: body.minOrderValue ?? 0,
+                maxDiscount: body.maxDiscount ?? null,
+                usageLimit: body.usageLimit ?? null,
+                perUserLimit: body.perUserLimit ?? null,
+                startDate: body.startDate ?? null,
+                endDate: body.endDate ?? null,
+                isFirstOrderOnly: body.isFirstOrderOnly ?? false,
+                status,
+            },
+        },
+        { new: true }
+    ).lean();
+
+    try {
+        await claimCouponCodeReservation({
+            ownerType: COUPON_OWNER_TYPES.PLATFORM_OFFER,
+            ownerId: existing._id,
+            couponCode: body.couponCode,
+        });
+    } catch (error) {
+        await FoodOffer.findByIdAndUpdate(
+            id,
+            { $set: restoreOfferState },
+            { new: true }
+        );
+        if (error?.code === 11000) {
+            throw new ValidationError('Coupon code already exists');
+        }
+        throw error;
+    }
+
+    await invalidateOffersCacheSafely('offer update');
+    return updated;
+}
+
+export async function updateAdminOfferStatus(id, status) {
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) return null;
+    if (!['active', 'paused', 'inactive'].includes(status)) {
+        throw new ValidationError('Status must be active, paused or inactive');
+    }
+
+    const existing = await FoodOffer.findById(id).lean();
+    if (!existing) return null;
+
+    if (status === 'active' && isOfferEndDateExpired(existing.endDate)) {
+        throw new ValidationError('Cannot activate an expired offer. Extend the end date first.');
+    }
+
+    const updated = await FoodOffer.findByIdAndUpdate(
+        id,
+        { $set: { status } },
+        { new: true }
+    ).lean();
+
+    await invalidateOffersCacheSafely('offer status update');
+    return updated;
+}
+
 export async function updateAdminOfferCartVisibility(offerId, itemId, showInCart) {
     if (!offerId || !mongoose.Types.ObjectId.isValid(offerId)) return null;
     if (!itemId) return null;
@@ -4793,13 +5262,19 @@ export async function deleteAdminOffer(id) {
     const deleted = await FoodOffer.findByIdAndDelete(id).lean();
     if (!deleted) return null;
     await FoodOfferUsage.deleteMany({ offerId: new mongoose.Types.ObjectId(id) });
+    await releaseCouponCodeReservation({
+        ownerType: COUPON_OWNER_TYPES.PLATFORM_OFFER,
+        ownerId: id,
+    });
+    await invalidateOffersCacheSafely('offer delete');
     return { id };
 }
 
 export async function expireExpiredOffers() {
-    const now = new Date();
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
     await FoodOffer.updateMany(
-        { status: 'active', endDate: { $lte: now } },
+        { status: 'active', endDate: { $lt: startOfToday } },
         { $set: { status: 'inactive' } }
     );
 }
@@ -6593,7 +7068,8 @@ export async function createZone(body) {
         serviceLocation: (body.serviceLocation && body.serviceLocation.trim()) || name,
         unit: body.unit === 'miles' ? 'miles' : 'kilometer',
         coordinates: normalized,
-        isActive: body.isActive !== false
+        isActive: body.isActive !== false,
+        quickDeliveryEnabled: body.quickDeliveryEnabled === true,
     });
     await zone.save();
     return { zone: zone.toObject() };
@@ -6609,6 +7085,9 @@ export async function updateZone(id, body) {
     if (body.serviceLocation !== undefined) zone.serviceLocation = String(body.serviceLocation).trim();
     if (body.unit !== undefined) zone.unit = body.unit === 'miles' ? 'miles' : 'kilometer';
     if (body.isActive !== undefined) zone.isActive = body.isActive !== false;
+    if (body.quickDeliveryEnabled !== undefined) {
+        zone.quickDeliveryEnabled = body.quickDeliveryEnabled === true;
+    }
     if (Array.isArray(body.coordinates) && body.coordinates.length >= 3) {
         const normalizedCoords = [];
         for (const c of body.coordinates) {
@@ -6681,25 +7160,187 @@ export async function getWithdrawals(query = {}) {
     return { requests, total, page, limit };
 }
 
-export async function updateWithdrawalStatus(id, { status, adminNote, rejectionReason, transactionId }) {
+export async function updateWithdrawalStatus(id, { status, adminNote, rejectionReason, transactionId }, adminUser = null) {
     if (!id || !mongoose.Types.ObjectId.isValid(id)) throw new ValidationError('Invalid withdrawal ID');
 
-    const update = {
-        status: String(status).toLowerCase(),
-        adminNote,
-        rejectionReason,
-        transactionId,
-        processedAt: new Date()
-    };
+    const existing = await FoodRestaurantWithdrawal.findById(id).lean();
+    if (!existing) throw new ValidationError('Withdrawal request not found');
 
-    const updated = await FoodRestaurantWithdrawal.findByIdAndUpdate(
-        id,
-        { $set: update },
+    const currentStatus = String(existing.status || '').trim().toLowerCase();
+    const nextStatus = String(status || '').trim().toLowerCase();
+
+    if (!['approved', 'rejected'].includes(nextStatus)) {
+        throw new ValidationError('Status must be approved or rejected');
+    }
+
+    // Reject only from pending (never mid-settle)
+    if (nextStatus === 'rejected') {
+        if (currentStatus !== 'pending') {
+            throw new ValidationError(`Withdrawal is already ${currentStatus}`);
+        }
+
+        const claimed = await FoodRestaurantWithdrawal.findOneAndUpdate(
+            { _id: id, status: 'pending' },
+            {
+                $set: {
+                    status: 'rejected',
+                    adminNote,
+                    rejectionReason,
+                    transactionId,
+                    processedAt: new Date(),
+                },
+            },
+            { new: true }
+        ).populate('restaurantId', 'restaurantName');
+
+        if (!claimed) {
+            throw new ValidationError('Withdrawal is no longer pending (already processed)');
+        }
+
+        try {
+            const restaurantId =
+                claimed.restaurantId?._id || claimed.restaurantId || existing.restaurantId;
+            const { notifyOwnersSafely } = await import(
+                '../../../../core/notifications/firebase.service.js'
+            );
+            await notifyOwnersSafely(
+                [{ ownerType: 'RESTAURANT', ownerId: restaurantId }],
+                {
+                    title: 'Withdrawal rejected',
+                    body: `Your withdrawal of ₹${Number(claimed.amount || 0).toFixed(2)} was rejected${
+                        rejectionReason ? `: ${rejectionReason}` : '.'
+                    }`,
+                    data: {
+                        type: 'withdrawal_request_status',
+                        withdrawalId: String(claimed._id),
+                        status: 'rejected',
+                    },
+                }
+            );
+        } catch (e) {
+            console.error(
+                'Failed to send restaurant withdrawal status notification:',
+                e?.message || e
+            );
+        }
+
+        return claimed.toObject ? claimed.toObject() : claimed;
+    }
+
+    // Approve: claim pending|processing → processing, settle, then mark approved.
+    // Never leave "approved" without a successful settle (crash-safe).
+    if (!['pending', 'processing'].includes(currentStatus)) {
+        throw new ValidationError(`Withdrawal is already ${currentStatus}`);
+    }
+
+    const claimed = await FoodRestaurantWithdrawal.findOneAndUpdate(
+        { _id: id, status: { $in: ['pending', 'processing'] } },
+        {
+            $set: {
+                status: 'processing',
+                adminNote,
+                rejectionReason,
+                transactionId,
+            },
+        },
         { new: true }
-    ).populate('restaurantId', 'restaurantName').lean();
+    ).populate('restaurantId', 'restaurantName');
 
-    if (!updated) throw new ValidationError('Withdrawal request not found');
-    return updated;
+    if (!claimed) {
+        throw new ValidationError('Withdrawal is no longer pending (already processed)');
+    }
+
+    const restaurantId =
+        claimed.restaurantId?._id || claimed.restaurantId || existing.restaurantId;
+
+    try {
+        await foodTransactionService.settleRestaurantSharesForWithdrawal(
+            restaurantId,
+            claimed.amount,
+            {
+                withdrawalId: String(claimed._id),
+                note: `Settled via restaurant withdrawal approval (${claimed._id})`,
+                recordedByRole: 'ADMIN',
+                recordedById: adminUser?.userId || adminUser?._id || null,
+            }
+        );
+    } catch (err) {
+        console.error(
+            `Failed to settle restaurant shares for withdrawal ${claimed._id}:`,
+            err?.message || err
+        );
+        await FoodRestaurantWithdrawal.findByIdAndUpdate(id, {
+            $set: { status: 'pending', ledgerSettled: false },
+            $unset: {
+                adminNote: 1,
+                rejectionReason: 1,
+                transactionId: 1,
+                processedAt: 1,
+            },
+        });
+        throw new ValidationError(
+            err?.message ||
+                'Failed to settle restaurant earnings for this withdrawal. Status left as pending.'
+        );
+    }
+
+    const paidAt = new Date();
+    const approved = await FoodRestaurantWithdrawal.findOneAndUpdate(
+        { _id: id, status: 'processing' },
+        {
+            $set: {
+                status: 'approved',
+                adminNote,
+                rejectionReason,
+                transactionId,
+                processedAt: paidAt,
+            },
+        },
+        { new: true }
+    ).populate('restaurantId', 'restaurantName');
+
+    if (!approved) {
+        // Settle already committed; another worker likely finished the approve step.
+        const existingApproved = await FoodRestaurantWithdrawal.findById(id)
+            .populate('restaurantId', 'restaurantName');
+        return existingApproved?.toObject
+            ? existingApproved.toObject()
+            : existingApproved;
+    }
+
+    const performer = adminUser
+        ? await resolveActionPerformerSnapshot(adminUser)
+        : null;
+    await recordRestaurantWithdrawalPayment(approved, performer, {
+        transactionId,
+        adminNote,
+        userId: restaurantId,
+    });
+
+    try {
+        const { notifyOwnersSafely } = await import(
+            '../../../../core/notifications/firebase.service.js'
+        );
+        await notifyOwnersSafely(
+            [{ ownerType: 'RESTAURANT', ownerId: restaurantId }],
+            {
+                title: 'Withdrawal approved',
+                body: `Your withdrawal of ₹${Number(approved.amount || 0).toFixed(2)} has been approved.`,
+                data: {
+                    type: 'withdrawal_request_status',
+                    withdrawalId: String(approved._id),
+                    status: 'approved',
+                },
+            }
+        );
+    } catch (e) {
+        console.error(
+            'Failed to send restaurant withdrawal status notification:',
+            e?.message || e
+        );
+    }
+
+    return approved.toObject ? approved.toObject() : approved;
 }
 
 export async function getDeliveryWithdrawals(query = {}) {
@@ -6741,43 +7382,106 @@ export async function getDeliveryWithdrawals(query = {}) {
     return { requests, total, page, limit };
 }
 
-export async function updateDeliveryWithdrawalStatus(id, { status, adminNote, rejectionReason, transactionId }) {
+export async function updateDeliveryWithdrawalStatus(id, { status, adminNote, rejectionReason, transactionId }, adminUser = null) {
     if (!id || !mongoose.Types.ObjectId.isValid(id)) throw new ValidationError('Invalid withdrawal ID');
 
+    const nextStatus = String(status || '').trim().toLowerCase();
+    if (!['approved', 'rejected', 'processed'].includes(nextStatus)) {
+        throw new ValidationError('Status must be approved, processed, or rejected');
+    }
+
+    const existing = await FoodDeliveryWithdrawal.findById(id).lean();
+    if (!existing) throw new ValidationError('Withdrawal request not found');
+    if (existing.status !== 'pending') throw new ValidationError(`Withdrawal is already ${existing.status}`);
+
     const update = {
-        status: String(status).toLowerCase(),
+        status: nextStatus === 'processed' ? 'approved' : nextStatus,
         adminNote,
         rejectionReason,
         transactionId,
         processedAt: new Date()
     };
 
-    const existing = await FoodDeliveryWithdrawal.findById(id).lean();
-    if (!existing) throw new ValidationError('Withdrawal request not found');
-    if (existing.status !== 'pending') throw new ValidationError(`Withdrawal is already ${existing.status}`);
-
-    const updated = await FoodDeliveryWithdrawal.findByIdAndUpdate(
-        id,
+    // Atomic claim so concurrent admins cannot double-approve / double-debit
+    const claimed = await FoodDeliveryWithdrawal.findOneAndUpdate(
+        { _id: id, status: 'pending' },
         { $set: update },
         { new: true }
-    ).populate('deliveryPartnerId', 'name phone profilePartnerId').lean();
+    ).populate('deliveryPartnerId', 'name phone profilePartnerId');
 
-    // If approved, deduct from wallet balance using central transaction service
-    if (status.toLowerCase() === 'approved' || status.toLowerCase() === 'processed') {
-        const amount = Number(updated.amount || 0);
-        if (amount > 0) {
-            await debitWallet({
-                entityType: 'deliveryBoy',
-                entityId: updated.deliveryPartnerId?._id || updated.deliveryPartnerId,
-                amount: amount,
-                description: `Withdrawal Approved - ${updated.orderId || updated.id}`,
-                category: 'settlement_payout',
-                metadata: { withdrawalId: updated._id, transactionId }
-            });
-        }
+    if (!claimed) {
+        throw new ValidationError('Withdrawal is no longer pending (already processed)');
     }
 
-    return updated;
+    if (nextStatus === 'approved' || nextStatus === 'processed') {
+        const amount = Number(claimed.amount || 0);
+        if (amount > 0) {
+            try {
+                await debitWallet({
+                    entityType: 'deliveryBoy',
+                    entityId: claimed.deliveryPartnerId?._id || claimed.deliveryPartnerId,
+                    amount: amount,
+                    description: `Withdrawal Approved - ${claimed.orderId || claimed.id || claimed._id}`,
+                    category: 'settlement_payout',
+                    metadata: { withdrawalId: claimed._id, transactionId }
+                });
+            } catch (err) {
+                console.error(
+                    `Failed to debit wallet for delivery withdrawal ${claimed._id}:`,
+                    err?.message || err
+                );
+                await FoodDeliveryWithdrawal.findByIdAndUpdate(id, {
+                    $set: { status: 'pending' },
+                    $unset: {
+                        adminNote: 1,
+                        rejectionReason: 1,
+                        transactionId: 1,
+                        processedAt: 1,
+                    },
+                });
+                throw new ValidationError(
+                    err?.message || 'Failed to debit delivery wallet. Withdrawal left as pending.'
+                );
+            }
+        }
+
+        // Permanent payout history (idempotent; does not affect money path)
+        const performer = adminUser
+            ? await resolveActionPerformerSnapshot(adminUser)
+            : null;
+        await recordDeliveryWithdrawalPayment(claimed, performer, {
+            transactionId,
+            adminNote,
+        });
+    }
+
+    try {
+        const partnerId =
+            claimed.deliveryPartnerId?._id || claimed.deliveryPartnerId || existing.deliveryPartnerId;
+        const { notifyOwnersSafely } = await import('../../../../core/notifications/firebase.service.js');
+        const finalStatus = nextStatus === 'processed' ? 'approved' : nextStatus;
+        await notifyOwnersSafely(
+            [{ ownerType: 'DELIVERY_PARTNER', ownerId: partnerId }],
+            {
+                title: finalStatus === 'approved' ? 'Withdrawal approved' : 'Withdrawal rejected',
+                body:
+                    finalStatus === 'approved'
+                        ? `Your withdrawal of ₹${Number(claimed.amount || 0).toFixed(2)} has been approved.`
+                        : `Your withdrawal of ₹${Number(claimed.amount || 0).toFixed(2)} was rejected${
+                              rejectionReason ? `: ${rejectionReason}` : '.'
+                          }`,
+                data: {
+                    type: 'withdrawal_status',
+                    withdrawalId: String(claimed._id),
+                    status: finalStatus,
+                },
+            }
+        );
+    } catch (e) {
+        console.error('Failed to send delivery withdrawal status notification:', e?.message || e);
+    }
+
+    return claimed.toObject ? claimed.toObject() : claimed;
 }
 
 /**
@@ -6839,29 +7543,76 @@ export async function getDeliveryWallets(query = {}) {
 
 export async function updateDeliveryBoyWallet(dto) {
     const { deliveryId, pocketBalance, cashInHand } = dto;
-    const wallet = await getDeliveryPartnerWalletEnhanced(deliveryId);
-
-    // Adjust Pocket Balance via Bonus/Adjustment
-    const pocketDiff = Number(pocketBalance) - wallet.pocketBalance;
-    if (Math.abs(pocketDiff) > 0.01) {
-        await DeliveryBonusTransaction.create({
-            deliveryPartnerId: deliveryId,
-            amount: pocketDiff,
-            reason: 'Admin manual adjustment',
-            transactionId: generateBonusTransactionId()
-        });
+    if (!deliveryId || !mongoose.Types.ObjectId.isValid(String(deliveryId))) {
+        throw new ValidationError('Invalid delivery partner ID');
     }
 
-    // Adjust Cash In Hand via Deposit/Adjustment (Deposit reduces cashInHand)
-    const cashDiff = wallet.cashInHand - Number(cashInHand);
-    if (Math.abs(cashDiff) > 0.01) {
+    const targetPocket = Number(pocketBalance);
+    const targetCash = Number(cashInHand);
+    if (!Number.isFinite(targetPocket) || targetPocket < 0) {
+        throw new ValidationError('pocketBalance must be a non-negative number');
+    }
+    if (!Number.isFinite(targetCash) || targetCash < 0) {
+        throw new ValidationError('cashInHand must be a non-negative number');
+    }
+
+    const wallet = await getDeliveryPartnerWalletEnhanced(deliveryId);
+
+    // Adjust pocket via real wallet credit/debit (never orphan bonus rows that phantom-inflate pocket)
+    const pocketDiff =
+        Math.round((targetPocket - Number(wallet.pocketBalance || 0)) * 100) / 100;
+    if (Math.abs(pocketDiff) > 0.01) {
+        if (pocketDiff > 0) {
+            await creditWallet({
+                entityType: 'deliveryBoy',
+                entityId: deliveryId,
+                amount: pocketDiff,
+                description: 'Admin manual pocket adjustment',
+                category: 'admin_adjustment',
+                metadata: { source: 'updateDeliveryBoyWallet' },
+            });
+        } else {
+            try {
+                await debitWallet({
+                    entityType: 'deliveryBoy',
+                    entityId: deliveryId,
+                    amount: Math.abs(pocketDiff),
+                    description: 'Admin manual pocket adjustment',
+                    category: 'admin_adjustment',
+                    metadata: { source: 'updateDeliveryBoyWallet' },
+                });
+            } catch (err) {
+                throw new ValidationError(
+                    err?.message ||
+                        'Insufficient pocket balance for this adjustment (pending withdrawals may be locking funds)'
+                );
+            }
+        }
+    }
+
+    // Reduce cash-in-hand only by recording a Completed deposit. Increasing CIH is not supported here.
+    const cashDiff =
+        Math.round((Number(wallet.cashInHand || 0) - targetCash) * 100) / 100;
+    if (cashDiff > 0.01) {
+        if (cashDiff > Number(wallet.cashInHand || 0) + 0.009) {
+            throw new ValidationError(
+                `Cannot reduce cash-in-hand by ₹${cashDiff.toFixed(2)}; outstanding cash is ₹${Number(wallet.cashInHand || 0).toFixed(2)}`
+            );
+        }
         await FoodDeliveryCashDeposit.create({
             deliveryPartnerId: deliveryId,
             amount: cashDiff,
             status: 'Completed',
             paymentMethod: 'cash',
-            razorpayOrderId: 'manual_adj_' + Date.now()
+            depositType: 'online',
+            razorpayOrderId: `manual_adj_${String(deliveryId).slice(-8)}_${Date.now()}`,
+            razorpayPaymentId: null,
+            adminNote: 'Admin manual cash-in-hand adjustment',
         });
+    } else if (cashDiff < -0.01) {
+        throw new ValidationError(
+            'Cannot increase cash-in-hand via wallet adjust. It only increases when COD orders are delivered.'
+        );
     }
 
     const updated = await getDeliveryPartnerWalletEnhanced(deliveryId);
@@ -6871,7 +7622,7 @@ export async function updateDeliveryBoyWallet(dto) {
         pocketBalance: updated.pocketBalance,
         cashInHand: updated.cashInHand,
         remainingCashLimit: updated.availableCashLimit,
-        availableCashLimit: updated.availableCashLimit
+        availableCashLimit: updated.availableCashLimit,
     };
 }
 
@@ -7061,6 +7812,13 @@ export async function processRefund(orderId, refundAmount, refundTo) {
         );
     }
 
+    // Block customer refund before money moves if restaurant payout already settled
+    await foodTransactionService.assertRestaurantSettlementAllowsRefund(
+        order._id,
+        normalizedAmount,
+        totalAmount
+    );
+
     const existingRefund = order.payment?.refund || {};
     const requestedRefundMethod =
         existingRefund?.requestedMethod === 'wallet' || existingRefund?.requestedMethod === 'gateway'
@@ -7074,6 +7832,7 @@ export async function processRefund(orderId, refundAmount, refundTo) {
     const processedAt = new Date();
 
     if (normalizedRefundMethod === 'wallet') {
+        const refundTransactionId = `wallet_refund_${String(order._id)}_${normalizedAmount.toFixed(2)}`;
         await refundWalletBalance(
             order.userId,
             normalizedAmount,
@@ -7081,7 +7840,8 @@ export async function processRefund(orderId, refundAmount, refundTo) {
             {
                 orderId: String(order._id),
                 orderReadableId: String(order.orderId || ''),
-                source: 'admin_manual_refund'
+                source: 'admin_manual_refund',
+                refundTransactionId,
             }
         );
 
@@ -7089,7 +7849,7 @@ export async function processRefund(orderId, refundAmount, refundTo) {
         order.payment.refund = {
             status: 'processed',
             amount: normalizedAmount,
-            refundId: `wallet_refund_${Date.now()}`,
+            refundId: refundTransactionId,
             requestedMethod: requestedRefundMethod || normalizedRefundMethod,
             processedMethod: 'wallet',
             requestedAt: existingRefund?.requestedAt || processedAt,
@@ -7103,7 +7863,13 @@ export async function processRefund(orderId, refundAmount, refundTo) {
             throw new ValidationError('Original payment reference not found for this online order');
         }
 
-        const refundResult = await initiateRazorpayRefund(paymentId, normalizedAmount);
+        const refundResult = await initiateRazorpayRefund(paymentId, normalizedAmount, {
+            idempotencyKey: `food_refund_${String(order._id)}_admin_${Math.round(Number(normalizedAmount) * 100)}`,
+            notes: {
+                orderId: String(order.orderId || order._id),
+                source: 'admin_process_refund',
+            },
+        });
         if (!refundResult?.success) {
             order.payment.refund = {
                 status: 'failed',
@@ -7135,16 +7901,27 @@ export async function processRefund(orderId, refundAmount, refundTo) {
     await order.save();
 
     try {
-        await foodTransactionService.updateTransactionStatus(order._id, 'refunded', {
-            status: 'refunded',
-            note:
-                normalizedAmount < totalAmount
-                    ? `Partial refund of ₹${normalizedAmount.toFixed(2)} processed by admin`
-                    : `Full refund of ₹${normalizedAmount.toFixed(2)} processed by admin`,
-            recordedByRole: 'ADMIN'
-        });
-    } catch (_err) {
-        // Keep the refund completed even if finance history sync needs follow-up.
+        await foodTransactionService.applyRefundToTransaction(
+            order._id,
+            normalizedAmount,
+            totalAmount,
+            {
+                note:
+                    normalizedAmount < totalAmount
+                        ? `Partial refund of ₹${normalizedAmount.toFixed(2)} processed by admin`
+                        : `Full refund of ₹${normalizedAmount.toFixed(2)} processed by admin`,
+                recordedByRole: 'ADMIN',
+            }
+        );
+    } catch (err) {
+        // Settlement conflict should never happen after pre-check; surface other ledger failures.
+        if (err instanceof ValidationError) {
+            throw err;
+        }
+        console.error(
+            `Refund ledger sync failed for order ${order._id}:`,
+            err?.message || err
+        );
     }
 
     return order.toObject();
@@ -7318,6 +8095,22 @@ export async function updateCashPayRequestStatus(id, { status, adminNote, perfor
         throw new ValidationError(`Request has already been processed with status: ${existing.status}`);
     }
 
+    if (status === 'Completed') {
+        const partnerId = existing.deliveryPartnerId;
+        const wallet = await getDeliveryPartnerWalletEnhanced(partnerId);
+        const maxCompletable =
+            Math.round(
+                (Number(wallet.availableToDeposit || 0) + Number(existing.amount || 0)) * 100
+            ) / 100;
+        if (Number(existing.amount || 0) > maxCompletable + 0.009) {
+            throw new ValidationError(
+                `Cannot complete deposit of ₹${Number(existing.amount || 0).toFixed(2)}: ` +
+                    `remaining COD float is only ₹${maxCompletable.toFixed(2)} ` +
+                    `(₹${Number(wallet.pendingDepositAmount || 0).toFixed(2)} reserved in other pending deposits)`
+            );
+        }
+    }
+
     const updateFields = {
         status,
         adminNote,
@@ -7328,11 +8121,16 @@ export async function updateCashPayRequestStatus(id, { status, adminNote, perfor
         updateFields.adminId = performer.id;
     }
 
-    const updated = await FoodDeliveryCashDeposit.findByIdAndUpdate(
-        id,
+    // Atomic claim so concurrent Completes cannot double-apply
+    const updated = await FoodDeliveryCashDeposit.findOneAndUpdate(
+        { _id: id, status: 'Pending' },
         { $set: updateFields },
         { new: true }
     ).populate('deliveryPartnerId', 'name phone profilePartnerId').lean();
+
+    if (!updated) {
+        throw new ValidationError('Request is no longer pending (already processed)');
+    }
 
     return updated;
 }
@@ -7532,34 +8330,44 @@ export async function settleCODVerification(id, { action, adminNote, performer }
         throw new ValidationError(`Request cannot be processed because status is: ${deposit.status}`);
     }
 
-    const updateFields = {
-        adminNote,
-        processedAt: new Date()
-    };
-
     if (action === 'approve') {
-        updateFields.status = 'Completed';
-    } else if (action === 'reject') {
-        updateFields.status = 'Failed'; // Mark as Failed so it is settled as rejected
-    } else {
+        const wallet = await getDeliveryPartnerWalletEnhanced(deposit.deliveryPartnerId);
+        const maxCompletable =
+            Math.round(
+                (Number(wallet.availableToDeposit || 0) + Number(deposit.amount || 0)) * 100
+            ) / 100;
+        if (Number(deposit.amount || 0) > maxCompletable + 0.009) {
+            throw new ValidationError(
+                `Cannot approve COD deposit of ₹${Number(deposit.amount || 0).toFixed(2)}: ` +
+                    `remaining COD float is only ₹${maxCompletable.toFixed(2)}`
+            );
+        }
+    } else if (action !== 'reject') {
         throw new ValidationError('Invalid action. Must be approve or reject');
     }
+
+    const updateFields = {
+        adminNote,
+        processedAt: new Date(),
+        status: action === 'approve' ? 'Completed' : 'Failed',
+    };
 
     if (performer && performer.id) {
         updateFields.adminId = performer.id;
     }
 
-    const updated = await FoodDeliveryCashDeposit.findByIdAndUpdate(
-        id,
+    const updated = await FoodDeliveryCashDeposit.findOneAndUpdate(
+        { _id: id, status: 'Restaurant_Accepted' },
         { $set: updateFields },
         { new: true }
-    ).populate('deliveryPartnerId', 'name phone profilePartnerId')
+    )
+        .populate('deliveryPartnerId', 'name phone profilePartnerId')
         .populate('zoneHubRestaurantId', 'restaurantName')
         .lean();
 
+    if (!updated) {
+        throw new ValidationError('Request is no longer awaiting admin settlement');
+    }
+
     return updated;
 }
-
-
-
-

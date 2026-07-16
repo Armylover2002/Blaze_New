@@ -6,6 +6,25 @@ import { toast } from "sonner"
 
 const debugError = (...args) => {}
 
+function ToggleSwitch({ enabled, onToggle, disabled }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={enabled}
+      disabled={disabled}
+      onClick={onToggle}
+      className={`inline-flex items-center w-11 h-6 rounded-full border transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
+        enabled
+          ? "bg-red-600 border-red-600 justify-end"
+          : "bg-slate-200 border-slate-300 justify-start"
+      }`}
+    >
+      <span className="h-5 w-5 rounded-full bg-white shadow-sm" />
+    </button>
+  )
+}
+
 export default function ReferralSettings() {
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -88,7 +107,11 @@ export default function ReferralSettings() {
       }
       const res = await adminAPI.createOrUpdateReferralSettings(body)
       if (res?.data?.success) {
-        toast.success("Referral settings saved successfully")
+        toast.success(
+          settings.isActive
+            ? "Referral settings saved successfully"
+            : "Referral program deactivated. Pending restaurant rewards were cancelled."
+        )
         fetchSettings()
       } else {
         toast.error(res?.data?.message || "Failed to save referral settings")
@@ -130,30 +153,44 @@ export default function ReferralSettings() {
 
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
         <div className="p-6">
-          <div className="flex items-center justify-between mb-6">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-6">
             <div>
               <h2 className="text-xl font-bold text-slate-900">Configuration</h2>
               <p className="text-sm text-slate-500 mt-1">
-                These values apply instantly to new referrals.
+                These values apply instantly to new referrals. Deactivating cancels pending restaurant rewards.
               </p>
             </div>
-            <Button
-              onClick={handleSave}
-              disabled={saving || loading}
-              className="bg-red-600 hover:bg-red-700 text-white flex items-center gap-2"
-            >
-              {saving ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  Saving...
-                </>
-              ) : (
-                <>
-                  <Save className="w-4 h-4" />
-                  Save Settings
-                </>
-              )}
-            </Button>
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2">
+                <ToggleSwitch
+                  enabled={settings.isActive}
+                  disabled={loading || saving}
+                  onToggle={() =>
+                    setSettings((prev) => ({ ...prev, isActive: !prev.isActive }))
+                  }
+                />
+                <span className="text-sm font-medium text-slate-700 whitespace-nowrap">
+                  {settings.isActive ? "Program active" : "Program inactive"}
+                </span>
+              </div>
+              <Button
+                onClick={handleSave}
+                disabled={saving || loading}
+                className="bg-red-600 hover:bg-red-700 text-white flex items-center gap-2"
+              >
+                {saving ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-4 h-4" />
+                    Save Settings
+                  </>
+                )}
+              </Button>
+            </div>
           </div>
 
           {loading ? (
@@ -282,4 +319,3 @@ export default function ReferralSettings() {
     </div>
   )
 }
-

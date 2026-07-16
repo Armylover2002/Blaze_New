@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext } from "react"
 import { locationAPI, userAPI } from "@food/api"
+import apiClient from "@/services/api/axios.js"
 import {
   hasValidCoordinates,
   USER_LOCATION_STORAGE_KEY,
@@ -292,32 +293,36 @@ const reverseGeocodeDirect = async (latitude, longitude, forceFresh = false) => 
 
   const run = (async () => {
     try {
-      // 1. Try Google Geocoding REST API if the API key is available
-      const googleApiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY
-      if (googleApiKey) {
-        try {
-          const controller = new AbortController()
-          const abortTimeout = setTimeout(() => controller.abort(), 4000) // 4s timeout for Google
+      // 1. Try backend reverse-geocode proxy (server-side Google Maps key)
+      try {
+        const controller = new AbortController()
+        const abortTimeout = setTimeout(() => controller.abort(), 5000)
 
-          const url = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${latitude},${longitude}&key=${googleApiKey}&language=en`
-          const res = await fetch(url, { signal: controller.signal })
-          clearTimeout(abortTimeout)
+        const res = await apiClient.get("/common/maps/reverse-geocode", {
+          params: { lat: latitude, lng: longitude },
+          signal: controller.signal,
+        })
+        clearTimeout(abortTimeout)
 
-          if (res.ok) {
-            const data = await res.json()
-            if (data.status === "OK" && data.results && data.results[0]) {
-              const parsed = buildGoogleAddress(data, latitude, longitude)
-              if (parsed && parsed.address && parsed.address.trim() !== "") {
-                globalReverseGeocodeLastSuccess = parsed
-                return parsed
-              }
-            } else {
-              debugWarn("Google Geocoding API returned status:", data.status)
-            }
+        const backendData = res?.data?.data
+        if (backendData?.formattedAddress) {
+          const parsed = buildGoogleAddress(
+            {
+              results: [{
+                formatted_address: backendData.formattedAddress,
+                address_components: backendData.addressComponents || [],
+              }],
+            },
+            latitude,
+            longitude,
+          )
+          if (parsed && parsed.address && parsed.address.trim() !== "") {
+            globalReverseGeocodeLastSuccess = parsed
+            return parsed
           }
-        } catch (googleErr) {
-          debugWarn("Google Geocoding failed, falling back to Nominatim:", googleErr.message)
         }
+      } catch (backendErr) {
+        debugWarn("Backend reverse geocode failed, falling back to Nominatim:", backendErr.message)
       }
 
       // 2. Try Nominatim as a fallback for detailed street-level data

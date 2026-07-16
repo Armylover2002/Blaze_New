@@ -3,7 +3,6 @@ import { NavLink, useNavigate, useLocation } from "react-router-dom";
 import {
   Store,
   FileText,
-  Calendar,
   History,
   Book,
   LayoutGrid,
@@ -24,6 +23,7 @@ import {
   IndianRupee,
   Info,
   Compass,
+  Timer,
 } from "lucide-react";
 import { restaurantAPI } from "@food/api";
 import { getAppLogo, getCompanyName } from "@common/utils/businessSettings";
@@ -82,6 +82,7 @@ export default function DesktopSidebar() {
       items: [
         { name: "Menu inventory", path: "/food/restaurant/inventory", icon: Book },
         { name: "Menu categories", path: "/food/restaurant/menu-categories", icon: LayoutGrid },
+        { name: "Item slot timings", path: "/food/restaurant/item-slot-timings", icon: Timer },
         { name: "Create coupons", path: "/food/restaurant/create-coupons", icon: Gift },
       ],
     },
@@ -90,7 +91,6 @@ export default function DesktopSidebar() {
       items: [
         { name: "Outlet info", path: "/food/restaurant/outlet-info", icon: Info },
         { name: "Outlet timings", path: "/food/restaurant/outlet-timings", icon: Clock },
-        { name: "Dining reservations", path: "/food/restaurant/reservations", icon: Calendar },
       ],
     },
     {

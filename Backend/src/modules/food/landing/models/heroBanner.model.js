@@ -17,13 +17,17 @@ const foodHeroBannerSchema = new mongoose.Schema(
             type: String
         },
         ctaLink: {
-            type: String
+            type: String,
+            default: ''
         },
         zoneId: {
             type: String,
             default: ''
         },
-
+        linkedRestaurantIds: [{
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'FoodRestaurant'
+        }],
         sortOrder: {
             type: Number,
             default: 0,
@@ -44,4 +48,3 @@ const foodHeroBannerSchema = new mongoose.Schema(
 foodHeroBannerSchema.index({ isActive: 1, sortOrder: 1 });
 
 export const FoodHeroBanner = mongoose.model('FoodHeroBanner', foodHeroBannerSchema, 'food_hero_banners');
-

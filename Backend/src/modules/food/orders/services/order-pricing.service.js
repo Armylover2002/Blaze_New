@@ -1,11 +1,16 @@
+/**
+ * Internal alternate Food order pricing calculator (Feature branch).
+ * NOT wired to production routes — live pricing uses `calculateOrder` in order.service.js.
+ * Kept restored for merge reconstruction / future wiring.
+ */
 import mongoose from 'mongoose';
 import { FoodOrder } from '../models/order.model.js';
-import { FoodRestaurant } from '../../restaurant/models/restaurant.model.js';
 import { FoodFeeSettings } from '../../admin/models/feeSettings.model.js';
 import { FoodOffer } from '../../admin/models/offer.model.js';
 import { FoodOfferUsage } from '../../admin/models/offerUsage.model.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
 import { resolveRestaurantCommissionPercentage } from '../../constants/commission.constants.js';
+import { resolveRestaurantDocument } from '../../shared/restaurantIdentity.util.js';
 import { roadDistanceKm } from './order.helpers.js';
 
 function roundCurrency(value) {
@@ -112,12 +117,12 @@ function resolveSponsorRule(subtotal, distanceKm, sponsorRules = []) {
 }
 
 export async function calculateOrderPricing(userId, dto) {
-  const restaurant = await FoodRestaurant.findById(dto.restaurantId)
-    .select("status location commissionPercentage")
-    .lean();
+  // Option B: inbound restaurantId may be business code or Mongo _id.
+  const restaurant = await resolveRestaurantDocument(dto.restaurantId);
   if (!restaurant) throw new ValidationError("Restaurant not found");
   if (restaurant.status !== "approved")
     throw new ValidationError("Restaurant not available");
+  const resolvedRestaurantObjectId = restaurant._id;
 
   const items = Array.isArray(dto.items) ? dto.items : [];
   const subtotal = items.reduce(
@@ -207,7 +212,7 @@ export async function calculateOrderPricing(userId, dto) {
       const endOk = !offer.endDate || now < new Date(offer.endDate);
       const scopeOk =
         offer.restaurantScope !== "selected" ||
-        String(offer.restaurantId || "") === String(dto.restaurantId || "");
+        String(offer.restaurantId || "") === String(resolvedRestaurantObjectId || "");
       const minOk = subtotal >= (Number(offer.minOrderValue) || 0);
       let usageOk = true;
       if (
@@ -269,12 +274,13 @@ export async function calculateOrderPricing(userId, dto) {
       }
     } else {
       const { RestaurantCoupon } = await import('../../admin/models/restaurantCoupon.model.js');
-      const isIdValid = mongoose.Types.ObjectId.isValid(dto.restaurantId);
-      const restCoupon = isIdValid ? await RestaurantCoupon.findOne({
-        couponCode: codeRaw,
-        status: 'Approved',
-        restaurantId: new mongoose.Types.ObjectId(dto.restaurantId)
-      }).lean() : null;
+      const restCoupon = resolvedRestaurantObjectId
+        ? await RestaurantCoupon.findOne({
+            couponCode: codeRaw,
+            status: 'Approved',
+            restaurantId: new mongoose.Types.ObjectId(resolvedRestaurantObjectId),
+          }).lean()
+        : null;
 
       if (restCoupon) {
         const endOk = !restCoupon.expiryDate || now < new Date(restCoupon.expiryDate);

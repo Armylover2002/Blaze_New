@@ -85,7 +85,7 @@ export const validateUniqueDocuments = async (payload, excludeUserId = null) => 
 
 /**
  * For public document validation during rejected reapply (Edit Existing / Create New),
- * exclude the current partner so they can reuse their own PAN/Aadhaar/DL.
+ *  partner so they can reuse their own PAN/Aadhaar/DL.
  * Never excludes approved partners via the public path (auth path uses req.user).
  */
 export const resolveDocumentValidationExcludePartnerId = async (body = {}) => {
@@ -890,6 +890,9 @@ export const getDeliveryPartnerWallet = async (deliveryPartnerId) => {
     const cashLimitSettings = await getDeliveryCashLimitSettings();
     const totalCashLimit = Number(cashLimitSettings.deliveryCashLimit) || 0;
     const deliveryWithdrawalLimit = Number(cashLimitSettings.deliveryWithdrawalLimit) || 100;
+    const rawMax = cashLimitSettings.deliveryMaxWithdrawalLimit;
+    const deliveryMaxWithdrawalLimit =
+        rawMax != null && Number(rawMax) > 0 ? Number(rawMax) : null;
 
     const partnerId = new mongoose.Types.ObjectId(deliveryPartnerId);
 
@@ -1017,6 +1020,7 @@ export const getDeliveryPartnerWallet = async (deliveryPartnerId) => {
         totalCashLimit,
         availableCashLimit,
         deliveryWithdrawalLimit,
+        deliveryMaxWithdrawalLimit,
         transactions: [...paymentTransactions, ...returnPickupTxList, ...bonusTransactions].sort((a, b) => {
             const ad = a?.date ? new Date(a.date).getTime() : 0;
             const bd = b?.date ? new Date(b.date).getTime() : 0;

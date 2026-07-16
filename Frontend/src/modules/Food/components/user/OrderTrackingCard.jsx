@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useRef, useCallback, memo } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { UtensilsCrossed, ChevronRight, X } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { formatScheduledAtShort } from "@food/utils/scheduleTime";
 
 const CookingAnimation = memo(() => (
   <div className="relative w-12 h-12 flex items-center justify-center rounded-xl bg-red-50 border border-red-100 overflow-visible shadow-[0_4px_15px_rgba(204,37,50,0.15)] shrink-0">
@@ -466,12 +467,7 @@ function OrderTrackingCardInner({ hasBottomNav = true }) {
               </p>
               <p className="text-white text-base md:text-[17px] font-bold leading-tight drop-shadow-sm">
                 {orderStatus === "scheduled"
-                  ? activeOrder.scheduledAt
-                    ? new Date(activeOrder.scheduledAt).toLocaleTimeString([], {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })
-                    : "Scheduled"
+                  ? formatScheduledAtShort(activeOrder.scheduledAt) || "Scheduled"
                   : timeRemaining !== null
                     ? `${Math.max(1, timeRemaining)} min`
                     : "--"}

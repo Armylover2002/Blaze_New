@@ -2,12 +2,11 @@ import { getPublicGourmetRestaurants } from '../services/gourmet.service.js';
 import { getLandingSettings } from '../services/landingSettings.service.js';
 import { FoodHeroBanner } from '../models/heroBanner.model.js';
 import { FoodUnder250Banner } from '../models/under250Banner.model.js';
-import { FoodDiningBanner } from '../models/diningBanner.model.js';
 import { FoodExploreIcon } from '../models/exploreIcon.model.js';
 import { FoodRestaurant } from '../../restaurant/models/restaurant.model.js';
 import { sendResponse } from '../../../../utils/response.js';
 
-/** Public hero banners for user home: active only, sorted, with linkedRestaurants populated for click-through */
+/** Public hero banners for user home: active only, sorted */
 export const getPublicHeroBannersController = async (req, res, next) => {
     try {
         const requestedZoneId =
@@ -25,20 +24,12 @@ export const getPublicHeroBannersController = async (req, res, next) => {
 
         const docs = await FoodHeroBanner.find(query)
             .sort({ sortOrder: 1, createdAt: -1 })
-            .populate({
-                path: 'linkedRestaurantIds',
-                select: '_id restaurantName slug area city rating cuisines profileImage pureVegRestaurant',
-                model: 'FoodRestaurant'
-            })
             .lean();
-        const banners = (docs || []).map((b) => {
-            const { linkedRestaurantIds, ...rest } = b;
-            return {
-                ...rest,
-                linkedRestaurants: Array.isArray(linkedRestaurantIds) ? linkedRestaurantIds : [],
-                imageUrl: b.imageUrl
-            };
-        });
+        const banners = (docs || []).map((b) => ({
+            ...b,
+            linkedRestaurants: [],
+            imageUrl: b.imageUrl
+        }));
         return sendResponse(res, 200, 'Hero banners fetched', { banners });
     } catch (error) {
         next(error);
@@ -49,15 +40,6 @@ export const getPublicUnder250BannersController = async (req, res, next) => {
     try {
         const docs = await FoodUnder250Banner.find({ isActive: true }).sort({ sortOrder: 1, createdAt: -1 }).lean();
         return sendResponse(res, 200, 'Under 250 banners fetched', { banners: docs });
-    } catch (error) {
-        next(error);
-    }
-};
-
-export const getPublicDiningBannersController = async (req, res, next) => {
-    try {
-        const docs = await FoodDiningBanner.find({ isActive: true }).sort({ sortOrder: 1, createdAt: -1 }).lean();
-        return sendResponse(res, 200, 'Dining banners fetched', { banners: docs });
     } catch (error) {
         next(error);
     }

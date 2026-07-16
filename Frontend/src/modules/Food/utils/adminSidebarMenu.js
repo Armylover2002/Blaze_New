@@ -185,7 +185,6 @@ export const adminSidebarMenu = [
       { type: "link", label: "Cash Pay Requests", permissionKey: "settlement", path: "/admin/food/cash-pay-requests", icon: "ClipboardCheck" },
       { type: "link", label: "Delivery Withdrawal", permissionKey: "withdrawal", path: "/admin/food/delivery-withdrawal", icon: "Wallet" },
       { type: "link", label: "Delivery boy Wallet", permissionKey: "wallet", path: "/admin/food/delivery-boy-wallet", icon: "PiggyBank" },
-      { type: "link", label: "Delivery Boy Commission", permissionKey: "commission", path: "/admin/food/delivery-boy-commission", icon: "IndianRupee " },
       { type: "link", label: "Delivery Emergency Help", permissionKey: "emergency_help", path: "/admin/food/delivery-emergency-help", icon: "Phone" },
       { type: "link", label: "Delivery Support Tickets", permissionKey: "support_tickets", path: "/admin/food/delivery-support-tickets", icon: "MessageSquare" },
       {
@@ -244,6 +243,7 @@ export const adminSidebarMenu = [
     permissionKey: "transaction_management",
     items: [
       { type: "link", label: "Restaurant Withdraws", permissionKey: "restaurant_withdraws", path: "/admin/food/restaurant-withdraws", icon: "CreditCard" },
+      { type: "link", label: "Restaurant Withdrawal Limits", permissionKey: "restaurant_withdraws", path: "/admin/food/restaurant-withdrawal-limit", icon: "Wallet" },
       { type: "link", label: "Onboarding Fee Management", permissionKey: "restaurant_withdraws", path: "/admin/food/onboarding-fee-management", icon: "Settings" },
       { type: "link", label: "Onboarding Payments", permissionKey: "restaurant_withdraws", path: "/admin/food/onboarding-payments", icon: "Receipt" },
     ],
@@ -254,15 +254,6 @@ export const adminSidebarMenu = [
     permissionKey: "banner_settings",
     items: [
       { type: "link", label: "Landing Page Management", permissionKey: "landing_page", path: "/admin/food/hero-banner-management", icon: "Image" },
-    ],
-  },
-  {
-    type: "section",
-    label: "DINING MANAGEMENT",
-    permissionKey: "dining_management",
-    items: [
-      { type: "link", label: "Dining Banners", permissionKey: "banners", path: "/admin/food/dining-management", icon: "UtensilsCrossed" },
-      { type: "link", label: "Dining List", permissionKey: "list", path: "/admin/food/dining-list", icon: "FileText" },
     ],
   },
   {

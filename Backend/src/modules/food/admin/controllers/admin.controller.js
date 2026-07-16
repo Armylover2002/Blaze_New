@@ -1,11 +1,13 @@
 import mongoose from 'mongoose';
 import * as adminService from '../services/admin.service.js';
 import { validateCategoryListQuery, validateCategoryRejectDto, validateCategoryUpsertDto } from '../validators/category.validator.js';
-import { validateCreateOfferDto, validateUpdateOfferCartVisibilityDto } from '../validators/offer.validator.js';
 import { validateAddDeliveryBonusDto, validateBonusTransactionsQuery } from '../validators/deliveryBonus.validator.js';
+import { validateCreateOfferDto, validateUpdateOfferCartVisibilityDto, validateUpdateOfferDto, validateUpdateOfferStatusDto } from '../validators/offer.validator.js';
 import { validateCheckCompletionsDto, validateEarningAddonHistoryActionDto, validateEarningAddonUpsertDto, validateToggleEarningAddonStatusDto } from '../validators/earningAddon.validator.js';
 import { validateDeliveryCommissionRuleDto, validateOptionalStatusDto } from '../validators/commission.validator.js';
 import { validateFeeSettingsUpsertDto } from '../validators/feeSettings.validator.js';
+import { validateDeliveryCashLimitUpsertDto } from '../validators/deliveryCashLimit.validator.js';
+import { validateRestaurantWithdrawalLimitUpsertDto } from '../validators/restaurantWithdrawalLimit.validator.js';
 import { validateDeliveryEmergencyHelpUpsertDto } from '../validators/deliveryEmergencyHelp.validator.js';
 import { validateReferralSettingsUpsertDto } from '../validators/referralSettings.validator.js';
 import { resolveActionPerformerSnapshot } from '../../../../core/utils/performer.js';
@@ -726,6 +728,40 @@ export async function createAdminOffer(req, res, next) {
     }
 }
 
+export async function updateAdminOffer(req, res, next) {
+    try {
+        const { id } = req.params;
+        if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({ success: false, message: 'Invalid offer id' });
+        }
+        const body = validateUpdateOfferDto(req.body || {});
+        const updated = await adminService.updateAdminOffer(id, body);
+        if (!updated) {
+            return res.status(404).json({ success: false, message: 'Offer not found' });
+        }
+        res.status(200).json({ success: true, message: 'Offer updated successfully', data: { offer: updated } });
+    } catch (error) {
+        next(error);
+    }
+}
+
+export async function updateAdminOfferStatus(req, res, next) {
+    try {
+        const { id } = req.params;
+        if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({ success: false, message: 'Invalid offer id' });
+        }
+        const body = validateUpdateOfferStatusDto(req.body || {});
+        const updated = await adminService.updateAdminOfferStatus(id, body.status);
+        if (!updated) {
+            return res.status(404).json({ success: false, message: 'Offer not found' });
+        }
+        res.status(200).json({ success: true, message: 'Offer status updated successfully', data: { offer: updated } });
+    } catch (error) {
+        next(error);
+    }
+}
+
 export async function updateAdminOfferCartVisibility(req, res, next) {
     try {
         const { id } = req.params;
@@ -1082,7 +1118,8 @@ export async function createOrUpdateFeeSettings(req, res, next) {
 // ----- Referral Settings (admin) -----
 export async function getReferralSettings(req, res, next) {
     try {
-        const data = await adminService.getReferralSettings();
+        // Admin must still load config when the program is deactivated.
+        const data = await adminService.getReferralSettings({ includeInactive: true });
         res.status(200).json({ success: true, message: 'Referral settings fetched successfully', data });
     } catch (error) {
         next(error);
@@ -1111,8 +1148,29 @@ export async function getDeliveryCashLimit(req, res, next) {
 
 export async function updateDeliveryCashLimit(req, res, next) {
     try {
-        const data = await adminService.upsertDeliveryCashLimitSettings(req.body || {});
+        const body = validateDeliveryCashLimitUpsertDto(req.body || {});
+        const data = await adminService.upsertDeliveryCashLimitSettings(body);
         res.status(200).json({ success: true, message: 'Delivery cash limit updated successfully', data });
+    } catch (error) {
+        next(error);
+    }
+}
+
+// ----- Restaurant Withdrawal Limits (admin) -----
+export async function getRestaurantWithdrawalLimit(req, res, next) {
+    try {
+        const data = await adminService.getRestaurantWithdrawalLimitSettings();
+        res.status(200).json({ success: true, message: 'Restaurant withdrawal limits fetched successfully', data });
+    } catch (error) {
+        next(error);
+    }
+}
+
+export async function updateRestaurantWithdrawalLimit(req, res, next) {
+    try {
+        const body = validateRestaurantWithdrawalLimitUpsertDto(req.body || {});
+        const data = await adminService.upsertRestaurantWithdrawalLimitSettings(body);
+        res.status(200).json({ success: true, message: 'Restaurant withdrawal limits updated successfully', data });
     } catch (error) {
         next(error);
     }
@@ -1548,7 +1606,7 @@ export async function getWithdrawals(req, res, next) {
 export async function updateWithdrawalStatus(req, res, next) {
     try {
         const { id } = req.params;
-        const data = await adminService.updateWithdrawalStatus(id, req.body || {});
+        const data = await adminService.updateWithdrawalStatus(id, req.body || {}, req.user);
         res.status(200).json({ success: true, message: 'Withdrawal status updated successfully', data });
     } catch (error) {
         next(error);
@@ -1567,7 +1625,7 @@ export async function getDeliveryWithdrawals(req, res, next) {
 export async function updateDeliveryWithdrawalStatus(req, res, next) {
     try {
         const { id } = req.params;
-        const data = await adminService.updateDeliveryWithdrawalStatus(id, req.body || {});
+        const data = await adminService.updateDeliveryWithdrawalStatus(id, req.body || {}, req.user);
         res.status(200).json({ success: true, message: 'Delivery withdrawal status updated successfully', data });
     } catch (error) {
         next(error);

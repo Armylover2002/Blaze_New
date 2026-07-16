@@ -8,7 +8,6 @@ import { ValidationError } from '../../../../core/auth/errors.js';
 import mongoose from 'mongoose';
 import { FoodZone } from '../../admin/models/zone.model.js';
 import { FoodOffer } from '../../admin/models/offer.model.js';
-import { getRestaurantDiningSnapshot, submitRestaurantDiningRequest } from '../../dining/services/dining.service.js';
 import {
     notifyAdminsSafely,
     notifyOwnerSafely
@@ -355,16 +354,19 @@ const toRestaurantProfile = (doc) => {
             Number.isFinite(Number(doc.estimatedDeliveryTimeMinutes))
                 ? Number(doc.estimatedDeliveryTimeMinutes)
                 : null,
-        diningSettings: {
-            isEnabled: doc.diningSettings?.isEnabled !== false,
-            maxGuests: Math.max(1, parseInt(doc.diningSettings?.maxGuests, 10) || 6),
-            diningType: String(doc.diningSettings?.diningType || 'family-dining').trim() || 'family-dining'
-        },
-        diningCategoryIds: Array.isArray(doc.diningCategoryIds) ? doc.diningCategoryIds.map((id) => String(id)) : [],
-        diningCategories: Array.isArray(doc.diningCategories) ? doc.diningCategories : [],
-        diningPrimaryCategoryId: doc.diningPrimaryCategoryId || null,
-        pendingDiningRequest: doc.pendingDiningRequest || null,
         isAcceptingOrders: doc.isAcceptingOrders !== false,
+        scheduleOrderEnabled: doc.scheduleOrderEnabled !== false,
+        /** Opt-in Quick Delivery. Missing ⇒ false. */
+        quickDeliveryEnabled: doc.quickDeliveryEnabled === true,
+        /**
+         * Kitchen prep for Food Quick ETA only (not listing delivery estimate).
+         * null ⇒ platform defaultKitchenPrepMinutes.
+         */
+        kitchenPrepMinutes:
+            Number.isFinite(Number(doc.kitchenPrepMinutes)) &&
+            Number(doc.kitchenPrepMinutes) > 0
+                ? Math.round(Number(doc.kitchenPrepMinutes))
+                : null,
         status: doc.status || null,
         onboardingStep: doc.onboardingStep ?? 1,
         isActive: doc.isActive !== false,
@@ -1483,7 +1485,7 @@ export const registerRestaurant = async (payload, files, authUserId) => {
                     : { referralCode: refRaw };
 
                 const [referrer, settingsDoc] = await Promise.all([
-                    FoodRestaurant.findOne(referrerQuery).select('_id referralCount').lean(),
+                    FoodRestaurant.findOne(referrerQuery).select('_id referralCount status').lean(),
                     FoodReferralSettings.findOne({ isActive: true }).sort({ createdAt: -1 }).lean()
                 ]);
 
@@ -1492,10 +1494,27 @@ export const registerRestaurant = async (payload, files, authUserId) => {
                     const refereeReward = Math.max(0, Number(settingsDoc.restaurant?.refereeReward) || 0);
                     const limit = Math.max(0, Number(settingsDoc.restaurant?.limit) || 0);
 
-                    if (
+                    // Pending invites consume slots so referrers cannot oversell the limit
+                    // before approvals; credited count is the hard gate at payout.
+                    const usedSlots = await FoodReferralLog.countDocuments({
+                        referrerId: referrer._id,
+                        role: 'RESTAURANT',
+                        status: { $in: ['pending', 'credited'] }
+                    });
+
+                    if (referrer.status !== 'approved') {
+                        await FoodReferralLog.create({
+                            referrerId: referrer._id,
+                            refereeId: restaurant._id,
+                            role: 'RESTAURANT',
+                            rewardAmount: referrerReward,
+                            status: 'rejected',
+                            reason: 'referrer_not_approved'
+                        });
+                    } else if (
                         (referrerReward > 0 || refereeReward > 0) &&
                         limit > 0 &&
-                        Number(referrer.referralCount || 0) < limit
+                        usedSlots < limit
                     ) {
                         // Update new restaurant with referrer info
                         await FoodRestaurant.updateOne({ _id: restaurant._id }, { $set: { referredBy: referrer._id } });
@@ -1604,8 +1623,10 @@ export const getCurrentRestaurantProfile = async (restaurantId) => {
                 'featuredPrice',
                 'offer',
                 'estimatedDeliveryTimeMinutes',
-                'diningSettings',
                 'isAcceptingOrders',
+                'scheduleOrderEnabled',
+                'quickDeliveryEnabled',
+                'kitchenPrepMinutes',
                 'isActive',
                 'wasEverApproved',
                 'approvedAt',
@@ -1661,14 +1682,9 @@ export const getCurrentRestaurantProfile = async (restaurantId) => {
         logger.error(`[PROFILE-HYDRATION] Error validating accepts orders status: ${err.message}`);
     }
 
-    const diningSnapshot = await getRestaurantDiningSnapshot(restaurantId);
     return toRestaurantProfile({
         ...doc,
         isAcceptingOrders,
-        diningCategoryIds: diningSnapshot.categoryIds,
-        diningCategories: diningSnapshot.categories,
-        diningPrimaryCategoryId: diningSnapshot.primaryCategoryId,
-        pendingDiningRequest: diningSnapshot.pendingDiningRequest
     });
 };
 
@@ -1741,8 +1757,10 @@ export const updateRestaurantAcceptingOrders = async (restaurantId, isAcceptingO
                 'openingTime',
                 'closingTime',
                 'openDays',
-                'diningSettings',
                 'isAcceptingOrders',
+                'scheduleOrderEnabled',
+                'quickDeliveryEnabled',
+                'kitchenPrepMinutes',
                 'status',
                 'createdAt',
                 'updatedAt'
@@ -1750,14 +1768,6 @@ export const updateRestaurantAcceptingOrders = async (restaurantId, isAcceptingO
         }
     ).lean();
     return toRestaurantProfile(doc);
-};
-
-export const updateCurrentRestaurantDiningSettings = async (restaurantId, body = {}) => {
-    if (!restaurantId) {
-        throw new ValidationError('Invalid restaurant id');
-    }
-    await submitRestaurantDiningRequest(restaurantId, body);
-    return getCurrentRestaurantProfile(restaurantId);
 };
 
 export const updateRestaurantProfile = async (restaurantId, body = {}) => {
@@ -1787,6 +1797,59 @@ export const updateRestaurantProfile = async (restaurantId, body = {}) => {
             throw new ValidationError('Owner name is too long');
         }
         update.ownerName = ownerName;
+    }
+
+    if (body.scheduleOrderEnabled !== undefined) {
+        if (typeof body.scheduleOrderEnabled === 'boolean') {
+            update.scheduleOrderEnabled = body.scheduleOrderEnabled;
+        } else if (typeof body.scheduleOrderEnabled === 'string') {
+            const normalized = body.scheduleOrderEnabled.trim().toLowerCase();
+            if (normalized === 'true' || normalized === '1' || normalized === 'yes') {
+                update.scheduleOrderEnabled = true;
+            } else if (normalized === 'false' || normalized === '0' || normalized === 'no') {
+                update.scheduleOrderEnabled = false;
+            } else {
+                throw new ValidationError('scheduleOrderEnabled must be a boolean');
+            }
+        } else {
+            throw new ValidationError('scheduleOrderEnabled must be a boolean');
+        }
+    }
+
+    if (body.quickDeliveryEnabled !== undefined) {
+        if (typeof body.quickDeliveryEnabled === 'boolean') {
+            update.quickDeliveryEnabled = body.quickDeliveryEnabled;
+        } else if (typeof body.quickDeliveryEnabled === 'string') {
+            const normalized = body.quickDeliveryEnabled.trim().toLowerCase();
+            if (normalized === 'true' || normalized === '1' || normalized === 'yes') {
+                update.quickDeliveryEnabled = true;
+            } else if (normalized === 'false' || normalized === '0' || normalized === 'no') {
+                update.quickDeliveryEnabled = false;
+            } else {
+                throw new ValidationError('quickDeliveryEnabled must be a boolean');
+            }
+        } else {
+            throw new ValidationError('quickDeliveryEnabled must be a boolean');
+        }
+    }
+
+    if (body.kitchenPrepMinutes !== undefined) {
+        if (body.kitchenPrepMinutes === null || body.kitchenPrepMinutes === '') {
+            update.kitchenPrepMinutes = null;
+        } else {
+            const {
+                parseKitchenPrepMinutes,
+                KITCHEN_PREP_MINUTES_MIN,
+                KITCHEN_PREP_MINUTES_MAX,
+            } = await import('../../orders/utils/quickDeliveryConstants.js');
+            const parsed = parseKitchenPrepMinutes(body.kitchenPrepMinutes);
+            if (!Number.isFinite(parsed)) {
+                throw new ValidationError(
+                    `kitchenPrepMinutes must be an integer between ${KITCHEN_PREP_MINUTES_MIN} and ${KITCHEN_PREP_MINUTES_MAX}`,
+                );
+            }
+            update.kitchenPrepMinutes = parsed;
+        }
     }
 
     if (body.ownerEmail !== undefined) {
@@ -2184,6 +2247,10 @@ export const updateRestaurantProfile = async (restaurantId, body = {}) => {
                     'openingTime',
                     'closingTime',
                     'openDays',
+                    'isAcceptingOrders',
+                    'scheduleOrderEnabled',
+                    'quickDeliveryEnabled',
+                    'kitchenPrepMinutes',
                     'status',
                     'createdAt',
                     'updatedAt',
@@ -2698,7 +2765,7 @@ export const listPublicOffers = async (query = {}) => {
 
     const adminOffers = [];
     for (const o of list) {
-        if (!isCouponWithinDateWindow(o, now) || !isCouponUsageAvailable(o)) continue;
+        if (!isCouponWithinDateWindow(o, now) || !(await isCouponUsageAvailable(o))) continue;
 
         const { minOrderValue, meetsMinOrder, amountToUnlock, estimatedDiscount, displayDiscount } =
             getCouponCartEligibility(o, numericSubtotal);
@@ -2773,7 +2840,7 @@ export const listPublicOffers = async (query = {}) => {
 
         for (const c of dbCoupons) {
             if (c.showInCart === false) continue;
-            if (!isCouponWithinDateWindow(c, now) || !isCouponUsageAvailable(c)) continue;
+            if (!isCouponWithinDateWindow(c, now) || !(await isCouponUsageAvailable(c))) continue;
 
             const { minOrderValue, meetsMinOrder, amountToUnlock, estimatedDiscount, displayDiscount } =
                 getCouponCartEligibility(c, numericSubtotal);

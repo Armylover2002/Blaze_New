@@ -65,7 +65,6 @@ const Bonus = lazy(() => import("@food/pages/admin/wallet/Bonus"));
 const LoyaltyPointReport = lazy(() => import("@food/pages/admin/loyalty-point/Report"));
 const SubscribedMailList = lazy(() => import("@food/pages/admin/SubscribedMailList"));
 // Deliveryman Management
-const DeliveryBoyCommission = lazy(() => import("@food/pages/admin/DeliveryBoyCommission"));
 const DeliveryCashLimit = lazy(() => import("@food/pages/admin/DeliveryCashLimit"));
 const CashLimitSettlement = lazy(() => import("@food/pages/admin/CashLimitSettlement"));
 const CashPayRequests = lazy(() => import("@food/pages/admin/CashPayRequests"));
@@ -96,6 +95,7 @@ const TaxReport = lazy(() => import("@food/pages/admin/reports/TaxReport"));
 const RestaurantVATReport = lazy(() => import("@food/pages/admin/reports/RestaurantVATReport"));
 // Transaction Management
 const RestaurantWithdraws = lazy(() => import("@food/pages/admin/transactions/RestaurantWithdraws"));
+const RestaurantWithdrawalLimit = lazy(() => import("@food/pages/admin/RestaurantWithdrawalLimit"));
 const WithdrawMethod = lazy(() => import("@food/pages/admin/transactions/WithdrawMethod"));
 const OnboardingFeeManagement = lazy(() => import("@food/pages/admin/transactions/OnboardingFeeManagement"));
 const OnboardingPayments = lazy(() => import("@food/pages/admin/transactions/OnboardingPayments"));
@@ -136,8 +136,6 @@ const CleanDatabase = lazy(() => import("@food/pages/admin/system/CleanDatabase"
 const DeletedAccounts = lazy(() => import("@food/pages/admin/system/DeletedAccounts"));
 const AddonActivation = lazy(() => import("@food/pages/admin/system/AddonActivation"));
 const LandingPageManagement = lazy(() => import("@food/pages/admin/system/LandingPageManagement"));
-const DiningManagement = lazy(() => import("@food/pages/admin/system/DiningManagement"));
-const DiningList = lazy(() => import("@food/pages/admin/system/DiningList"));
 const EditRestaurant = lazy(() => import("@food/pages/admin/restaurant/EditRestaurant"));
 const QuickCommerceDashboard = lazy(() => import("@food/pages/admin/quick-commerce/QuickCommerceDashboard"));
 const QuickCommerceOrders = lazy(() => import("@food/pages/admin/quick-commerce/QuickCommerceOrders"));
@@ -312,7 +310,6 @@ export default function AdminRouter() {
             <Route path="loyalty-point/report" element={<LoyaltyPointReport />} />
             <Route path="subscribed-mail-list" element={<SubscribedMailList />} />
 
-            <Route path="delivery-boy-commission" element={<DeliveryBoyCommission />} />
             <Route path="delivery-cash-limit" element={<DeliveryCashLimit />} />
             <Route path="cash-limit-settlement" element={<CashLimitSettlement />} />
             <Route path="cash-pay-requests" element={<CashPayRequests />} />
@@ -344,6 +341,7 @@ export default function AdminRouter() {
             <Route path="restaurant-vat-report" element={<RestaurantVATReport />} />
             
             <Route path="restaurant-withdraws" element={<RestaurantWithdraws />} />
+            <Route path="restaurant-withdrawal-limit" element={<RestaurantWithdrawalLimit />} />
             <Route path="withdraw-method" element={<WithdrawMethod />} />
             <Route path="onboarding-fee-management" element={<OnboardingFeeManagement />} />
             <Route path="onboarding-payments" element={<OnboardingPayments />} />
@@ -389,8 +387,6 @@ export default function AdminRouter() {
             <Route path="deleted-accounts" element={<DeletedAccounts />} />
             <Route path="addon-activation" element={<AddonActivation />} />
             <Route path="hero-banner-management" element={<LandingPageManagement />} />
-            <Route path="dining-management" element={<DiningManagement />} />
-            <Route path="dining-list" element={<DiningList />} />
           </Route>
 
 

@@ -54,16 +54,8 @@ export function resolveFirstTimeRestaurantScope(coupon, resolvedRestaurantObject
         : null;
 }
 
-export async function resolveRestaurantObjectId(restaurantId) {
-    if (!restaurantId) return null;
-    const idStr = String(restaurantId).trim();
-    if (mongoose.Types.ObjectId.isValid(idStr)) {
-        return new mongoose.Types.ObjectId(idStr);
-    }
-    const { FoodRestaurant } = await import('../restaurant/models/restaurant.model.js');
-    const rest = await FoodRestaurant.findOne({ restaurantId: idStr }).select('_id restaurantId').lean();
-    return rest?._id ? new mongoose.Types.ObjectId(String(rest._id)) : null;
-}
+/** @deprecated Prefer importing from restaurantIdentity.util.js — kept as re-export for BC. */
+export { resolveRestaurantObjectId } from './restaurantIdentity.util.js';
 
 export function normalizeDiscountType(discountType) {
     const value = String(discountType || '').toLowerCase();
@@ -109,10 +101,32 @@ export function isCouponWithinDateWindow(coupon, now = new Date()) {
     return now <= end;
 }
 
-export function isCouponUsageAvailable(coupon) {
+export async function countGlobalCouponApplications(couponCode) {
+    const code = couponCode ? String(couponCode).trim().toUpperCase() : '';
+    if (!code) return 0;
+
+    return FoodOrder.countDocuments({
+        orderStatus: { $nin: CANCELLED_ORDER_STATUSES },
+        $or: [
+            { 'pricing.couponCode': code },
+            { 'pricing.appliedCoupon.code': code },
+        ],
+    });
+}
+
+export async function isCouponUsageAvailable(coupon) {
     const usageLimit = Number(coupon?.usageLimit);
     if (!Number.isFinite(usageLimit) || usageLimit <= 0) return true;
-    return Number(coupon?.usedCount || 0) < usageLimit;
+
+    let usedCount = Number(coupon?.usedCount || 0);
+
+    // Count in-flight orders too (usage is only incremented on delivery).
+    if (coupon?.couponCode) {
+        const appliedOrders = await countGlobalCouponApplications(coupon.couponCode);
+        usedCount = Math.max(usedCount, appliedOrders);
+    }
+
+    return usedCount < usageLimit;
 }
 
 export async function isCouponFirstTimeEligible(coupon, userId, resolvedRestaurantObjectId = null) {
@@ -252,7 +266,7 @@ export async function validateAndApplyCoupon({
         const scopeOk = offerMatchesRestaurant(offer, resolvedRestaurantObjectId);
         const minOk = itemSubtotal >= getCouponMinOrderValue(offer);
         const dateOk = isCouponWithinDateWindow(offer, now);
-        const usageOk = isCouponUsageAvailable(offer);
+        const usageOk = await isCouponUsageAvailable(offer);
 
         let perUserOk = true;
         if (userId) {
@@ -294,7 +308,7 @@ export async function validateAndApplyCoupon({
 
     const minOk = itemSubtotal >= getCouponMinOrderValue(restCoupon);
     const dateOk = isCouponWithinDateWindow(restCoupon, now);
-    const usageOk = isCouponUsageAvailable(restCoupon);
+    const usageOk = await isCouponUsageAvailable(restCoupon);
 
     let perUserOk = true;
     if (userId) {
@@ -338,13 +352,19 @@ export function getCouponCartEligibility(coupon, numericSubtotal) {
     return { minOrderValue, meetsMinOrder, amountToUnlock, estimatedDiscount, displayDiscount };
 }
 
+const COUPON_USAGE_LIMIT_GATE = [
+    { usageLimit: { $exists: false } },
+    { usageLimit: null },
+    { usageLimit: 0 },
+    { $expr: { $lt: ['$usedCount', '$usageLimit'] } },
+];
+
 /** Increment coupon usage only when an order is delivered (not on place/cancel). */
 export async function consumeOrderCouponUsageOnDelivery(order, userId = null) {
     if (!order) return;
 
     const status = String(order.orderStatus || '').toLowerCase();
     if (status !== 'delivered') return;
-    if (order.pricing?.couponUsageConsumed) return;
 
     const couponCode = order?.pricing?.couponCode
         ? String(order.pricing.couponCode).trim().toUpperCase()
@@ -354,13 +374,31 @@ export async function consumeOrderCouponUsageOnDelivery(order, userId = null) {
     const orderType = String(order?.orderType || '').toLowerCase();
     if (!['food', 'mixed'].includes(orderType)) return;
 
+    // Claim first so concurrent delivery handlers cannot double-increment.
+    const claimed = await FoodOrder.findOneAndUpdate(
+        {
+            _id: order._id,
+            orderStatus: 'delivered',
+            'pricing.couponUsageConsumed': { $ne: true },
+        },
+        { $set: { 'pricing.couponUsageConsumed': true } },
+        { new: true },
+    );
+    if (!claimed) return;
+    if (order.pricing) {
+        order.pricing.couponUsageConsumed = true;
+    }
+
     const resolvedUserId = userId || order.userId;
     const couponSource = order?.pricing?.appliedCoupon?.source;
     const { FoodOfferUsage } = await import('../admin/models/offerUsage.model.js');
 
     const offer = await FoodOffer.findOne({ couponCode }).lean();
     if (offer && couponSource !== 'restaurant') {
-        await FoodOffer.updateOne({ _id: offer._id }, { $inc: { usedCount: 1 } });
+        await FoodOffer.updateOne(
+            { _id: offer._id, $or: COUPON_USAGE_LIMIT_GATE },
+            { $inc: { usedCount: 1 } },
+        );
         if (resolvedUserId) {
             await FoodOfferUsage.updateOne(
                 { offerId: offer._id, userId: new mongoose.Types.ObjectId(String(resolvedUserId)) },
@@ -368,38 +406,31 @@ export async function consumeOrderCouponUsageOnDelivery(order, userId = null) {
                 { upsert: true },
             );
         }
-    } else {
-        let resolvedRestaurantId = await resolveRestaurantObjectId(order?.restaurantId);
-        if (resolvedRestaurantId) {
-            const { RestaurantCoupon } = await import('../admin/models/restaurantCoupon.model.js');
-            const { RestaurantCouponUsage } = await import('../admin/models/restaurantCouponUsage.model.js');
-            const restCoupon = await RestaurantCoupon.findOne({
-                couponCode,
-                restaurantId: resolvedRestaurantId,
-                status: 'Approved',
-            }).select('_id').lean();
-
-            if (restCoupon) {
-                await RestaurantCoupon.updateOne(
-                    { _id: restCoupon._id },
-                    { $inc: { usedCount: 1 } },
-                );
-                if (resolvedUserId) {
-                    await RestaurantCouponUsage.updateOne(
-                        { couponId: restCoupon._id, userId: new mongoose.Types.ObjectId(String(resolvedUserId)) },
-                        { $inc: { count: 1 }, $set: { lastUsedAt: new Date() } },
-                        { upsert: true },
-                    );
-                }
-            }
-        }
+        return;
     }
 
-    await FoodOrder.updateOne(
-        { _id: order._id },
-        { $set: { 'pricing.couponUsageConsumed': true } },
+    const resolvedRestaurantId = await resolveRestaurantObjectId(order?.restaurantId);
+    if (!resolvedRestaurantId) return;
+
+    const { RestaurantCoupon } = await import('../admin/models/restaurantCoupon.model.js');
+    const { RestaurantCouponUsage } = await import('../admin/models/restaurantCouponUsage.model.js');
+    const restCoupon = await RestaurantCoupon.findOne({
+        couponCode,
+        restaurantId: resolvedRestaurantId,
+        status: 'Approved',
+    }).select('_id').lean();
+
+    if (!restCoupon) return;
+
+    await RestaurantCoupon.updateOne(
+        { _id: restCoupon._id, $or: COUPON_USAGE_LIMIT_GATE },
+        { $inc: { usedCount: 1 } },
     );
-    if (order.pricing) {
-        order.pricing.couponUsageConsumed = true;
+    if (resolvedUserId) {
+        await RestaurantCouponUsage.updateOne(
+            { couponId: restCoupon._id, userId: new mongoose.Types.ObjectId(String(resolvedUserId)) },
+            { $inc: { count: 1 }, $set: { lastUsedAt: new Date() } },
+            { upsert: true },
+        );
     }
 }

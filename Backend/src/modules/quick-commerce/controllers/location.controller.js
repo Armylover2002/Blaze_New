@@ -118,3 +118,59 @@ export const reverseGeocode = asyncHandler(async (req, res) => {
     },
   });
 });
+
+/**
+ * @desc    Resolve a Google place_id to coordinates
+ * @route   GET /api/v1/quick-commerce/location/geocode-place
+ * @access  Public
+ */
+export const geocodePlaceId = asyncHandler(async (req, res) => {
+  const placeId = String(req.query.placeId || '').trim();
+
+  if (!placeId) {
+    throw new ApiError(400, 'placeId query parameter is required');
+  }
+
+  const key = process.env.GOOGLE_MAPS_API_KEY || process.env.GOOGLE_MAP_API_KEY;
+  if (!key) {
+    throw new ApiError(500, 'Maps API key not configured on server');
+  }
+
+  try {
+    const { data } = await axios.get(
+      `https://maps.googleapis.com/maps/api/geocode/json?place_id=${encodeURIComponent(placeId)}&key=${key}`,
+      { timeout: 8000 },
+    );
+
+    if (data.status === 'ZERO_RESULTS') {
+      return res.status(404).json({
+        success: false,
+        message: 'Place not found',
+      });
+    }
+
+    if (data.status !== 'OK') {
+      console.error('Google Maps place geocode error:', data.status, data.error_message);
+      throw new ApiError(500, `Maps API error: ${data.status}`);
+    }
+
+    const first = data.results[0];
+    const { lat, lng } = first.geometry.location;
+    const components = mapAddressComponents(first.address_components || []);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        latitude: lat,
+        longitude: lng,
+        formattedAddress: first.formatted_address,
+        ...components,
+        placeId: first.place_id || placeId,
+      },
+    });
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    console.error('Place geocoding error:', error.message);
+    throw new ApiError(500, 'Failed to geocode place');
+  }
+});

@@ -38,6 +38,7 @@ import { useProfile } from "@food/context/ProfileContext"
 import { useAuth } from "@core/context/AuthContext"
 import { useLocation as useUserLocation } from "@food/hooks/useLocation"
 import DeliveryTrackingMap from "@food/components/user/DeliveryTrackingMap"
+import { isFoodQuickOrder, formatQuickEtaWindow } from "@food/utils/quickDelivery"
 import { orderAPI, restaurantAPI } from "@food/api"
 import { useCompanyName } from "@food/hooks/useCompanyName"
 import { useUserNotifications } from "@food/hooks/useUserNotifications"
@@ -394,6 +395,10 @@ function transformOrderForTracking(apiOrder, previousOrder = null, explicitResta
     createdAt: apiOrder?.createdAt || previousOrder?.createdAt || null,
     totalAmount: apiOrder?.pricing?.total || apiOrder?.totalAmount || previousOrder?.totalAmount || 0,
     deliveryFee: apiOrder?.pricing?.deliveryFee || apiOrder?.deliveryFee || previousOrder?.deliveryFee || 0,
+    quickDeliveryFee: apiOrder?.pricing?.quickDeliveryFee ?? previousOrder?.quickDeliveryFee ?? 0,
+    deliveryMode: apiOrder?.deliveryMode || previousOrder?.deliveryMode || "basic",
+    etaPromise: apiOrder?.etaPromise || previousOrder?.etaPromise || null,
+    sla: apiOrder?.sla || previousOrder?.sla || null,
     gst: apiOrder?.pricing?.tax || apiOrder?.pricing?.gst || apiOrder?.gst || apiOrder?.tax || previousOrder?.gst || 0,
     packagingFee: apiOrder?.pricing?.packagingFee || apiOrder?.packagingFee || 0,
     platformFee: apiOrder?.pricing?.platformFee || apiOrder?.platformFee || 0,
@@ -874,22 +879,31 @@ export default function OrderTracking() {
     return code ? String(code) : null;
   }, [order?.deliveryVerification?.dropOtp?.code, order?.deliveryVerification?.dropOtp, order?.handoverOtp, order?.deliveryOtp, socketDropOtpCode]);
 
+  const isFoodQuick = isFoodQuickOrder(order);
+  const quickPromiseLabel = formatQuickEtaWindow(order?.etaPromise);
+
   // Build status config dynamically only when relevant values change
   const currentStatus = useMemo(() => {
     const template = STATUS_CONFIG_TEMPLATE[orderStatus] || STATUS_CONFIG_TEMPLATE.placed;
+    const arriveBy =
+      isFoodQuick && quickPromiseLabel
+        ? `Quick promise ${quickPromiseLabel}`
+        : typeof estimatedTime === "number"
+          ? `Arriving in ${estimatedTime} mins`
+          : null;
     switch (orderStatus) {
       case 'scheduled': return { ...template, subtitle: isQuickOrder ? "Your order is scheduled. Please wait for the store to respond." : "Your order is scheduled. Please wait for the restaurant to respond." };
-      case 'placed': return { ...template, subtitle: isQuickOrder ? "Waiting for store to accept" : "Waiting for restaurant to accept" };
-      case 'confirmed': return { ...template, subtitle: isQuickOrder ? "Store has accepted your order" : "Restaurant has accepted your order" };
-      case 'preparing': return { ...template, title: isQuickOrder ? "Items are being packed" : "Food is being prepared", subtitle: typeof estimatedTime === 'number' ? `Arriving in ${estimatedTime} mins` : (isQuickOrder ? "Packing your items" : "Cooking your meal") };
-      case 'assigned': return { ...template, subtitle: isQuickOrder ? "A delivery partner is arriving at the store" : "A delivery partner is arriving at the restaurant" };
+      case 'placed': return { ...template, subtitle: isQuickOrder ? "Waiting for store to accept" : (isFoodQuick ? "Quick order waiting for restaurant" : "Waiting for restaurant to accept") };
+      case 'confirmed': return { ...template, subtitle: isQuickOrder ? "Store has accepted your order" : (isFoodQuick ? "Quick order accepted — kitchen prioritized" : "Restaurant has accepted your order") };
+      case 'preparing': return { ...template, title: isQuickOrder ? "Items are being packed" : (isFoodQuick ? "Quick prep in progress" : "Food is being prepared"), subtitle: arriveBy || (isQuickOrder ? "Packing your items" : "Cooking your meal") };
+      case 'assigned': return { ...template, subtitle: isQuickOrder ? "A delivery partner is arriving at the store" : (isFoodQuick ? "Priority rider heading to restaurant" : "A delivery partner is arriving at the restaurant") };
       case 'at_pickup': return { ...template, title: isQuickOrder ? "Rider at store" : "Rider at restaurant", subtitle: "Rider is waiting for your order" };
       case 'ready': return { ...template, subtitle: "Rider is picking up your order" };
-      case 'on_way': return { ...template, subtitle: typeof estimatedTime === 'number' ? `Arriving in ${estimatedTime} mins` : "Rider is out for delivery" };
-      case 'delivered': return { ...template, subtitle: isQuickOrder ? "Enjoy your purchase!" : "Enjoy your meal!" };
+      case 'on_way': return { ...template, subtitle: arriveBy || "Rider is out for delivery" };
+      case 'delivered': return { ...template, subtitle: isQuickOrder ? "Enjoy your purchase!" : (order?.sla?.breached && Number(order?.sla?.compensationAmount) > 0 ? `Delivered · SLA credit ₹${Math.round(Number(order.sla.compensationAmount))}` : "Enjoy your meal!") };
       default: return template;
     }
-  }, [orderStatus, isQuickOrder, estimatedTime]);
+  }, [orderStatus, isQuickOrder, isFoodQuick, quickPromiseLabel, estimatedTime, order?.sla]);
 
   const isDeliveredOrder = useMemo(() => (
     orderStatus === "delivered" || order?.status === "delivered" || Boolean(order?.deliveredAt)
@@ -1495,7 +1509,9 @@ export default function OrderTracking() {
       });
       y = (doc.lastAutoTable?.finalY || y) + 24;
       const totalsXLabel = pageWidth - margin - 150, totalsXValue = pageWidth - margin;
-      const totals = [["Subtotal", formatInvoiceCurrency(order?.subtotal)], ["Delivery Fee", formatInvoiceCurrency(order?.deliveryFee)], ["Platform Fee", formatInvoiceCurrency(order?.platformFee)], ["Packaging Fee", formatInvoiceCurrency(order?.packagingFee)], ["GST & Taxes", formatInvoiceCurrency(order?.gst)]];
+      const totals = [["Subtotal", formatInvoiceCurrency(order?.subtotal)], ["Delivery Fee", formatInvoiceCurrency(order?.deliveryFee)]];
+      if (Number(order?.quickDeliveryFee || 0) > 0) totals.push(["Quick Delivery", formatInvoiceCurrency(order?.quickDeliveryFee)]);
+      totals.push(["Platform Fee", formatInvoiceCurrency(order?.platformFee)], ["Packaging Fee", formatInvoiceCurrency(order?.packagingFee)], ["GST & Taxes", formatInvoiceCurrency(order?.gst)]);
       if (Number(order?.discount || 0) > 0) totals.push(["Discount", `- ${formatInvoiceCurrency(order?.discount)}`]);
       doc.setFontSize(10);
       totals.forEach(([label, value]) => { doc.setFont("helvetica", "normal"); doc.text(label, totalsXLabel, y); doc.text(value, totalsXValue, y, { align: "right" }); y += 16; });
@@ -1588,6 +1604,17 @@ export default function OrderTracking() {
 
         {!['at_pickup', 'ready', 'on_way', 'at_drop', 'delivered'].includes(orderStatus) && (
           <div className="px-4 pb-4 text-center">
+            {isFoodQuick && (
+              <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-[11px] font-bold uppercase tracking-wider text-emerald-700">
+                Quick Delivery
+                {quickPromiseLabel ? <span className="font-semibold normal-case tracking-normal">· {quickPromiseLabel}</span> : null}
+              </div>
+            )}
+            {order?.sla?.breached && Number(order?.sla?.compensationAmount) > 0 && (
+              <div className="mb-2 text-xs font-semibold text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+                SLA compensation ₹{Math.round(Number(order.sla.compensationAmount))} credited to your wallet
+              </div>
+            )}
             <motion.h1 className="text-2xl font-bold mb-3" key={currentStatus.title} initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}>
               {currentStatus.title}
             </motion.h1>

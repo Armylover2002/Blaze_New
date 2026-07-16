@@ -2,6 +2,7 @@ import 'dotenv/config';
 import { Worker } from 'bullmq';
 import { config } from '../../config/env.js';
 import { logger } from '../../utils/logger.js';
+import { connectDB, disconnectDB } from '../../config/db.js';
 import { getBullMQConnection } from '../connection.js';
 import { ORDER_QUEUE } from '../queue.constants.js';
 import { processOrderJob } from '../processors/order.processor.js';
@@ -29,16 +30,30 @@ const startOrderWorker = () => {
     worker.on('completed', (job) => logger.info(`Order job ${job.id} completed`));
     worker.on('failed', (job, err) => logger.error(`Order job ${job?.id} failed: ${err.message}`));
     worker.on('error', (err) => logger.error(`Order worker error: ${err.message}`));
-    logger.info('Order worker started');
+    logger.info('Order worker started (Mongo connected)');
     return worker;
 };
 
-const worker = startOrderWorker();
-if (worker) {
-    const shutdown = async () => {
-        await worker.close();
-        process.exit(0);
-    };
-    process.on('SIGTERM', shutdown);
-    process.on('SIGINT', shutdown);
-}
+const bootstrap = async () => {
+    try {
+        // Schedule activation + dispatch jobs require mongoose models.
+        await connectDB();
+        const worker = startOrderWorker();
+        if (!worker) {
+            process.exit(0);
+            return;
+        }
+        const shutdown = async () => {
+            await worker.close();
+            await disconnectDB().catch(() => {});
+            process.exit(0);
+        };
+        process.on('SIGTERM', shutdown);
+        process.on('SIGINT', shutdown);
+    } catch (err) {
+        logger.error(`Order worker bootstrap failed: ${err?.message || err}`);
+        process.exit(1);
+    }
+};
+
+bootstrap();

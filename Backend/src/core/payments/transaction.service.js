@@ -75,6 +75,13 @@ export async function getBalance(entityType, entityId) {
  * @param {Object} [payload.metadata] - extra data
  * @returns {Object} { transaction, wallet }
  */
+/** Categories that must credit at most once per order + entityType. */
+const IDEMPOTENT_ORDER_CREDIT_CATEGORIES = new Set(['delivery_earning', 'platform_fee']);
+
+function isDuplicateKeyError(err) {
+    return err?.code === 11000 || String(err?.message || '').includes('E11000');
+}
+
 /**
  * Record a transaction within an existing MongoDB session (caller manages commit).
  * Backward-compatible addition — existing recordTransaction() behaviour unchanged.
@@ -92,6 +99,34 @@ export async function recordTransactionWithSession(payload, session) {
     if (!Number.isFinite(amount) || amount <= 0) throw new Error('amount must be positive');
 
     const { Model, filter } = resolveWallet(entityType, entityId);
+    const orderOid =
+        orderId && mongoose.Types.ObjectId.isValid(String(orderId))
+            ? new mongoose.Types.ObjectId(String(orderId))
+            : null;
+
+    // Idempotent order-linked delivery/platform credits (payment job + wallet self-heal).
+    if (
+        type === 'credit' &&
+        orderOid &&
+        IDEMPOTENT_ORDER_CREDIT_CATEGORIES.has(category)
+    ) {
+        const existing = await Transaction.findOne({
+            orderId: orderOid,
+            entityType,
+            category,
+            type: 'credit',
+            status: 'completed',
+        }).session(session);
+
+        if (existing) {
+            const wallet = await Model.findOne(filter).session(session);
+            return {
+                transaction: existing.toObject(),
+                wallet: { balance: Number(wallet?.balance) || Number(existing.balanceAfter) || 0 },
+                alreadyProcessed: true,
+            };
+        }
+    }
 
     let wallet = await Model.findOne(filter).session(session);
     if (!wallet) {
@@ -111,21 +146,47 @@ export async function recordTransactionWithSession(payload, session) {
         ? ADMIN_ENTITY_OID
         : new mongoose.Types.ObjectId(entityId);
 
-    const [txn] = await Transaction.create([{
-        paymentId: paymentId ? new mongoose.Types.ObjectId(paymentId) : null,
-        orderId: orderId ? new mongoose.Types.ObjectId(orderId) : null,
-        entityType,
-        entityId: entityOid,
-        type,
-        amount,
-        balanceAfter: newBalance,
-        currency: 'INR',
-        status: 'completed',
-        description,
-        category,
-        module,
-        metadata
-    }], { session });
+    let txn;
+    try {
+        [txn] = await Transaction.create([{
+            paymentId: paymentId ? new mongoose.Types.ObjectId(paymentId) : null,
+            orderId: orderOid,
+            entityType,
+            entityId: entityOid,
+            type,
+            amount,
+            balanceAfter: newBalance,
+            currency: 'INR',
+            status: 'completed',
+            description,
+            category,
+            module,
+            metadata
+        }], { session });
+    } catch (err) {
+        if (
+            isDuplicateKeyError(err) &&
+            type === 'credit' &&
+            orderOid &&
+            IDEMPOTENT_ORDER_CREDIT_CATEGORIES.has(category)
+        ) {
+            const existing = await Transaction.findOne({
+                orderId: orderOid,
+                entityType,
+                category,
+                type: 'credit',
+                status: 'completed',
+            }).session(session);
+            if (existing) {
+                return {
+                    transaction: existing.toObject(),
+                    wallet: { balance: currentBalance },
+                    alreadyProcessed: true,
+                };
+            }
+        }
+        throw err;
+    }
 
     if (type === 'credit') {
         if (entityType === 'restaurant' || entityType === 'deliveryBoy') {
@@ -152,7 +213,8 @@ export async function recordTransactionWithSession(payload, session) {
 
     return {
         transaction: txn.toObject(),
-        wallet: { balance: newBalance }
+        wallet: { balance: newBalance },
+        alreadyProcessed: false,
     };
 }
 

@@ -207,65 +207,244 @@ export const verifyWalletTopupPayment = async (userId, payload) => {
     return { wallet: await getUserWallet(userId) };
 };
 
+/** Auto-cancel / compensation refund sources — at most one successful credit per order. */
+const AUTO_WALLET_REFUND_SOURCES = [
+    'user_cancel_refund',
+    'restaurant_cancel_refund',
+    'admin_auto_refund',
+    'order_save_compensation',
+];
+
+/**
+ * Atomically debit wallet when balance is sufficient.
+ * Idempotent for the same metadata.orderId (retries after partial place-order failures).
+ */
 export const deductWalletBalance = async (userId, amountInr, description = 'Order payment', metadata = {}) => {
     const amount = Number(amountInr);
     if (!Number.isFinite(amount) || amount <= 0) {
         throw new ValidationError('Invalid deduction amount');
     }
 
-    const wallet = await ensureWallet(userId);
-    if (wallet.balance < amount) {
-        throw new ValidationError('Insufficient wallet balance');
+    await ensureWallet(userId);
+    const oid = new mongoose.Types.ObjectId(String(userId));
+    const orderIdKey = String(metadata?.orderId || '').trim();
+    const sourceKey = String(metadata?.source || 'food_order_payment').trim();
+
+    if (orderIdKey) {
+        const alreadyDebited = await FoodUserWallet.findOne({
+            userId: oid,
+            transactions: {
+                $elemMatch: {
+                    type: 'deduction',
+                    'metadata.orderId': orderIdKey,
+                },
+            },
+        })
+            .select('_id')
+            .lean();
+        if (alreadyDebited) {
+            return { wallet: await getUserWallet(userId), alreadyProcessed: true };
+        }
     }
 
-    wallet.transactions.unshift({
+    const txn = {
         type: 'deduction',
         amount,
         status: 'Completed',
         description,
-        metadata: { source: 'order_payment', ...(metadata || {}) }
-    });
+        metadata: { ...(metadata || {}), source: sourceKey },
+        createdAt: new Date(),
+        updatedAt: new Date(),
+    };
 
-    wallet.balance = Number(wallet.balance) - amount;
-    await wallet.save();
-    await syncUserWalletBalance(userId, wallet.balance);
+    const debitFilter = {
+        userId: oid,
+        balance: { $gte: amount },
+    };
+    if (orderIdKey) {
+        debitFilter.transactions = {
+            $not: {
+                $elemMatch: {
+                    type: 'deduction',
+                    'metadata.orderId': orderIdKey,
+                },
+            },
+        };
+    }
 
+    const updated = await FoodUserWallet.findOneAndUpdate(
+        debitFilter,
+        {
+            $inc: { balance: -amount },
+            $push: { transactions: { $each: [txn], $position: 0 } },
+        },
+        { new: true }
+    );
+
+    if (!updated) {
+        // Race: another request already deducted for this orderId
+        if (orderIdKey) {
+            const raced = await FoodUserWallet.findOne({
+                userId: oid,
+                transactions: {
+                    $elemMatch: {
+                        type: 'deduction',
+                        'metadata.orderId': orderIdKey,
+                    },
+                },
+            })
+                .select('_id')
+                .lean();
+            if (raced) {
+                return { wallet: await getUserWallet(userId), alreadyProcessed: true };
+            }
+        }
+        throw new ValidationError('Insufficient wallet balance');
+    }
+
+    await syncUserWalletBalance(userId, updated.balance);
     return { wallet: await getUserWallet(userId) };
 };
 
+/**
+ * Credit wallet for order refunds.
+ * Idempotent on returnId / refundTransactionId, or orderId+source+amount
+ * (auto-cancel sources: one refund per orderId across those sources).
+ */
 export const refundWalletBalance = async (userId, amountInr, description = 'Order refund', metadata = {}) => {
     const amount = Number(amountInr);
     if (!Number.isFinite(amount) || amount <= 0) {
         return { wallet: await getUserWallet(userId) };
     }
 
-    const wallet = await ensureWallet(userId);
+    await ensureWallet(userId);
+    const oid = new mongoose.Types.ObjectId(String(userId));
     const returnId = String(metadata?.returnId || '').trim();
     const refundTransactionId = String(metadata?.refundTransactionId || '').trim();
-    const existingRefund = (Array.isArray(wallet.transactions) ? wallet.transactions : []).find((txn) => {
-        if (txn?.type !== 'refund') return false;
-        const txnReturnId = String(txn?.metadata?.returnId || '').trim();
-        const txnRefundId = String(txn?.metadata?.refundTransactionId || '').trim();
-        if (returnId && txnReturnId === returnId) return true;
-        if (refundTransactionId && txnRefundId === refundTransactionId) return true;
-        return false;
-    });
-    if (existingRefund) {
-        return { wallet: await getUserWallet(userId), alreadyProcessed: true };
+    const orderIdKey = String(metadata?.orderId || '').trim();
+    const sourceKey = String(metadata?.source || 'order_refund').trim();
+    const isAutoSource = AUTO_WALLET_REFUND_SOURCES.includes(sourceKey);
+
+    const duplicateOr = [];
+    if (returnId) {
+        duplicateOr.push({
+            transactions: {
+                $elemMatch: { type: 'refund', 'metadata.returnId': returnId },
+            },
+        });
+    }
+    if (refundTransactionId) {
+        duplicateOr.push({
+            transactions: {
+                $elemMatch: {
+                    type: 'refund',
+                    'metadata.refundTransactionId': refundTransactionId,
+                },
+            },
+        });
+    }
+    if (orderIdKey && isAutoSource) {
+        duplicateOr.push({
+            transactions: {
+                $elemMatch: {
+                    type: 'refund',
+                    'metadata.orderId': orderIdKey,
+                    'metadata.source': { $in: AUTO_WALLET_REFUND_SOURCES },
+                },
+            },
+        });
+    } else if (orderIdKey) {
+        duplicateOr.push({
+            transactions: {
+                $elemMatch: {
+                    type: 'refund',
+                    'metadata.orderId': orderIdKey,
+                    'metadata.source': sourceKey,
+                    amount,
+                },
+            },
+        });
     }
 
-    wallet.transactions.unshift({
+    if (duplicateOr.length) {
+        const existingRefund = await FoodUserWallet.findOne({
+            userId: oid,
+            $or: duplicateOr,
+        })
+            .select('_id')
+            .lean();
+        if (existingRefund) {
+            return { wallet: await getUserWallet(userId), alreadyProcessed: true };
+        }
+    }
+
+    const txn = {
         type: 'refund',
         amount,
         status: 'Completed',
         description,
-        metadata: { source: 'order_refund', ...(metadata || {}) }
-    });
+        metadata: { ...(metadata || {}), source: sourceKey },
+        createdAt: new Date(),
+        updatedAt: new Date(),
+    };
 
-    wallet.balance = Number(wallet.balance) + amount;
-    await wallet.save();
-    await syncUserWalletBalance(userId, wallet.balance);
+    const creditFilter = { userId: oid };
+    if (orderIdKey && isAutoSource) {
+        creditFilter.transactions = {
+            $not: {
+                $elemMatch: {
+                    type: 'refund',
+                    'metadata.orderId': orderIdKey,
+                    'metadata.source': { $in: AUTO_WALLET_REFUND_SOURCES },
+                },
+            },
+        };
+    } else if (orderIdKey) {
+        creditFilter.transactions = {
+            $not: {
+                $elemMatch: {
+                    type: 'refund',
+                    'metadata.orderId': orderIdKey,
+                    'metadata.source': sourceKey,
+                    amount,
+                },
+            },
+        };
+    } else if (refundTransactionId) {
+        creditFilter.transactions = {
+            $not: {
+                $elemMatch: {
+                    type: 'refund',
+                    'metadata.refundTransactionId': refundTransactionId,
+                },
+            },
+        };
+    } else if (returnId) {
+        creditFilter.transactions = {
+            $not: {
+                $elemMatch: {
+                    type: 'refund',
+                    'metadata.returnId': returnId,
+                },
+            },
+        };
+    }
 
+    const updated = await FoodUserWallet.findOneAndUpdate(
+        creditFilter,
+        {
+            $inc: { balance: amount },
+            $push: { transactions: { $each: [txn], $position: 0 } },
+        },
+        { new: true }
+    );
+
+    if (!updated) {
+        // Concurrent duplicate refund attempt — treat as already processed.
+        return { wallet: await getUserWallet(userId), alreadyProcessed: true };
+    }
+
+    await syncUserWalletBalance(userId, updated.balance);
     return { wallet: await getUserWallet(userId) };
 };
 
