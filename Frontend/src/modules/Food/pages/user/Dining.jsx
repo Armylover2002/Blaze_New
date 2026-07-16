@@ -39,8 +39,7 @@ const getCoordinates = (restaurant) => {
   return null
 }
 
-import { getRoadDistancesFromOrigin } from "@/shared/services/roadDistance"
-  "before:absolute before:inset-0 before:-translate-x-full before:bg-gradient-to-r before:from-transparent before:via-white/30 before:to-transparent before:animate-[shimmer_2.2s_infinite]"
+const shimmerClassName = "before:absolute before:inset-0 before:-translate-x-full before:bg-gradient-to-r before:from-transparent before:via-white/30 before:to-transparent before:animate-[shimmer_2.2s_infinite]"
 
 const loadingCategoryCards = Array.from({ length: 6 }, (_, index) => `category-skeleton-${index}`)
 const loadingRestaurantCards = Array.from({ length: 6 }, (_, index) => `restaurant-skeleton-${index}`)

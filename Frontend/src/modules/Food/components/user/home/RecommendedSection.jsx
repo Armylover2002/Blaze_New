@@ -99,7 +99,7 @@ const RecommendedSection = memo(({ recommendedForYouRestaurants }) => {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState(null);
-  const { addToCart } = useCart();
+  const { addToCart, cart, updateQuantity } = useCart();
 
   // Stable key derived from IDs — prevents unnecessary re-fetches when parent re-renders
   const restaurantIdsKey = useMemo(
@@ -252,15 +252,48 @@ const RecommendedSection = memo(({ recommendedForYouRestaurants }) => {
                     <span className="text-sm font-bold text-[#1c1c1e]">
                       ₹{product.price || "199"}
                     </span>
-                    <button 
-                      className="bg-red-50 text-[#FF0000] font-bold text-[10px] px-4 py-1.5 rounded-[6px] transition-colors hover:bg-red-100 border-0 outline-none"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelectedProduct(product);
-                      }}
-                    >
-                      ADD
-                    </button>
+                    {(() => {
+                      const inCart = cart.some(item => (item.id === product.id || item.id === product._id || item.productId === (product.id || product._id)));
+                      const cartItem = cart.find(item => (item.id === product.id || item.id === product._id || item.productId === (product.id || product._id)));
+                      
+                      if (inCart && cartItem) {
+                        return (
+                          <div className="flex items-center gap-1.5 border border-[#FF0000] rounded-[6px] bg-red-50 text-[#FF0000] overflow-hidden" onClick={(e) => e.stopPropagation()}>
+                            <button
+                              className="px-2 py-1 font-bold hover:bg-red-100 transition-colors border-0 outline-none"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                updateQuantity(product._id || product.id, cartItem.quantity - 1, null, product);
+                              }}
+                            >
+                              -
+                            </button>
+                            <span className="font-bold text-[10px] min-w-[12px] text-center">{cartItem.quantity}</span>
+                            <button
+                              className="px-2 py-1 font-bold hover:bg-red-100 transition-colors border-0 outline-none"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                updateQuantity(product._id || product.id, cartItem.quantity + 1, null, product);
+                              }}
+                            >
+                              +
+                            </button>
+                          </div>
+                        );
+                      }
+                      
+                      return (
+                        <button 
+                          className="bg-red-50 text-[#FF0000] font-bold text-[10px] px-4 py-1.5 rounded-[6px] transition-colors hover:bg-red-100 border-0 outline-none"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedProduct(product);
+                          }}
+                        >
+                          ADD
+                        </button>
+                      );
+                    })()}
                   </div>
                 </div>
               </div>
