@@ -13,6 +13,7 @@ import { parseGeoPoint } from "@food/utils/geo";
 let globalHomeCache = {
   bootstrap: null,
   restaurants: null,
+  advertisements: null,
   lastFetched: 0,
 };
 
@@ -41,6 +42,9 @@ export const useFoodHomeData = ({
   const [heroBannerImages, setHeroBannerImages] = useState(globalHomeCache.bootstrap?.banners?.images || []);
   const [heroBannersData, setHeroBannersData] = useState(globalHomeCache.bootstrap?.banners?.data || []);
   const [loadingBanners, setLoadingBanners] = useState(!hasValidCache);
+
+  // --- Advertisements State ---
+  const [advertisements, setAdvertisements] = useState(globalHomeCache.bootstrap?.advertisements || []);
 
   // --- Categories State ---
   const [realCategories, setRealCategories] = useState(globalHomeCache.bootstrap?.categories || []);
@@ -120,11 +124,12 @@ export const useFoodHomeData = ({
         })(),
         publicGetOnce("/food/explore-icons/public"),
         publicGetOnce("/food/landing/settings/public"),
+        publicGetOnce("/food/advertisements/public"),
       ]);
 
       if (cancelled) return;
 
-      const newBootstrapCache = { banners: {}, categories: [], exploreMore: [], settings: {} };
+      const newBootstrapCache = { banners: {}, categories: [], exploreMore: [], settings: {}, advertisements: [] };
 
       // Process Banners
       if (results[0].status === "fulfilled") {
@@ -181,6 +186,12 @@ export const useFoodHomeData = ({
           recommendedIds: settings.recommendedRestaurantIds,
           recommendedRaw: settings.recommendedRestaurants,
         };
+      }
+
+      if (results[4].status === "fulfilled") {
+        const adsData = results[4].value?.data?.data?.advertisements || [];
+        setAdvertisements(adsData);
+        newBootstrapCache.advertisements = adsData;
       }
 
       // Update global cache
@@ -415,6 +426,7 @@ export const useFoodHomeData = ({
     },
     landing: { exploreMore: landingExploreMore, heading: exploreMoreHeading, loading: loadingLandingConfig, videoUrl: headerVideoUrl },
     meta: { recommended: recommendedForYouRestaurants },
+    advertisements: advertisements,
     actions: { toggleFilter, applyFiltersAndRefetch, loadMoreRestaurants },
     state: { activeFilters, sortBy, setSortBy, selectedCuisine, setSelectedCuisine, isBootstrapped }
   };

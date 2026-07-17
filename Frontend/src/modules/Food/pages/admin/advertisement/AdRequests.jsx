@@ -27,6 +27,7 @@ export default function AdRequests() {
     restaurantInfo: true,
     adsType: true,
     duration: true,
+    status: true,
     actions: true,
   })
 
@@ -55,6 +56,7 @@ export default function AdRequests() {
     restaurantInfo: "Restaurant Info",
     adsType: "Ads Type",
     duration: "Duration",
+    status: "Status",
     actions: "Actions",
   }
 
@@ -152,6 +154,7 @@ export default function AdRequests() {
       restaurantInfo: true,
       adsType: true,
       duration: true,
+      status: true,
       actions: true,
     })
   }
@@ -283,8 +286,8 @@ export default function AdRequests() {
 
       {/* Table */}
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-        <div className="overflow-x-hidden">
-          <table className="w-full">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-max">
             <thead className="bg-slate-50 border-b border-slate-200">
               <tr>
                 {visibleColumns.si && <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">SI</th>}
@@ -293,6 +296,7 @@ export default function AdRequests() {
                 {visibleColumns.restaurantInfo && <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">Restaurant Info</th>}
                 {visibleColumns.adsType && <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">Ads Type</th>}
                 {visibleColumns.duration && <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">Duration</th>}
+                {visibleColumns.status && <th className="px-6 py-4 text-center text-[10px] font-bold text-slate-700 uppercase tracking-wider">Status</th>}
                 {visibleColumns.actions && <th className="px-6 py-4 text-center text-[10px] font-bold text-slate-700 uppercase tracking-wider">Action</th>}
               </tr>
             </thead>
@@ -346,6 +350,20 @@ export default function AdRequests() {
                     {visibleColumns.duration && (
                       <td className="px-6 py-4 whitespace-nowrap">
                         <span className="text-sm text-slate-700">{request.duration}</span>
+                      </td>
+                    )}
+                    {visibleColumns.status && (
+                      <td className="px-6 py-4 whitespace-nowrap text-center">
+                        <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${
+                          request.status === 'new' ? 'bg-amber-100 text-amber-700' :
+                          request.status === 'update' ? 'bg-blue-100 text-blue-700' :
+                          request.status === 'denied' ? 'bg-red-100 text-red-700' :
+                          'bg-slate-100 text-slate-700'
+                        }`}>
+                          {request.status === 'new' ? 'Pending' : 
+                           request.status === 'update' ? 'Update' : 
+                           request.status === 'denied' ? 'Denied' : request.status}
+                        </span>
                       </td>
                     )}
                     {visibleColumns.actions && (

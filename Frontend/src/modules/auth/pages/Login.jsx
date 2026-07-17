@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from "react"
 import { motion } from "framer-motion"
 import { Routes, Route, Navigate, Link, useLocation, useNavigate } from "react-router-dom"
-import { Phone, Lock, ArrowRight, ArrowLeft, ShieldCheck, Loader2, UserRound, Headset } from "lucide-react"
+import { Phone, Lock, ArrowRight, ArrowLeft, ShieldCheck, Loader2, UserRound, Headset, Facebook, Instagram, Twitter, Linkedin, Youtube } from "lucide-react"
 import { toast } from "sonner"
 import { authAPI, userAPI } from "@food/api"
 import { isModuleAuthenticated, setAuthData, clearModuleAuth } from "@food/utils/auth"
@@ -34,6 +34,7 @@ export default function UnifiedOTPFastLogin() {
   const [tempAuthData, setTempAuthData] = useState(null)
   const [logoUrl, setLogoUrl] = useState(() => getAppLogo('user'))
   const [companyName, setCompanyName] = useState(() => getCompanyName())
+  const [socialLinks, setSocialLinks] = useState(() => getCachedSettings()?.socialLinks || {})
   const location = useLocation()
   const navigate = useNavigate()
 
@@ -45,6 +46,7 @@ export default function UnifiedOTPFastLogin() {
         if (settings) {
           setLogoUrl(getAppLogo('user'))
           setCompanyName(getCompanyName())
+          setSocialLinks(settings.socialLinks || {})
         }
       } catch (error) {}
     }
@@ -603,6 +605,37 @@ export default function UnifiedOTPFastLogin() {
               )}
             </button>
           </form>
+
+          {/* Social Links Section */}
+          {step === 1 && (socialLinks.facebook || socialLinks.instagram || socialLinks.twitter || socialLinks.linkedin || socialLinks.youtube) && (
+            <div className="mt-8 flex justify-center items-center gap-6">
+              {socialLinks.facebook && (
+                <a href={socialLinks.facebook} target="_blank" rel="noopener noreferrer" className="text-gray-400 hover:text-blue-600 dark:text-gray-500 dark:hover:text-blue-500 transition-colors">
+                  <Facebook className="h-5 w-5" />
+                </a>
+              )}
+              {socialLinks.instagram && (
+                <a href={socialLinks.instagram} target="_blank" rel="noopener noreferrer" className="text-gray-400 hover:text-pink-600 dark:text-gray-500 dark:hover:text-pink-500 transition-colors">
+                  <Instagram className="h-5 w-5" />
+                </a>
+              )}
+              {socialLinks.twitter && (
+                <a href={socialLinks.twitter} target="_blank" rel="noopener noreferrer" className="text-gray-400 hover:text-blue-400 dark:text-gray-500 dark:hover:text-blue-300 transition-colors">
+                  <Twitter className="h-5 w-5" />
+                </a>
+              )}
+              {socialLinks.linkedin && (
+                <a href={socialLinks.linkedin} target="_blank" rel="noopener noreferrer" className="text-gray-400 hover:text-blue-700 dark:text-gray-500 dark:hover:text-blue-600 transition-colors">
+                  <Linkedin className="h-5 w-5" />
+                </a>
+              )}
+              {socialLinks.youtube && (
+                <a href={socialLinks.youtube} target="_blank" rel="noopener noreferrer" className="text-gray-400 hover:text-red-600 dark:text-gray-500 dark:hover:text-red-500 transition-colors">
+                  <Youtube className="h-5 w-5" />
+                </a>
+              )}
+            </div>
+          )}
         </div>
 
         {step === 1 && (
