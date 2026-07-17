@@ -83,24 +83,6 @@ function collectGeoSources(entity) {
   return sources;
 }
 
-export function parseGeoPoint(entity) {
-  const sources = collectGeoSources(entity);
-  if (sources.length === 0) return null;
-
-  for (const source of sources) {
-    const direct = normalizeLatLng(
-      source.latitude ?? source.latitudes ?? source.lat,
-      source.longitude ?? source.longitudes ?? source.lng ?? source.long,
-    );
-    if (direct) return direct;
-
-    const fromCoords = pairFromCoordinatesArray(source.coordinates);
-    if (fromCoords) return fromCoords;
-  }
-
-  return null;
-}
-
 export function haversineKm(lat1, lon1, lat2, lon2) {
   const a = toFiniteCoord(lat1);
   const b = toFiniteCoord(lon1);
@@ -121,6 +103,31 @@ export function haversineKm(lat1, lon1, lat2, lon2) {
       sinDLon;
   const centralAngle = 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
   return R * centralAngle;
+}
+
+export function parseGeoPoint(entity) {
+  const sources = collectGeoSources(entity);
+  if (sources.length === 0) return null;
+
+  for (const source of sources) {
+    // Prefer GeoJSON coordinates (Mongo Point source of truth) over possibly-stale lat/lng fields.
+    const fromCoords = pairFromCoordinatesArray(source.coordinates);
+    const direct = normalizeLatLng(
+      source.latitude ?? source.latitudes ?? source.lat,
+      source.longitude ?? source.longitudes ?? source.lng ?? source.long,
+    );
+
+    if (fromCoords && direct) {
+      const driftKm = haversineKm(fromCoords.lat, fromCoords.lng, direct.lat, direct.lng);
+      // If lat/lng fields disagree with coordinates, trust GeoJSON.
+      if (Number.isFinite(driftKm) && driftKm > 0.1) return fromCoords;
+      return direct;
+    }
+    if (fromCoords) return fromCoords;
+    if (direct) return direct;
+  }
+
+  return null;
 }
 
 export function calculateDistanceKm(fromEntity, toEntity) {

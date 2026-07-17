@@ -109,6 +109,7 @@ import AdvertisementSection from "@food/components/user/home/AdvertisementSectio
 
 import * as imgUtils from "@food/utils/imageUtils";
 import { useFoodHomeData } from "@food/hooks/useFoodHomeData";
+import { parseGeoPoint } from "@food/utils/geo";
 
 // Extracted Sub-components
 const BannerSection = lazy(() => import("@food/components/user/home/BannerSection"));
@@ -193,13 +194,12 @@ export default function Home() {
   const defaultSavedAddress = useMemo(() => getDefaultAddress?.() || null, [getDefaultAddress]);
   const defaultSavedAddressLocation = useMemo(() => {
     if (!defaultSavedAddress) return null;
-    const coords = defaultSavedAddress?.location?.coordinates;
-    const latitude = Array.isArray(coords) && coords.length >= 2 ? coords[1] : (defaultSavedAddress.latitude ?? null);
-    const longitude = Array.isArray(coords) && coords.length >= 2 ? coords[0] : (defaultSavedAddress.longitude ?? null);
+    // Same pin parsing as Cart checkout (swap-aware).
+    const point = parseGeoPoint(defaultSavedAddress);
     return {
       ...defaultSavedAddress,
-      latitude,
-      longitude,
+      latitude: point?.lat ?? null,
+      longitude: point?.lng ?? null,
       area: defaultSavedAddress.additionalDetails || defaultSavedAddress.area || "",
       zipCode: defaultSavedAddress.zipCode || defaultSavedAddress.postalCode || "",
       postalCode: defaultSavedAddress.postalCode || defaultSavedAddress.zipCode || "",

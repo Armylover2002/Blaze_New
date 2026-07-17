@@ -29,6 +29,7 @@ import { useProfile } from "@food/context/ProfileContext"
 import { getCompanyNameAsync } from "@common/utils/businessSettings"
 import { isModuleAuthenticated } from "@food/utils/auth"
 import { getRoadDistanceKm } from "@/shared/services/roadDistance"
+import { parseGeoPoint } from "@food/utils/geo"
 import { getRestaurantAvailabilityStatus } from "@food/utils/restaurantAvailability"
 import useAppBackNavigation from "@food/hooks/useAppBackNavigation"
 import {
@@ -65,9 +66,42 @@ function RestaurantDetailsContent() {
   const showOnlyUnder250 = searchParams.get('under250') === 'true'
   const targetDishId = useMemo(() => String(searchParams.get('dish') || '').trim(), [searchParams])
   const { addToCart, updateQuantity, removeFromCart, getCartItem, cart } = useCart()
-  const { vegMode, addDishFavorite, removeDishFavorite, isDishFavorite, getDishFavorites, getFavorites, addFavorite, removeFavorite, isFavorite } = useProfile()
-  const { location: userLocation } = useLocation() // Get user's current location
-  const { zoneId, zone, loading: loadingZone, isOutOfService } = useZone(userLocation) // Get user's zone for zone-based filtering
+  const { vegMode, addDishFavorite, removeDishFavorite, isDishFavorite, getDishFavorites, getFavorites, addFavorite, removeFavorite, isFavorite, getDefaultAddress } = useProfile()
+  const { location: liveUserLocation } = useLocation()
+  const deliveryAddressMode = useMemo(() => {
+    if (typeof window === "undefined") return "saved"
+    return window.localStorage.getItem("deliveryAddressMode") || "saved"
+  }, [])
+  // Same origin as Home + Cart checkout so listed distance matches fee distance.
+  const deliveryUserPoint = useMemo(() => {
+    const saved = getDefaultAddress?.() || null
+    if (deliveryAddressMode !== "current" && saved) {
+      const fromSaved = parseGeoPoint(saved)
+      if (fromSaved) return fromSaved
+    }
+    return (
+      parseGeoPoint(liveUserLocation) ||
+      parseGeoPoint({
+        latitude: liveUserLocation?.latitude,
+        longitude: liveUserLocation?.longitude,
+        lat: liveUserLocation?.lat,
+        lng: liveUserLocation?.lng,
+      })
+    )
+  }, [deliveryAddressMode, getDefaultAddress, liveUserLocation])
+  const userLocation = useMemo(() => {
+    if (deliveryUserPoint) {
+      return {
+        ...(liveUserLocation || {}),
+        latitude: deliveryUserPoint.lat,
+        longitude: deliveryUserPoint.lng,
+        lat: deliveryUserPoint.lat,
+        lng: deliveryUserPoint.lng,
+      }
+    }
+    return liveUserLocation
+  }, [deliveryUserPoint, liveUserLocation])
+  const { zoneId, zone, loading: loadingZone, isOutOfService } = useZone(userLocation)
   const [currentImageIndex, setCurrentImageIndex] = useState(0)
   const [highlightIndex, setHighlightIndex] = useState(0)
   const [quantities, setQuantities] = useState({})
@@ -393,18 +427,18 @@ function RestaurantDetailsContent() {
             return `${Math.round(distanceInKm * 1000)} m`
           }
 
-          // Get restaurant coordinates
-          // Priority: latitude/longitude fields > coordinates array (GeoJSON format: [lng, lat])
-          const restaurantLat = locationObj?.latitude || (locationObj?.coordinates && Array.isArray(locationObj.coordinates) ? locationObj.coordinates[1] : null)
-          const restaurantLng = locationObj?.longitude || (locationObj?.coordinates && Array.isArray(locationObj.coordinates) ? locationObj.coordinates[0] : null)
+          // Get restaurant coordinates (same parseGeoPoint as Cart checkout)
+          const restaurantPoint = parseGeoPoint(locationObj)
+          const restaurantLat = restaurantPoint?.lat
+          const restaurantLng = restaurantPoint?.lng
 
           debugLog('? Restaurant coordinates:', { restaurantLat, restaurantLng, locationObj })
 
-          // Get user coordinates
-          const userLat = userLocation?.latitude
-          const userLng = userLocation?.longitude
+          // Delivery address origin (saved vs current) — matches Home + Cart
+          const userLat = deliveryUserPoint?.lat ?? userLocation?.latitude
+          const userLng = deliveryUserPoint?.lng ?? userLocation?.longitude
 
-          debugLog('? User location:', { userLat, userLng, userLocation })
+          debugLog('? User location:', { userLat, userLng, userLocation, deliveryUserPoint })
 
           // Calculate distance if both coordinates are available
           let calculatedDistance = null
@@ -1001,36 +1035,34 @@ function RestaurantDetailsContent() {
     }
 
     fetchRestaurant()
-  }, [slug, zoneId, restaurant])
+  }, [slug, zoneId, restaurant, deliveryUserPoint?.lat, deliveryUserPoint?.lng])
 
   // Track previous values to prevent unnecessary recalculations
   const prevCoordsRef = useRef({ userLat: null, userLng: null, restaurantLat: null, restaurantLng: null })
   const prevDistanceRef = useRef(null)
 
-  // Extract restaurant coordinates as stable values (not array references)
-  const restaurantLat = restaurant?.locationObject?.latitude ||
-    (restaurant?.locationObject?.coordinates && Array.isArray(restaurant.locationObject.coordinates)
-      ? restaurant.locationObject.coordinates[1]
-      : null)
-  const restaurantLng = restaurant?.locationObject?.longitude ||
-    (restaurant?.locationObject?.coordinates && Array.isArray(restaurant.locationObject.coordinates)
-      ? restaurant.locationObject.coordinates[0]
-      : null)
+  // Extract restaurant coordinates as stable values (same as Cart parseGeoPoint)
+  const restaurantPoint = useMemo(
+    () => parseGeoPoint(restaurant?.locationObject || restaurant?.location),
+    [restaurant?.locationObject, restaurant?.location],
+  )
+  const restaurantLat = restaurantPoint?.lat ?? null
+  const restaurantLng = restaurantPoint?.lng ?? null
 
-  // Recalculate distance when user location updates
+  // Recalculate distance when delivery origin or restaurant pin updates
   useEffect(() => {
-    if (!restaurant || !userLocation?.latitude || !userLocation?.longitude) return
+    if (!restaurant || !deliveryUserPoint?.lat || !deliveryUserPoint?.lng) return
     if (!restaurantLat || !restaurantLng) return
 
-    const userLat = userLocation.latitude
-    const userLng = userLocation.longitude
+    const userLat = deliveryUserPoint.lat
+    const userLng = deliveryUserPoint.lng
 
     // Check if coordinates have actually changed (with small threshold to avoid floating point issues)
     const coordsChanged =
-      Math.abs(prevCoordsRef.current.userLat - userLat) > 0.0001 ||
-      Math.abs(prevCoordsRef.current.userLng - userLng) > 0.0001 ||
-      Math.abs(prevCoordsRef.current.restaurantLat - restaurantLat) > 0.0001 ||
-      Math.abs(prevCoordsRef.current.restaurantLng - restaurantLng) > 0.0001
+      Math.abs((prevCoordsRef.current.userLat || 0) - userLat) > 0.0001 ||
+      Math.abs((prevCoordsRef.current.userLng || 0) - userLng) > 0.0001 ||
+      Math.abs((prevCoordsRef.current.restaurantLat || 0) - restaurantLat) > 0.0001 ||
+      Math.abs((prevCoordsRef.current.restaurantLng || 0) - restaurantLng) > 0.0001
 
     // Skip recalculation if coordinates haven't changed
     if (!coordsChanged && prevDistanceRef.current !== null) {
@@ -1040,37 +1072,33 @@ function RestaurantDetailsContent() {
     // Update refs with current coordinates
     prevCoordsRef.current = { userLat, userLng, restaurantLat, restaurantLng }
 
-    if (userLat && userLng && restaurantLat && restaurantLng &&
-      !isNaN(userLat) && !isNaN(userLng) && !isNaN(restaurantLat) && !isNaN(restaurantLng)) {
+    let cancelled = false
 
-      let cancelled = false
+    const recalculateDistance = async () => {
+      const distanceInKm = await getRoadDistanceKm(userLat, userLng, restaurantLat, restaurantLng)
+      if (cancelled || !Number.isFinite(distanceInKm)) return
 
-      const recalculateDistance = async () => {
-        const distanceInKm = await getRoadDistanceKm(userLat, userLng, restaurantLat, restaurantLng)
-        if (cancelled || !Number.isFinite(distanceInKm)) return
+      const calculatedDistance = distanceInKm >= 1
+        ? `${distanceInKm.toFixed(1)} km`
+        : `${Math.round(distanceInKm * 1000)} m`
 
-        const calculatedDistance = distanceInKm >= 1
-          ? `${distanceInKm.toFixed(1)} km`
-          : `${Math.round(distanceInKm * 1000)} m`
+      if (calculatedDistance !== prevDistanceRef.current) {
+        debugLog('? Recalculated distance from user to restaurant:', calculatedDistance, 'km:', distanceInKm)
+        prevDistanceRef.current = calculatedDistance
 
-        if (calculatedDistance !== prevDistanceRef.current) {
-          debugLog('? Recalculated distance from user to restaurant:', calculatedDistance, 'km:', distanceInKm)
-          prevDistanceRef.current = calculatedDistance
-
-          setRestaurant((prev) => {
-            if (prev?.distance === calculatedDistance) return prev
-            return {
-              ...prev,
-              distance: calculatedDistance,
-            }
-          })
-        }
+        setRestaurant((prev) => {
+          if (prev?.distance === calculatedDistance) return prev
+          return {
+            ...prev,
+            distance: calculatedDistance,
+          }
+        })
       }
-
-      void recalculateDistance()
-      return () => { cancelled = true }
     }
-  }, [userLocation?.latitude, userLocation?.longitude, restaurantLat, restaurantLng, restaurant])
+
+    void recalculateDistance()
+    return () => { cancelled = true }
+  }, [deliveryUserPoint?.lat, deliveryUserPoint?.lng, restaurantLat, restaurantLng, restaurant])
 
   // Sync quantities from cart on mount and when restaurant changes
   useEffect(() => {

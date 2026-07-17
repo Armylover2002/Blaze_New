@@ -3,6 +3,7 @@ import { publicGetOnce, restaurantAPI, adminAPI } from "@food/api";
 import { foodImages } from "@food/constants/images";
 import { getRestaurantAvailabilityStatus } from "@food/utils/restaurantAvailability";
 import * as imgUtils from "@food/utils/imageUtils";
+import { parseGeoPoint } from "@food/utils/geo";
 
 /**
  * Custom hook to manage all data fetching and filtering for the Food Module Home Page.
@@ -17,6 +18,12 @@ let globalHomeCache = {
 };
 
 const CACHE_EXPIRY_MS = 5 * 60 * 1000; // 5 minutes
+
+/** Bust in-memory home restaurant cache after distance fixes. */
+export function invalidateFoodHomeRestaurantCache() {
+  globalHomeCache.restaurants = null;
+  globalHomeCache.lastFetched = 0;
+}
 
 export const useFoodHomeData = ({ 
   zoneId, 
@@ -207,9 +214,18 @@ export const useFoodHomeData = ({
     try {
       setLoadingRestaurants(true);
       const params = {};
-      if (Number.isFinite(location?.latitude) && Number.isFinite(location?.longitude)) {
-        params.lat = location.latitude;
-        params.lng = location.longitude;
+      const origin = parseGeoPoint(location) || (
+        Number.isFinite(Number(location?.latitude ?? location?.lat)) &&
+        Number.isFinite(Number(location?.longitude ?? location?.lng))
+          ? {
+              lat: Number(location.latitude ?? location.lat),
+              lng: Number(location.longitude ?? location.lng),
+            }
+          : null
+      );
+      if (origin) {
+        params.lat = origin.lat;
+        params.lng = origin.lng;
       }
       if (filters.sortBy) params.sortBy = filters.sortBy;
       if (filters.selectedCuisine) params.cuisine = filters.selectedCuisine;
@@ -235,9 +251,9 @@ export const useFoodHomeData = ({
             cuisine: restaurant.cuisines?.[0] || "Multi-cuisine",
             rating: Number(restaurant.rating) || 0,
             deliveryTime: restaurant.estimatedDeliveryTime || "25-30 mins",
-            distance: restaurant.distanceInKm 
-              ? `${restaurant.distanceInKm} km` 
-              : (restaurant.distance ? String(restaurant.distance).includes("km") ? restaurant.distance : `${restaurant.distance} km` : `${(2 + Math.random()).toFixed(1)} km`),
+            distance: restaurant.distanceInKm != null && Number.isFinite(Number(restaurant.distanceInKm))
+              ? `${Number(restaurant.distanceInKm).toFixed(1)} km`
+              : (restaurant.distance ? String(restaurant.distance).includes("km") ? restaurant.distance : `${restaurant.distance} km` : null),
             featuredDish: restaurant.featuredDish,
             featuredPrice: restaurant.featuredPrice,
             image: allImages[0] || "",

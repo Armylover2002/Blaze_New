@@ -142,24 +142,15 @@ export async function listRefunds({ status, page = 1, limit = 20 } = {}) {
 }
 
 /**
- * Backward compatibility: add a refund transaction to the legacy FoodUserWallet embedded array.
+ * Backward compatibility hook after universal wallet credit.
+ * Balance + embedded history are now written atomically by recordTransaction /
+ * creditWallet — do NOT credit balance or push history again here
+ * (previously double-credited FoodUserWallet.balance).
  */
 async function addRefundToLegacyWallet(userId, amount, orderId) {
-    try {
-        const { FoodUserWallet } = await import('../../modules/food/user/models/userWallet.model.js');
-        const wallet = await FoodUserWallet.findOne({ userId: new mongoose.Types.ObjectId(userId) });
-        if (wallet) {
-            wallet.transactions.unshift({
-                type: 'refund',
-                amount,
-                status: 'Completed',
-                description: 'Order refund',
-                metadata: { source: 'order_refund', orderId: String(orderId) }
-            });
-            wallet.balance = (Number(wallet.balance) || 0) + amount;
-            await wallet.save();
-        }
-    } catch (err) {
-        logger.warn(`addRefundToLegacyWallet failed: ${err.message}`);
-    }
+    // Intentionally a no-op: creditWallet already updates food_user_wallets.balance
+    // and appends one embedded transactions[] entry for order_refund.
+    logger.info(
+        `addRefundToLegacyWallet skipped (handled by creditWallet embed) userId=${userId} amount=${amount} orderId=${orderId}`
+    );
 }

@@ -81,9 +81,11 @@ export async function processQuickSlaCompensation(orderMongoId) {
       entityId: order.userId,
       amount,
       description: `Quick Delivery SLA credit for order ${order.orderId}`,
-      category: 'quick_sla_compensation',
+      // Must match Transaction.category enum — keep SLA semantics in metadata
+      category: 'adjustment',
       orderId: order._id,
       metadata: {
+        source: 'quick_sla_compensation',
         orderId: order.orderId,
         quickDeliveryFee: charge,
         delayMinutes: evalResult.delayMinutes,

@@ -1313,12 +1313,12 @@ export async function getRestaurantReport(query = {}) {
     const page = Math.max(parseInt(query.page, 10) || 1, 1);
     const skip = (page - 1) * limit;
 
-    const restaurantFilter = {};
+    const restaurantFilter = { status: 'approved' };
     const allFilter = String(query.all || '').trim().toLowerCase();
     if (allFilter === 'active') {
-        restaurantFilter.status = 'approved';
+        restaurantFilter.accountStatus = 'active';
     } else if (allFilter === 'inactive') {
-        restaurantFilter.status = { $ne: 'approved' };
+        restaurantFilter.accountStatus = { $ne: 'active' };
     }
 
     const zoneRaw = String(query.zone || '').trim();
@@ -4822,7 +4822,28 @@ export async function approveRestaurant(id, performer = null) {
                                     balance: referrerReward,
                                     totalEarnings: referrerReward,
                                     referralEarnings: referrerReward
-                                }
+                                },
+                                $push: {
+                                    transactions: {
+                                        $each: [{
+                                            type: 'credit',
+                                            amount: referrerReward,
+                                            category: 'referral_reward',
+                                            description: 'Restaurant referral reward (referrer)',
+                                            status: 'completed',
+                                            referenceId: String(claimed._id),
+                                            metadata: {
+                                                source: 'restaurant_referral',
+                                                role: 'referrer',
+                                                referralLogId: String(claimed._id),
+                                                refereeId: String(updated._id),
+                                            },
+                                            createdAt: new Date(),
+                                            updatedAt: new Date(),
+                                        }],
+                                        $position: 0,
+                                    },
+                                },
                             },
                             { upsert: true, session }
                         );
@@ -4836,7 +4857,28 @@ export async function approveRestaurant(id, performer = null) {
                                     balance: refereeReward,
                                     totalEarnings: refereeReward,
                                     referralEarnings: refereeReward
-                                }
+                                },
+                                $push: {
+                                    transactions: {
+                                        $each: [{
+                                            type: 'credit',
+                                            amount: refereeReward,
+                                            category: 'referral_reward',
+                                            description: 'Restaurant referral reward (referee)',
+                                            status: 'completed',
+                                            referenceId: String(claimed._id),
+                                            metadata: {
+                                                source: 'restaurant_referral',
+                                                role: 'referee',
+                                                referralLogId: String(claimed._id),
+                                                referrerId: String(claimed.referrerId),
+                                            },
+                                            createdAt: new Date(),
+                                            updatedAt: new Date(),
+                                        }],
+                                        $position: 0,
+                                    },
+                                },
                             },
                             { upsert: true, session }
                         );
@@ -5982,12 +6024,45 @@ export async function addDeliveryPartnerBonus(body, adminUser, reqInfo = {}) {
         } while (true);
 
         // STEP 2 — Credit wallet only after unique claim succeeded.
+        const existingWallet = await FoodDeliveryWallet.findOne({
+            deliveryPartnerId: body.deliveryPartnerId,
+        })
+            .session(session)
+            .select('balance')
+            .lean();
+        previousWalletBalance = Number(existingWallet?.balance || 0);
+        updatedWalletBalance = previousWalletBalance + amount;
+
         const updatedWallet = await FoodDeliveryWallet.findOneAndUpdate(
             { deliveryPartnerId: body.deliveryPartnerId },
             {
                 $inc: {
                     balance: amount,
                     totalBonus: amount
+                },
+                $push: {
+                    transactions: {
+                        $each: [{
+                            type: 'credit',
+                            amount,
+                            openingBalance: previousWalletBalance,
+                            closingBalance: updatedWalletBalance,
+                            category: 'adjustment',
+                            description: body.reference
+                                ? `Delivery bonus: ${body.reference}`
+                                : 'Delivery bonus',
+                            status: 'completed',
+                            referenceId: transactionId,
+                            metadata: {
+                                source: 'delivery_bonus',
+                                transactionId,
+                                idempotencyKey,
+                            },
+                            createdAt: new Date(),
+                            updatedAt: new Date(),
+                        }],
+                        $position: 0,
+                    },
                 },
                 $setOnInsert: {
                     deliveryPartnerId: body.deliveryPartnerId,
@@ -6472,15 +6547,23 @@ export async function creditEarningAddonHistory(historyId, notes) {
     doc.creditedNotes = typeof notes === 'string' ? notes.trim() : '';
     await doc.save();
 
-    // 2. Credit the wallet
+    // 2. Credit the wallet (same fields as deliveryBoy creditWallet path:
+    //    balance + totalEarnings — via existing creditWallet, not direct $inc)
     if (amountToCredit > 0) {
-        await FoodDeliveryWallet.findOneAndUpdate(
-            { deliveryPartnerId: doc.deliveryPartnerId },
-            { $inc: { balance: amountToCredit, totalEarnings: amountToCredit } },
-            { upsert: true }
-        );
+        await creditWallet({
+            entityType: 'deliveryBoy',
+            entityId: doc.deliveryPartnerId,
+            amount: amountToCredit,
+            description: `Earning Addon: ${doc.offerId?.title || 'Offer Reward'}`,
+            category: 'adjustment',
+            metadata: {
+                source: 'earning_addon_credit',
+                historyId: String(doc._id),
+                offerId: doc.offerId?._id ? String(doc.offerId._id) : undefined,
+            },
+        });
 
-        // 3. Create a transaction for ledger
+        // 3. Create a transaction for bonus/addon admin ledger (unchanged side ledger)
         try {
             await DeliveryBonusTransaction.create({
                 deliveryPartnerId: doc.deliveryPartnerId,
@@ -7568,7 +7651,8 @@ export async function updateDeliveryBoyWallet(dto) {
                 entityId: deliveryId,
                 amount: pocketDiff,
                 description: 'Admin manual pocket adjustment',
-                category: 'admin_adjustment',
+                // Must match Transaction.category enum (transaction.model.js)
+                category: 'adjustment',
                 metadata: { source: 'updateDeliveryBoyWallet' },
             });
         } else {
@@ -7578,7 +7662,8 @@ export async function updateDeliveryBoyWallet(dto) {
                     entityId: deliveryId,
                     amount: Math.abs(pocketDiff),
                     description: 'Admin manual pocket adjustment',
-                    category: 'admin_adjustment',
+                    // Must match Transaction.category enum (transaction.model.js)
+                    category: 'adjustment',
                     metadata: { source: 'updateDeliveryBoyWallet' },
                 });
             } catch (err) {
@@ -8160,7 +8245,7 @@ export async function getZoneHubs(query = {}) {
             isZoneHub: true,
             status: 'approved',
             isDeleted: { $ne: true }
-        }).select('restaurantName primaryContactNumber ownerPhone ownerName addressLine1 location status city').lean();
+        }).select('restaurantName restaurantId primaryContactNumber ownerPhone ownerName addressLine1 location status city').lean();
 
         return {
             id: z._id,
@@ -8172,6 +8257,7 @@ export async function getZoneHubs(query = {}) {
             hubAssigned: hubs.length > 0,
             hubs: hubs.map(h => ({
                 id: h._id,
+                displayId: h.restaurantId,
                 name: h.restaurantName,
                 phone: h.primaryContactNumber || h.ownerPhone || 'N/A',
                 owner: h.ownerName || 'N/A',
@@ -8181,6 +8267,7 @@ export async function getZoneHubs(query = {}) {
             })),
             hub: hubs.length > 0 ? {
                 id: hubs[0]._id,
+                displayId: hubs[0].restaurantId,
                 name: hubs[0].restaurantName,
                 phone: hubs[0].primaryContactNumber || hubs[0].ownerPhone || 'N/A',
                 owner: hubs[0].ownerName || 'N/A',

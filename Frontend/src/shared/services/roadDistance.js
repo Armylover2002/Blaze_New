@@ -15,7 +15,7 @@ const roundCoord = (value) => {
 };
 
 const cacheKey = (lat1, lng1, lat2, lng2) =>
-  `${roundCoord(lat1)}_${roundCoord(lng1)}_${roundCoord(lat2)}_${roundCoord(lng2)}`;
+  `v2_${roundCoord(lat1)}_${roundCoord(lng1)}_${roundCoord(lat2)}_${roundCoord(lng2)}`;
 
 const readCache = (key) => {
   const entry = cache.get(key);

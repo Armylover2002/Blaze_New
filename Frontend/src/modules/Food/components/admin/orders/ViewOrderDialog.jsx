@@ -600,6 +600,14 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order }) {
                     : <span className="text-slate-400">₹0.00</span>}
                 </span>
               </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-slate-600">Packaging Fee</span>
+                <span className="font-medium text-slate-900">
+                  {order.packagingFee !== undefined && order.packagingFee > 0 
+                    ? `₹${order.packagingFee.toFixed(2)}` 
+                    : <span className="text-slate-400">₹0.00</span>}
+                </span>
+              </div>
               {order.vatTax !== undefined && order.vatTax > 0 && (
                 <div className="flex justify-between text-sm">
                   <span className="text-slate-600">Tax (GST)</span>

@@ -437,6 +437,8 @@ export function buildDeliverySocketPayload(orderDoc, restaurantDoc = null) {
     deliveryFee: order?.pricing?.deliveryFee || 0,
     deliveryFleet: order?.deliveryFleet,
     dispatch: order?.dispatch,
+    distanceKm: order?.distanceKm ?? order?.pricing?.deliveryDistanceKm ?? null,
+    deliveryDistanceKm: order?.deliveryDistanceKm ?? order?.pricing?.deliveryDistanceKm ?? null,
     createdAt: order?.createdAt,
     updatedAt: order?.updatedAt,
     // Food Quick Delivery (deliveryMode) — distinct from QC orderType:quick

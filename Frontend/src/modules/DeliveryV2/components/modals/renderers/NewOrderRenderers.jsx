@@ -29,7 +29,7 @@ const BaseOrderHeader = ({ title, subtitle, badges, earnings, timeLeft, bgColor 
   </div>
 );
 
-const BaseOrderBody = ({ pickupStops, dropPoint, customerAddress, mapsLink, distanceKm, etaMins, isReturnPickup, returnLabels, pickupIcon: PickupIcon = ChefHat }) => (
+const BaseOrderBody = ({ pickupStops, dropPoint, customerAddress, mapsLink, distanceKm, dropDistanceKm, etaMins, isReturnPickup, returnLabels, pickupIcon: PickupIcon = ChefHat }) => (
   <div className="p-5 space-y-6">
     <div className="flex gap-4">
       <div className="flex flex-col items-center gap-1 mt-1.5 py-0.5">
@@ -47,7 +47,7 @@ const BaseOrderBody = ({ pickupStops, dropPoint, customerAddress, mapsLink, dist
               </div>
               <p className="text-gray-950 font-bold text-lg leading-tight">{pickup.sourceName}</p>
               {pickup.phone && <p className="text-gray-600 text-xs font-semibold">{pickup.phone}</p>}
-              <p className="text-gray-500 text-xs font-medium leading-relaxed line-clamp-1">{pickup.address}</p>
+              <p className="text-gray-500 text-xs font-medium leading-relaxed">{pickup.address}</p>
             </div>
           ))}
         </div>
@@ -58,7 +58,7 @@ const BaseOrderBody = ({ pickupStops, dropPoint, customerAddress, mapsLink, dist
           </div>
           <p className="text-gray-950 font-bold text-lg leading-tight">{dropPoint.name}</p>
           {dropPoint.phone && <p className="text-gray-600 text-xs font-semibold">{dropPoint.phone}</p>}
-          <p className="text-gray-500 text-xs font-medium line-clamp-1">{customerAddress}</p>
+          <p className="text-gray-500 text-xs font-medium">{customerAddress}</p>
           {mapsLink && (
             <a href={mapsLink} target="_blank" rel="noreferrer" className="inline-flex mt-1 text-[9px] font-bold uppercase tracking-widest text-blue-600 hover:text-blue-700">
               Open in Google Maps
@@ -68,19 +68,26 @@ const BaseOrderBody = ({ pickupStops, dropPoint, customerAddress, mapsLink, dist
       </div>
     </div>
 
-    <div className="grid grid-cols-2 gap-3">
-      <div className="p-3 bg-gray-50 rounded-xl border border-gray-100 flex items-center gap-3">
+    <div className="grid grid-cols-3 gap-3">
+      <div className="p-3 bg-gray-50 rounded-xl border border-gray-100 flex flex-col gap-1 items-center justify-center text-center">
         <Clock className="w-4 h-4 text-gray-500" />
         <div className="flex flex-col">
           <span className="text-[9px] text-gray-400 font-bold uppercase tracking-widest">Time</span>
           <span className="text-xs font-bold text-gray-900">{etaMins} MINS</span>
         </div>
       </div>
-      <div className="p-3 bg-gray-50 rounded-xl border border-gray-100 flex items-center gap-3">
-        <MapPin className="w-4 h-4 text-gray-400" />
+      <div className="p-3 bg-gray-50 rounded-xl border border-gray-100 flex flex-col gap-1 items-center justify-center text-center">
+        <MapPin className="w-4 h-4 text-blue-500" />
         <div className="flex flex-col">
-          <span className="text-[9px] text-gray-400 font-bold uppercase tracking-widest">Distance</span>
+          <span className="text-[9px] text-gray-400 font-bold uppercase tracking-widest">Pickup</span>
           <span className="text-xs font-bold text-gray-900">{distanceKm} KM</span>
+        </div>
+      </div>
+      <div className="p-3 bg-gray-50 rounded-xl border border-gray-100 flex flex-col gap-1 items-center justify-center text-center">
+        <MapPin className="w-4 h-4 text-emerald-500" />
+        <div className="flex flex-col">
+          <span className="text-[9px] text-gray-400 font-bold uppercase tracking-widest">Drop</span>
+          <span className="text-xs font-bold text-gray-900">{dropDistanceKm} KM</span>
         </div>
       </div>
     </div>
@@ -91,7 +98,7 @@ const BaseOrderBody = ({ pickupStops, dropPoint, customerAddress, mapsLink, dist
 // RENDERERS
 // ----------------------
 
-const FoodOrderRenderer = ({ order, distanceKm, etaMins, timeLeft }) => {
+const FoodOrderRenderer = ({ order, distanceKm, dropDistanceKm, etaMins, timeLeft }) => {
   const isReturnPickup = isReturnPickupTrip(order);
   const returnLabels = getReturnPickupStopLabels();
   const pickupPoints = normalizePickupPoints(order);
@@ -139,6 +146,7 @@ const FoodOrderRenderer = ({ order, distanceKm, etaMins, timeLeft }) => {
         }}
         customerAddress={customerAddress}
         distanceKm={distanceKm}
+        dropDistanceKm={dropDistanceKm}
         etaMins={etaMins}
         isReturnPickup={isReturnPickup}
         returnLabels={returnLabels}
@@ -148,7 +156,7 @@ const FoodOrderRenderer = ({ order, distanceKm, etaMins, timeLeft }) => {
   );
 };
 
-const QuickCommerceOrderRenderer = ({ order, distanceKm, etaMins, timeLeft }) => {
+const QuickCommerceOrderRenderer = ({ order, distanceKm, dropDistanceKm, etaMins, timeLeft }) => {
   const pickupPoints = normalizePickupPoints(order);
   const earnings = order.earnings || order.riderEarning || order.tripEarning || order.walletEarning || 0;
   const storeName = order?.storeName || order?.sellerName || order?.seller?.shopName || 'Seller Store';
@@ -181,6 +189,7 @@ const QuickCommerceOrderRenderer = ({ order, distanceKm, etaMins, timeLeft }) =>
         }}
         customerAddress={customerAddress}
         distanceKm={distanceKm}
+        dropDistanceKm={dropDistanceKm}
         etaMins={etaMins}
         pickupIcon={Package}
       />
@@ -188,7 +197,7 @@ const QuickCommerceOrderRenderer = ({ order, distanceKm, etaMins, timeLeft }) =>
   );
 };
 
-const ParcelOrderRenderer = ({ order, distanceKm, etaMins, timeLeft }) => {
+const ParcelOrderRenderer = ({ order, distanceKm, dropDistanceKm, etaMins, timeLeft }) => {
   const earnings = order.earnings || order.riderEarning || order.tripEarning || order.walletEarning || 0;
   
   const pickupStops = [{
@@ -216,6 +225,7 @@ const ParcelOrderRenderer = ({ order, distanceKm, etaMins, timeLeft }) => {
         }}
         customerAddress={order?.dropAddress || 'Drop Address'}
         distanceKm={distanceKm}
+        dropDistanceKm={dropDistanceKm}
         etaMins={etaMins}
         pickupIcon={Package}
       />

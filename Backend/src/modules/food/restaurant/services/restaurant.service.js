@@ -16,6 +16,7 @@ import { isPointInPolygon } from '../../../../utils/geo.js';
 import { ensureDailyPassEligibility, activateDailyPass, checkRestaurantEligibilityReadOnly } from '../../subscriptions/services/wallet.service.js';
 import { logger } from '../../../../utils/logger.js';
 import { getRoadDistancesFromOrigin } from '../../../../services/roadDistance.service.js';
+import { parseGeoPoint } from '../../shared/geo.utils.js';
 import {
     splitReviewableUpdate,
     mergePendingProfileChanges,
@@ -44,14 +45,12 @@ async function enrichRestaurantsWithRoadDistance(restaurants, userLat, userLng, 
         return restaurants;
     }
 
+    // Same restaurant pin parsing as checkout (parseGeoPoint / swap-aware).
     const entries = restaurants
         .map((restaurant, index) => {
-            const location = restaurant?.location || {};
-            const coords = Array.isArray(location.coordinates) ? location.coordinates : null;
-            const rLat = Number(location.latitude ?? coords?.[1]);
-            const rLng = Number(location.longitude ?? coords?.[0]);
-            if (!Number.isFinite(rLat) || !Number.isFinite(rLng)) return null;
-            return { index, lat: rLat, lng: rLng };
+            const point = parseGeoPoint(restaurant?.location || restaurant);
+            if (!point) return null;
+            return { index, lat: point.lat, lng: point.lng };
         })
         .filter(Boolean);
 
@@ -65,8 +64,10 @@ async function enrichRestaurantsWithRoadDistance(restaurants, userLat, userLng, 
     entries.forEach((entry, i) => {
         const distanceKm = distances[i]?.distanceKm;
         if (!Number.isFinite(distanceKm)) return;
-        restaurants[entry.index].distanceInKm = distanceKm;
-        restaurants[entry.index].distanceMeters = Math.round(distanceKm * 1000);
+        // Match checkout display precision (1 decimal).
+        const rounded = Math.round(Number(distanceKm) * 10) / 10;
+        restaurants[entry.index].distanceInKm = rounded;
+        restaurants[entry.index].distanceMeters = Math.round(rounded * 1000);
     });
 
     if (resortNearest) {
