@@ -1169,10 +1169,14 @@ export const restaurantAPI = {
       },
     }),
   /** Submit a real withdrawal request to the backend. */
-  createWithdrawalRequest: (amount) =>
-    apiClient.post("/food/restaurant/withdraw", { amount: Number(amount) }, {
+  createWithdrawalRequest: (amount, options = {}) => {
+    const body = { amount: Number(amount) };
+    const key = String(options?.idempotencyKey || "").trim();
+    if (key.length >= 8) body.idempotencyKey = key.slice(0, 128);
+    return apiClient.post("/food/restaurant/withdraw", body, {
       contextModule: "restaurant"
-    }),
+    });
+  },
   /** Cancel a pending restaurant withdrawal. */
   cancelWithdrawalRequest: (id) =>
     apiClient.post(`/food/restaurant/withdrawals/${id}/cancel`, {}, {

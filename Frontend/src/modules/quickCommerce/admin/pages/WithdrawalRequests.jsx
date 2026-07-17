@@ -28,6 +28,7 @@ import {
 import { cn } from '@/lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
 import Pagination from '@shared/components/ui/Pagination';
+import { PAGINATION_CONFIG } from '@/shared/constants/pagination';
 import { adminApi } from "../services/adminApi";
 import { toast } from "sonner";
 
@@ -77,7 +78,7 @@ const WithdrawalRequests = () => {
 
     const [sellerRequests, setSellerRequests] = useState([]);
     const [sellerPage, setSellerPage] = useState(1);
-    const [pageSize, setPageSize] = useState(25);
+    const [pageSize, setPageSize] = useState(PAGINATION_CONFIG.defaultPageSize);
     const [sellerTotal, setSellerTotal] = useState(0);
     const [financeSummary, setFinanceSummary] = useState({});
 

@@ -27,6 +27,7 @@ import {
 } from 'react-icons/hi2';
 import Modal from '@shared/components/ui/Modal';
 import Pagination from '@shared/components/ui/Pagination';
+import { PAGINATION_CONFIG } from '@/shared/constants/pagination';
 import { cn } from '@/lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
 import { convertToWebP } from '@/shared/utils/imageUploadUtils';
@@ -245,7 +246,7 @@ const ProductManagement = () => {
     const [products, setProducts] = useState([]);
     const [categories, setCategories] = useState([]); // All categories for dropdowns
     const [page, setPage] = useState(1);
-    const [pageSize, setPageSize] = useState(25);
+    const [pageSize, setPageSize] = useState(PAGINATION_CONFIG.defaultPageSize);
     const [total, setTotal] = useState(0);
     const [isLoading, setIsLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);

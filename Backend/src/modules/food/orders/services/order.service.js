@@ -4327,6 +4327,21 @@ export async function getOrderById(
   return sanitizeOrderForExternal(order);
 }
 
+const WALLET_REFUND_SOURCE_BY_ACTOR = {
+  user: "user_cancel_refund",
+  restaurant: "restaurant_cancel_refund",
+  admin: "admin_auto_refund",
+};
+
+function isTerminalOrderStatus(status) {
+  const s = String(status || "").trim().toLowerCase();
+  return (
+    isTerminalCancelStatus(s) ||
+    s === "delivered" ||
+    s === "cancelled"
+  );
+}
+
 // --- AUTO REFUND HELPER ---
 async function autoProcessRefund(order, source) {
     if (!order || !order.payment || order.payment.status !== 'paid') return false;
@@ -4344,6 +4359,8 @@ async function autoProcessRefund(order, source) {
     
     let processed = false;
     let refundId = '';
+    const walletSource =
+      WALLET_REFUND_SOURCE_BY_ACTOR[source] || "restaurant_cancel_refund";
     
     try {
         if (isWalletPaid) {
@@ -4354,7 +4371,7 @@ async function autoProcessRefund(order, source) {
                 {
                     orderId: String(order._id),
                     orderReadableId: String(order.orderId || ''),
-                    source: `auto_refund_${source}`
+                    source: walletSource,
                 }
             );
             processed = true;
@@ -4362,7 +4379,13 @@ async function autoProcessRefund(order, source) {
         } else if (isOnlinePaid) {
             const paymentId = order.payment.razorpay?.paymentId;
             if (paymentId) {
-                const refundResult = await initiateRazorpayRefund(paymentId, amount);
+                const refundResult = await initiateRazorpayRefund(paymentId, amount, {
+                    idempotencyKey: `food_refund_${String(order._id)}_${source}`,
+                    notes: {
+                        orderId: String(order.orderId || order._id),
+                        source: walletSource,
+                    },
+                });
                 if (refundResult && refundResult.success) {
                     processed = true;
                     refundId = refundResult.refundId;
@@ -4828,6 +4851,40 @@ export async function updateOrderStatusRestaurant(
   });
   if (!order) throw new NotFoundError("Order not found");
   const from = order.orderStatus;
+  const requestedStatus = String(orderStatus || "").trim();
+  const isCancelRequest =
+    isTerminalCancelStatus(requestedStatus) ||
+    requestedStatus.includes("cancel");
+
+  // Idempotent: duplicate cancel/reject — order already terminal, do not re-refund.
+  if (isCancelRequest && isTerminalCancelStatus(from)) {
+    return order.toObject();
+  }
+
+  // Block resurrecting cancelled/delivered orders into active workflow.
+  if (isTerminalOrderStatus(from) && !isCancelRequest) {
+    throw new ValidationError(
+      `Order cannot move to '${requestedStatus}' from terminal status '${from}'`,
+    );
+  }
+
+  // Idempotent accept / mark-ready when already at or past target state.
+  if (
+    requestedStatus === "preparing" &&
+    ["preparing", "ready_for_pickup", "ready", "picked_up", "delivered"].includes(
+      String(from || "").trim().toLowerCase(),
+    )
+  ) {
+    return order.toObject();
+  }
+  if (
+    (requestedStatus === "ready_for_pickup" || requestedStatus === "ready") &&
+    ["ready_for_pickup", "ready", "picked_up", "delivered"].includes(
+      String(from || "").trim().toLowerCase(),
+    )
+  ) {
+    return order.toObject();
+  }
 
   // Enforce actor-specific cancellation status and terminal side effects.
   if (isTerminalCancelStatus(orderStatus)) {
@@ -4853,6 +4910,25 @@ export async function updateOrderStatusRestaurant(
       note: String(reason || "").trim(),
     });
   }
+
+  // Payment + refund side effects before persistence (admin path saves after refund).
+  if (isCancelRequest) {
+    const isOnlinePaid =
+      order.payment?.method === "razorpay" &&
+      (order.payment?.status === "paid" || order.payment?.status === "refunded");
+    if (["paid", "refunded"].includes(order.payment?.status)) {
+      await autoProcessRefund(order, "restaurant");
+    } else if (!isOnlinePaid && order.payment) {
+      order.payment.status = "cancelled";
+    }
+    if (order.orderType === "mixed" || order.orderType === "quick") {
+      console.log(
+        `[MIXED-SYNC] Order ${order.orderId} (type: ${order.orderType}) cancelled by restaurant. Propagating to seller legs...`,
+      );
+      await cancelSellerOrdersForParent(order, "Cancelled by restaurant");
+    }
+  }
+
   await order.save();
 
   // Real-time: status update to restaurant room.
@@ -4908,19 +4984,6 @@ export async function updateOrderStatusRestaurant(
       
       title = "Order Cancelled ❌";
       body = `Unfortunately, your order has been cancelled by the restaurant.${refundDetail}`;
-      
-      // Update payment status for cancellation
-      if (["paid", "refunded"].includes(order.payment?.status)) {
-        await autoProcessRefund(order, 'restaurant');
-      } else if (!isOnlinePaid) {
-        order.payment.status = "cancelled";
-      }
-
-      // Sync mixed order seller legs
-      if (order.orderType === 'mixed' || order.orderType === 'quick') {
-        console.log(`[MIXED-SYNC] Order ${order.orderId} (type: ${order.orderType}) cancelled by restaurant. Propagating to seller legs...`);
-        await cancelSellerOrdersForParent(order, "Cancelled by restaurant");
-      }
     }
 
     const notifyList = [

@@ -1,8 +1,7 @@
 import React from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
-
-const PAGE_SIZE_OPTIONS = [10, 25, 50];
+import { PAGINATION_CONFIG } from '@/shared/constants/pagination';
 
 const Pagination = ({
     page,
@@ -36,7 +35,7 @@ const Pagination = ({
                             "focus:ring-2 focus:ring-primary/20 focus:outline-none disabled:opacity-50 cursor-pointer"
                         )}
                     >
-                        {PAGE_SIZE_OPTIONS.map((size) => (
+                        {PAGINATION_CONFIG.allowedPageSizeOptions.map((size) => (
                             <option key={size} value={size}>{size}</option>
                         ))}
                     </select>

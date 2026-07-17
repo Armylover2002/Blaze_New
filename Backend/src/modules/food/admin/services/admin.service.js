@@ -45,6 +45,7 @@ import { FoodTransaction } from '../../orders/models/foodTransaction.model.js';
 import { buildOrderIdentityFilter } from '../../orders/services/order.helpers.js';
 import { FoodRestaurantWithdrawal } from '../../restaurant/models/foodRestaurantWithdrawal.model.js';
 import { applyPendingOpenDaysUpdate, discardPendingOpenDaysUpdate, syncOutletTimingsFromOpenDays } from '../../restaurant/services/outletTimings.service.js';
+import { buildPaginationMeta, buildPaginationOptions } from '../../../../utils/helpers.js';
 // import { applyPendingOpenDaysUpdate, discardPendingOpenDaysUpdate } from '../../restaurant/services/outletTimings.service.js';
 import {
     buildApplyPendingProfileChangesUpdate,
@@ -263,9 +264,7 @@ const validateOpeningClosingTimes = (openingTime, closingTime) => {
 };
 
 export async function getRestaurantComplaints(query = {}) {
-    const limit = Math.min(Math.max(parseInt(query.limit, 10) || 50, 1), 500);
-    const page = Math.max(parseInt(query.page, 10) || 1, 1);
-    const skip = (page - 1) * limit;
+    const { page, limit, skip } = buildPaginationOptions(query, { defaultLimit: 50, maxLimit: 500 });
 
     const filter = { type: 'order' };
     if (query.status && query.status !== 'all') filter.status = query.status;
@@ -305,7 +304,13 @@ export async function getRestaurantComplaints(query = {}) {
         FoodSupportTicket.countDocuments(filter)
     ]);
 
-    return { complaints, total, page, limit };
+    return {
+        complaints,
+        total,
+        page,
+        limit,
+        pagination: buildPaginationMeta({ totalItems: total, page, limit }),
+    };
 }
 
 export async function globalSearch(query = '') {

@@ -38,6 +38,42 @@ import BottomNavOrders from "@food/components/restaurant/BottomNavOrders";
 import RestaurantNavbar from "@food/components/restaurant/RestaurantNavbar";
 import notificationSound from "@food/assets/audio/alert.mp3";
 import { restaurantAPI } from "@food/api";
+
+/** Coalesce concurrent getOrders + short TTL so tab/popup polls don't stampede. */
+let restaurantOrdersFetchInFlight = null;
+let restaurantOrdersFetchCache = { at: 0, response: null };
+const RESTAURANT_ORDERS_CACHE_TTL_MS = 2500;
+
+function invalidateRestaurantOrdersCache() {
+  restaurantOrdersFetchCache = { at: 0, response: null };
+}
+
+async function fetchRestaurantOrdersShared({ force = false } = {}) {
+  const now = Date.now();
+  if (
+    !force &&
+    restaurantOrdersFetchCache.response &&
+    now - restaurantOrdersFetchCache.at < RESTAURANT_ORDERS_CACHE_TTL_MS
+  ) {
+    return restaurantOrdersFetchCache.response;
+  }
+  if (!force && restaurantOrdersFetchInFlight) {
+    return restaurantOrdersFetchInFlight;
+  }
+  const request = restaurantAPI
+    .getOrders()
+    .then((response) => {
+      restaurantOrdersFetchCache = { at: Date.now(), response };
+      return response;
+    })
+    .finally(() => {
+      if (restaurantOrdersFetchInFlight === request) {
+        restaurantOrdersFetchInFlight = null;
+      }
+    });
+  restaurantOrdersFetchInFlight = request;
+  return request;
+}
 import {
   formatScheduledAtShort,
   parseValidDate,
@@ -162,7 +198,7 @@ function CompletedOrders({ onSelectOrder, refreshToken = 0, searchQuery = "" }) 
 
     const fetchOrders = async () => {
       try {
-        const response = await restaurantAPI.getOrders();
+        const response = await fetchRestaurantOrdersShared();
 
         if (!isMounted) return;
 
@@ -376,7 +412,7 @@ function CancelledOrders({ onSelectOrder, refreshToken = 0, searchQuery = "" }) 
 
     const fetchOrders = async () => {
       try {
-        const response = await restaurantAPI.getOrders();
+        const response = await fetchRestaurantOrdersShared();
 
         if (!isMounted) return;
 
@@ -604,7 +640,12 @@ function CancelledOrders({ onSelectOrder, refreshToken = 0, searchQuery = "" }) 
   );
 }
 
-function AllOrders({ onSelectOrder, onCancel, searchQuery = "" }) {
+function AllOrders({
+  onSelectOrder,
+  onCancel,
+  searchQuery = "",
+  refreshToken = 0,
+}) {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -617,7 +658,7 @@ function AllOrders({ onSelectOrder, onCancel, searchQuery = "" }) {
 
     const fetchOrders = async () => {
       try {
-        const response = await restaurantAPI.getOrders();
+        const response = await fetchRestaurantOrdersShared();
 
         if (!isMounted) return;
 
@@ -658,7 +699,8 @@ function AllOrders({ onSelectOrder, onCancel, searchQuery = "" }) {
     };
 
     fetchOrders();
-    intervalId = setInterval(fetchOrders, 10000);
+    // Single active-list poll; shared cache coalesces with popup fallback.
+    intervalId = setInterval(fetchOrders, 15000);
     countdownIntervalId = setInterval(() => {
       if (isMounted) {
         setCurrentTime(new Date());
@@ -670,7 +712,7 @@ function AllOrders({ onSelectOrder, onCancel, searchQuery = "" }) {
       if (intervalId) clearInterval(intervalId);
       if (countdownIntervalId) clearInterval(countdownIntervalId);
     };
-  }, []);
+  }, [refreshToken]);
 
   const handleMarkReady = async ({ orderId, mongoId }) => {
     const orderKey = mongoId || orderId;
@@ -824,11 +866,16 @@ export default function OrdersMain() {
   const [orderToCancel, setOrderToCancel] = useState(null);
   const [acceptSwipeProgress, setAcceptSwipeProgress] = useState(0);
   const [isAcceptingOrder, setIsAcceptingOrder] = useState(false);
+  const [isRejectingOrder, setIsRejectingOrder] = useState(false);
+  const [isCancellingOrder, setIsCancellingOrder] = useState(false);
   const audioRef = useRef(null);
   const shownOrdersRef = useRef(new Set()); // Track orders already shown in popup
   const acceptSliderRef = useRef(null);
   const acceptSwipeStartXRef = useRef(0);
   const acceptSwipeActiveRef = useRef(false);
+  const autoRejectInFlightRef = useRef(false);
+  const rejectInFlightRef = useRef(false);
+  const cancelInFlightRef = useRef(false);
   const [restaurantStatus, setRestaurantStatus] = useState({
     isActive: null,
     rejectionReason: null,
@@ -1137,7 +1184,10 @@ export default function OrdersMain() {
   }, []);
 
   const [ordersRefreshToken, setOrdersRefreshToken] = useState(0);
-  const requestOrdersRefresh = () => setOrdersRefreshToken((t) => t + 1);
+  const requestOrdersRefresh = () => {
+    invalidateRestaurantOrdersCache();
+    setOrdersRefreshToken((t) => t + 1);
+  };
 
   // Check for confirmed orders that haven't been shown in popup yet, or scheduled orders whose time has come
   useEffect(() => {
@@ -1146,7 +1196,7 @@ export default function OrdersMain() {
       if (showNewOrderPopupRef.current || newOrderRef.current) return;
 
       try {
-        const response = await restaurantAPI.getOrders();
+        const response = await fetchRestaurantOrdersShared();
         if (response.data?.success && response.data.data?.orders) {
           const now = Date.now();
 
@@ -1250,18 +1300,17 @@ export default function OrdersMain() {
     }
   }, [showNewOrderPopup, isMuted]);
 
-  // Countdown timer
+  // Countdown timer — auto-reject fires once when countdown hits 0
   useEffect(() => {
-    if (showNewOrderPopup) {
-      if (countdown > 0) {
-        const timer = setInterval(() => {
-          setCountdown((prev) => prev - 1);
-        }, 1000);
-        return () => clearInterval(timer);
-      } else {
-        // Automatically reject when countdown hits 0
-        handleAutoReject();
-      }
+    if (!showNewOrderPopup) return;
+    if (countdown > 0) {
+      const timer = setInterval(() => {
+        setCountdown((prev) => prev - 1);
+      }, 1000);
+      return () => clearInterval(timer);
+    }
+    if (!autoRejectInFlightRef.current) {
+      handleAutoReject();
     }
   }, [showNewOrderPopup, countdown]);
 
@@ -1269,6 +1318,9 @@ export default function OrdersMain() {
     if (!showNewOrderPopup) {
       setAcceptSwipeProgress(0);
       setIsAcceptingOrder(false);
+      setIsRejectingOrder(false);
+      rejectInFlightRef.current = false;
+      autoRejectInFlightRef.current = false;
       acceptSwipeActiveRef.current = false;
       acceptSwipeStartXRef.current = 0;
     }
@@ -1362,16 +1414,23 @@ export default function OrdersMain() {
     setAcceptSwipeProgress(0);
   };
 
-  // Handle auto reject on timeout
+  // Handle auto reject on timeout (single-flight)
   const handleAutoReject = async () => {
+    if (autoRejectInFlightRef.current || rejectInFlightRef.current || isAcceptingOrder) {
+      return;
+    }
+
     const orderToReject = popupOrder || newOrder;
     if (!orderToReject) return;
 
     const orderId = orderToReject.orderMongoId || orderToReject.orderId || orderToReject?._id;
     if (!orderId) return;
 
+    autoRejectInFlightRef.current = true;
+    rejectInFlightRef.current = true;
+    setIsRejectingOrder(true);
+
     try {
-      // Use a special reason for auto-rejection
       await restaurantAPI.rejectOrder(orderId, "Order timeout - No response from restaurant");
       toast.info("Order auto-rejected due to timeout");
       clearOrderTimer(orderId);
@@ -1379,7 +1438,6 @@ export default function OrdersMain() {
     } catch (error) {
       debugError("Error auto-rejecting order:", error);
     } finally {
-      // Clean up UI state regardless of API success
       if (audioRef.current) {
         audioRef.current.pause();
         audioRef.current.currentTime = 0;
@@ -1393,12 +1451,14 @@ export default function OrdersMain() {
       setPrepTime(11);
       setAcceptSwipeProgress(0);
       setIsAcceptingOrder(false);
+      setIsRejectingOrder(false);
+      rejectInFlightRef.current = false;
     }
   };
 
   // Handle accept order
   const handleAcceptOrder = async () => {
-    if (isAcceptingOrder) return;
+    if (isAcceptingOrder || rejectInFlightRef.current || isRejectingOrder) return;
     setIsAcceptingOrder(true);
 
     if (audioRef.current) {
@@ -1464,42 +1524,47 @@ export default function OrdersMain() {
   };
 
   const handleRejectConfirm = async () => {
-    if (!rejectReason) return;
+    if (!rejectReason || rejectInFlightRef.current || isRejectingOrder) return;
 
-    // Use popupOrder (from Socket.IO or API fallback) or newOrder (from hook)
     const orderToReject = popupOrder || newOrder;
+    rejectInFlightRef.current = true;
+    autoRejectInFlightRef.current = true;
+    setIsRejectingOrder(true);
 
-    // Reject order via API if we have a real order
-    if (orderToReject?.orderMongoId || orderToReject?.orderId) {
-      try {
+    try {
+      if (orderToReject?.orderMongoId || orderToReject?.orderId) {
         const orderId = orderToReject.orderMongoId || orderToReject.orderId;
         await restaurantAPI.rejectOrder(orderId, rejectReason);
         debugLog("? Order rejected:", orderId);
         requestOrdersRefresh();
-      } catch (error) {
-        debugError("? Error rejecting order:", error);
-        alert("Failed to reject order. Please try again.");
-        return;
       }
-    }
 
-    const orderId = orderToReject?.orderMongoId || orderToReject?.orderId || orderToReject?._id;
-    clearOrderTimer(orderId);
+      const orderId =
+        orderToReject?.orderMongoId || orderToReject?.orderId || orderToReject?._id;
+      clearOrderTimer(orderId);
 
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current.currentTime = 0;
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.currentTime = 0;
+      }
+      setShowRejectPopup(false);
+      setShowNewOrderPopup(false);
+      setPopupOrder(null);
+      clearNewOrder();
+      setRejectReason("");
+      setCountdown(240);
+      setPrepTime(11);
+    } catch (error) {
+      debugError("? Error rejecting order:", error);
+      alert("Failed to reject order. Please try again.");
+      rejectInFlightRef.current = false;
+      autoRejectInFlightRef.current = false;
+      setIsRejectingOrder(false);
     }
-    setShowRejectPopup(false);
-    setShowNewOrderPopup(false);
-    setPopupOrder(null);
-    clearNewOrder();
-    setRejectReason("");
-    setCountdown(240);
-    setPrepTime(11);
   };
 
   const handleRejectCancel = () => {
+    if (isRejectingOrder || rejectInFlightRef.current) return;
     setShowRejectPopup(false);
     setShowNewOrderPopup(false);
     setPopupOrder(null);
@@ -1515,7 +1580,17 @@ export default function OrdersMain() {
   }, []);
 
   const handleCancelConfirm = async () => {
-    if (!cancelReason.trim() || !orderToCancel) return;
+    if (
+      !cancelReason.trim() ||
+      !orderToCancel ||
+      cancelInFlightRef.current ||
+      isCancellingOrder
+    ) {
+      return;
+    }
+
+    cancelInFlightRef.current = true;
+    setIsCancellingOrder(true);
 
     try {
       const orderId = orderToCancel.mongoId || orderToCancel.orderId;
@@ -1528,10 +1603,14 @@ export default function OrdersMain() {
     } catch (error) {
       debugError("? Error cancelling order:", error);
       toast.error(error.response?.data?.message || "Failed to cancel order");
+    } finally {
+      cancelInFlightRef.current = false;
+      setIsCancellingOrder(false);
     }
   };
 
   const handleCancelPopupClose = () => {
+    if (isCancellingOrder || cancelInFlightRef.current) return;
     setShowCancelPopup(false);
     setOrderToCancel(null);
     setCancelReason("");
@@ -1837,6 +1916,7 @@ export default function OrdersMain() {
             onSelectOrder={handleSelectOrder}
             onCancel={handleCancelClick}
             searchQuery={searchQuery}
+            refreshToken={ordersRefreshToken}
           />
         );
       case "preparing":
@@ -2624,17 +2704,19 @@ case "cancelled":
                 <div className="px-4 py-4 bg-gray-50 border-t border-gray-200 flex gap-3">
                   <button
                     onClick={handleRejectCancel}
-                    className="flex-1 bg-white border-2 border-gray-300 text-gray-700 py-3 rounded-lg font-semibold text-sm hover:bg-gray-50 transition-colors">
+                    disabled={isRejectingOrder}
+                    className="flex-1 bg-white border-2 border-gray-300 text-gray-700 py-3 rounded-lg font-semibold text-sm hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
                     Cancel
                   </button>
                   <button
                     onClick={handleRejectConfirm}
-                    disabled={!rejectReason}
-                    className={`flex-1 py-3 rounded-lg font-semibold text-sm transition-colors ${rejectReason
+                    disabled={!rejectReason || isRejectingOrder}
+                    className={`flex-1 py-3 rounded-lg font-semibold text-sm transition-colors ${
+                      rejectReason && !isRejectingOrder
                       ? "!bg-black !text-white"
                       : "bg-gray-200 text-gray-400 cursor-not-allowed"
                       }`}>
-                    Confirm Rejection
+                    {isRejectingOrder ? "Rejecting..." : "Confirm Rejection"}
                   </button>
                 </div>
               </motion.div>
@@ -2720,17 +2802,19 @@ case "cancelled":
                 <div className="px-4 py-4 bg-gray-50 border-t border-gray-200 flex gap-3">
                   <button
                     onClick={handleCancelPopupClose}
-                    className="flex-1 bg-white border-2 border-gray-300 text-gray-700 py-3 rounded-lg font-semibold text-sm hover:bg-gray-50 transition-colors">
+                    disabled={isCancellingOrder}
+                    className="flex-1 bg-white border-2 border-gray-300 text-gray-700 py-3 rounded-lg font-semibold text-sm hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
                     Cancel
                   </button>
                   <button
                     onClick={handleCancelConfirm}
-                    disabled={!cancelReason}
-                    className={`flex-1 py-3 rounded-lg font-semibold text-sm transition-colors ${cancelReason
+                    disabled={!cancelReason || isCancellingOrder}
+                    className={`flex-1 py-3 rounded-lg font-semibold text-sm transition-colors ${
+                      cancelReason && !isCancellingOrder
                       ? "!bg-red-600 !text-white hover:bg-red-700"
                       : "bg-gray-200 text-gray-400 cursor-not-allowed"
                       }`}>
-                    Confirm Cancellation
+                    {isCancellingOrder ? "Cancelling..." : "Confirm Cancellation"}
                   </button>
                 </div>
               </motion.div>
@@ -3104,7 +3188,7 @@ function PreparingOrders({
     const fetchOrders = async () => {
       try {
         // Fetch all orders and filter for 'preparing' status on frontend
-        const response = await restaurantAPI.getOrders();
+        const response = await fetchRestaurantOrdersShared();
 
         if (!isMounted) return;
 
@@ -3205,43 +3289,46 @@ function PreparingOrders({
 
   // Track which orders have been marked as ready to avoid duplicate API calls
   const markedReadyOrdersRef = useRef(new Set());
+  const preparingOrdersRef = useRef(orders);
+  preparingOrdersRef.current = orders;
+  const onStatusChangedRef = useRef(onStatusChanged);
+  onStatusChangedRef.current = onStatusChanged;
 
-  // Auto-mark orders as ready when ETA reaches 0
+  // Auto-mark orders as ready when ETA reaches 0.
+  // Stable interval — do NOT depend on currentTime (avoids recreate every 1s).
   useEffect(() => {
-    if (!currentTime || orders.length === 0) return;
+    if (orders.length === 0) return;
 
     const checkAndMarkReady = async () => {
-      for (const order of orders) {
+      const now = Date.now();
+      const currentOrders = preparingOrdersRef.current;
+
+      for (const order of currentOrders) {
         const orderKey = order.mongoId || order.orderId;
 
-        // Skip if already marked as ready
         if (markedReadyOrdersRef.current.has(orderKey)) {
           continue;
         }
 
-        // Calculate remaining ETA
-        const elapsedMs = currentTime - order.preparingTimestamp;
+        const elapsedMs = now - new Date(order.preparingTimestamp).getTime();
         const elapsedMinutes = Math.floor(elapsedMs / 60000);
         const remainingMinutes = Math.max(0, order.initialETA - elapsedMinutes);
 
-        // If ETA has reached 0 (or slightly past), mark as ready
         if (remainingMinutes <= 0 && order.status === "preparing") {
           const elapsedSeconds = Math.floor(elapsedMs / 1000);
           const totalETASeconds = order.initialETA * 60;
 
-          // Mark as ready when ETA time has elapsed (with 2 second buffer)
           if (elapsedSeconds >= totalETASeconds - 2) {
             try {
               debugLog(
                 `?? Auto-marking order ${order.orderId} as ready (ETA reached 0)`,
               );
-              markedReadyOrdersRef.current.add(orderKey); // Mark as processing
+              markedReadyOrdersRef.current.add(orderKey);
               await restaurantAPI.markOrderReady(
                 order.mongoId || order.orderId,
               );
               debugLog(`? Order ${order.orderId} marked as ready`);
-              onStatusChanged?.();
-              // Order will be removed from preparing list on next fetch
+              onStatusChangedRef.current?.();
             } catch (error) {
               const status = error.response?.status;
               const msg = (
@@ -3249,14 +3336,12 @@ function PreparingOrders({
                 error.message ||
                 ""
               ).toLowerCase();
-              // If 400 and message says order cannot be marked ready (e.g. already ready),
-              // treat as idempotent - backend cron or another client already marked it.
               if (
                 status === 400 &&
                 (msg.includes("cannot be marked as ready") ||
                   msg.includes("current status"))
               ) {
-                // Keep in markedReadyOrdersRef so we don't retry; order will disappear on next fetch
+                // Already ready — keep key so we don't retry
               } else {
                 debugError(
                   `? Failed to auto-mark order ${order.orderId} as ready:`,
@@ -3264,20 +3349,19 @@ function PreparingOrders({
                 );
                 markedReadyOrdersRef.current.delete(orderKey);
               }
-              // Don't show error toast - it will retry on next check (for non-idempotent errors)
             }
           }
         }
       }
     };
 
-    // Check every 2 seconds for orders that need to be marked ready
+    checkAndMarkReady();
     const readyCheckInterval = setInterval(checkAndMarkReady, 2000);
 
     return () => {
       clearInterval(readyCheckInterval);
     };
-  }, [currentTime, orders]);
+  }, [orders]);
 
   // Clear marked orders when orders list changes (orders moved to ready)
   useEffect(() => {
@@ -3433,7 +3517,7 @@ function ReadyOrders({ onSelectOrder, refreshToken = 0, searchQuery = "" }) {
     const fetchOrders = async () => {
       try {
         // Fetch all orders and filter for 'ready' status on frontend
-        const response = await restaurantAPI.getOrders();
+        const response = await fetchRestaurantOrdersShared();
 
         if (!isMounted) return;
 
@@ -3558,7 +3642,7 @@ const OutForDeliveryOrders = ({ onSelectOrder, refreshToken = 0, searchQuery = "
     const fetchOrders = async () => {
       try {
         // Fetch all orders and filter for 'out_for_delivery' status on frontend
-        const response = await restaurantAPI.getOrders();
+        const response = await fetchRestaurantOrdersShared();
 
         if (!isMounted) return;
 
@@ -3682,7 +3766,7 @@ function ScheduledOrders({ onSelectOrder, refreshToken = 0, searchQuery = "" }) 
 
     const fetchOrders = async () => {
       try {
-        const response = await restaurantAPI.getOrders();
+        const response = await fetchRestaurantOrdersShared();
         if (!isMounted) return;
 
         if (response.data?.success && response.data.data?.orders) {
@@ -3726,7 +3810,8 @@ function ScheduledOrders({ onSelectOrder, refreshToken = 0, searchQuery = "" }) 
     };
 
     fetchOrders();
-    const interval = setInterval(fetchOrders, 30000);
+    // Soft poll only — coalesced with popup fallback via shared cache.
+    const interval = setInterval(fetchOrders, 60000);
     return () => {
       isMounted = false;
       clearInterval(interval);

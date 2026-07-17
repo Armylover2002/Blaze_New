@@ -180,27 +180,45 @@ export const createOrUpdateOtp = async (phone, options = {}) => {
 
 export const verifyOtp = async (phone, otp) => {
     const phoneCandidates = getPhoneCandidates(phone);
+    const code = String(otp || '').trim();
+    const now = new Date();
+    const maxAttempts = Number(config.otpMaxAttempts) || 5;
+
+    // Atomic success path: only one concurrent verify can consume a matching OTP.
+    const consumed = await FoodOtp.findOneAndDelete({
+        phone: { $in: phoneCandidates },
+        otp: code,
+        expiresAt: { $gt: now },
+        attempts: { $lt: maxAttempts },
+    });
+    if (consumed) {
+        return { valid: true };
+    }
+
     const record = await FoodOtp.findOne({ phone: { $in: phoneCandidates } });
     if (!record) {
         return { valid: false, reason: 'OTP not found' };
     }
 
-    if (record.expiresAt < new Date()) {
+    if (record.expiresAt < now) {
         return { valid: false, reason: 'OTP expired' };
     }
 
-    if (record.attempts >= config.otpMaxAttempts) {
+    if (record.attempts >= maxAttempts) {
         return { valid: false, reason: 'Max attempts exceeded' };
     }
 
-    record.attempts += 1;
+    // Wrong code (or race lost the successful consume) — bump attempts atomically.
+    await FoodOtp.updateOne(
+        { _id: record._id, attempts: { $lt: maxAttempts } },
+        { $inc: { attempts: 1 } }
+    );
 
-    if (record.otp !== otp) {
-        await record.save();
-        return { valid: false, reason: 'Invalid OTP' };
+    if (record.otp === code) {
+        // Matching code but consume lost the race / expiry edge — treat as already used.
+        return { valid: false, reason: 'OTP not found' };
     }
 
-    await record.deleteOne();
-    return { valid: true };
+    return { valid: false, reason: 'Invalid OTP' };
 };
 

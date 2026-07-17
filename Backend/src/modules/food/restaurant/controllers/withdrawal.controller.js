@@ -3,7 +3,7 @@ import { sendResponse, sendError } from '../../../../utils/response.js';
 import { FoodRestaurantWithdrawal } from '../models/foodRestaurantWithdrawal.model.js';
 import { FoodRestaurantWallet } from '../models/restaurantWallet.model.js';
 import { FoodRestaurant } from '../models/restaurant.model.js';
-import { getRestaurantFinance } from '../services/restaurantFinance.service.js';
+import { getRestaurantAvailableWithdrawalBalance } from '../services/restaurantFinance.service.js';
 import { getRestaurantWithdrawalLimitSettings } from '../../admin/services/admin.service.js';
 
 function resolveBankDetails(bodyBank, restaurant) {
@@ -25,6 +25,19 @@ function hasUsableBankDetails(bank) {
     );
 }
 
+function normalizeIdempotencyKey(value) {
+    const key = String(value || '').trim().slice(0, 128);
+    return key.length >= 8 ? key : '';
+}
+
+function isDuplicateKeyError(error) {
+    return (
+        error?.code === 11000 ||
+        error?.code === 11001 ||
+        /E11000|duplicate key/i.test(String(error?.message || ''))
+    );
+}
+
 async function notifySafely(targets, payload) {
     try {
         const { notifyOwnersSafely } = await import(
@@ -41,6 +54,7 @@ export const createWithdrawalRequestController = async (req, res, next) => {
     try {
         const restaurantId = req.user?.userId;
         const { amount, bankDetails } = req.body;
+        const idempotencyKey = normalizeIdempotencyKey(req.body?.idempotencyKey);
 
         if (!restaurantId) return sendError(res, 401, 'Restaurant authentication required');
         const numericAmount = Number(amount);
@@ -53,6 +67,22 @@ export const createWithdrawalRequestController = async (req, res, next) => {
         }
 
         const rid = new mongoose.Types.ObjectId(restaurantId);
+
+        if (idempotencyKey) {
+            const existing = await FoodRestaurantWithdrawal.findOne({
+                restaurantId: rid,
+                idempotencyKey,
+            }).lean();
+            if (existing) {
+                return sendResponse(
+                    res,
+                    200,
+                    'Withdrawal request already submitted',
+                    existing
+                );
+            }
+        }
+
         const [restaurant, limitSettings] = await Promise.all([
             FoodRestaurant.findById(rid)
                 .select('restaurantName accountNumber ifscCode bankName accountHolderName')
@@ -85,17 +115,23 @@ export const createWithdrawalRequestController = async (req, res, next) => {
         }
 
         let withdrawal;
+        let createdNew = false;
 
         await session.withTransaction(async () => {
-            // Serialize concurrent creates for this restaurant via wallet row lock
+            // Force a write on the wallet row so concurrent creates serialize.
             await FoodRestaurantWallet.findOneAndUpdate(
                 { restaurantId: rid },
-                { $setOnInsert: { restaurantId: rid } },
+                {
+                    $setOnInsert: { restaurantId: rid },
+                    $currentDate: { updatedAt: true },
+                },
                 { upsert: true, session, new: true }
             );
 
-            const finance = await getRestaurantFinance(restaurantId);
-            const availableBalance = finance?.currentCycle?.estimatedPayout || 0;
+            const { availableBalance } = await getRestaurantAvailableWithdrawalBalance(
+                restaurantId,
+                { session }
+            );
 
             if (numericAmount > availableBalance) {
                 const err = new Error(
@@ -105,34 +141,73 @@ export const createWithdrawalRequestController = async (req, res, next) => {
                 throw err;
             }
 
-            const [created] = await FoodRestaurantWithdrawal.create(
-                [
-                    {
+            if (idempotencyKey) {
+                const existingInTxn = await FoodRestaurantWithdrawal.findOne({
+                    restaurantId: rid,
+                    idempotencyKey,
+                })
+                    .session(session)
+                    .lean();
+                if (existingInTxn) {
+                    withdrawal = existingInTxn;
+                    return;
+                }
+            }
+
+            const payload = {
+                restaurantId: rid,
+                amount: numericAmount,
+                bankDetails: resolvedBank,
+                status: 'pending',
+            };
+            if (idempotencyKey) payload.idempotencyKey = idempotencyKey;
+
+            try {
+                const [created] = await FoodRestaurantWithdrawal.create([payload], {
+                    session,
+                });
+                withdrawal = created;
+                createdNew = true;
+            } catch (createErr) {
+                if (idempotencyKey && isDuplicateKeyError(createErr)) {
+                    const existingDup = await FoodRestaurantWithdrawal.findOne({
                         restaurantId: rid,
-                        amount: numericAmount,
-                        bankDetails: resolvedBank,
-                        status: 'pending',
-                    },
-                ],
-                { session }
-            );
-            withdrawal = created;
+                        idempotencyKey,
+                    })
+                        .session(session)
+                        .lean();
+                    if (existingDup) {
+                        withdrawal = existingDup;
+                        return;
+                    }
+                }
+                throw createErr;
+            }
         });
 
-        await notifySafely(
-            [{ ownerType: 'ADMIN', ownerId: 'GLOBAL' }],
-            {
-                title: 'New withdrawal request',
-                body: `${restaurant.restaurantName || 'Restaurant'} requested ₹${Number(numericAmount).toFixed(2)}`,
-                data: {
-                    type: 'withdraw_request',
-                    withdrawalId: String(withdrawal._id),
-                    restaurantId: String(rid),
-                },
-            }
-        );
+        if (createdNew && withdrawal) {
+            await notifySafely(
+                [{ ownerType: 'ADMIN', ownerId: 'GLOBAL' }],
+                {
+                    title: 'New withdrawal request',
+                    body: `${restaurant.restaurantName || 'Restaurant'} requested ₹${Number(numericAmount).toFixed(2)}`,
+                    data: {
+                        type: 'withdraw_request',
+                        withdrawalId: String(withdrawal._id),
+                        restaurantId: String(rid),
+                    },
+                }
+            );
+        }
 
-        return sendResponse(res, 201, 'Withdrawal request submitted successfully', withdrawal);
+        return sendResponse(
+            res,
+            createdNew ? 201 : 200,
+            createdNew
+                ? 'Withdrawal request submitted successfully'
+                : 'Withdrawal request already submitted',
+            withdrawal
+        );
     } catch (error) {
         if (
             error?.statusCode === 400 ||

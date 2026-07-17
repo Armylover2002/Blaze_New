@@ -19,6 +19,13 @@ const foodRestaurantWithdrawalSchema = new mongoose.Schema({
         default: 'pending',
         index: true
     },
+    /** Client retry key — unique per restaurant when provided */
+    idempotencyKey: {
+        type: String,
+        trim: true,
+        maxlength: 128,
+        default: undefined,
+    },
     paymentMethod: {
         type: String,
         default: 'bank_transfer'
@@ -41,5 +48,14 @@ const foodRestaurantWithdrawalSchema = new mongoose.Schema({
 });
 
 foodRestaurantWithdrawalSchema.index({ createdAt: -1 });
+foodRestaurantWithdrawalSchema.index(
+    { restaurantId: 1, idempotencyKey: 1 },
+    {
+        unique: true,
+        partialFilterExpression: {
+            idempotencyKey: { $type: 'string' },
+        },
+    }
+);
 
 export const FoodRestaurantWithdrawal = mongoose.model('FoodRestaurantWithdrawal', foodRestaurantWithdrawalSchema, 'food_restaurant_withdrawals');

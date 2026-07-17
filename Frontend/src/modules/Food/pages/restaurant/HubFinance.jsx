@@ -1368,7 +1368,13 @@ export default function HubFinance() {
                       
                       try {
                         setSubmittingWithdrawal(true)
-                        const response = await restaurantAPI.createWithdrawalRequest(amount)
+                        const idempotencyKey =
+                          (typeof crypto !== "undefined" && crypto.randomUUID)
+                            ? crypto.randomUUID()
+                            : `wd_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
+                        const response = await restaurantAPI.createWithdrawalRequest(amount, {
+                          idempotencyKey,
+                        })
                         if (response.data?.success) {
                           alert('Withdrawal request submitted successfully!')
                           setShowWithdrawalModal(false)

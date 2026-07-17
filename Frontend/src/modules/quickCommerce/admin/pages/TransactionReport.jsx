@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import Card from '@shared/components/ui/Card';
 import Badge from '@shared/components/ui/Badge';
 import Pagination from '@shared/components/ui/Pagination';
+import { PAGINATION_CONFIG } from '@/shared/constants/pagination';
 import { adminApi } from '../services/adminApi';
 import { toast } from 'sonner';
 import { Loader2, RefreshCw, Download, Filter, Search, FileText } from 'lucide-react';
@@ -14,7 +15,7 @@ const TransactionReport = () => {
     const [isExporting, setIsExporting] = useState(false);
     const [orders, setOrders] = useState([]);
     const [page, setPage] = useState(1);
-    const [pageSize, setPageSize] = useState(25);
+    const [pageSize, setPageSize] = useState(PAGINATION_CONFIG.defaultPageSize);
     const [total, setTotal] = useState(0);
     const [loading, setLoading] = useState(true);
 

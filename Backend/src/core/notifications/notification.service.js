@@ -3,15 +3,15 @@ import { ValidationError, NotFoundError } from '../auth/errors.js';
 import { FoodNotification } from './models/notification.model.js';
 import { computeNotificationExpiresAt } from './utils/notificationTtl.js';
 import { bulkWriteInChunks } from './utils/bulkWriteChunks.js';
+import { buildPaginationMeta, buildPaginationOptions } from '../../utils/helpers.js';
 
 const normalizePagination = ({ page = 1, limit = 20 } = {}) => {
-    const nextPage = Math.max(1, Number(page) || 1);
-    const nextLimit = Math.max(1, Math.min(100, Number(limit) || 20));
-    return {
-        page: nextPage,
-        limit: nextLimit,
-        skip: (nextPage - 1) * nextLimit
-    };
+    const { page: nextPage, limit: nextLimit, skip } = buildPaginationOptions(
+        { page, limit },
+        { defaultLimit: 20, maxLimit: 100 }
+    );
+
+    return { page: nextPage, limit: nextLimit, skip };
 };
 
 const normalizeOwnerType = (role) => {
@@ -188,7 +188,7 @@ export const getInboxNotifications = async ({
             page: meta.page,
             limit: meta.limit,
             total,
-            totalPages: Math.max(1, Math.ceil(total / meta.limit))
+            ...buildPaginationMeta({ totalItems: total, page: meta.page, limit: meta.limit })
         },
         unreadCount
     };

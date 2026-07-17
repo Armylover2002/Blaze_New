@@ -187,10 +187,7 @@ export default function RestaurantOTP() {
     }
 
     if (newOtp.every((digit) => digit !== "") && newOtp.length === 4) {
-      if (!hasSubmittedRef.current) {
-        hasSubmittedRef.current = true
-        handleVerify(newOtp.join(""))
-      }
+      handleVerify(newOtp.join(""))
     }
   }
 
@@ -246,18 +243,19 @@ export default function RestaurantOTP() {
   }
 
   const handleVerify = async (otpValue = null) => {
-    const code = otpValue || otp.join("")
-
-    if (hasSubmittedRef.current && !otpValue) {
+    // Always gate — including paste/auto-fill paths that pass otpValue.
+    if (hasSubmittedRef.current || isLoading) {
       return
     }
+
+    const code = String(otpValue ?? otp.join("")).replace(/\D/g, "").slice(0, 4)
 
     if (code.length !== 4) {
       setError("Please enter the complete 4-digit code")
-      hasSubmittedRef.current = false
       return
     }
 
+    hasSubmittedRef.current = true
     setIsLoading(true)
     setError("")
 
@@ -431,6 +429,7 @@ export default function RestaurantOTP() {
 
     setIsLoading(false)
     setOtp(["", "", "", ""])
+    hasSubmittedRef.current = false
     inputRefs.current[0]?.focus()
   }
 
