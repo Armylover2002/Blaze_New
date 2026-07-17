@@ -1,5 +1,13 @@
 import mongoose from 'mongoose';
 
+/**
+ * Food order settlement ledger — source of truth for restaurant order earnings.
+ *
+ * `amounts.restaurantShare` is snapshotted at order create (plus quick share
+ * realization on delivery). Payout eligibility and HubFinance balances are
+ * derived here via `settlement.isRestaurantSettled` / `restaurantSettledAmount`.
+ * Restaurant order credits are NOT mirrored into `food_restaurant_wallets`.
+ */
 const foodTransactionSchema = new mongoose.Schema({
     // Identifiers
     orderId: { type: mongoose.Schema.Types.ObjectId, ref: 'FoodOrder', required: true, unique: true, index: true },

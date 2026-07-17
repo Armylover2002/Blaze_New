@@ -52,13 +52,14 @@ export const getUserWalletTransactionsController = async (req, res, next) => {
 
 // ─── Restaurant Endpoints ───
 
+/** Referral / universal-ledger balance. Order payout lives in food_transactions + /restaurant/finance. */
 export const getRestaurantWalletController = async (req, res, next) => {
     try {
         const restaurantId = req.user?.restaurantId || req.params.restaurantId;
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 20;
         const data = await getWalletWithTransactions('restaurant', restaurantId, { page, limit });
-        return sendResponse(res, 200, 'Restaurant wallet fetched', data);
+        return sendResponse(res, 200, 'Restaurant wallet fetched (referral ledger; order earnings via finance API)', data);
     } catch (err) {
         next(err);
     }

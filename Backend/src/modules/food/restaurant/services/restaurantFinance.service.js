@@ -1,3 +1,14 @@
+/**
+ * Restaurant finance (Hub / payouts) — reads order earnings from `food_transactions`,
+ * not from `food_restaurant_wallets.balance`.
+ *
+ * Available withdrawal = sum(unsettled delivered `restaurantShare`) + wallet
+ * `referralEarnings` − pending/processing withdrawals.
+ *
+ * An empty `food_restaurant_wallets` collection after orders-only activity is
+ * expected; wallet rows appear after referral credit, subscription top-up, or
+ * withdrawal flows.
+ */
 import mongoose from 'mongoose';
 import { FoodOrder } from '../../orders/models/order.model.js';
 import { FoodTransaction } from '../../orders/models/foodTransaction.model.js';
@@ -88,6 +99,8 @@ function isDeliveredOrderForPayout(orderLike) {
 
 /**
  * Available withdrawal balance for a restaurant.
+ * Computed from `food_transactions` (delivered + captured, unsettled share) plus
+ * wallet `referralEarnings`, minus pending withdrawals — not from wallet.balance.
  * Pass `session` so create-withdrawal can evaluate balance inside the same txn.
  */
 export async function getRestaurantAvailableWithdrawalBalance(
@@ -295,6 +308,7 @@ export async function getRestaurantFinance(restaurantId, query = {}) {
             availableBalance: availableBalance,
             pendingPayout: globalEstimatedPayout,
             referralEarnings: referralBalance,
+            // Wallet lifetime total (referral / creditWallet only — not order share; see currentCycle)
             totalEarnings: Number(wallet?.totalEarnings || 0)
         },
         withdrawalLimits: {

@@ -26,7 +26,7 @@ router.get('/orders/:orderId/refunds', getRefundsByOrderController);
 router.get('/wallet/balance', getUserWalletBalanceController);
 router.get('/wallet/transactions', getUserWalletTransactionsController);
 
-// ─── Restaurant wallet ───
+// ─── Restaurant wallet (referral / creditWallet balance — not order earnings; see food_transactions) ───
 router.get('/restaurant/:restaurantId/wallet', getRestaurantWalletController);
 
 // ─── Delivery partner wallet ───
