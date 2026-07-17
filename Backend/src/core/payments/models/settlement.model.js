@@ -1,9 +1,14 @@
 import mongoose from 'mongoose';
 
 /**
- * Settlement — batch payout request for restaurants /delivery partners.
- * Admin creates a settlement from accumulated wallet balance;
- * once processed (bank transfer done), the record is marked processed.
+ * Settlement — legacy batch payout records (`settlements` collection).
+ *
+ * NOT the food restaurant payout path. Restaurant withdrawals use:
+ *   food_restaurant_withdrawals + food_transactions settlement flags
+ * via POST /food/restaurant/withdraw and PATCH /food/admin/withdrawals/:id.
+ *
+ * New restaurant settlements must not be created via settlement.service
+ * (create/process reject entityType=restaurant).
  */
 const settlementSchema = new mongoose.Schema(
     {

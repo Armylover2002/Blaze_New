@@ -4,7 +4,7 @@ import { assertNoZoneOverlap } from '../../../../utils/zoneOverlap.js';
 import { FoodRestaurant } from '../../restaurant/models/restaurant.model.js';
 import { DEFAULT_RESTAURANT_COMMISSION_RATE } from '../../constants/commission.constants.js';
 import { validateRestaurantPhoneUniqueness, normalizeRestaurantPhone } from '../../restaurant/services/restaurant.service.js';
-import { FoodRestaurantWallet } from '../../restaurant/models/restaurantWallet.model.js';
+import { FoodRestaurantWallet, ensureRestaurantWallet } from '../../restaurant/models/restaurantWallet.model.js';
 import { FoodDeliveryPartner } from '../../delivery/models/deliveryPartner.model.js';
 import { DeliverySupportTicket } from '../../delivery/models/supportTicket.model.js';
 import { FoodZone } from '../models/zone.model.js';
@@ -45,6 +45,7 @@ import { FoodTransaction } from '../../orders/models/foodTransaction.model.js';
 import { buildOrderIdentityFilter } from '../../orders/services/order.helpers.js';
 import { FoodRestaurantWithdrawal } from '../../restaurant/models/foodRestaurantWithdrawal.model.js';
 import { applyPendingOpenDaysUpdate, discardPendingOpenDaysUpdate, syncOutletTimingsFromOpenDays } from '../../restaurant/services/outletTimings.service.js';
+import { buildPaginationMeta, buildPaginationOptions } from '../../../../utils/helpers.js';
 // import { applyPendingOpenDaysUpdate, discardPendingOpenDaysUpdate } from '../../restaurant/services/outletTimings.service.js';
 import {
     buildApplyPendingProfileChangesUpdate,
@@ -263,9 +264,7 @@ const validateOpeningClosingTimes = (openingTime, closingTime) => {
 };
 
 export async function getRestaurantComplaints(query = {}) {
-    const limit = Math.min(Math.max(parseInt(query.limit, 10) || 50, 1), 500);
-    const page = Math.max(parseInt(query.page, 10) || 1, 1);
-    const skip = (page - 1) * limit;
+    const { page, limit, skip } = buildPaginationOptions(query, { defaultLimit: 50, maxLimit: 500 });
 
     const filter = { type: 'order' };
     if (query.status && query.status !== 'all') filter.status = query.status;
@@ -305,7 +304,13 @@ export async function getRestaurantComplaints(query = {}) {
         FoodSupportTicket.countDocuments(filter)
     ]);
 
-    return { complaints, total, page, limit };
+    return {
+        complaints,
+        total,
+        page,
+        limit,
+        pagination: buildPaginationMeta({ totalItems: total, page, limit }),
+    };
 }
 
 export async function globalSearch(query = '') {
@@ -3609,6 +3614,7 @@ export async function updateRestaurantStatus(id, body = {}) {
         {
             $set: {
                 status,
+                isActive,
                 approvedAt: isActive ? new Date() : undefined,
                 rejectedAt: isActive ? undefined : new Date(),
                 rejectionReason: isActive ? undefined : 'Disabled by admin'
@@ -3616,6 +3622,23 @@ export async function updateRestaurantStatus(id, body = {}) {
         },
         { new: true, runValidators: false }
     ).lean();
+
+    // Kill existing sessions when admin disables/rejects the restaurant
+    if (updated && !isActive) {
+        await FoodRefreshToken.deleteMany({ userId: updated._id });
+    }
+
+    if (updated && isActive) {
+        try {
+            await ensureRestaurantWallet(updated._id);
+        } catch (e) {
+            console.error(
+                `Failed to initialize restaurant wallet on status update for ${updated._id}:`,
+                e?.message || e
+            );
+        }
+    }
+
     if (updated) invalidateDashboardStatsCache();
     return updated;
 }
@@ -4728,6 +4751,16 @@ export async function approveRestaurant(id, performer = null) {
     ).lean();
 
     if (updated) {
+        // Ensure wallet exists for first-time approval (covers pre-existing restaurants).
+        try {
+            await ensureRestaurantWallet(updated._id);
+        } catch (e) {
+            console.error(
+                `Failed to initialize restaurant wallet on approval for ${updated._id}:`,
+                e?.message || e
+            );
+        }
+
         // --- Referral Reward Crediting ---
         // Re-validate platform settings at payout, then claim + credit + count
         // in one transaction (no double-pay; disabled/zeroed programs cannot pay).
@@ -5001,6 +5034,7 @@ export async function rejectRestaurant(id, reason, performer = null) {
     ).lean();
 
     if (updated) {
+        await FoodRefreshToken.deleteMany({ userId: updated._id });
         try {
             const { notifyOwnersSafely } = await import('../../../../core/notifications/firebase.service.js');
             await notifyOwnersSafely(

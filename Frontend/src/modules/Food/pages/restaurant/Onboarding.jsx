@@ -297,6 +297,7 @@ const finishRegistrationAndGoPending = async (registerResponse, ownerPhone, navi
     setAuthData,
   )
   sessionStorage.removeItem("restaurantReonboard")
+  sessionStorage.removeItem("restaurant_registrationToken")
   await clearOnboardingDraft()
   clearOnboardingFileCache()
   const phone = normalizePhoneDigits(ownerPhone)
@@ -448,6 +449,7 @@ export default function RestaurantOnboarding() {
   const [step, setStep] = useState(1)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [paymentInProgress, setPaymentInProgress] = useState(false)
   const [error, setError] = useState("")
   const [isLoggingOut, setIsLoggingOut] = useState(false)
   const [feeConfig, setFeeConfig] = useState(undefined)
@@ -609,6 +611,7 @@ export default function RestaurantOnboarding() {
   const previewUrlCacheRef = useRef(new Map())
   const hasRestoredDraftStepRef = useRef(false)
   const onboardingDraftRef = useRef(null)
+  const paymentFlowInProgressRef = useRef(false)
   const menuImagesInputRef = useRef(null)
   const profileImageInputRef = useRef(null)
   const panImageInputRef = useRef(null)
@@ -1149,6 +1152,9 @@ export default function RestaurantOnboarding() {
   }
 
   const handleNext = async () => {
+    if (saving || paymentInProgress || paymentFlowInProgressRef.current) {
+      return
+    }
     console.log("NEXT CLICKED")
     setError("")
 
@@ -1312,8 +1318,9 @@ export default function RestaurantOnboarding() {
               navigate,
             );
           } else {
-            // Open real Razorpay modal
-            setSaving(false); // Enable interactive UI since payment is in progress
+            // Keep Next locked while Razorpay is open to prevent duplicate createOrder calls.
+            paymentFlowInProgressRef.current = true
+            setPaymentInProgress(true)
             const rzpOptions = {
               key: orderData.keyId,
               amount: Math.round(orderData.amount * 100),
@@ -1356,16 +1363,22 @@ export default function RestaurantOnboarding() {
                   setError(msg);
                   toast.error(msg);
                 } finally {
+                  paymentFlowInProgressRef.current = false
+                  setPaymentInProgress(false)
                   setSaving(false);
                 }
               },
               onError: (err) => {
                 toast.error(err?.description || "Payment failed. Please try again.");
                 setError(err?.description || "Payment failed");
+                paymentFlowInProgressRef.current = false
+                setPaymentInProgress(false)
                 setSaving(false);
               },
               onClose: () => {
                 toast.error("Payment modal closed. Payment is required to complete onboarding.");
+                paymentFlowInProgressRef.current = false
+                setPaymentInProgress(false)
                 setSaving(false);
               }
             };
@@ -1397,7 +1410,10 @@ export default function RestaurantOnboarding() {
       setError(msg)
       toast.error(msg)
     } finally {
-      setSaving(false)
+      // Do not unlock Next while Razorpay modal is still open.
+      if (!paymentFlowInProgressRef.current) {
+        setSaving(false)
+      }
     }
   }
 
@@ -2721,7 +2737,7 @@ export default function RestaurantOnboarding() {
         bannerUrl={bannerUrl}
         logoUrl={logoUrl}
         loading={loading}
-        saving={saving}
+        saving={saving || paymentInProgress}
         error={error}
         keyboardInset={keyboardInset}
         isEditing={isEditing}

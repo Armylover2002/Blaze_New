@@ -7,6 +7,7 @@ import { Seller } from '../seller/models/seller.model.js';
 import { SellerOrder } from '../seller/models/sellerOrder.model.js';
 import { QuickZone } from '../models/quick_zone.model.js';
 import { assertNoZoneOverlap, ZONE_OVERLAP_MESSAGE } from '../../../utils/zoneOverlap.js';
+import { buildPaginationOptions, PAGINATION_DEFAULTS } from '../../../utils/helpers.js';
 import { detectQuickZoneForPoint } from '../services/quick-zone-lookup.service.js';
 import { resolveQuickOrderCancellationReason } from '../utils/cancellation.helpers.js';
 import { resolveQuickOrderCustomer } from '../utils/customer.helpers.js';
@@ -1475,8 +1476,10 @@ export const getAdminFinanceSummary = async (_req, res) => {
 };
 
 export const getAdminFinanceLedger = async (req, res) => {
-  const page = Math.max(1, Number(req.query?.page || 1) || 1);
-  const limit = Math.max(1, Math.min(100, Number(req.query?.limit || 25) || 25));
+  const { page, limit } = buildPaginationOptions(req.query, {
+    defaultLimit: PAGINATION_DEFAULTS.defaultLimit,
+    maxLimit: 100,
+  });
   const result = await getQuickCommerceFinanceLedger({ page, limit });
   return res.json({ success: true, result });
 };

@@ -18,6 +18,7 @@ import { adminApi } from "../../services/adminApi";
 import { toast } from "sonner";
 import IconSelector from "@shared/components/IconSelector";
 import Pagination from "@shared/components/ui/Pagination";
+import { PAGINATION_CONFIG } from "@/shared/constants/pagination";
 import { getIconSvg } from "@shared/constants/categoryIcons";
 import { useAuth } from "@core/context/AuthContext";
 import { getCurrentUser } from "@food/utils/auth";
@@ -95,7 +96,7 @@ const HeaderCategories = () => {
 
   const [categories, setCategories] = useState([]);
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(25);
+  const [pageSize, setPageSize] = useState(PAGINATION_CONFIG.defaultPageSize);
   const [total, setTotal] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");

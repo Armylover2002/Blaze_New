@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import Lenis from "lenis"
 import BottomNavbar from "@food/components/restaurant/BottomNavbar"
@@ -16,9 +16,6 @@ import {
 } from "lucide-react"
 import { Card, CardContent } from "@food/components/ui/card"
 import { useNavigate } from "react-router-dom"
-import { getOrderStatus, normalizeStatus, matchesOrdersPageFilter, ORDER_STATUS } from "@food/utils/orderStatus"
-import { getTransactionsByType, getOrderPaymentAmount } from "@food/utils/walletState"
-import { formatCurrency, usdToInr } from "@food/utils/currency"
 import { restaurantAPI } from "@food/api"
 import { RestaurantGridSkeleton } from "@food/components/ui/loading-skeletons"
 import { useDelayedLoading } from "@food/hooks/useDelayedLoading"
@@ -26,6 +23,38 @@ const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
 
+function startOfLocalDay(d = new Date()) {
+  const day = new Date(d)
+  day.setHours(0, 0, 0, 0)
+  return day
+}
+
+/** Order volume cards from live API orders (not localStorage wallet mocks). */
+function buildOrderSummaryCards(orders) {
+  const todayStart = startOfLocalDay()
+  const weekStart = new Date(todayStart)
+  weekStart.setDate(todayStart.getDate() - 7)
+  const monthStart = new Date(todayStart)
+  monthStart.setMonth(todayStart.getMonth() - 1)
+
+  let todayCount = 0
+  let weekCount = 0
+  let monthCount = 0
+
+  for (const order of orders) {
+    const created = order?.createdAt ? new Date(order.createdAt) : null
+    if (!created || Number.isNaN(created.getTime())) continue
+    if (created >= todayStart) todayCount += 1
+    if (created >= weekStart) weekCount += 1
+    if (created >= monthStart) monthCount += 1
+  }
+
+  return [
+    { label: "Today", count: todayCount },
+    { label: "This Week", count: weekCount },
+    { label: "This Month", count: monthCount },
+  ]
+}
 
 export default function OrdersPage() {
   const navigate = useNavigate()
@@ -69,63 +98,7 @@ export default function OrdersPage() {
     }
   }, [])
 
-  // Calculate summary cards from payment transactions
-  const calculateSummaryCards = () => {
-    const paymentTransactions = getTransactionsByType("payment")
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
-    
-    const thisWeek = new Date(today)
-    thisWeek.setDate(today.getDate() - 7)
-    
-    const thisMonth = new Date(today)
-    thisMonth.setMonth(today.getMonth() - 1)
-    
-    const parseDate = (dateString) => {
-      // Parse date string like "01 Jun 2023" or "07 Feb 2023"
-      try {
-        const parts = dateString.split(' ')
-        if (parts.length === 3) {
-          const day = parseInt(parts[0])
-          const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-          const month = monthNames.indexOf(parts[1])
-          const year = parseInt(parts[2])
-          return new Date(year, month, day)
-        }
-      } catch (e) {
-        // If parsing fails, return old date
-        return new Date(0)
-      }
-      return new Date(0)
-    }
-    
-    let todayCount = 0
-    let weekCount = 0
-    let monthCount = 0
-    
-    paymentTransactions.forEach(transaction => {
-      const transactionDate = parseDate(transaction.date)
-      transactionDate.setHours(0, 0, 0, 0)
-      
-      if (transactionDate >= today) {
-        todayCount++
-      }
-      if (transactionDate >= thisWeek) {
-        weekCount++
-      }
-      if (transactionDate >= thisMonth) {
-        monthCount++
-      }
-    })
-    
-    return [
-      { label: "Today", count: todayCount },
-      { label: "This Week", count: weekCount },
-      { label: "This Month", count: monthCount }
-    ]
-  }
-  
-  const summaryCards = calculateSummaryCards()
+  const summaryCards = useMemo(() => buildOrderSummaryCards(orders), [orders])
 
   // Fetch orders from API
   useEffect(() => {

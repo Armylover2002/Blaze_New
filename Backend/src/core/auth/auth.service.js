@@ -11,7 +11,7 @@ import { FoodReferralSettings } from "../../modules/food/admin/models/referralSe
 import { FoodReferralLog } from "../../modules/food/admin/models/referralLog.model.js";
 import { FoodUserWallet } from "../../modules/food/user/models/userWallet.model.js";
 import { createOrUpdateOtp, verifyOtp } from "../otp/otp.service.js";
-import { signAccessToken, signRefreshToken, verifyRefreshToken } from "./token.util.js";
+import { signAccessToken, signRefreshToken, verifyRefreshToken, signRestaurantRegistrationToken } from "./token.util.js";
 import { FoodRefreshToken } from "../refreshTokens/refreshToken.model.js";
 import { ValidationError, AuthError, ForbiddenError } from "./errors.js";
 import { config } from "../../config/env.js";
@@ -20,6 +20,7 @@ import { sendAdminResetOtpEmail } from "../../utils/email.js";
 import mongoose from "mongoose";
 import { AdminRole } from "../admin/role.model.js";
 import { creditReferralReward } from "../../modules/food/user/services/userWallet.service.js";
+import { mergeDeviceToken } from "../notifications/firebase.service.js";
 import {
   assertAdminForgotOtpRequestAllowed,
   assertAdminForgotOtpVerificationAllowed,
@@ -31,12 +32,74 @@ import {
   recordAdminLoginFailure,
 } from "./auth.lockout.js";
 
+/** Persist a refresh token with a new rotation family (login / new session). */
+const createRefreshTokenSession = async (userId, basePayload) => {
+  const familyId = crypto.randomUUID();
+  const refreshToken = signRefreshToken({ ...basePayload, familyId });
+  const ttlMs = ms(config.jwtRefreshExpiresIn || "7d");
+  const expiresAt = new Date(Date.now() + ttlMs);
+  await FoodRefreshToken.create({
+    userId,
+    token: refreshToken,
+    familyId,
+    expiresAt,
+  });
+  return { refreshToken, familyId, expiresAt };
+};
+
+/** Rotate refresh token in-place for a family; returns the new refresh JWT. */
+const rotateRefreshTokenSession = async (stored, payload) => {
+  const familyId = stored.familyId || crypto.randomUUID();
+  const refreshToken = signRefreshToken({
+    userId: payload.userId,
+    role: payload.role,
+    familyId,
+  });
+  const ttlMs = ms(config.jwtRefreshExpiresIn || "7d");
+  const expiresAt = new Date(Date.now() + ttlMs);
+
+  await FoodRefreshToken.deleteOne({ _id: stored._id });
+  await FoodRefreshToken.create({
+    userId: stored.userId,
+    token: refreshToken,
+    familyId,
+    expiresAt,
+  });
+
+  return refreshToken;
+};
+
+/** On reuse of an already-rotated refresh token, revoke the whole family (or user sessions). */
+const revokeOnRefreshReuse = async (token) => {
+  try {
+    const payload = verifyRefreshToken(token);
+    if (payload?.familyId) {
+      await FoodRefreshToken.deleteMany({ familyId: payload.familyId });
+    } else if (payload?.userId) {
+      await FoodRefreshToken.deleteMany({ userId: payload.userId });
+    }
+  } catch {
+    // Token may already be expired/invalid — still treat as invalid below
+  }
+};
+
 const ROLES = {
   USER: "USER",
   RESTAURANT: "RESTAURANT",
   DELIVERY_PARTNER: "DELIVERY_PARTNER",
   ADMIN: "ADMIN",
   SELLER: "SELLER",
+};
+
+/** Attach/replace an FCM device token on a profile doc (dedupe + same-device refresh). */
+const applyFcmTokenToProfile = async (profileDoc, fcmToken, platform) => {
+  if (!profileDoc || !fcmToken) return false;
+  const field = platform === "mobile" ? "fcmTokenMobile" : "fcmTokens";
+  const { tokens, changed } = mergeDeviceToken(profileDoc[field], fcmToken);
+  if (!changed) return false;
+  profileDoc[field] = tokens;
+  await profileDoc.save();
+  return true;
 };
 
 const ACCOUNT_DEACTIVATED_MESSAGE =
@@ -270,26 +333,9 @@ export const verifyUserOtpAndLogin = async (
   // Block login for deactivated, blocked, or deleted users (defense in depth).
   assertUserEligibleForOtp(userDoc);
 
-  // Update FCM token if provided
+  // Update FCM token if provided (replace same-device rotations; keep multi-device)
   if (fcmToken) {
-    let isModified = false;
-    if (platform === "mobile") {
-      if (!userDoc.fcmTokenMobile) userDoc.fcmTokenMobile = [];
-      if (!userDoc.fcmTokenMobile.includes(fcmToken)) {
-        userDoc.fcmTokenMobile.push(fcmToken);
-        isModified = true;
-      }
-    } else {
-      // Default to web if not explicitly mobile
-      if (!userDoc.fcmTokens) userDoc.fcmTokens = [];
-      if (!userDoc.fcmTokens.includes(fcmToken)) {
-        userDoc.fcmTokens.push(fcmToken);
-        isModified = true;
-      }
-    }
-    if (isModified) {
-      await userDoc.save();
-    }
+    await applyFcmTokenToProfile(userDoc, fcmToken, platform);
   }
 
   // Ensure referralCode exists (used for share links on older accounts).
@@ -409,16 +455,7 @@ export const verifyUserOtpAndLogin = async (
   const payload = { userId: user._id.toString(), role: user.role || "USER" };
 
   const accessToken = signAccessToken(payload);
-  const refreshToken = signRefreshToken(payload);
-
-  const ttlMs = ms(config.jwtRefreshExpiresIn || "7d");
-  const expiresAt = new Date(Date.now() + ttlMs);
-
-  await FoodRefreshToken.create({
-    userId: user._id,
-    token: refreshToken,
-    expiresAt,
-  });
+  const { refreshToken } = await createRefreshTokenSession(user._id, payload);
 
   return { accessToken, refreshToken, user, isNewUser };
 };
@@ -475,16 +512,7 @@ export const adminLogin = async (email, password, roleId) => {
   const payload = { userId: admin._id.toString(), role: admin.role };
 
   const accessToken = signAccessToken(payload);
-  const refreshToken = signRefreshToken(payload);
-
-  const ttlMs = ms(config.jwtRefreshExpiresIn || "7d");
-  const expiresAt = new Date(Date.now() + ttlMs);
-
-  await FoodRefreshToken.create({
-    userId: admin._id,
-    token: refreshToken,
-    expiresAt,
-  });
+  const { refreshToken } = await createRefreshTokenSession(admin._id, payload);
 
   const userObj = normalizeAdminProfile(admin);
   delete userObj.password;
@@ -542,42 +570,23 @@ export const verifyRestaurantOtpAndLogin = async (phone, otp, fcmToken, platform
     return {
       needsRegistration: true,
       phone,
+      registrationToken: signRestaurantRegistrationToken(phone),
     };
   }
 
-  // In-progress onboarding — allow resume from saved step
+  // In-progress onboarding — allow resume from saved step (draft fetched via registration token)
   if (restaurant.status === "onboarding") {
-    const { getOnboardingDraftByPhone } = await import(
-      "../../modules/food/restaurant/services/restaurant.service.js"
-    );
-    const draft = await getOnboardingDraftByPhone(phone);
     return {
       needsRegistration: true,
       phone,
-      resumeStep: draft?.onboardingStep || restaurant.onboardingStep || 2,
-      restaurant: draft,
+      resumeStep: restaurant.onboardingStep || 2,
+      registrationToken: signRestaurantRegistrationToken(phone),
     };
   }
 
-  // Update FCM token if provided
+  // Update FCM token if provided (replace same-device rotations; keep multi-device)
   if (fcmToken) {
-    let isModified = false;
-    if (platform === "mobile") {
-      if (!restaurant.fcmTokenMobile) restaurant.fcmTokenMobile = [];
-      if (!restaurant.fcmTokenMobile.includes(fcmToken)) {
-        restaurant.fcmTokenMobile.push(fcmToken);
-        isModified = true;
-      }
-    } else {
-      if (!restaurant.fcmTokens) restaurant.fcmTokens = [];
-      if (!restaurant.fcmTokens.includes(fcmToken)) {
-        restaurant.fcmTokens.push(fcmToken);
-        isModified = true;
-      }
-    }
-    if (isModified) {
-      await restaurant.save();
-    }
+    await applyFcmTokenToProfile(restaurant, fcmToken, platform);
   }
 
   // Block login for deleted restaurants
@@ -587,13 +596,15 @@ export const verifyRestaurantOtpAndLogin = async (phone, otp, fcmToken, platform
     );
   }
 
-  // For rejected restaurants — return rejection info so frontend can show modal
+  // For rejected restaurants — return rejection info so frontend can show modal.
+  // Registration token lets re-apply use onboarding APIs with proven phone ownership.
   if (restaurant.status === "rejected") {
     return {
       isRejected: true,
       rejectionReason: restaurant.rejectionReason || null,
       phone,
       needsRegistration: false,
+      registrationToken: signRestaurantRegistrationToken(phone),
     };
   }
 
@@ -627,15 +638,7 @@ export const issueRestaurantSession = async (restaurant) => {
 
   const payload = { userId: restaurant._id.toString(), role: ROLES.RESTAURANT };
   const accessToken = signAccessToken(payload);
-  const refreshToken = signRefreshToken(payload);
-  const ttlMs = ms(config.jwtRefreshExpiresIn || "7d");
-  const expiresAt = new Date(Date.now() + ttlMs);
-
-  await FoodRefreshToken.create({
-    userId: restaurant._id,
-    token: refreshToken,
-    expiresAt,
-  });
+  const { refreshToken } = await createRefreshTokenSession(restaurant._id, payload);
 
   const user =
     typeof restaurant.toObject === "function" ? restaurant.toObject() : restaurant;
@@ -709,25 +712,9 @@ export const verifyDeliveryOtpAndLogin = async (phone, otp, fcmToken, platform) 
   }
 
   // Update FCM token if provided - CRITICAL: do this BEFORE returning pendingApproval
-  // so we can notify them when approved.
+  // so we can notify them when approved. Replace same-device rotations; keep multi-device.
   if (fcmToken) {
-    let isModified = false;
-    if (platform === "mobile") {
-      if (!deliveryPartner.fcmTokenMobile) deliveryPartner.fcmTokenMobile = [];
-      if (!deliveryPartner.fcmTokenMobile.includes(fcmToken)) {
-        deliveryPartner.fcmTokenMobile.push(fcmToken);
-        isModified = true;
-      }
-    } else {
-      if (!deliveryPartner.fcmTokens) deliveryPartner.fcmTokens = [];
-      if (!deliveryPartner.fcmTokens.includes(fcmToken)) {
-        deliveryPartner.fcmTokens.push(fcmToken);
-        isModified = true;
-      }
-    }
-    if (isModified) {
-      await deliveryPartner.save();
-    }
+    await applyFcmTokenToProfile(deliveryPartner, fcmToken, platform);
   }
 
   if (deliveryPartner.status && deliveryPartner.status !== "approved") {
@@ -795,15 +782,7 @@ export const verifyDeliveryOtpAndLogin = async (phone, otp, fcmToken, platform) 
     role: ROLES.DELIVERY_PARTNER,
   };
   const accessToken = signAccessToken(payload);
-  const refreshToken = signRefreshToken(payload);
-  const ttlMs = ms(config.jwtRefreshExpiresIn || "7d");
-  const expiresAt = new Date(Date.now() + ttlMs);
-
-  await FoodRefreshToken.create({
-    userId: deliveryPartner._id,
-    token: refreshToken,
-    expiresAt,
-  });
+  const { refreshToken } = await createRefreshTokenSession(deliveryPartner._id, payload);
 
   const userObj = deliveryPartner.toObject();
 
@@ -841,17 +820,15 @@ export const logout = async (refreshToken, fcmToken, platform) => {
   if (fcmToken) {
     console.log(`[FCM-Logout] Starting logout-driven token removal: platform=${platform}, tokenPreview=${fcmToken?.slice(0, 10)}...`);
 
-    // We try to remove the token from all 4 possible models regardless of the user ID, 
-    // ensuring no stale connections are left across any role or app the user was logged into.
-    const field = platform === "mobile" ? "fcmTokenMobile" : "fcmTokens";
+    // Remove from both platform fields so mis-tagged tokens do not linger.
     const models = [FoodUser, FoodRestaurant, FoodDeliveryPartner, FoodAdmin];
 
     try {
       await Promise.all(
         models.map((model) =>
           model.updateMany(
-            { [field]: fcmToken },
-            { $pull: { [field]: fcmToken } },
+            { $or: [{ fcmTokens: fcmToken }, { fcmTokenMobile: fcmToken }] },
+            { $pull: { fcmTokens: fcmToken, fcmTokenMobile: fcmToken } },
           ),
         ),
       );
@@ -891,14 +868,13 @@ export const logoutAll = async (refreshToken, fcmToken, platform) => {
 
   // 2. Cleanup FCM token globally if provided
   if (fcmToken) {
-    const field = platform === "mobile" ? "fcmTokenMobile" : "fcmTokens";
     const models = [FoodUser, FoodRestaurant, FoodDeliveryPartner, FoodAdmin];
     try {
       await Promise.all(
         models.map((model) =>
           model.updateMany(
-            { [field]: fcmToken },
-            { $pull: { [field]: fcmToken } },
+            { $or: [{ fcmTokens: fcmToken }, { fcmTokenMobile: fcmToken }] },
+            { $pull: { fcmTokens: fcmToken, fcmTokenMobile: fcmToken } },
           ),
         ),
       );
@@ -1352,18 +1328,20 @@ export const refreshAccessToken = async (token) => {
 
   const stored = await FoodRefreshToken.findOne({ token }).lean();
   if (!stored) {
+    // Token not in DB but may still be a valid JWT → reuse of rotated token
+    await revokeOnRefreshReuse(token);
     throw new AuthError("Invalid refresh token");
   }
 
-  const jwt = await import("jsonwebtoken");
   let payload;
   try {
-    payload = jwt.default.verify(token, config.jwtRefreshSecret);
+    payload = verifyRefreshToken(token);
   } catch {
+    await FoodRefreshToken.deleteOne({ _id: stored._id });
     throw new AuthError("Invalid refresh token");
   }
 
-  // If deactivated user/admin/employee, do not issue fresh access tokens (forces logout on client)
+  // If deactivated user/admin/employee/restaurant, do not issue fresh access tokens
   if (payload?.role === "USER") {
     const u = await FoodUser.findById(payload.userId).select("isActive").lean();
     if (!u || u.isActive === false) {
@@ -1374,12 +1352,35 @@ export const refreshAccessToken = async (token) => {
     if (!a || a.isActive === false) {
       throw new AuthError("Admin account is deactivated");
     }
+  } else if (payload?.role === "RESTAURANT") {
+    const r = await FoodRestaurant.findById(payload.userId)
+      .select("status isActive isDeleted accountStatus")
+      .lean();
+    if (!r || r.isDeleted === true || r.accountStatus === "deleted") {
+      throw new AuthError("Restaurant account is deleted/deactivated");
+    }
+    const status = String(r.status || "").toLowerCase();
+    if (status === "rejected") {
+      throw new AuthError("Restaurant account has been rejected");
+    }
+    // Pending first-time approval may keep refreshing for status polling only
+    if (r.isActive === false && status !== "pending") {
+      throw new AuthError("Restaurant account is deactivated");
+    }
+  } else if (payload?.role === "DELIVERY_PARTNER") {
+    const d = await FoodDeliveryPartner.findById(payload.userId)
+      .select("isActive")
+      .lean();
+    if (!d || d.isActive === false) {
+      throw new AuthError("Delivery account is inactive");
+    }
   }
 
   const newAccessToken = signAccessToken({
     userId: payload.userId,
     role: payload.role,
   });
+  const newRefreshToken = await rotateRefreshTokenSession(stored, payload);
 
-  return { accessToken: newAccessToken, refreshToken: token };
+  return { accessToken: newAccessToken, refreshToken: newRefreshToken };
 };

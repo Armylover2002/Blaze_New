@@ -65,7 +65,7 @@ import {
     deleteAddonController
 } from '../controllers/restaurantAddon.controller.js';
 import * as orderController from '../../orders/controllers/order.controller.js';
-import { authMiddleware, optionalAuthMiddleware } from '../../../../core/auth/auth.middleware.js';
+import { authMiddleware, optionalAuthMiddleware, requireRestaurantRegistrationToken } from '../../../../core/auth/auth.middleware.js';
 import { sendError } from '../../../../utils/response.js';
 import { getRestaurantFinanceController, getRestaurantSubscriptionWalletController } from '../controllers/restaurantFinance.controller.js';
 import { createTopupOrderController, verifyTopupController } from '../../subscriptions/controllers/subscription.controller.js';
@@ -98,6 +98,10 @@ const requireRestaurant = (req, res, next) => {
     next();
 };
 
+/**
+ * Privileged restaurant APIs: approved outlets, or previously-approved outlets
+ * awaiting re-verification. First-time pending accounts are limited to /current.
+ */
 const requireApprovedRestaurant = async (req, res, next) => {
     try {
         const restaurantId = req.user?.userId;
@@ -106,14 +110,21 @@ const requireApprovedRestaurant = async (req, res, next) => {
         }
 
         const restaurant = await FoodRestaurant.findById(restaurantId)
-            .select('status isActive isDeleted accountStatus')
+            .select('status isActive isDeleted accountStatus wasEverApproved')
             .lean();
 
         if (!restaurant || restaurant.isDeleted === true || restaurant.accountStatus === 'deleted') {
             return sendError(res, 403, 'Restaurant account is deleted/deactivated');
         }
 
-        if (restaurant.status !== 'approved' || restaurant.isActive === false) {
+        const status = String(restaurant.status || '').toLowerCase();
+        const isApproved = status === 'approved' && restaurant.isActive !== false;
+        const isReverificationPending =
+            status === 'pending' &&
+            restaurant.wasEverApproved === true &&
+            restaurant.isActive !== false;
+
+        if (!isApproved && !isReverificationPending) {
             return sendError(res, 403, 'Approved restaurant access required');
         }
 
@@ -131,9 +142,9 @@ const uploadFields = upload.fields([
     { name: 'menuImages', maxCount: 10 }
 ]);
 
-router.post('/register', uploadFields, registerRestaurantController);
-router.post('/onboarding/step/:step', uploadFields, saveOnboardingStepController);
-router.get('/onboarding/draft', getOnboardingDraftController);
+router.post('/register', requireRestaurantRegistrationToken, uploadFields, registerRestaurantController);
+router.post('/onboarding/step/:step', requireRestaurantRegistrationToken, uploadFields, saveOnboardingStepController);
+router.get('/onboarding/draft', requireRestaurantRegistrationToken, getOnboardingDraftController);
 
 // Public: approved restaurants list (for user app)
 router.get('/menus/batch', cacheResponse(300, 'restaurant_menus_batch'), getPublicMenusBatchController);
@@ -142,58 +153,46 @@ router.get('/restaurants/under-250', cacheResponse(300, 'restaurants_under_250')
 router.get('/restaurants/:id', cacheResponse(600, 'restaurant_detail'), getApprovedRestaurantController);
 router.get('/restaurants/:id/menu', cacheResponse(600, 'restaurant_menu'), getPublicRestaurantMenuController);
 router.get('/restaurants/:id/outlet-timings', cacheResponse(600, 'restaurant_timings'), getOutletTimingsByRestaurantIdController);
-router.get('/debug-counts', async (req, res) => {
-    try {
-        const { FoodRestaurant } = await import('../models/restaurant.model.js');
-        const all = await FoodRestaurant.find({}).lean();
-        res.json({
-            total: all.length,
-            approvedAndListed: all.filter(r => r.status === 'approved' && r.isListed).length,
-            zoneMatch: all.filter(r => String(r.zoneId) === req.query.zoneId).length,
-            sample: all[0]
-        });
-    } catch (e) {
-        res.json({ error: e.message });
-    }
-});
 router.get('/offers', optionalAuthMiddleware, listPublicOffersController);
 // Public: categories list (zone-aware; returns zone categories + global)
 router.get('/categories/public', cacheResponse(600, 'categories'), listCategoriesController);
 
 // Restaurant dashboard/profile (Bearer token + RESTAURANT role)
+// /current stays open for first-time pending status polling; privileged routes need approval.
 router.get('/current', authMiddleware, requireRestaurant, getCurrentRestaurantController);
-router.patch('/profile', authMiddleware, requireRestaurant, async (req, res, next) => {
+router.patch('/profile', authMiddleware, requireRestaurant, requireApprovedRestaurant, async (req, res, next) => {
     // Invalidate caches when profile is updated
     await invalidateCache('restaurants:*');
     await invalidateCache('restaurant_detail:*');
     next();
 }, updateRestaurantProfileController);
-router.patch('/availability', authMiddleware, requireRestaurant, async (req, res, next) => {
+router.patch('/availability', authMiddleware, requireRestaurant, requireApprovedRestaurant, async (req, res, next) => {
     await invalidateCache('restaurants:*');
     await invalidateCache('restaurant_detail:*');
     next();
 }, updateRestaurantAcceptingOrdersController);
-router.get('/outlet-timings', authMiddleware, requireRestaurant, getCurrentRestaurantOutletTimingsController);
-router.put('/outlet-timings', authMiddleware, requireRestaurant, async (req, res, next) => {
+router.get('/outlet-timings', authMiddleware, requireRestaurant, requireApprovedRestaurant, getCurrentRestaurantOutletTimingsController);
+router.put('/outlet-timings', authMiddleware, requireRestaurant, requireApprovedRestaurant, async (req, res, next) => {
     await invalidateCache('restaurants:*');
     await invalidateCache('restaurant_detail:*');
     await invalidateCache('restaurant_timings:*');
     next();
 }, upsertCurrentRestaurantOutletTimingsController);
-router.get('/finance', authMiddleware, requireRestaurant, getRestaurantFinanceController);
-router.get('/finance/cod-verification', authMiddleware, requireRestaurant, getRestaurantCODDepositsController);
-router.post('/finance/cod-verification/:id/action', authMiddleware, requireRestaurant, upload.single('restaurantProof'), processRestaurantCODDepositController);
-router.get('/subscription-eligibility', authMiddleware, requireRestaurant, checkSubscriptionEligibilityController);
-router.get('/subscription-wallet', authMiddleware, requireRestaurant, getRestaurantSubscriptionWalletController);
-router.post('/subscription-topup', authMiddleware, requireRestaurant, createTopupOrderController);
-router.post('/verify-topup', authMiddleware, requireRestaurant, verifyTopupController);
-router.post('/withdraw', authMiddleware, requireRestaurant, createWithdrawalRequestController);
-router.get('/withdrawals', authMiddleware, requireRestaurant, listMyWithdrawalsController);
-router.post('/withdrawals/:id/cancel', authMiddleware, requireRestaurant, cancelMyWithdrawalController);
+router.get('/finance', authMiddleware, requireRestaurant, requireApprovedRestaurant, getRestaurantFinanceController);
+router.get('/finance/cod-verification', authMiddleware, requireRestaurant, requireApprovedRestaurant, getRestaurantCODDepositsController);
+router.post('/finance/cod-verification/:id/action', authMiddleware, requireRestaurant, requireApprovedRestaurant, upload.single('restaurantProof'), processRestaurantCODDepositController);
+router.get('/subscription-eligibility', authMiddleware, requireRestaurant, requireApprovedRestaurant, checkSubscriptionEligibilityController);
+router.get('/subscription-wallet', authMiddleware, requireRestaurant, requireApprovedRestaurant, getRestaurantSubscriptionWalletController);
+router.post('/subscription-topup', authMiddleware, requireRestaurant, requireApprovedRestaurant, createTopupOrderController);
+router.post('/verify-topup', authMiddleware, requireRestaurant, requireApprovedRestaurant, verifyTopupController);
+router.post('/withdraw', authMiddleware, requireRestaurant, requireApprovedRestaurant, createWithdrawalRequestController);
+router.get('/withdrawals', authMiddleware, requireRestaurant, requireApprovedRestaurant, listMyWithdrawalsController);
+router.post('/withdrawals/:id/cancel', authMiddleware, requireRestaurant, requireApprovedRestaurant, cancelMyWithdrawalController);
 router.post(
     '/profile/profile-image',
     authMiddleware,
     requireRestaurant,
+    requireApprovedRestaurant,
     upload.single('file'),
     async (req, res, next) => {
         await invalidateCache('restaurants:*');
@@ -206,6 +205,7 @@ router.post(
     '/profile/menu-image',
     authMiddleware,
     requireRestaurant,
+    requireApprovedRestaurant,
     upload.single('file'),
     async (req, res, next) => {
         await invalidateCache('restaurant_menu:*');
@@ -219,6 +219,7 @@ router.post(
     '/profile/cover-images',
     authMiddleware,
     requireRestaurant,
+    requireApprovedRestaurant,
     upload.array('files', 20),
     async (req, res, next) => {
         await invalidateCache('restaurant_detail:*');
@@ -230,6 +231,7 @@ router.post(
     '/profile/menu-images',
     authMiddleware,
     requireRestaurant,
+    requireApprovedRestaurant,
     upload.array('files', 20),
     async (req, res, next) => {
         await invalidateCache('restaurant_menu:*');
@@ -246,75 +248,75 @@ const invalidateCategoryCacheMiddleware = async (req, res, next) => {
 };
 
 // Categories (restaurant dashboard). Read-only for item creation, CRUD for Menu Categories page.
-router.get('/categories', authMiddleware, requireRestaurant, listCategoriesController);
-router.get('/categories/:id/status', authMiddleware, requireRestaurant, getCategoryStatusController);
-router.post('/categories', authMiddleware, requireRestaurant, invalidateCategoryCacheMiddleware, createCategoryController);
-router.patch('/categories/:id', authMiddleware, requireRestaurant, invalidateCategoryCacheMiddleware, updateCategoryController);
-router.delete('/categories/:id', authMiddleware, requireRestaurant, invalidateCategoryCacheMiddleware, deleteCategoryController);
+router.get('/categories', authMiddleware, requireRestaurant, requireApprovedRestaurant, listCategoriesController);
+router.get('/categories/:id/status', authMiddleware, requireRestaurant, requireApprovedRestaurant, getCategoryStatusController);
+router.post('/categories', authMiddleware, requireRestaurant, requireApprovedRestaurant, invalidateCategoryCacheMiddleware, createCategoryController);
+router.patch('/categories/:id', authMiddleware, requireRestaurant, requireApprovedRestaurant, invalidateCategoryCacheMiddleware, updateCategoryController);
+router.delete('/categories/:id', authMiddleware, requireRestaurant, requireApprovedRestaurant, invalidateCategoryCacheMiddleware, deleteCategoryController);
 
 // Item slot timings (restaurant dashboard)
-router.get('/item-slot-timings', authMiddleware, requireRestaurant, listItemSlotTimingsController);
-router.get('/item-slot-timings/:id', authMiddleware, requireRestaurant, getItemSlotTimingByIdController);
-router.post('/item-slot-timings', authMiddleware, requireRestaurant, async (req, res, next) => {
+router.get('/item-slot-timings', authMiddleware, requireRestaurant, requireApprovedRestaurant, listItemSlotTimingsController);
+router.get('/item-slot-timings/:id', authMiddleware, requireRestaurant, requireApprovedRestaurant, getItemSlotTimingByIdController);
+router.post('/item-slot-timings', authMiddleware, requireRestaurant, requireApprovedRestaurant, async (req, res, next) => {
     await invalidateCache('restaurant_menu:*');
     await invalidateCache('restaurant_menus_batch:*');
     next();
 }, createItemSlotTimingController);
-router.patch('/item-slot-timings/:id', authMiddleware, requireRestaurant, async (req, res, next) => {
+router.patch('/item-slot-timings/:id', authMiddleware, requireRestaurant, requireApprovedRestaurant, async (req, res, next) => {
     await invalidateCache('restaurant_menu:*');
     await invalidateCache('restaurant_menus_batch:*');
     next();
 }, updateItemSlotTimingController);
-router.delete('/item-slot-timings/:id', authMiddleware, requireRestaurant, async (req, res, next) => {
+router.delete('/item-slot-timings/:id', authMiddleware, requireRestaurant, requireApprovedRestaurant, async (req, res, next) => {
     await invalidateCache('restaurant_menu:*');
     await invalidateCache('restaurant_menus_batch:*');
     next();
 }, deleteItemSlotTimingController);
 
 // Menu (restaurant dashboard) - only fields needed by UI
-router.get('/menu', authMiddleware, requireRestaurant, getMenuController);
-router.patch('/menu', authMiddleware, requireRestaurant, async (req, res, next) => {
+router.get('/menu', authMiddleware, requireRestaurant, requireApprovedRestaurant, getMenuController);
+router.patch('/menu', authMiddleware, requireRestaurant, requireApprovedRestaurant, async (req, res, next) => {
     await invalidateCache('restaurant_menu:*');
     await invalidateCache('restaurant_menus_batch:*');
     next();
 }, updateMenuController);
 
 // Feedback (restaurant dashboard)
-router.post('/feedback-experience', authMiddleware, requireRestaurant, feedbackExperienceController.createFeedbackExperience);
+router.post('/feedback-experience', authMiddleware, requireRestaurant, requireApprovedRestaurant, feedbackExperienceController.createFeedbackExperience);
 
 // Public: restaurant add-ons (user app)
 router.get('/restaurants/:id/addons', cacheResponse(600, 'restaurant_addons'), getPublicRestaurantAddonsController);
 
 // Foods (restaurant creates/updates items -> stored in food_items collection)
-router.post('/foods', authMiddleware, requireRestaurant, async (req, res, next) => {
+router.post('/foods', authMiddleware, requireRestaurant, requireApprovedRestaurant, async (req, res, next) => {
     await invalidateCache('restaurant_menu:*');
     await invalidateCache('restaurant_menus_batch:*');
     next();
 }, createRestaurantFoodController);
-router.patch('/foods/:id', authMiddleware, requireRestaurant, async (req, res, next) => {
+router.patch('/foods/:id', authMiddleware, requireRestaurant, requireApprovedRestaurant, async (req, res, next) => {
     await invalidateCache('restaurant_menu:*');
     await invalidateCache('restaurant_menus_batch:*');
     next();
 }, updateRestaurantFoodController);
 
 // Add-ons (restaurant dashboard) - approval handled by admin
-router.get('/addons', authMiddleware, requireRestaurant, listAddonsController);
-router.post('/addons', authMiddleware, requireRestaurant, createAddonController);
-router.patch('/addons/:id', authMiddleware, requireRestaurant, updateAddonController);
-router.delete('/addons/:id', authMiddleware, requireRestaurant, deleteAddonController);
+router.get('/addons', authMiddleware, requireRestaurant, requireApprovedRestaurant, listAddonsController);
+router.post('/addons', authMiddleware, requireRestaurant, requireApprovedRestaurant, createAddonController);
+router.patch('/addons/:id', authMiddleware, requireRestaurant, requireApprovedRestaurant, updateAddonController);
+router.delete('/addons/:id', authMiddleware, requireRestaurant, requireApprovedRestaurant, deleteAddonController);
 
 // Orders (restaurant dashboard)
-router.get('/orders', authMiddleware, requireRestaurant, orderController.listOrdersRestaurantController);
-router.get('/orders/:orderId', authMiddleware, requireRestaurant, orderController.getOrderByIdRestaurantController);
-router.patch('/orders/:orderId/status', authMiddleware, requireRestaurant, orderController.updateOrderStatusRestaurantController);
-router.post('/orders/:orderId/resend-notification', authMiddleware, requireRestaurant, orderController.resendDeliveryNotificationRestaurantController);
+router.get('/orders', authMiddleware, requireRestaurant, requireApprovedRestaurant, orderController.listOrdersRestaurantController);
+router.get('/orders/:orderId', authMiddleware, requireRestaurant, requireApprovedRestaurant, orderController.getOrderByIdRestaurantController);
+router.patch('/orders/:orderId/status', authMiddleware, requireRestaurant, requireApprovedRestaurant, orderController.updateOrderStatusRestaurantController);
+router.post('/orders/:orderId/resend-notification', authMiddleware, requireRestaurant, requireApprovedRestaurant, orderController.resendDeliveryNotificationRestaurantController);
 
 // Complaints (restaurant dashboard)
-router.get('/complaints', authMiddleware, requireRestaurant, getRestaurantComplaintsController);
+router.get('/complaints', authMiddleware, requireRestaurant, requireApprovedRestaurant, getRestaurantComplaintsController);
 
 // Referrals
-router.get('/referral-stats', authMiddleware, requireRestaurant, getRestaurantReferralStatsController);
-router.get('/referral-details', authMiddleware, requireRestaurant, getRestaurantReferralDetailsController);
+router.get('/referral-stats', authMiddleware, requireRestaurant, requireApprovedRestaurant, getRestaurantReferralStatsController);
+router.get('/referral-details', authMiddleware, requireRestaurant, requireApprovedRestaurant, getRestaurantReferralDetailsController);
 router.post('/support/tickets', authMiddleware, requireRestaurant, createRestaurantSupportTicketController);
 router.get('/support/tickets', authMiddleware, requireRestaurant, listRestaurantSupportTicketsController);
 

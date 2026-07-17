@@ -18,8 +18,23 @@ export default function WithdrawalHistoryPage() {
   const fetchWithdrawalRequests = async () => {
     try {
       setLoadingWithdrawalRequests(true)
-      const response = await restaurantAPI.getWithdrawalHistory()
-      const history = response?.data?.data || []
+      // Server-side filter by tab; keep a sensible page size.
+      const statusByTab = {
+        pending: "pending,processing",
+        successful: "approved",
+        rejected: "rejected,cancelled",
+      }
+      const response = await restaurantAPI.getWithdrawalHistory({
+        page: 1,
+        limit: 50,
+        status: statusByTab[withdrawalHistoryTab] || undefined,
+      })
+      const payload = response?.data?.data
+      const history = Array.isArray(payload)
+        ? payload
+        : Array.isArray(payload?.withdrawals)
+          ? payload.withdrawals
+          : []
 
       const mapped = history.map(h => ({
         id: h._id,
@@ -31,7 +46,9 @@ export default function WithdrawalHistoryPage() {
               ? 'Rejected'
               : h.status === 'cancelled'
                 ? 'Cancelled'
-                : 'Pending',
+                : h.status === 'processing'
+                  ? 'Pending'
+                  : 'Pending',
         rejectionReason: h.rejectionReason,
         requestedAt: h.createdAt,
         processedAt: h.processedAt
@@ -49,7 +66,7 @@ export default function WithdrawalHistoryPage() {
 
   useEffect(() => {
     fetchWithdrawalRequests()
-  }, [])
+  }, [withdrawalHistoryTab])
 
   const handleCancel = async (id) => {
     if (!window.confirm('Cancel this pending withdrawal request?')) return
@@ -70,12 +87,8 @@ export default function WithdrawalHistoryPage() {
     { key: 'rejected', label: 'Rejected' },
   ]
 
-  const filtered =
-    withdrawalHistoryTab === 'pending'
-      ? withdrawalRequests.filter(req => req.status === 'Pending')
-      : withdrawalHistoryTab === 'successful'
-        ? withdrawalRequests.filter(req => req.status === 'Approved' || req.status === 'Processed')
-        : withdrawalRequests.filter(req => req.status === 'Rejected' || req.status === 'Cancelled')
+  // Server already filtered by tab; keep list as returned.
+  const filtered = withdrawalRequests
 
   return (
     <div className="min-h-screen bg-gray-100 flex flex-col">

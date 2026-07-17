@@ -551,6 +551,12 @@ export async function settleRestaurant(orderId, adminId) {
  * Leftover amount reduces referral earnings.
  * Throws if unsettled earnings + referral cannot fully cover the amount.
  *
+ * Dual-ledger (Option A):
+ * - Order share: settle flags on `food_transactions` + bump wallet `totalSettled`
+ *   (+ embedded history). Does NOT debit `wallet.balance` — order earnings never
+ *   lived on that field.
+ * - Referral: debit `referralEarnings` and `balance`, bump `totalSettled`.
+ *
  * Race-safe: runs in a Mongo transaction and locks the restaurant wallet first
  * so concurrent admin approvals cannot double-consume the same shares.
  */
@@ -840,6 +846,7 @@ export async function settleRestaurantSharesForWithdrawal(
                                                     metadata: {
                                                         source: 'restaurant_withdrawal_referral',
                                                         referralDebited,
+                                                        balanceDebited: true,
                                                     },
                                                     createdAt: now,
                                                     updatedAt: now,
@@ -871,13 +878,59 @@ export async function settleRestaurantSharesForWithdrawal(
                 );
             }
 
+            // Order-share portion: totalSettled + audit history only.
+            // Do not debit wallet.balance — order earnings live in food_transactions.
             if (settledOrderShare > 0) {
                 await FoodRestaurantWallet.findOneAndUpdate(
                     { restaurantId: rid },
-                    {
-                        $inc: { totalSettled: settledOrderShare },
-                        $setOnInsert: { restaurantId: rid },
-                    },
+                    [
+                        {
+                            $set: {
+                                totalSettled: {
+                                    $round: [
+                                        {
+                                            $add: [
+                                                { $ifNull: ['$totalSettled', 0] },
+                                                settledOrderShare,
+                                            ],
+                                        },
+                                        2,
+                                    ],
+                                },
+                                transactions: {
+                                    $concatArrays: [
+                                        [
+                                            {
+                                                type: 'debit',
+                                                amount: settledOrderShare,
+                                                openingBalance: { $ifNull: ['$balance', 0] },
+                                                // Balance unchanged: order share never sat on wallet.balance
+                                                closingBalance: { $ifNull: ['$balance', 0] },
+                                                category: 'settlement_payout',
+                                                description:
+                                                    meta.note ||
+                                                    'Restaurant withdrawal (order earnings via food_transactions)',
+                                                status: 'completed',
+                                                withdrawalId: meta.withdrawalId
+                                                    ? String(meta.withdrawalId)
+                                                    : null,
+                                                metadata: {
+                                                    source: 'restaurant_withdrawal_order_share',
+                                                    settledOrderShare,
+                                                    balanceUnaffected: true,
+                                                    ledger: 'food_transactions',
+                                                    settledTransactionIds: settledIds.map(String),
+                                                },
+                                                createdAt: now,
+                                                updatedAt: now,
+                                            },
+                                        ],
+                                        { $ifNull: ['$transactions', []] },
+                                    ],
+                                },
+                            },
+                        },
+                    ],
                     { upsert: true, session }
                 );
             }

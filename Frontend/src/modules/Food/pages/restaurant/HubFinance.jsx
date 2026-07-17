@@ -1,13 +1,21 @@
-import { useState, useMemo, useRef, useEffect } from "react"
+import { useState, useMemo, useRef, useEffect, useCallback } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import { motion, AnimatePresence } from "framer-motion"
-import { Bell, Menu, ChevronDown, Calendar, Download, ArrowRight, FileText, Wallet, X, Gift } from "lucide-react"
+import { Bell, Menu, ChevronDown, Calendar, Download, ArrowRight, FileText, Wallet, X, Gift, AlertCircle, RefreshCw } from "lucide-react"
 import BottomNavOrders from "@food/components/restaurant/BottomNavOrders"
 import { restaurantAPI } from "@food/api"
+import { toast } from "sonner"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
 
+function getApiErrorMessage(error, fallback = "Something went wrong") {
+  return (
+    error?.response?.data?.message ||
+    error?.message ||
+    fallback
+  )
+}
 
 export default function HubFinance() {
   const navigate = useNavigate()
@@ -23,6 +31,7 @@ export default function HubFinance() {
   const dateRangePickerRef = useRef(null)
   const [financeData, setFinanceData] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [financeError, setFinanceError] = useState(null)
   const [pastCyclesData, setPastCyclesData] = useState(null)
   const [loadingPastCycles, setLoadingPastCycles] = useState(false)
   const [restaurantData, setRestaurantData] = useState(null)
@@ -32,6 +41,7 @@ export default function HubFinance() {
   const [submittingWithdrawal, setSubmittingWithdrawal] = useState(false)
   const [withdrawalRequests, setWithdrawalRequests] = useState([])
   const [loadingWithdrawals, setLoadingWithdrawals] = useState(false)
+  const [withdrawalsError, setWithdrawalsError] = useState(null)
   const [referralStats, setReferralStats] = useState(null)
 
   const minWithdrawalLimit = Number(financeData?.withdrawalLimits?.min) || 1
@@ -41,27 +51,59 @@ export default function HubFinance() {
       ? Number(rawMaxWithdrawal)
       : null
 
+  const fetchFinanceData = useCallback(async () => {
+    try {
+      setLoading(true)
+      setFinanceError(null)
+      const response = await restaurantAPI.getFinance()
+      if (response.data?.success && response.data?.data) {
+        setFinanceData(response.data.data)
+        debugLog('Finance data fetched:', response.data.data)
+      } else {
+        const message = response.data?.message || "Failed to load finance data"
+        setFinanceData(null)
+        setFinanceError(message)
+        toast.error(message)
+      }
+    } catch (error) {
+      // Suppress 401 — axios interceptor handles token refresh / redirect
+      if (error.response?.status === 401) return
+      const message = getApiErrorMessage(error, "Failed to load finance data")
+      setFinanceData(null)
+      setFinanceError(message)
+      toast.error(message)
+      debugError('Error fetching finance data:', error)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  const fetchWithdrawals = useCallback(async () => {
+    try {
+      setLoadingWithdrawals(true)
+      setWithdrawalsError(null)
+      const response = await restaurantAPI.getWithdrawalHistory({ page: 1, limit: 20 })
+      const payload = response?.data?.data
+      const list = Array.isArray(payload)
+        ? payload
+        : Array.isArray(payload?.withdrawals)
+          ? payload.withdrawals
+          : []
+      setWithdrawalRequests(list)
+    } catch (error) {
+      if (error?.response?.status === 401) return
+      const message = getApiErrorMessage(error, "Failed to load withdrawal history")
+      setWithdrawalRequests([])
+      setWithdrawalsError(message)
+      toast.error(message)
+      debugError('Error fetching withdrawal history:', error)
+    } finally {
+      setLoadingWithdrawals(false)
+    }
+  }, [])
+
   // Fetch finance data on mount
   useEffect(() => {
-    const fetchFinanceData = async () => {
-      try {
-        setLoading(true)
-        const response = await restaurantAPI.getFinance()
-        if (response.data?.success && response.data?.data) {
-          const data = response.data.data
-          setFinanceData(data)
-          debugLog('? Finance data fetched:', data)
-        }
-      } catch (error) {
-        // Suppress 401 errors as they're handled by axios interceptor (token refresh/redirect)
-        if (error.response?.status !== 401) {
-          debugError('? Error fetching finance data:', error)
-        }
-      } finally {
-        setLoading(false)
-      }
-    }
-
     const fetchReferralStats = async () => {
       try {
         const response = await restaurantAPI.getReferralStats()
@@ -69,38 +111,20 @@ export default function HubFinance() {
           setReferralStats(response.data.data)
         }
       } catch (error) {
+        if (error?.response?.status === 401) return
+        // Non-blocking: page still works without referral strip
+        toast.error(getApiErrorMessage(error, "Failed to load referral stats"))
         debugError('Error fetching referral stats:', error)
       }
     }
 
     fetchFinanceData()
     fetchReferralStats()
-  }, [])
+  }, [fetchFinanceData])
 
   useEffect(() => {
-    const fetchWithdrawals = async () => {
-      try {
-        setLoadingWithdrawals(true)
-        const response = await restaurantAPI.getWithdrawalHistory()
-        const payload = response?.data?.data
-        const list = Array.isArray(payload)
-          ? payload
-          : Array.isArray(payload?.withdrawals)
-            ? payload.withdrawals
-            : []
-        setWithdrawalRequests(list)
-      } catch (error) {
-        if (error?.response?.status !== 401) {
-          debugError('Error fetching withdrawal history:', error)
-        }
-        setWithdrawalRequests([])
-      } finally {
-        setLoadingWithdrawals(false)
-      }
-    }
-
     fetchWithdrawals()
-  }, [])
+  }, [fetchWithdrawals])
 
   // Fetch restaurant data for header display
   useEffect(() => {
@@ -122,7 +146,8 @@ export default function HubFinance() {
         } catch (error) {
           // Suppress 401 errors as they're handled by axios interceptor
           if (error.response?.status !== 401) {
-            debugError('? Error fetching restaurant data:', error)
+            toast.error(getApiErrorMessage(error, "Failed to load restaurant profile"))
+            debugError('Error fetching restaurant data:', error)
           }
         }
       }
@@ -339,7 +364,8 @@ export default function HubFinance() {
     } catch (error) {
       // Suppress 401 errors as they're handled by axios interceptor (token refresh/redirect)
       if (error.response?.status !== 401) {
-        debugError('? Error fetching past cycles data:', error)
+        toast.error(getApiErrorMessage(error, "Failed to load past cycle data"))
+        debugError('Error fetching past cycles data:', error)
       }
       setPastCyclesData(null)
     } finally {
@@ -807,6 +833,26 @@ export default function HubFinance() {
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto px-4 pb-28 pt-6 md:mx-auto md:max-w-6xl md:px-8 md:pb-8 md:pt-6 md:w-full">
+        {financeError && !loading && (
+          <div className="mb-4 flex flex-col gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-4 text-red-800 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-3">
+              <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
+              <div>
+                <p className="text-sm font-semibold">Couldn’t load finance data</p>
+                <p className="text-sm opacity-90">{financeError}</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => fetchFinanceData()}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700"
+            >
+              <RefreshCw className="h-4 w-4" />
+              Retry
+            </button>
+          </div>
+        )}
+
         {activeTab === "payouts" && (
           <div className="space-y-6">
             {/* Top row: balance + stats */}
@@ -816,6 +862,18 @@ export default function HubFinance() {
                 <div className="rounded-2xl bg-black p-6 text-white shadow-lg md:p-8">
                   {loading ? (
                     <div className="py-8 text-center text-gray-400">Loading...</div>
+                  ) : financeError ? (
+                    <div className="py-6 text-center">
+                      <p className="mb-3 text-sm text-gray-400">Balance unavailable</p>
+                      <button
+                        type="button"
+                        onClick={() => fetchFinanceData()}
+                        className="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2 text-sm font-bold text-black"
+                      >
+                        <RefreshCw className="h-4 w-4" />
+                        Retry
+                      </button>
+                    </div>
                   ) : (
                     <>
                       <p className="mb-1 text-sm text-gray-400">Available for withdrawal</p>
@@ -852,16 +910,27 @@ export default function HubFinance() {
                   <p className="mt-1 text-xs text-gray-500">{financeData?.currentCycle?.totalOrders || 0} orders</p>
                 </div>
                 <div className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+                  <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-gray-400">Lifetime earnings</p>
+                  <p className="text-2xl font-bold text-gray-900">
+                    ₹{(financeData?.earnings?.totalEarnings || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </p>
+                  <p className="mt-1 text-xs text-gray-500">
+                    Orders ₹{(financeData?.earnings?.totalOrderEarnings || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    {" · "}
+                    Referrals ₹{(financeData?.earnings?.walletLedger?.totalEarnings ?? 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
                   <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-gray-400">Pending payout</p>
                   <p className="text-2xl font-bold text-gray-900">
                     ₹{(financeData?.earnings?.pendingPayout || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </p>
                   <p className="mt-1 text-xs text-gray-500">Total unsettled share</p>
                 </div>
-                <div className="col-span-2 rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
-                  <div className="flex items-center justify-between">
+                <div className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+                  <div className="flex items-center justify-between h-full">
                     <div>
-                      <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-gray-400">Referral earnings</p>
+                      <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-gray-400">Referral balance</p>
                       <p className="text-2xl font-bold text-gray-900">
                         ₹{(financeData?.earnings?.referralEarnings || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </p>
@@ -869,7 +938,7 @@ export default function HubFinance() {
                         From {referralStats?.referralCount || 0} approved referrals
                       </p>
                     </div>
-                    <div className="flex items-center gap-3">
+                    <div className="flex flex-col items-end gap-2">
                       <button
                         onClick={() => navigate("/food/restaurant/refer-earn")}
                         className="text-sm font-medium text-red-600 hover:underline"
@@ -893,7 +962,22 @@ export default function HubFinance() {
                 {loadingWithdrawals ? (
                   <div className="py-6 text-center text-sm text-gray-500">Loading withdrawal requests...</div>
                 ) : withdrawalRequests.length === 0 ? (
-                  <div className="py-6 text-center text-sm text-gray-500">No withdrawal requests found.</div>
+                  <div className="py-6 text-center text-sm text-gray-500">
+                    {withdrawalsError ? (
+                      <div className="space-y-2">
+                        <p className="text-red-600">{withdrawalsError}</p>
+                        <button
+                          type="button"
+                          onClick={() => fetchWithdrawals()}
+                          className="text-sm font-medium text-red-600 underline"
+                        >
+                          Retry
+                        </button>
+                      </div>
+                    ) : (
+                      "No withdrawal requests found."
+                    )}
+                  </div>
                 ) : (
                   <div className="space-y-3">
                     {withdrawalRequests.slice(0, 8).map((request, index) => {
@@ -1368,30 +1452,26 @@ export default function HubFinance() {
                       
                       try {
                         setSubmittingWithdrawal(true)
-                        const response = await restaurantAPI.createWithdrawalRequest(amount)
+                        const idempotencyKey =
+                          (typeof crypto !== "undefined" && crypto.randomUUID)
+                            ? crypto.randomUUID()
+                            : `wd_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
+                        const response = await restaurantAPI.createWithdrawalRequest(amount, {
+                          idempotencyKey,
+                        })
                         if (response.data?.success) {
-                          alert('Withdrawal request submitted successfully!')
+                          toast.success('Withdrawal request submitted successfully!')
                           setShowWithdrawalModal(false)
                           setWithdrawalAmount('')
-                          // Refresh finance data
-                          const financeResponse = await restaurantAPI.getFinance()
-                          if (financeResponse.data?.success && financeResponse.data?.data) {
-                            setFinanceData(financeResponse.data.data)
-                          }
-                          const withdrawalResponse = await restaurantAPI.getWithdrawalHistory()
-                          const withdrawalPayload = withdrawalResponse?.data?.data
-                          const withdrawalList = Array.isArray(withdrawalPayload)
-                            ? withdrawalPayload
-                            : Array.isArray(withdrawalPayload?.withdrawals)
-                              ? withdrawalPayload.withdrawals
-                              : []
-                          setWithdrawalRequests(withdrawalList)
+                          await Promise.all([fetchFinanceData(), fetchWithdrawals()])
                         } else {
-                          alert(response.data?.message || 'Failed to submit withdrawal request')
+                          toast.error(response.data?.message || 'Failed to submit withdrawal request')
                         }
                       } catch (error) {
-                        debugError('Error submitting withdrawal request:', error)
-                        alert(error.response?.data?.message || 'Failed to submit withdrawal request. Please try again.')
+                        if (error?.response?.status !== 401) {
+                          toast.error(getApiErrorMessage(error, 'Failed to submit withdrawal request. Please try again.'))
+                          debugError('Error submitting withdrawal request:', error)
+                        }
                       } finally {
                         setSubmittingWithdrawal(false)
                       }

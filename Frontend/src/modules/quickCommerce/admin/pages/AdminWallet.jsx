@@ -29,6 +29,7 @@ import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import Modal from '@shared/components/ui/Modal';
 import Pagination from '@shared/components/ui/Pagination';
+import { PAGINATION_CONFIG } from '@/shared/constants/pagination';
 import { adminApi } from "../services/adminApi";
 import { toast } from "sonner";
 
@@ -37,7 +38,7 @@ const AdminWallet = () => {
     const [loading, setLoading] = useState(true);
     const [walletData, setWalletData] = useState({ stats: {}, transactions: {} });
     const [txnPage, setTxnPage] = useState(1);
-    const [txnPageSize, setTxnPageSize] = useState(25);
+    const [txnPageSize, setTxnPageSize] = useState(PAGINATION_CONFIG.defaultPageSize);
     const [sellerRequests, setSellerRequests] = useState([]);
     const [searchTerm, setSearchTerm] = useState('');
     const [activeTab, setActiveTab] = useState('all'); // all, earnings, payouts, seller_requests

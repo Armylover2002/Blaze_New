@@ -240,7 +240,7 @@ export default function DeliveryCashLimit() {
                     {loading && (
                       <p className="text-xs text-emerald-700/80 mt-1 flex items-center gap-2">
                         <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                        Loading current limit…
+                        Loading current limitï¿½
                       </p>
                     )}
                   </div>
@@ -283,7 +283,7 @@ export default function DeliveryCashLimit() {
                     {loading && (
                       <p className="text-xs text-amber-700/80 mt-1 flex items-center gap-2">
                         <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                        Loading…
+                        Loadingï¿½
                       </p>
                     )}
                   </div>
@@ -327,7 +327,7 @@ export default function DeliveryCashLimit() {
                     {loading && (
                       <p className="text-xs text-sky-700/80 mt-1 flex items-center gap-2">
                         <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                        Loading…
+                        Loadingï¿½
                       </p>
                     )}
                   </div>

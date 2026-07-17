@@ -21,7 +21,7 @@ import {
     shouldIncludePorter,
     shouldIncludeFood,
 } from '../../../porter/orders/services/porter-driver-finance.service.js';
-import { notifyAdminsSafely } from '../../../../core/notifications/firebase.service.js';
+import { notifyAdminsSafely, mergeDeviceToken } from '../../../../core/notifications/firebase.service.js';
 import {
     parseSignupVehiclesPayload,
     uploadPartnerDocumentImages,
@@ -330,13 +330,11 @@ export const registerDeliveryPartner = async (payload, files) => {
         partner = await FoodDeliveryPartner.create(partnerData);
     }
 
-    // Update FCM token if provided
+    // Update FCM token if provided (single-device seed on registration)
     if (fcmToken) {
-        if (platform === 'mobile') {
-            partner.fcmTokenMobile = [fcmToken];
-        } else {
-            partner.fcmTokens = [fcmToken];
-        }
+        const field = platform === 'mobile' ? 'fcmTokenMobile' : 'fcmTokens';
+        const { tokens } = mergeDeviceToken([], fcmToken);
+        partner[field] = tokens;
     }
 
     // Ensure referralCode exists for sharing.
@@ -485,16 +483,10 @@ export const updateDeliveryPartnerProfile = async (userId, payload, files) => {
     if (drivingLicenseNumber !== undefined) partner.drivingLicenseNumber = drivingLicenseNumber;
 
     if (fcmToken) {
-        if (platform === 'mobile') {
-            if (!partner.fcmTokenMobile) partner.fcmTokenMobile = [];
-            if (!partner.fcmTokenMobile.includes(fcmToken)) {
-                partner.fcmTokenMobile.push(fcmToken);
-            }
-        } else {
-            if (!partner.fcmTokens) partner.fcmTokens = [];
-            if (!partner.fcmTokens.includes(fcmToken)) {
-                partner.fcmTokens.push(fcmToken);
-            }
+        const field = platform === 'mobile' ? 'fcmTokenMobile' : 'fcmTokens';
+        const { tokens, changed } = mergeDeviceToken(partner[field], fcmToken);
+        if (changed) {
+            partner[field] = tokens;
         }
     }
 

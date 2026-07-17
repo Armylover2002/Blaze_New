@@ -19,6 +19,7 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import Pagination from '@shared/components/ui/Pagination';
+import { PAGINATION_CONFIG } from '@/shared/constants/pagination';
 import { adminApi } from '../services/adminApi';
 import { toast } from 'sonner';
 import { buildCustomerCsvRows, downloadCsv } from '../utils/csvExportUtils';
@@ -32,7 +33,7 @@ const CustomerManagement = () => {
     const [isExporting, setIsExporting] = useState(false);
     const [customers, setCustomers] = useState([]);
     const [page, setPage] = useState(1);
-    const [pageSize, setPageSize] = useState(25);
+    const [pageSize, setPageSize] = useState(PAGINATION_CONFIG.defaultPageSize);
     const [total, setTotal] = useState(0);
     const [loading, setLoading] = useState(true);
     const [isRefreshing, setIsRefreshing] = useState(false);

@@ -1128,13 +1128,19 @@ export const restaurantAPI = {
   getMe: () => authService.getMe("restaurant"),
   /** Restaurant dashboard: fetch current restaurant profile (deduped + short-cached). */
   getCurrentRestaurant: () => getRestaurantCurrentOnce(),
-  /** Finance dashboard for `hub-finance`. */
+  /**
+   * Order payout / Hub Finance (canonical — food_transactions ledger).
+   * Do NOT use deprecated GET /food/payments/restaurant/:id/wallet for payouts.
+   */
   getFinance: (params = {}) =>
     apiClient.get("/food/restaurant/finance", {
       contextModule: "restaurant",
       params: params || {},
     }),
-  /** Subscription wallet center. */
+  /**
+   * Subscription daily-pass wallet (canonical — food_restaurant_wallets.subscriptionBalance).
+   * Do NOT use deprecated GET /food/payments/restaurant/:id/wallet for subscription balance.
+   */
   getSubscriptionWallet: () =>
     apiClient.get("/food/restaurant/subscription-wallet", {
       contextModule: "restaurant",
@@ -1169,19 +1175,24 @@ export const restaurantAPI = {
       },
     }),
   /** Submit a real withdrawal request to the backend. */
-  createWithdrawalRequest: (amount) =>
-    apiClient.post("/food/restaurant/withdraw", { amount: Number(amount) }, {
+  createWithdrawalRequest: (amount, options = {}) => {
+    const body = { amount: Number(amount) };
+    const key = String(options?.idempotencyKey || "").trim();
+    if (key.length >= 8) body.idempotencyKey = key.slice(0, 128);
+    return apiClient.post("/food/restaurant/withdraw", body, {
       contextModule: "restaurant"
-    }),
+    });
+  },
   /** Cancel a pending restaurant withdrawal. */
   cancelWithdrawalRequest: (id) =>
     apiClient.post(`/food/restaurant/withdrawals/${id}/cancel`, {}, {
       contextModule: "restaurant"
     }),
-  /** List withdrawal history for current restaurant. */
-  getWithdrawalHistory: () =>
+  /** List withdrawal history for current restaurant (supports page, limit, status). */
+  getWithdrawalHistory: (params = {}) =>
     apiClient.get("/food/restaurant/withdrawals", {
-      contextModule: "restaurant"
+      contextModule: "restaurant",
+      params: params || {},
     }),
   getCODDeposits: (params = {}) =>
     apiClient.get("/food/restaurant/finance/cod-verification", {
