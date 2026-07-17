@@ -207,8 +207,9 @@ export function clearModuleAuth(module) {
     localStorage.removeItem("accessToken");
     clearUserSession();
   }
-  // Clear cached FCM web token for this module
+  // Clear cached FCM web token for this module (after logout has already used it)
   localStorage.removeItem(`fcm_web_registered_token_${module}`);
+  localStorage.removeItem(`fcm_web_registered_owner_${module}`);
   if (module === "restaurant") {
     clearRestaurantSessionCache();
     sessionStorage.removeItem("restaurantReonboard");

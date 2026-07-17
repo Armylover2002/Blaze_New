@@ -20,6 +20,7 @@ import { sendAdminResetOtpEmail } from "../../utils/email.js";
 import mongoose from "mongoose";
 import { AdminRole } from "../admin/role.model.js";
 import { creditReferralReward } from "../../modules/food/user/services/userWallet.service.js";
+import { mergeDeviceToken } from "../notifications/firebase.service.js";
 import {
   assertAdminForgotOtpRequestAllowed,
   assertAdminForgotOtpVerificationAllowed,
@@ -88,6 +89,17 @@ const ROLES = {
   DELIVERY_PARTNER: "DELIVERY_PARTNER",
   ADMIN: "ADMIN",
   SELLER: "SELLER",
+};
+
+/** Attach/replace an FCM device token on a profile doc (dedupe + same-device refresh). */
+const applyFcmTokenToProfile = async (profileDoc, fcmToken, platform) => {
+  if (!profileDoc || !fcmToken) return false;
+  const field = platform === "mobile" ? "fcmTokenMobile" : "fcmTokens";
+  const { tokens, changed } = mergeDeviceToken(profileDoc[field], fcmToken);
+  if (!changed) return false;
+  profileDoc[field] = tokens;
+  await profileDoc.save();
+  return true;
 };
 
 const ACCOUNT_DEACTIVATED_MESSAGE =
@@ -321,26 +333,9 @@ export const verifyUserOtpAndLogin = async (
   // Block login for deactivated, blocked, or deleted users (defense in depth).
   assertUserEligibleForOtp(userDoc);
 
-  // Update FCM token if provided
+  // Update FCM token if provided (replace same-device rotations; keep multi-device)
   if (fcmToken) {
-    let isModified = false;
-    if (platform === "mobile") {
-      if (!userDoc.fcmTokenMobile) userDoc.fcmTokenMobile = [];
-      if (!userDoc.fcmTokenMobile.includes(fcmToken)) {
-        userDoc.fcmTokenMobile.push(fcmToken);
-        isModified = true;
-      }
-    } else {
-      // Default to web if not explicitly mobile
-      if (!userDoc.fcmTokens) userDoc.fcmTokens = [];
-      if (!userDoc.fcmTokens.includes(fcmToken)) {
-        userDoc.fcmTokens.push(fcmToken);
-        isModified = true;
-      }
-    }
-    if (isModified) {
-      await userDoc.save();
-    }
+    await applyFcmTokenToProfile(userDoc, fcmToken, platform);
   }
 
   // Ensure referralCode exists (used for share links on older accounts).
@@ -589,25 +584,9 @@ export const verifyRestaurantOtpAndLogin = async (phone, otp, fcmToken, platform
     };
   }
 
-  // Update FCM token if provided
+  // Update FCM token if provided (replace same-device rotations; keep multi-device)
   if (fcmToken) {
-    let isModified = false;
-    if (platform === "mobile") {
-      if (!restaurant.fcmTokenMobile) restaurant.fcmTokenMobile = [];
-      if (!restaurant.fcmTokenMobile.includes(fcmToken)) {
-        restaurant.fcmTokenMobile.push(fcmToken);
-        isModified = true;
-      }
-    } else {
-      if (!restaurant.fcmTokens) restaurant.fcmTokens = [];
-      if (!restaurant.fcmTokens.includes(fcmToken)) {
-        restaurant.fcmTokens.push(fcmToken);
-        isModified = true;
-      }
-    }
-    if (isModified) {
-      await restaurant.save();
-    }
+    await applyFcmTokenToProfile(restaurant, fcmToken, platform);
   }
 
   // Block login for deleted restaurants
@@ -733,25 +712,9 @@ export const verifyDeliveryOtpAndLogin = async (phone, otp, fcmToken, platform) 
   }
 
   // Update FCM token if provided - CRITICAL: do this BEFORE returning pendingApproval
-  // so we can notify them when approved.
+  // so we can notify them when approved. Replace same-device rotations; keep multi-device.
   if (fcmToken) {
-    let isModified = false;
-    if (platform === "mobile") {
-      if (!deliveryPartner.fcmTokenMobile) deliveryPartner.fcmTokenMobile = [];
-      if (!deliveryPartner.fcmTokenMobile.includes(fcmToken)) {
-        deliveryPartner.fcmTokenMobile.push(fcmToken);
-        isModified = true;
-      }
-    } else {
-      if (!deliveryPartner.fcmTokens) deliveryPartner.fcmTokens = [];
-      if (!deliveryPartner.fcmTokens.includes(fcmToken)) {
-        deliveryPartner.fcmTokens.push(fcmToken);
-        isModified = true;
-      }
-    }
-    if (isModified) {
-      await deliveryPartner.save();
-    }
+    await applyFcmTokenToProfile(deliveryPartner, fcmToken, platform);
   }
 
   if (deliveryPartner.status && deliveryPartner.status !== "approved") {
@@ -857,17 +820,15 @@ export const logout = async (refreshToken, fcmToken, platform) => {
   if (fcmToken) {
     console.log(`[FCM-Logout] Starting logout-driven token removal: platform=${platform}, tokenPreview=${fcmToken?.slice(0, 10)}...`);
 
-    // We try to remove the token from all 4 possible models regardless of the user ID, 
-    // ensuring no stale connections are left across any role or app the user was logged into.
-    const field = platform === "mobile" ? "fcmTokenMobile" : "fcmTokens";
+    // Remove from both platform fields so mis-tagged tokens do not linger.
     const models = [FoodUser, FoodRestaurant, FoodDeliveryPartner, FoodAdmin];
 
     try {
       await Promise.all(
         models.map((model) =>
           model.updateMany(
-            { [field]: fcmToken },
-            { $pull: { [field]: fcmToken } },
+            { $or: [{ fcmTokens: fcmToken }, { fcmTokenMobile: fcmToken }] },
+            { $pull: { fcmTokens: fcmToken, fcmTokenMobile: fcmToken } },
           ),
         ),
       );
@@ -907,14 +868,13 @@ export const logoutAll = async (refreshToken, fcmToken, platform) => {
 
   // 2. Cleanup FCM token globally if provided
   if (fcmToken) {
-    const field = platform === "mobile" ? "fcmTokenMobile" : "fcmTokens";
     const models = [FoodUser, FoodRestaurant, FoodDeliveryPartner, FoodAdmin];
     try {
       await Promise.all(
         models.map((model) =>
           model.updateMany(
-            { [field]: fcmToken },
-            { $pull: { [field]: fcmToken } },
+            { $or: [{ fcmTokens: fcmToken }, { fcmTokenMobile: fcmToken }] },
+            { $pull: { fcmTokens: fcmToken, fcmTokenMobile: fcmToken } },
           ),
         ),
       );

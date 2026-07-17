@@ -1188,10 +1188,11 @@ export const restaurantAPI = {
     apiClient.post(`/food/restaurant/withdrawals/${id}/cancel`, {}, {
       contextModule: "restaurant"
     }),
-  /** List withdrawal history for current restaurant. */
-  getWithdrawalHistory: () =>
+  /** List withdrawal history for current restaurant (supports page, limit, status). */
+  getWithdrawalHistory: (params = {}) =>
     apiClient.get("/food/restaurant/withdrawals", {
-      contextModule: "restaurant"
+      contextModule: "restaurant",
+      params: params || {},
     }),
   getCODDeposits: (params = {}) =>
     apiClient.get("/food/restaurant/finance/cod-verification", {

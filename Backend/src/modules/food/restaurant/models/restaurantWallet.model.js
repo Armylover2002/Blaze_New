@@ -17,13 +17,19 @@ import { embeddedWalletTransactionSchema } from '../../../../core/payments/model
  *
  * Field roles:
  * - `balance` / `referralEarnings` — referral rewards only (debited when a
- *   withdrawal consumes referral balance)
+ *   withdrawal consumes referral balance). NOT order earnings.
  * - `subscriptionBalance` — daily pass / subscription fees (separate product wallet)
- * - `totalSettled` — cumulative order + referral amount marked paid via withdrawals
- * - `totalEarnings` — lifetime referral (and universal `creditWallet` credits only)
+ * - `lockedAmount` — reserved for legacy lock/unlock helpers; order payouts do not
+ *   use this field (soft-lock is pending rows in `food_restaurant_withdrawals`)
+ * - `totalSettled` — cumulative amount paid via withdrawals (order share from
+ *   food_transactions + referral debits). Order-share settlement does NOT
+ *   reduce `balance`.
+ * - `totalEarnings` — lifetime referral (and universal `creditWallet` credits only);
+ *   excludes order share from food_transactions
+ * - `transactions` — embedded audit for referral/subscription/settlement metadata;
+ *   not a per-order delivery credit log
  *
- * Embedded `transactions` complements the universal `transactions` collection
- * for referral debits and manual credits — not per-order delivery credits.
+ * Collection: `food_restaurant_wallets`
  */
 const restaurantWalletSchema = new mongoose.Schema(
     {
@@ -33,19 +39,25 @@ const restaurantWalletSchema = new mongoose.Schema(
             required: true,
             unique: true
         },
-        /** Referral reward balance (not order earnings). See model header. */
+        /** Referral reward balance only — never credited from delivered orders. */
         balance: { type: Number, default: 0 },
         /** Subscription wallet balance for daily passes and future fees */
         subscriptionBalance: { type: Number, default: 0, min: 0 },
-        /** Amount locked for pending settlements (cannot be withdrawn) */
+        /**
+         * Legacy lock field. Restaurant order withdrawals soft-lock via
+         * pending/processing `food_restaurant_withdrawals`, not this counter.
+         */
         lockedAmount: { type: Number, default: 0, min: 0 },
         /** Lifetime referral (and creditWallet) earnings — excludes order share */
         totalEarnings: { type: Number, default: 0, min: 0 },
         /** Referral rewards available for withdrawal (included in payout math) */
         referralEarnings: { type: Number, default: 0, min: 0 },
-        /** Cumulative amount consumed by approved restaurant withdrawals */
+        /** Cumulative amount paid via withdrawals (order share + referral). Order share does not reduce balance. */
         totalSettled: { type: Number, default: 0, min: 0 },
-        /** Per-document balance mutation history (same wallet document) */
+        /**
+         * Embedded audit history (referral credits/debits, order-share settlement
+         * markers with balanceUnaffected, etc.). Not per-order delivery credits.
+         */
         transactions: { type: [embeddedWalletTransactionSchema], default: [] }
     },
     { collection: 'food_restaurant_wallets', timestamps: true }

@@ -37,3 +37,42 @@ const deliveryWalletSchema = new mongoose.Schema(
 );
 
 export const FoodDeliveryWallet = mongoose.model('FoodDeliveryWallet', deliveryWalletSchema, 'food_delivery_wallets');
+
+/**
+ * Ensure a zero-balance delivery wallet row exists (idempotent upsert).
+ */
+export async function ensureDeliveryWallet(deliveryPartnerId, { session = null } = {}) {
+    if (!deliveryPartnerId || !mongoose.Types.ObjectId.isValid(String(deliveryPartnerId))) {
+        return null;
+    }
+    const pid =
+        deliveryPartnerId instanceof mongoose.Types.ObjectId
+            ? deliveryPartnerId
+            : new mongoose.Types.ObjectId(String(deliveryPartnerId));
+
+    const options = {
+        upsert: true,
+        new: true,
+        setDefaultsOnInsert: true,
+    };
+    if (session) options.session = session;
+
+    return FoodDeliveryWallet.findOneAndUpdate(
+        { deliveryPartnerId: pid },
+        {
+            $setOnInsert: {
+                deliveryPartnerId: pid,
+                balance: 0,
+                subscriptionBalance: 0,
+                lockedAmount: 0,
+                cashInHand: 0,
+                totalEarnings: 0,
+                totalBonus: 0,
+                totalSettled: 0,
+                totalDeliveries: 0,
+                transactions: [],
+            },
+        },
+        options
+    );
+}

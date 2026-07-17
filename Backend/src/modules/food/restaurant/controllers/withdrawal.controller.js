@@ -3,7 +3,7 @@ import { sendResponse, sendError } from '../../../../utils/response.js';
 import { FoodRestaurantWithdrawal } from '../models/foodRestaurantWithdrawal.model.js';
 import { FoodRestaurantWallet } from '../models/restaurantWallet.model.js';
 import { FoodRestaurant } from '../models/restaurant.model.js';
-import { getRestaurantAvailableWithdrawalBalance } from '../services/restaurantFinance.service.js';
+import { getRestaurantAvailableWithdrawalBalance, selfHealRestaurantFinanceLedger } from '../services/restaurantFinance.service.js';
 import { getRestaurantWithdrawalLimitSettings } from '../../admin/services/admin.service.js';
 
 function resolveBankDetails(bodyBank, restaurant) {
@@ -117,6 +117,9 @@ export const createWithdrawalRequestController = async (req, res, next) => {
         let withdrawal;
         let createdNew = false;
 
+        // Heal ledger before balance check / txn (session path skips self-heal).
+        await selfHealRestaurantFinanceLedger(restaurantId);
+
         await session.withTransaction(async () => {
             // Force a write on the wallet row so concurrent creates serialize.
             await FoodRestaurantWallet.findOneAndUpdate(
@@ -226,11 +229,51 @@ export const listMyWithdrawalsController = async (req, res, next) => {
         const restaurantId = req.user?.userId;
         if (!restaurantId) return sendError(res, 401, 'Restaurant authentication required');
 
-        const withdrawals = await FoodRestaurantWithdrawal.find({ restaurantId })
-            .sort({ createdAt: -1 })
-            .lean();
+        const page = Math.max(1, parseInt(String(req.query.page || '1'), 10) || 1);
+        const rawLimit = parseInt(String(req.query.limit || '50'), 10) || 50;
+        const limit = Math.min(100, Math.max(1, rawLimit));
+        const skip = (page - 1) * limit;
 
-        return sendResponse(res, 200, 'Withdrawals fetched successfully', withdrawals);
+        const ALLOWED_STATUSES = new Set([
+            'pending',
+            'processing',
+            'approved',
+            'rejected',
+            'cancelled',
+        ]);
+        const statusParam = String(req.query.status || '')
+            .trim()
+            .toLowerCase();
+        const statuses = statusParam
+            ? statusParam
+                  .split(',')
+                  .map((s) => s.trim())
+                  .filter((s) => ALLOWED_STATUSES.has(s))
+            : [];
+
+        const filter = { restaurantId };
+        if (statuses.length === 1) {
+            filter.status = statuses[0];
+        } else if (statuses.length > 1) {
+            filter.status = { $in: statuses };
+        }
+
+        const [withdrawals, total] = await Promise.all([
+            FoodRestaurantWithdrawal.find(filter)
+                .sort({ createdAt: -1 })
+                .skip(skip)
+                .limit(limit)
+                .lean(),
+            FoodRestaurantWithdrawal.countDocuments(filter),
+        ]);
+
+        return sendResponse(res, 200, 'Withdrawals fetched successfully', {
+            withdrawals,
+            total,
+            page,
+            limit,
+            totalPages: Math.max(1, Math.ceil(total / limit) || 1),
+        });
     } catch (error) {
         next(error);
     }

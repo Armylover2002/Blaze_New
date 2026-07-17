@@ -4,8 +4,8 @@ import timezone from 'dayjs/plugin/timezone.js';
 import utc from 'dayjs/plugin/utc.js';
 import { FoodDailyPass } from '../models/foodDailyPass.model.js';
 import { FoodWalletLedger } from '../models/foodWalletLedger.model.js';
-import { FoodDeliveryWallet } from '../../delivery/models/deliveryWallet.model.js';
-import { FoodRestaurantWallet } from '../../restaurant/models/restaurantWallet.model.js';
+import { FoodDeliveryWallet, ensureDeliveryWallet } from '../../delivery/models/deliveryWallet.model.js';
+import { FoodRestaurantWallet, ensureRestaurantWallet } from '../../restaurant/models/restaurantWallet.model.js';
 import { getActiveSubscription } from './subscription.service.js';
 import { SubscriptionPlan } from '../../admin/models/subscriptionPlan.model.js';
 import { ValidationError, NotFoundError } from '../../../../core/auth/errors.js';
@@ -17,6 +17,22 @@ dayjs.extend(utc);
 dayjs.extend(timezone);
 
 const IST_TIMEZONE = 'Asia/Kolkata';
+/** Minimum subscriptionBalance required before daily-pass activation (top-up mandatory). */
+export const SUBSCRIPTION_MIN_BALANCE = 1000;
+
+/**
+ * Ensure restaurant/delivery subscription wallet document exists (zero balances).
+ * Does not credit funds — callers must still enforce top-up / balance checks.
+ */
+async function ensureSubscriptionWalletDoc(userId, userType) {
+    if (userType === 'RESTAURANT') {
+        return ensureRestaurantWallet(userId);
+    }
+    if (userType === 'DELIVERY_PARTNER') {
+        return ensureDeliveryWallet(userId);
+    }
+    return null;
+}
 
 import http from 'http';
 
@@ -47,18 +63,22 @@ export async function createTopupOrder(userId, userType, amount) {
     if (!amount || amount < 1) throw new ValidationError('Minimum topup amount is ₹1');
     if (!['RESTAURANT', 'DELIVERY_PARTNER'].includes(userType)) throw new ValidationError('Invalid user type');
 
-    // PHASE 1: Minimum balance enforcement
-    const MIN_BALANCE = 1000;
+    // Ensure wallet row exists before reading balance (first-time partners).
+    await ensureSubscriptionWalletDoc(userId, userType);
+
+    // PHASE 1: Minimum balance enforcement — top-up is mandatory when below threshold.
     const WalletModel = userType === 'RESTAURANT' ? FoodRestaurantWallet : FoodDeliveryWallet;
     const ownerFilter = userType === 'RESTAURANT' ? { restaurantId: userId } : { deliveryPartnerId: userId };
 
     const wallet = await WalletModel.findOne(ownerFilter).select('subscriptionBalance').lean();
-    const currentBalance = wallet?.subscriptionBalance || 0;
+    const currentBalance = Number(wallet?.subscriptionBalance || 0);
 
-    if (currentBalance < MIN_BALANCE) {
-        const requiredTopup = Math.max(0, MIN_BALANCE - currentBalance);
+    if (currentBalance < SUBSCRIPTION_MIN_BALANCE) {
+        const requiredTopup = Math.max(0, SUBSCRIPTION_MIN_BALANCE - currentBalance);
         if (amount < requiredTopup) {
-            throw new ValidationError(`Minimum recharge required is ₹${requiredTopup} to maintain active status`);
+            throw new ValidationError(
+                `Minimum recharge required is ₹${requiredTopup} to maintain active status (subscription wallet top-up is mandatory before daily pass)`
+            );
         }
     }
 
@@ -316,9 +336,12 @@ export async function activateDailyPass(userId, userType, retryCount = 0) {
     }
 
     // Step 2 of Saga: Deduct Wallet Balance
+    // Ensure wallet document exists first so missing-row ≠ low balance.
+    await ensureSubscriptionWalletDoc(userId, userType);
+
     const WalletModel = userType === 'RESTAURANT' ? FoodRestaurantWallet : FoodDeliveryWallet;
     const ownerFilter = userType === 'RESTAURANT' ? { restaurantId: userId } : { deliveryPartnerId: userId };
-    const safetyThreshold = Math.max(1000, deductionAmount);
+    const safetyThreshold = Math.max(SUBSCRIPTION_MIN_BALANCE, deductionAmount);
 
     let wallet;
     try {
@@ -336,11 +359,31 @@ export async function activateDailyPass(userId, userType, retryCount = 0) {
     }
 
     if (!wallet) {
-        logDailyPassEvent('WALLET_DEDUCTION_FAILED', { userId, userType, retryCount, passId: String(newPass._id), extra: { reason: 'LOW_BALANCE' } });
+        const live = await WalletModel.findOne(ownerFilter).select('subscriptionBalance').lean();
+        const balance = Number(live?.subscriptionBalance || 0);
+        const requiredTopup = Math.max(0, safetyThreshold - balance);
+        logDailyPassEvent('WALLET_DEDUCTION_FAILED', {
+            userId,
+            userType,
+            retryCount,
+            passId: String(newPass._id),
+            extra: { reason: 'LOW_BALANCE', balance, requiredTopup, threshold: safetyThreshold },
+        });
         // Compensating Rollback: Delete Pass
         await FoodDailyPass.deleteOne({ _id: newPass._id });
         logDailyPassEvent('PASS_CORRUPTED_DELETED', { userId, userType, retryCount, passId: String(newPass._id), extra: { context: 'rollback_due_to_low_balance' } });
-        return { success: false, deducted: false, reason: 'LOW_BALANCE' };
+        return {
+            success: false,
+            deducted: false,
+            reason: 'LOW_BALANCE',
+            balance,
+            threshold: safetyThreshold,
+            requiredTopup,
+            message:
+                requiredTopup > 0
+                    ? `Insufficient subscription balance (₹${balance}). Top up at least ₹${requiredTopup} before activating daily pass.`
+                    : 'Insufficient subscription balance for daily pass.',
+        };
     }
 
     const beforeBalance = wallet.subscriptionBalance;

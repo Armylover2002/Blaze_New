@@ -14,6 +14,7 @@ const DEFAULT_FIREBASE_CONFIG = {
 };
 
 const tokenCachePrefix = "fcm_web_registered_token_";
+const tokenOwnerCachePrefix = "fcm_web_registered_owner_";
 const pushSoundEnabledStorageKey = "push_sound_enabled";
 let publicEnvPromise = null;
 let foregroundListenerAttached = false;
@@ -443,7 +444,34 @@ function getSavedToken(moduleName) {
 }
 
 function setSavedToken(moduleName, token) {
+  if (!token) {
+    localStorage.removeItem(`${tokenCachePrefix}${moduleName}`);
+    return;
+  }
   localStorage.setItem(`${tokenCachePrefix}${moduleName}`, token);
+}
+
+function getSavedTokenOwner(moduleName) {
+  return localStorage.getItem(`${tokenOwnerCachePrefix}${moduleName}`) || "";
+}
+
+function setSavedTokenOwner(moduleName, ownerId) {
+  if (!ownerId) {
+    localStorage.removeItem(`${tokenOwnerCachePrefix}${moduleName}`);
+    return;
+  }
+  localStorage.setItem(`${tokenOwnerCachePrefix}${moduleName}`, ownerId);
+}
+
+function getCurrentModuleOwnerId(moduleName) {
+  try {
+    const raw = localStorage.getItem(`${moduleName}_user`);
+    if (!raw) return "";
+    const user = JSON.parse(raw);
+    return String(user?._id || user?.id || user?.userId || "");
+  } catch {
+    return "";
+  }
 }
 
 async function saveTokenByModule(moduleName, token, platform = "web") {
@@ -461,6 +489,39 @@ async function saveTokenByModule(moduleName, token, platform = "web") {
   }
 }
 
+/**
+ * Persist token to backend only when it is new for this user/device.
+ * Always refresh the local cache so logout can remove the correct token.
+ */
+async function persistTokenIfNeeded(moduleName, token, platform = "web") {
+  const normalizedToken = String(token || "").trim();
+  if (!normalizedToken || normalizedToken.length < 20) return false;
+
+  const ownerId = getCurrentModuleOwnerId(moduleName);
+  const lastToken = getSavedToken(moduleName);
+  const lastOwner = getSavedTokenOwner(moduleName);
+
+  if (lastToken === normalizedToken && lastOwner && ownerId && lastOwner === ownerId) {
+    pushDebugLog(PUSH_DEBUG_PREFIX, "Skipping FCM save — token already registered for this user", {
+      moduleName,
+      platform,
+      tokenPreview: `${normalizedToken.slice(0, 12)}...`,
+    });
+    return false;
+  }
+
+  await saveTokenByModule(moduleName, normalizedToken, platform);
+  setSavedToken(moduleName, normalizedToken);
+  setSavedTokenOwner(moduleName, ownerId);
+  pushDebugLog(PUSH_DEBUG_PREFIX, "FCM token synchronized with backend", {
+    moduleName,
+    platform,
+    ownerId: ownerId || null,
+    tokenPreview: `${normalizedToken.slice(0, 12)}...`,
+  });
+  return true;
+}
+
 async function registerNativeWebViewFcmToken(moduleName) {
   if (!isFlutterWebView()) return;
 
@@ -471,11 +532,7 @@ async function registerNativeWebViewFcmToken(moduleName) {
       const normalizedToken = String(token || "").trim();
       if (normalizedToken.length < 20) continue;
 
-      const lastSavedToken = getSavedToken(moduleName);
-      if (lastSavedToken !== normalizedToken) {
-        await saveTokenByModule(moduleName, normalizedToken, "mobile");
-        setSavedToken(moduleName, normalizedToken);
-      }
+      await persistTokenIfNeeded(moduleName, normalizedToken, "mobile");
 
       pushDebugLog(PUSH_DEBUG_PREFIX, "Registered native WebView FCM token", {
         moduleName,
@@ -741,12 +798,10 @@ export async function registerWebPushForCurrentModule(pathname = window.location
         tokenPreview: `${token.slice(0, 12)}...`,
       });
 
-      // Removed localStorage caching (getSavedToken/setSavedToken) as per user requirements.
-      // The backend 'upsert' already handles duplicates efficiently.
+      // Only POST when token is new for this user, or Firebase rotated it.
+      // Always keep localStorage in sync for logout removal.
       try {
-        pushDebugLog(PUSH_DEBUG_PREFIX, "Synchronizing FCM token with backend database", { moduleName, tokenPreview: `${token?.slice(0, 10)}...` });
-        await saveTokenByModule(moduleName, token);
-        pushDebugLog(PUSH_DEBUG_PREFIX, "FCM token synchronized with backend successfully");
+        await persistTokenIfNeeded(moduleName, token, "web");
       } catch (e) {
         pushDebugWarn(PUSH_DEBUG_PREFIX, "Failed to synchronize FCM token to backend", { error: e?.message || e, stack: e?.stack });
       }

@@ -38,6 +38,8 @@ router.get('/delivery/:deliveryPartnerId/wallet', getDeliveryWalletController);
 // ─── Admin / Finance ───
 router.get('/admin/wallet', getAdminWalletController);
 router.get('/admin/finance/summary', getAdminFinanceSummaryController);
+// Legacy settlements collection — NOT for food restaurant payouts.
+// Restaurant: POST /food/restaurant/withdraw + PATCH /food/admin/withdrawals/:id
 router.get('/admin/settlements', listSettlementsController);
 router.post('/admin/settlements', createSettlementController);
 router.post('/admin/settlements/:id/process', processSettlementController);
