@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import ms from "ms";
 import mongoose from "mongoose";
 import {
@@ -896,13 +897,15 @@ const parseProductPayload = async (req, existingProduct = null) => {
 const createAuthTokens = async (sellerId) => {
   const payload = { userId: String(sellerId), role: "SELLER" };
   const accessToken = signAccessToken(payload);
-  const refreshToken = signRefreshToken(payload);
+  const familyId = crypto.randomUUID();
+  const refreshToken = signRefreshToken({ ...payload, familyId });
   const ttlMs = ms(config.jwtRefreshExpiresIn || "7d");
   const expiresAt = new Date(Date.now() + ttlMs);
 
   await FoodRefreshToken.create({
     userId: sellerId,
     token: refreshToken,
+    familyId,
     expiresAt,
   });
 

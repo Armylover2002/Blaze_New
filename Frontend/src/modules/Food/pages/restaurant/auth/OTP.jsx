@@ -276,6 +276,10 @@ export default function RestaurantOTP() {
       const needsRegistration = data?.needsRegistration === true
       const normalizedPhone = data?.phone || phone
 
+      if (data?.registrationToken) {
+        sessionStorage.setItem("restaurant_registrationToken", data.registrationToken)
+      }
+
       if (needsRegistration) {
         const displayPhone = String(normalizedPhone || phone || "")
           .replace(/\D/g, "")

@@ -12,6 +12,13 @@ const refreshTokenSchema = new mongoose.Schema(
             required: true,
             unique: true
         },
+        /** Session family for rotation + reuse detection (stolen-token revoke). */
+        familyId: {
+            type: String,
+            required: false,
+            index: true,
+            default: null
+        },
         device: {
             type: String,
             required: false,
@@ -37,4 +44,3 @@ const refreshTokenSchema = new mongoose.Schema(
 refreshTokenSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
 export const FoodRefreshToken = mongoose.model('FoodRefreshToken', refreshTokenSchema);
-

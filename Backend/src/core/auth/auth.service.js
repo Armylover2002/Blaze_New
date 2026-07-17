@@ -11,7 +11,7 @@ import { FoodReferralSettings } from "../../modules/food/admin/models/referralSe
 import { FoodReferralLog } from "../../modules/food/admin/models/referralLog.model.js";
 import { FoodUserWallet } from "../../modules/food/user/models/userWallet.model.js";
 import { createOrUpdateOtp, verifyOtp } from "../otp/otp.service.js";
-import { signAccessToken, signRefreshToken, verifyRefreshToken } from "./token.util.js";
+import { signAccessToken, signRefreshToken, verifyRefreshToken, signRestaurantRegistrationToken } from "./token.util.js";
 import { FoodRefreshToken } from "../refreshTokens/refreshToken.model.js";
 import { ValidationError, AuthError, ForbiddenError } from "./errors.js";
 import { config } from "../../config/env.js";
@@ -30,6 +30,57 @@ import {
   lockAdminForgotOtpVerification,
   recordAdminLoginFailure,
 } from "./auth.lockout.js";
+
+/** Persist a refresh token with a new rotation family (login / new session). */
+const createRefreshTokenSession = async (userId, basePayload) => {
+  const familyId = crypto.randomUUID();
+  const refreshToken = signRefreshToken({ ...basePayload, familyId });
+  const ttlMs = ms(config.jwtRefreshExpiresIn || "7d");
+  const expiresAt = new Date(Date.now() + ttlMs);
+  await FoodRefreshToken.create({
+    userId,
+    token: refreshToken,
+    familyId,
+    expiresAt,
+  });
+  return { refreshToken, familyId, expiresAt };
+};
+
+/** Rotate refresh token in-place for a family; returns the new refresh JWT. */
+const rotateRefreshTokenSession = async (stored, payload) => {
+  const familyId = stored.familyId || crypto.randomUUID();
+  const refreshToken = signRefreshToken({
+    userId: payload.userId,
+    role: payload.role,
+    familyId,
+  });
+  const ttlMs = ms(config.jwtRefreshExpiresIn || "7d");
+  const expiresAt = new Date(Date.now() + ttlMs);
+
+  await FoodRefreshToken.deleteOne({ _id: stored._id });
+  await FoodRefreshToken.create({
+    userId: stored.userId,
+    token: refreshToken,
+    familyId,
+    expiresAt,
+  });
+
+  return refreshToken;
+};
+
+/** On reuse of an already-rotated refresh token, revoke the whole family (or user sessions). */
+const revokeOnRefreshReuse = async (token) => {
+  try {
+    const payload = verifyRefreshToken(token);
+    if (payload?.familyId) {
+      await FoodRefreshToken.deleteMany({ familyId: payload.familyId });
+    } else if (payload?.userId) {
+      await FoodRefreshToken.deleteMany({ userId: payload.userId });
+    }
+  } catch {
+    // Token may already be expired/invalid — still treat as invalid below
+  }
+};
 
 const ROLES = {
   USER: "USER",
@@ -409,16 +460,7 @@ export const verifyUserOtpAndLogin = async (
   const payload = { userId: user._id.toString(), role: user.role || "USER" };
 
   const accessToken = signAccessToken(payload);
-  const refreshToken = signRefreshToken(payload);
-
-  const ttlMs = ms(config.jwtRefreshExpiresIn || "7d");
-  const expiresAt = new Date(Date.now() + ttlMs);
-
-  await FoodRefreshToken.create({
-    userId: user._id,
-    token: refreshToken,
-    expiresAt,
-  });
+  const { refreshToken } = await createRefreshTokenSession(user._id, payload);
 
   return { accessToken, refreshToken, user, isNewUser };
 };
@@ -475,16 +517,7 @@ export const adminLogin = async (email, password, roleId) => {
   const payload = { userId: admin._id.toString(), role: admin.role };
 
   const accessToken = signAccessToken(payload);
-  const refreshToken = signRefreshToken(payload);
-
-  const ttlMs = ms(config.jwtRefreshExpiresIn || "7d");
-  const expiresAt = new Date(Date.now() + ttlMs);
-
-  await FoodRefreshToken.create({
-    userId: admin._id,
-    token: refreshToken,
-    expiresAt,
-  });
+  const { refreshToken } = await createRefreshTokenSession(admin._id, payload);
 
   const userObj = normalizeAdminProfile(admin);
   delete userObj.password;
@@ -542,20 +575,17 @@ export const verifyRestaurantOtpAndLogin = async (phone, otp, fcmToken, platform
     return {
       needsRegistration: true,
       phone,
+      registrationToken: signRestaurantRegistrationToken(phone),
     };
   }
 
-  // In-progress onboarding — allow resume from saved step
+  // In-progress onboarding — allow resume from saved step (draft fetched via registration token)
   if (restaurant.status === "onboarding") {
-    const { getOnboardingDraftByPhone } = await import(
-      "../../modules/food/restaurant/services/restaurant.service.js"
-    );
-    const draft = await getOnboardingDraftByPhone(phone);
     return {
       needsRegistration: true,
       phone,
-      resumeStep: draft?.onboardingStep || restaurant.onboardingStep || 2,
-      restaurant: draft,
+      resumeStep: restaurant.onboardingStep || 2,
+      registrationToken: signRestaurantRegistrationToken(phone),
     };
   }
 
@@ -587,13 +617,15 @@ export const verifyRestaurantOtpAndLogin = async (phone, otp, fcmToken, platform
     );
   }
 
-  // For rejected restaurants — return rejection info so frontend can show modal
+  // For rejected restaurants — return rejection info so frontend can show modal.
+  // Registration token lets re-apply use onboarding APIs with proven phone ownership.
   if (restaurant.status === "rejected") {
     return {
       isRejected: true,
       rejectionReason: restaurant.rejectionReason || null,
       phone,
       needsRegistration: false,
+      registrationToken: signRestaurantRegistrationToken(phone),
     };
   }
 
@@ -627,15 +659,7 @@ export const issueRestaurantSession = async (restaurant) => {
 
   const payload = { userId: restaurant._id.toString(), role: ROLES.RESTAURANT };
   const accessToken = signAccessToken(payload);
-  const refreshToken = signRefreshToken(payload);
-  const ttlMs = ms(config.jwtRefreshExpiresIn || "7d");
-  const expiresAt = new Date(Date.now() + ttlMs);
-
-  await FoodRefreshToken.create({
-    userId: restaurant._id,
-    token: refreshToken,
-    expiresAt,
-  });
+  const { refreshToken } = await createRefreshTokenSession(restaurant._id, payload);
 
   const user =
     typeof restaurant.toObject === "function" ? restaurant.toObject() : restaurant;
@@ -795,15 +819,7 @@ export const verifyDeliveryOtpAndLogin = async (phone, otp, fcmToken, platform) 
     role: ROLES.DELIVERY_PARTNER,
   };
   const accessToken = signAccessToken(payload);
-  const refreshToken = signRefreshToken(payload);
-  const ttlMs = ms(config.jwtRefreshExpiresIn || "7d");
-  const expiresAt = new Date(Date.now() + ttlMs);
-
-  await FoodRefreshToken.create({
-    userId: deliveryPartner._id,
-    token: refreshToken,
-    expiresAt,
-  });
+  const { refreshToken } = await createRefreshTokenSession(deliveryPartner._id, payload);
 
   const userObj = deliveryPartner.toObject();
 
@@ -1352,18 +1368,20 @@ export const refreshAccessToken = async (token) => {
 
   const stored = await FoodRefreshToken.findOne({ token }).lean();
   if (!stored) {
+    // Token not in DB but may still be a valid JWT → reuse of rotated token
+    await revokeOnRefreshReuse(token);
     throw new AuthError("Invalid refresh token");
   }
 
-  const jwt = await import("jsonwebtoken");
   let payload;
   try {
-    payload = jwt.default.verify(token, config.jwtRefreshSecret);
+    payload = verifyRefreshToken(token);
   } catch {
+    await FoodRefreshToken.deleteOne({ _id: stored._id });
     throw new AuthError("Invalid refresh token");
   }
 
-  // If deactivated user/admin/employee, do not issue fresh access tokens (forces logout on client)
+  // If deactivated user/admin/employee/restaurant, do not issue fresh access tokens
   if (payload?.role === "USER") {
     const u = await FoodUser.findById(payload.userId).select("isActive").lean();
     if (!u || u.isActive === false) {
@@ -1374,12 +1392,35 @@ export const refreshAccessToken = async (token) => {
     if (!a || a.isActive === false) {
       throw new AuthError("Admin account is deactivated");
     }
+  } else if (payload?.role === "RESTAURANT") {
+    const r = await FoodRestaurant.findById(payload.userId)
+      .select("status isActive isDeleted accountStatus")
+      .lean();
+    if (!r || r.isDeleted === true || r.accountStatus === "deleted") {
+      throw new AuthError("Restaurant account is deleted/deactivated");
+    }
+    const status = String(r.status || "").toLowerCase();
+    if (status === "rejected") {
+      throw new AuthError("Restaurant account has been rejected");
+    }
+    // Pending first-time approval may keep refreshing for status polling only
+    if (r.isActive === false && status !== "pending") {
+      throw new AuthError("Restaurant account is deactivated");
+    }
+  } else if (payload?.role === "DELIVERY_PARTNER") {
+    const d = await FoodDeliveryPartner.findById(payload.userId)
+      .select("isActive")
+      .lean();
+    if (!d || d.isActive === false) {
+      throw new AuthError("Delivery account is inactive");
+    }
   }
 
   const newAccessToken = signAccessToken({
     userId: payload.userId,
     role: payload.role,
   });
+  const newRefreshToken = await rotateRefreshTokenSession(stored, payload);
 
-  return { accessToken: newAccessToken, refreshToken: token };
+  return { accessToken: newAccessToken, refreshToken: newRefreshToken };
 };

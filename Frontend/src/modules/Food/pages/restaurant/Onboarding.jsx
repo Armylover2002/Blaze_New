@@ -297,6 +297,7 @@ const finishRegistrationAndGoPending = async (registerResponse, ownerPhone, navi
     setAuthData,
   )
   sessionStorage.removeItem("restaurantReonboard")
+  sessionStorage.removeItem("restaurant_registrationToken")
   await clearOnboardingDraft()
   clearOnboardingFileCache()
   const phone = normalizePhoneDigits(ownerPhone)

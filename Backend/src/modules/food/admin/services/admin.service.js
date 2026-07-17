@@ -3609,6 +3609,7 @@ export async function updateRestaurantStatus(id, body = {}) {
         {
             $set: {
                 status,
+                isActive,
                 approvedAt: isActive ? new Date() : undefined,
                 rejectedAt: isActive ? undefined : new Date(),
                 rejectionReason: isActive ? undefined : 'Disabled by admin'
@@ -3616,6 +3617,12 @@ export async function updateRestaurantStatus(id, body = {}) {
         },
         { new: true, runValidators: false }
     ).lean();
+
+    // Kill existing sessions when admin disables/rejects the restaurant
+    if (updated && !isActive) {
+        await FoodRefreshToken.deleteMany({ userId: updated._id });
+    }
+
     if (updated) invalidateDashboardStatsCache();
     return updated;
 }
@@ -5001,6 +5008,7 @@ export async function rejectRestaurant(id, reason, performer = null) {
     ).lean();
 
     if (updated) {
+        await FoodRefreshToken.deleteMany({ userId: updated._id });
         try {
             const { notifyOwnersSafely } = await import('../../../../core/notifications/firebase.service.js');
             await notifyOwnersSafely(

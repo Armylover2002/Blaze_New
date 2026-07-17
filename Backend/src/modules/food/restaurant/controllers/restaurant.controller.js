@@ -29,20 +29,16 @@ export const registerRestaurantController = async (req, res, next) => {
         console.log("REGISTER RESTAURANT PAYLOAD:", req.body);
         const validated = validateRestaurantRegisterDto(req.body);
 
-        let authUserId = null;
-        const authHeader = req.headers.authorization;
-        if (authHeader && authHeader.startsWith('Bearer ')) {
-            const token = authHeader.substring(7);
-            try {
-                const { verifyAccessToken } = await import('../../../../core/auth/token.util.js');
-                const decoded = verifyAccessToken(token);
-                authUserId = decoded.userId;
-            } catch (err) {
-                // Ignore invalid tokens
-            }
+        const tokenPhone = String(req.registrationPhone || '').replace(/\D/g, '').slice(-10);
+        const payloadPhone = String(validated.ownerPhone || '').replace(/\D/g, '').slice(-10);
+        if (!tokenPhone || !payloadPhone || tokenPhone !== payloadPhone) {
+            return res.status(403).json({
+                success: false,
+                message: 'Phone does not match verified registration token. Please verify OTP again.',
+            });
         }
 
-        const restaurant = await registerRestaurant(validated, req.files, authUserId);
+        const restaurant = await registerRestaurant(validated, req.files, null);
         const { issueRestaurantSession } = await import('../../../../core/auth/auth.service.js');
         const session = await issueRestaurantSession(restaurant);
         return sendResponse(res, 201, 'Restaurant registered successfully', {
@@ -60,6 +56,16 @@ export const saveOnboardingStepController = async (req, res, next) => {
         console.log('REQUEST RECEIVED', req.body);
         const stepNum = req.params.step;
         const validated = validateOnboardingStepDto(stepNum, req.body);
+
+        const tokenPhone = String(req.registrationPhone || '').replace(/\D/g, '').slice(-10);
+        const payloadPhone = String(validated.ownerPhone || '').replace(/\D/g, '').slice(-10);
+        if (!tokenPhone || !payloadPhone || tokenPhone !== payloadPhone) {
+            return res.status(403).json({
+                success: false,
+                message: 'Phone does not match verified registration token',
+            });
+        }
+
         const restaurant = await saveOnboardingStep(stepNum, validated, req.files);
         return sendResponse(res, 200, 'Onboarding step saved successfully', { restaurant });
     } catch (error) {
@@ -69,7 +75,8 @@ export const saveOnboardingStepController = async (req, res, next) => {
 
 export const getOnboardingDraftController = async (req, res, next) => {
     try {
-        const phone = req.query.phone;
+        // Always bind to OTP-verified phone from registration token (ignore/override query).
+        const phone = req.registrationPhoneDigits || req.registrationPhone;
         if (!phone) {
             return res.status(400).json({ success: false, message: 'Phone is required' });
         }

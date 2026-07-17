@@ -1,4 +1,4 @@
-import { verifyAccessToken } from './token.util.js';
+import { verifyAccessToken, verifyRestaurantRegistrationToken } from './token.util.js';
 import { sendError } from '../../utils/response.js';
 import { FoodUser } from '../users/user.model.js';
 import { FoodDeliveryPartner } from '../../modules/food/delivery/models/deliveryPartner.model.js';
@@ -13,6 +13,29 @@ export const requireAdmin = (req, res, next) => {
     next();
 };
 
+/** Requires a short-lived OTP-proven registration token (not a restaurant session JWT). */
+export const requireRestaurantRegistrationToken = (req, res, next) => {
+    const authHeader = req.headers.authorization || '';
+    const token = authHeader.startsWith('Bearer ') ? authHeader.substring(7) : null;
+
+    if (!token) {
+        return sendError(res, 401, 'Registration token required. Please verify OTP again.');
+    }
+
+    try {
+        const decoded = verifyRestaurantRegistrationToken(token);
+        const phoneLast10 = String(decoded.phoneLast10 || decoded.phone || '').replace(/\D/g, '').slice(-10);
+        if (!phoneLast10) {
+            return sendError(res, 401, 'Invalid registration token');
+        }
+        req.registrationPhone = phoneLast10;
+        req.registrationPhoneDigits = String(decoded.phone || phoneLast10).replace(/\D/g, '');
+        next();
+    } catch {
+        return sendError(res, 401, 'Invalid or expired registration token. Please verify OTP again.');
+    }
+};
+
 export const authMiddleware = (req, res, next) => {
     const authHeader = req.headers.authorization || '';
     const token = authHeader.startsWith('Bearer ') ? authHeader.substring(7) : null;
@@ -23,6 +46,9 @@ export const authMiddleware = (req, res, next) => {
 
     try {
         const decoded = verifyAccessToken(token);
+        if (decoded?.purpose === 'restaurant_onboarding') {
+            return sendError(res, 401, 'Invalid or expired token');
+        }
         req.user = {
             userId: decoded.userId,
             role: decoded.role
