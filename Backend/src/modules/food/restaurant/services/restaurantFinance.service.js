@@ -6,8 +6,8 @@
  * `referralEarnings` − pending/processing withdrawals.
  *
  * An empty `food_restaurant_wallets` collection after orders-only activity is
- * expected; wallet rows appear after referral credit, subscription top-up, or
- * withdrawal flows.
+ * expected for legacy restaurants; new ones get a zero-balance row on register/
+ * approve. Wallet balances still do not hold order earnings.
  */
 import mongoose from 'mongoose';
 import { FoodOrder } from '../../orders/models/order.model.js';

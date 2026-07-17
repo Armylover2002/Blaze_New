@@ -4,7 +4,7 @@ import { assertNoZoneOverlap } from '../../../../utils/zoneOverlap.js';
 import { FoodRestaurant } from '../../restaurant/models/restaurant.model.js';
 import { DEFAULT_RESTAURANT_COMMISSION_RATE } from '../../constants/commission.constants.js';
 import { validateRestaurantPhoneUniqueness, normalizeRestaurantPhone } from '../../restaurant/services/restaurant.service.js';
-import { FoodRestaurantWallet } from '../../restaurant/models/restaurantWallet.model.js';
+import { FoodRestaurantWallet, ensureRestaurantWallet } from '../../restaurant/models/restaurantWallet.model.js';
 import { FoodDeliveryPartner } from '../../delivery/models/deliveryPartner.model.js';
 import { DeliverySupportTicket } from '../../delivery/models/supportTicket.model.js';
 import { FoodZone } from '../models/zone.model.js';
@@ -3628,6 +3628,17 @@ export async function updateRestaurantStatus(id, body = {}) {
         await FoodRefreshToken.deleteMany({ userId: updated._id });
     }
 
+    if (updated && isActive) {
+        try {
+            await ensureRestaurantWallet(updated._id);
+        } catch (e) {
+            console.error(
+                `Failed to initialize restaurant wallet on status update for ${updated._id}:`,
+                e?.message || e
+            );
+        }
+    }
+
     if (updated) invalidateDashboardStatsCache();
     return updated;
 }
@@ -4740,6 +4751,16 @@ export async function approveRestaurant(id, performer = null) {
     ).lean();
 
     if (updated) {
+        // Ensure wallet exists for first-time approval (covers pre-existing restaurants).
+        try {
+            await ensureRestaurantWallet(updated._id);
+        } catch (e) {
+            console.error(
+                `Failed to initialize restaurant wallet on approval for ${updated._id}:`,
+                e?.message || e
+            );
+        }
+
         // --- Referral Reward Crediting ---
         // Re-validate platform settings at payout, then claim + credit + count
         // in one transaction (no double-pay; disabled/zeroed programs cannot pay).

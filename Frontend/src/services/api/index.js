@@ -1128,13 +1128,19 @@ export const restaurantAPI = {
   getMe: () => authService.getMe("restaurant"),
   /** Restaurant dashboard: fetch current restaurant profile (deduped + short-cached). */
   getCurrentRestaurant: () => getRestaurantCurrentOnce(),
-  /** Order payout / Hub Finance (source: food_transactions ledger, not food_restaurant_wallets). */
+  /**
+   * Order payout / Hub Finance (canonical — food_transactions ledger).
+   * Do NOT use deprecated GET /food/payments/restaurant/:id/wallet for payouts.
+   */
   getFinance: (params = {}) =>
     apiClient.get("/food/restaurant/finance", {
       contextModule: "restaurant",
       params: params || {},
     }),
-  /** Subscription daily-pass wallet (food_restaurant_wallets.subscriptionBalance). */
+  /**
+   * Subscription daily-pass wallet (canonical — food_restaurant_wallets.subscriptionBalance).
+   * Do NOT use deprecated GET /food/payments/restaurant/:id/wallet for subscription balance.
+   */
   getSubscriptionWallet: () =>
     apiClient.get("/food/restaurant/subscription-wallet", {
       contextModule: "restaurant",

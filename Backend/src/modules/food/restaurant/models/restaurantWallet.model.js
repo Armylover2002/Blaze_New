@@ -9,7 +9,8 @@ import { embeddedWalletTransactionSchema } from '../../../../core/payments/model
  * Withdrawable order payout is computed in `restaurantFinance.service.js` from
  * unsettled `food_transactions`, not from `balance`.
  *
- * This document is created lazily (upsert) when:
+ * This document is created (upsert) when:
+ * - Restaurant registers or is approved (zero-balance row)
  * - Referral rewards are credited (admin approval)
  * - Subscription wallet top-up / daily-pass flows run
  * - Withdrawal request or admin approval locks/settles shares
@@ -51,3 +52,41 @@ const restaurantWalletSchema = new mongoose.Schema(
 );
 
 export const FoodRestaurantWallet = mongoose.model('FoodRestaurantWallet', restaurantWalletSchema, 'food_restaurant_wallets');
+
+/**
+ * Ensure a zero-balance restaurant wallet row exists (idempotent upsert).
+ * Does not credit order earnings — those live in food_transactions.
+ */
+export async function ensureRestaurantWallet(restaurantId, { session = null } = {}) {
+    if (!restaurantId || !mongoose.Types.ObjectId.isValid(String(restaurantId))) {
+        return null;
+    }
+    const rid =
+        restaurantId instanceof mongoose.Types.ObjectId
+            ? restaurantId
+            : new mongoose.Types.ObjectId(String(restaurantId));
+
+    const options = {
+        upsert: true,
+        new: true,
+        setDefaultsOnInsert: true,
+    };
+    if (session) options.session = session;
+
+    return FoodRestaurantWallet.findOneAndUpdate(
+        { restaurantId: rid },
+        {
+            $setOnInsert: {
+                restaurantId: rid,
+                balance: 0,
+                subscriptionBalance: 0,
+                lockedAmount: 0,
+                totalEarnings: 0,
+                referralEarnings: 0,
+                totalSettled: 0,
+                transactions: [],
+            },
+        },
+        options
+    );
+}

@@ -1,10 +1,28 @@
 import { sendResponse } from '../../utils/response.js';
 import { getPaymentsByOrder } from './payment.service.js';
-import { getTransactionsByOrder } from './transaction.service.js';
+import { getTransactionsByOrder, getTransactionsByEntity } from './transaction.service.js';
 import { getWalletBalance, getWalletWithTransactions, getUserWalletForFrontend } from './wallet.service.js';
 import { getRefundsByOrder, listRefunds } from './refund.service.js';
 import { createSettlement, processSettlement, listSettlements } from './settlement.service.js';
 import { logger } from '../../utils/logger.js';
+import mongoose from 'mongoose';
+
+/** Canonical restaurant payout / Hub Finance path (order earnings). */
+const RESTAURANT_FINANCE_SUCCESSOR = '/api/v1/food/restaurant/finance';
+/** Canonical restaurant subscription wallet path. */
+const RESTAURANT_SUBSCRIPTION_WALLET_SUCCESSOR = '/api/v1/food/restaurant/subscription-wallet';
+
+function setRestaurantWalletDeprecationHeaders(res) {
+    res.set('Deprecation', 'true');
+    res.set(
+        'Link',
+        `<${RESTAURANT_FINANCE_SUCCESSOR}>; rel="successor-version", <${RESTAURANT_SUBSCRIPTION_WALLET_SUCCESSOR}>; rel="alternate"`
+    );
+    res.set(
+        'Warning',
+        '299 - "GET /food/payments/restaurant/:id/wallet is deprecated; use GET /food/restaurant/finance for payouts and GET /food/restaurant/subscription-wallet for subscription balance"'
+    );
+}
 
 // ─── User Endpoints ───
 
@@ -52,32 +70,83 @@ export const getUserWalletTransactionsController = async (req, res, next) => {
 
 // ─── Restaurant Endpoints ───
 
-/** Referral / universal-ledger balance. Order payout lives in food_transactions + /restaurant/finance. */
+/**
+ * @deprecated Prefer GET /food/restaurant/finance (order payouts) and
+ * GET /food/restaurant/subscription-wallet (subscription balance).
+ * Kept for backward compatibility; does not upsert an empty wallet row.
+ */
 export const getRestaurantWalletController = async (req, res, next) => {
     try {
+        setRestaurantWalletDeprecationHeaders(res);
+
         const restaurantId = req.user?.restaurantId || req.params.restaurantId;
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 20;
-        const data = await getWalletWithTransactions('restaurant', restaurantId, { page, limit });
 
-        // Dual-ledger: wallet.balance is referral/creditWallet only — attach order payout from food_transactions.
+        if (!restaurantId || !mongoose.Types.ObjectId.isValid(String(restaurantId))) {
+            return sendResponse(res, 200, 'Restaurant wallet endpoint deprecated', {
+                deprecated: true,
+                useInstead: {
+                    finance: RESTAURANT_FINANCE_SUCCESSOR,
+                    subscriptionWallet: RESTAURANT_SUBSCRIPTION_WALLET_SUCCESSOR,
+                },
+                balance: 0,
+                lockedAmount: 0,
+                availableBalance: 0,
+                transactions: [],
+                total: 0,
+                page,
+                limit,
+                totalPages: 0,
+                ledger: 'referral_subscription',
+                orderPayout: null,
+            });
+        }
+
+        const rid = new mongoose.Types.ObjectId(String(restaurantId));
+        const { FoodRestaurantWallet } = await import(
+            '../../modules/food/restaurant/models/restaurantWallet.model.js'
+        );
+
+        // Read-only — do not ensureWallet/upsert (avoids creating empty docs from a dead client).
+        const [wallet, txns, orderPayoutModule] = await Promise.all([
+            FoodRestaurantWallet.findOne({ restaurantId: rid })
+                .select('balance lockedAmount referralEarnings totalEarnings subscriptionBalance totalSettled')
+                .lean(),
+            getTransactionsByEntity('restaurant', String(restaurantId), { page, limit }),
+            import('../../modules/food/restaurant/services/restaurantFinance.service.js'),
+        ]);
+
         const {
             getRestaurantAvailableWithdrawalBalance,
             getRestaurantLifetimeOrderEarnings,
-        } = await import(
-            '../../modules/food/restaurant/services/restaurantFinance.service.js'
-        );
+        } = orderPayoutModule;
         const [orderPayout, totalOrderEarnings] = await Promise.all([
             getRestaurantAvailableWithdrawalBalance(restaurantId),
             getRestaurantLifetimeOrderEarnings(restaurantId),
         ]);
 
+        const balance = Number(wallet?.balance) || 0;
+        const lockedAmount = Number(wallet?.lockedAmount) || 0;
+
         return sendResponse(
             res,
             200,
-            'Restaurant wallet fetched (referral ledger; order earnings via finance API)',
+            'Deprecated: use /food/restaurant/finance for payouts and /food/restaurant/subscription-wallet for subscription balance',
             {
-                ...data,
+                deprecated: true,
+                useInstead: {
+                    finance: RESTAURANT_FINANCE_SUCCESSOR,
+                    subscriptionWallet: RESTAURANT_SUBSCRIPTION_WALLET_SUCCESSOR,
+                },
+                balance,
+                lockedAmount,
+                availableBalance: balance - lockedAmount,
+                referralEarnings: Number(wallet?.referralEarnings) || 0,
+                totalEarnings: Number(wallet?.totalEarnings) || 0,
+                subscriptionBalance: Number(wallet?.subscriptionBalance) || 0,
+                totalSettled: Number(wallet?.totalSettled) || 0,
+                ...txns,
                 ledger: 'referral_subscription',
                 orderPayout: {
                     availableBalance: orderPayout.availableBalance,

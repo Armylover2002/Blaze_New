@@ -26,7 +26,10 @@ router.get('/orders/:orderId/refunds', getRefundsByOrderController);
 router.get('/wallet/balance', getUserWalletBalanceController);
 router.get('/wallet/transactions', getUserWalletTransactionsController);
 
-// ─── Restaurant wallet (referral / creditWallet balance — not order earnings; see food_transactions) ───
+// ─── Restaurant wallet (DEPRECATED) ───
+// Prefer GET /food/restaurant/finance (order payouts) and
+// GET /food/restaurant/subscription-wallet (subscription balance).
+// Kept for backward compatibility; response includes Deprecation headers.
 router.get('/restaurant/:restaurantId/wallet', getRestaurantWalletController);
 
 // ─── Delivery partner wallet ───
