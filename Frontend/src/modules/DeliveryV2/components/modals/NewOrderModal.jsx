@@ -4,7 +4,7 @@ import { ChevronDown } from 'lucide-react';
 import { ActionSlider } from '@/modules/DeliveryV2/components/ui/ActionSlider';
 import { useDeliveryStore } from '@/modules/DeliveryV2/store/useDeliveryStore';
 import { getHaversineDistance } from '@/modules/DeliveryV2/utils/geo';
-import { normalizePickupPoints, isMixedOrder, isReturnPickupTrip, getReturnPickupStopLabels, formatDeliveryAddressText } from '@/modules/DeliveryV2/utils/orderRouting';
+import { normalizePickupPoints, normalizeLocationPoint, isMixedOrder, isReturnPickupTrip, getReturnPickupStopLabels, formatDeliveryAddressText } from '@/modules/DeliveryV2/utils/orderRouting';
 import { RenderNewOrder } from './renderers/NewOrderRenderers';
 
 /**
@@ -12,7 +12,7 @@ import { RenderNewOrder } from './renderers/NewOrderRenderers';
  * Matches the Zomato/Swiggy style Green Header + White Card.
  */
 export const NewOrderModal = ({ order, onAccept, onReject, onMinimize }) => {
-  const { riderLocation } = useDeliveryStore();
+  const { riderLocation, setRiderLocation } = useDeliveryStore();
   const isFoodQuick =
     order?.isFoodQuickDelivery === true ||
     String(order?.deliveryMode || '').toLowerCase() === 'quick';
@@ -29,6 +29,27 @@ export const NewOrderModal = ({ order, onAccept, onReject, onMinimize }) => {
     setTimeLeft(offerWindowSec);
   }, [order?.orderMongoId, order?.orderId, offerWindowSec]);
 
+  // Refresh high-accuracy GPS when offer opens so PICKUP uses live rider position.
+  useEffect(() => {
+    if (!order || typeof navigator === 'undefined' || !navigator.geolocation) return undefined;
+    let cancelled = false;
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        if (cancelled) return;
+        setRiderLocation({
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+          heading: pos.coords.heading || 0,
+        });
+      },
+      () => {},
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 8000 },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [order?.orderMongoId, order?.orderId, setRiderLocation]);
+
   useEffect(() => {
     const timer = setInterval(() => setTimeLeft((t) => t - 1), 1000);
     return () => clearInterval(timer);
@@ -44,59 +65,107 @@ export const NewOrderModal = ({ order, onAccept, onReject, onMinimize }) => {
     if (!order) return { distanceKm: null, etaMins: null };
 
     const rawEta = order.estimatedTime || order.duration || order.eta || order.route?.durationMin;
+    const formatKm = (km) => Number(km).toFixed(1);
+    const etaFromKm = (km) =>
+      rawEta && Number(rawEta) > 0
+        ? Math.ceil(Number(rawEta))
+        : Math.ceil((Number(km) * 1000) / 416) + (order.prepTime || 5);
 
-    // Prefer rider→pickup distance. Never treat trip route length as the offer "KM"
-    // (Porter persists route.distanceKm for pricing; it can be 0 / unrelated to the rider).
-    const pickupCandidates = [
-      order.pickupDistanceKm,
-      // Only treat top-level distanceKm as pickup when it is not clearly the route total.
-      order.distanceKm,
-    ];
-    let resolvedKm = null;
-    for (const candidate of pickupCandidates) {
-      const n = Number(candidate);
-      if (Number.isFinite(n) && n > 0) {
-        resolvedKm = n;
-        break;
-      }
-    }
+    const NEAR_M = 300; // treat as "at this stop"
 
-    // Local haversine: rider → parcel pickup (or restaurant)
-    const rest = primaryPickup?.location || order.restaurantLocation || order.pickupLocation || order.pickup || order.restaurantId?.location || {};
-    const resLat = parseFloat(
-      order.restaurant_lat ?? order.restaurantLat ?? rest.latitude ?? rest.lat,
+    // Restaurant / pickup — prefer payload latitude/longitude (same source as pricing origin).
+    const restaurantPoint =
+      normalizeLocationPoint(order.restaurantLocation) ||
+      normalizeLocationPoint(primaryPickup?.location) ||
+      normalizeLocationPoint(order.pickupLocation) ||
+      normalizeLocationPoint(order.pickup) ||
+      normalizeLocationPoint(order.dispatchLeg?.location) ||
+      normalizeLocationPoint(order.restaurantId?.location) ||
+      null;
+
+    const resLat = Number(
+      order.restaurant_lat ?? order.restaurantLat ?? restaurantPoint?.lat,
     );
-    const resLng = parseFloat(
-      order.restaurant_lng ?? order.restaurantLng ?? rest.longitude ?? rest.lng,
+    const resLng = Number(
+      order.restaurant_lng ?? order.restaurantLng ?? restaurantPoint?.lng,
     );
+    const hasRestaurant =
+      Number.isFinite(resLat) && Number.isFinite(resLng);
 
-    if (riderLocation && Number.isFinite(resLat) && Number.isFinite(resLng)) {
-      const distM = getHaversineDistance(
-        Number(riderLocation.lat),
-        Number(riderLocation.lng),
-        resLat,
-        resLng,
-      );
-      if (Number.isFinite(distM) && distM >= 0) {
-        const km = distM / 1000;
-        // Prefer live GPS when server distance is missing / zero.
-        if (resolvedKm == null || resolvedKm <= 0 || Math.abs(km - resolvedKm) > 0.01) {
-          resolvedKm = km;
+    // Customer drop (for "rider is with customer" case).
+    const deliveryAddress = order.deliveryAddress || {};
+    const customerPoint =
+      normalizeLocationPoint(order.customerLocation) ||
+      normalizeLocationPoint(order.deliveryLocation) ||
+      normalizeLocationPoint(deliveryAddress?.location) ||
+      (Array.isArray(deliveryAddress?.location?.coordinates) &&
+      deliveryAddress.location.coordinates.length >= 2
+        ? {
+            lng: Number(deliveryAddress.location.coordinates[0]),
+            lat: Number(deliveryAddress.location.coordinates[1]),
+          }
+        : null);
+
+    const dropKmRaw = Number(
+      order.deliveryDistanceKm ?? order.pricing?.deliveryDistanceKm,
+    );
+    const hasDropKm = Number.isFinite(dropKmRaw) && dropKmRaw >= 0;
+
+    const riderLat = Number(riderLocation?.lat);
+    const riderLng = Number(riderLocation?.lng);
+    const hasRider = Number.isFinite(riderLat) && Number.isFinite(riderLng);
+
+    // PICKUP must be rider → restaurant only.
+    // Never use order.distanceKm as a blind fallback (that is restaurant→customer).
+    if (hasRider) {
+      // Rider already at customer drop → pickup distance ≈ restaurant→customer (same as DROP).
+      if (
+        customerPoint &&
+        Number.isFinite(Number(customerPoint.lat)) &&
+        Number.isFinite(Number(customerPoint.lng))
+      ) {
+        const toCustomerM = getHaversineDistance(
+          riderLat,
+          riderLng,
+          Number(customerPoint.lat),
+          Number(customerPoint.lng),
+        );
+        if (Number.isFinite(toCustomerM) && toCustomerM <= NEAR_M) {
+          if (hasDropKm) {
+            return { distanceKm: formatKm(dropKmRaw), etaMins: etaFromKm(dropKmRaw) };
+          }
+          if (hasRestaurant) {
+            const toRestFromCustomerM = getHaversineDistance(
+              Number(customerPoint.lat),
+              Number(customerPoint.lng),
+              resLat,
+              resLng,
+            );
+            if (Number.isFinite(toRestFromCustomerM) && toRestFromCustomerM >= 0) {
+              const km = toRestFromCustomerM / 1000;
+              return { distanceKm: formatKm(km), etaMins: etaFromKm(km) };
+            }
+          }
         }
-        const mins = Math.ceil(distM / 416) + (order.prepTime || 5);
-        return {
-          distanceKm: Number(resolvedKm).toFixed(1),
-          etaMins: rawEta && Number(rawEta) > 0 ? Math.ceil(Number(rawEta)) : mins,
-        };
+      }
+
+      // Rider → restaurant (live GPS).
+      if (hasRestaurant) {
+        const toRestM = getHaversineDistance(riderLat, riderLng, resLat, resLng);
+        if (Number.isFinite(toRestM) && toRestM >= 0) {
+          // Snap tiny GPS noise to 0 when already at restaurant.
+          const km = toRestM <= NEAR_M ? 0 : toRestM / 1000;
+          return { distanceKm: formatKm(km), etaMins: etaFromKm(km || 0.1) };
+        }
       }
     }
 
-    if (resolvedKm != null && resolvedKm > 0) {
+    // Fallback: dispatch-time rider→pickup (allows 0).
+    const pickupFromServer = Number(order.pickupDistanceKm);
+    if (Number.isFinite(pickupFromServer) && pickupFromServer >= 0) {
       return {
-        distanceKm: Number(resolvedKm).toFixed(1),
-        etaMins: rawEta && Number(rawEta) > 0
-          ? Math.ceil(Number(rawEta))
-          : Math.ceil((resolvedKm * 1000) / 416) + 5,
+        distanceKm: formatKm(pickupFromServer),
+        etaMins: etaFromKm(pickupFromServer),
       };
     }
 
@@ -155,6 +224,10 @@ export const NewOrderModal = ({ order, onAccept, onReject, onMinimize }) => {
       },
     ];
 
+  const dropDistanceKm = 
+    order?.deliveryDistanceKm != null ? Number(order.deliveryDistanceKm).toFixed(1) : 
+    order?.distanceKm != null ? Number(order.distanceKm).toFixed(1) : '??';
+
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -177,7 +250,8 @@ export const NewOrderModal = ({ order, onAccept, onReject, onMinimize }) => {
 
         <RenderNewOrder 
           order={order} 
-          distanceKm={distanceKm} 
+          distanceKm={distanceKm}
+          dropDistanceKm={dropDistanceKm}
           etaMins={etaMins} 
           timeLeft={timeLeft} 
         />

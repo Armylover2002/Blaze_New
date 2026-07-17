@@ -1,8 +1,10 @@
 import mongoose from 'mongoose';
+import { embeddedWalletTransactionSchema } from '../../../../core/payments/models/embeddedWalletTransaction.schema.js';
 
 /**
  * DeliveryWallet — tracks the financial balance for each delivery partner.
  * Credited when deliveries are completed; debited when settlements are processed.
+ * Embedded `transactions` complements the universal `transactions` collection.
  */
 const deliveryWalletSchema = new mongoose.Schema(
     {
@@ -27,7 +29,9 @@ const deliveryWalletSchema = new mongoose.Schema(
         /** Total amount already settled/paid out to delivery boy */
         totalSettled: { type: Number, default: 0, min: 0 },
         /** Total number of completed deliveries */
-        totalDeliveries: { type: Number, default: 0, min: 0 }
+        totalDeliveries: { type: Number, default: 0, min: 0 },
+        /** Per-document balance mutation history (same wallet document) */
+        transactions: { type: [embeddedWalletTransactionSchema], default: [] }
     },
     { collection: 'food_delivery_wallets', timestamps: true }
 );

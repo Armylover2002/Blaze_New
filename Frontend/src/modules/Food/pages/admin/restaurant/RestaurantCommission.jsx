@@ -50,7 +50,7 @@ export default function RestaurantCommission() {
   const fetchRestaurants = async () => {
     try {
       setIsLoading(true)
-      const response = await adminAPI.getRestaurants({ limit: 1000 })
+      const response = await adminAPI.getRestaurants({ limit: 1000, status: 'approved' })
       const body = response?.data
       const data = body?.data
       

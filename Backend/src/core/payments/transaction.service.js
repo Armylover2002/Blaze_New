@@ -4,6 +4,11 @@ import { FoodUserWallet } from '../../modules/food/user/models/userWallet.model.
 import { FoodRestaurantWallet } from '../../modules/food/restaurant/models/restaurantWallet.model.js';
 import { FoodDeliveryWallet } from '../../modules/food/delivery/models/deliveryWallet.model.js';
 import { FoodAdminWallet } from '../../modules/food/admin/models/adminWallet.model.js';
+import {
+    buildPartnerEmbeddedTxn,
+    buildUserEmbeddedTxn,
+    mapUserEmbeddedType,
+} from './models/embeddedWalletTransaction.schema.js';
 import { logger } from '../../utils/logger.js';
 
 /**
@@ -188,22 +193,73 @@ export async function recordTransactionWithSession(payload, session) {
         throw err;
     }
 
+    // Embedded history on the same wallet document (complements universal Transaction row).
+    // Skip when caller already wrote legacy user embed (metadata.skipEmbeddedHistory).
+    const skipEmbedded = Boolean(metadata?.skipEmbeddedHistory);
+    let embeddedEntry = null;
+    if (!skipEmbedded) {
+        if (entityType === 'user') {
+            embeddedEntry = buildUserEmbeddedTxn({
+                type: mapUserEmbeddedType(type, category),
+                amount,
+                description,
+                metadata: {
+                    ...(metadata && typeof metadata === 'object' ? metadata : {}),
+                    category,
+                    openingBalance: currentBalance,
+                    closingBalance: newBalance,
+                    orderId: orderId ? String(orderId) : undefined,
+                    paymentId: paymentId ? String(paymentId) : undefined,
+                    universalTransactionId: txn?._id ? String(txn._id) : undefined,
+                    ledgerType: type,
+                },
+            });
+        } else {
+            embeddedEntry = buildPartnerEmbeddedTxn({
+                type,
+                amount,
+                openingBalance: currentBalance,
+                closingBalance: newBalance,
+                category,
+                description,
+                orderId: orderOid || orderId || null,
+                paymentId: paymentId || null,
+                referenceId: metadata?.referenceId || metadata?.reference || null,
+                withdrawalId: metadata?.withdrawalId || null,
+                universalTransactionId: txn?._id ? String(txn._id) : null,
+                metadata,
+            });
+        }
+    }
+
+    const pushEmbedded = embeddedEntry
+        ? { $push: { transactions: { $each: [embeddedEntry], $position: 0 } } }
+        : {};
+
     if (type === 'credit') {
         if (entityType === 'restaurant' || entityType === 'deliveryBoy') {
             await Model.updateOne(filter, {
                 $set: { balance: newBalance },
-                $inc: { totalEarnings: amount }
+                $inc: { totalEarnings: amount },
+                ...pushEmbedded,
             }, { session });
         } else if (entityType === 'admin') {
             await Model.updateOne(filter, {
                 $set: { balance: newBalance },
-                $inc: { totalRevenue: amount }
+                $inc: { totalRevenue: amount },
+                ...pushEmbedded,
             }, { session });
         } else {
-            await Model.updateOne(filter, { $set: { balance: newBalance } }, { session });
+            await Model.updateOne(filter, {
+                $set: { balance: newBalance },
+                ...pushEmbedded,
+            }, { session });
         }
     } else {
-        await Model.updateOne(filter, { $set: { balance: newBalance } }, { session });
+        await Model.updateOne(filter, {
+            $set: { balance: newBalance },
+            ...pushEmbedded,
+        }, { session });
     }
 
     if (entityType === 'user') {

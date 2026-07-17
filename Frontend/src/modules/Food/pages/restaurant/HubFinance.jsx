@@ -819,8 +819,12 @@ export default function HubFinance() {
                   ) : (
                     <>
                       <p className="mb-1 text-sm text-gray-400">Available for withdrawal</p>
-                      <p className="mb-6 text-4xl font-black md:text-5xl">
+                      <p className="mb-2 text-4xl font-black md:text-5xl">
                         ₹{(financeData?.earnings?.availableBalance || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </p>
+                      <p className="mb-6 text-xs font-medium text-gray-400 opacity-80">
+                        Limit: Min ₹{minWithdrawalLimit.toLocaleString('en-IN')} 
+                        {maxWithdrawalLimit != null ? ` • Max ₹${maxWithdrawalLimit.toLocaleString('en-IN')}` : ''}
                       </p>
                       <button
                         onClick={() => setShowWithdrawalModal(true)}

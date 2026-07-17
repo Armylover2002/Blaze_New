@@ -1,8 +1,10 @@
 import mongoose from 'mongoose';
+import { embeddedWalletTransactionSchema } from '../../../../core/payments/models/embeddedWalletTransaction.schema.js';
 
 /**
  * RestaurantWallet — tracks the financial balance for each restaurant.
  * Credited when orders are delivered; debited when settlements are processed.
+ * Embedded `transactions` complements the universal `transactions` collection.
  */
 const restaurantWalletSchema = new mongoose.Schema(
     {
@@ -22,7 +24,9 @@ const restaurantWalletSchema = new mongoose.Schema(
         /** Total amount from referrals */
         referralEarnings: { type: Number, default: 0, min: 0 },
         /** Total amount already settled/paid out */
-        totalSettled: { type: Number, default: 0, min: 0 }
+        totalSettled: { type: Number, default: 0, min: 0 },
+        /** Per-document balance mutation history (same wallet document) */
+        transactions: { type: [embeddedWalletTransactionSchema], default: [] }
     },
     { collection: 'food_restaurant_wallets', timestamps: true }
 );

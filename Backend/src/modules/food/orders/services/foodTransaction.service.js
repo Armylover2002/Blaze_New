@@ -801,6 +801,53 @@ export async function settleRestaurantSharesForWithdrawal(
                                             2,
                                         ],
                                     },
+                                    transactions: {
+                                        $concatArrays: [
+                                            [
+                                                {
+                                                    type: 'debit',
+                                                    amount: referralDebited,
+                                                    openingBalance: { $ifNull: ['$balance', 0] },
+                                                    closingBalance: {
+                                                        $max: [
+                                                            0,
+                                                            {
+                                                                $round: [
+                                                                    {
+                                                                        $subtract: [
+                                                                            {
+                                                                                $ifNull: [
+                                                                                    '$balance',
+                                                                                    0,
+                                                                                ],
+                                                                            },
+                                                                            referralDebited,
+                                                                        ],
+                                                                    },
+                                                                    2,
+                                                                ],
+                                                            },
+                                                        ],
+                                                    },
+                                                    category: 'settlement_payout',
+                                                    description:
+                                                        meta.note ||
+                                                        'Restaurant withdrawal (referral earnings)',
+                                                    status: 'completed',
+                                                    withdrawalId: meta.withdrawalId
+                                                        ? String(meta.withdrawalId)
+                                                        : null,
+                                                    metadata: {
+                                                        source: 'restaurant_withdrawal_referral',
+                                                        referralDebited,
+                                                    },
+                                                    createdAt: now,
+                                                    updatedAt: now,
+                                                },
+                                            ],
+                                            { $ifNull: ['$transactions', []] },
+                                        ],
+                                    },
                                 },
                             },
                         ],

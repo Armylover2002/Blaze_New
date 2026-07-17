@@ -8,6 +8,21 @@ import {
   isReturnPickupTrip,
 } from '@/modules/DeliveryV2/utils/orderRouting';
 
+const NEAR_M = 300;
+
+function resolveCustomerPoint(order) {
+  if (!order) return null;
+  const deliveryAddress = order.deliveryAddress || {};
+  return (
+    normalizeLocationPoint(order.customerLocation) ||
+    normalizeLocationPoint(order.dropLocation) ||
+    normalizeLocationPoint(order.delivery) ||
+    normalizeLocationPoint(order.customer_location) ||
+    normalizeLocationPoint(deliveryAddress?.location) ||
+    null
+  );
+}
+
 /**
  * useProximityCheck - Professional hook for dynamic range monitoring.
  * Ensures rider can only advance based on Admin-defined ranges.
@@ -38,12 +53,7 @@ export const useProximityCheck = () => {
       if (isReturnPickupTrip(activeOrder)) {
         return getReturnDropLocation(activeOrder) || normalizeLocationPoint(activeOrder.dropPoint);
       }
-      return (
-        normalizeLocationPoint(activeOrder.customerLocation) ||
-        normalizeLocationPoint(activeOrder.dropLocation) ||
-        normalizeLocationPoint(activeOrder.delivery) ||
-        normalizeLocationPoint(activeOrder.customer_location)
-      );
+      return resolveCustomerPoint(activeOrder);
     }
 
     return null;
@@ -56,18 +66,59 @@ export const useProximityCheck = () => {
     return 500;
   }, [tripStatus, settings]);
 
-  // Calculate real-time distance
+  // Calculate real-time distance (meters)
   const distanceToTarget = useMemo(() => {
     const rider = normalizeLocationPoint(riderLocation);
     if (!rider || !targetLocation) return Infinity;
 
-    return calculateDistance(
+    const liveM = calculateDistance(
       rider.lat,
       rider.lng,
       targetLocation.lat,
       targetLocation.lng,
     );
-  }, [riderLocation, targetLocation]);
+
+    // Going to restaurant: if rider is already at customer drop, show
+    // restaurant→customer road distance so PICKUP matches DROP (~6.6 km).
+    if (['PICKING_UP', 'REACHED_PICKUP'].includes(tripStatus) && activeOrder) {
+      const customer = resolveCustomerPoint(activeOrder);
+      if (customer) {
+        const toCustomerM = calculateDistance(
+          rider.lat,
+          rider.lng,
+          customer.lat,
+          customer.lng,
+        );
+        if (Number.isFinite(toCustomerM) && toCustomerM <= NEAR_M) {
+          const dropKm = Number(
+            activeOrder.deliveryDistanceKm ??
+              activeOrder.pricing?.deliveryDistanceKm ??
+              activeOrder.distanceKm,
+          );
+          if (Number.isFinite(dropKm) && dropKm >= 0) {
+            return dropKm * 1000;
+          }
+          // Fallback: straight-line customer → restaurant
+          const customerToRestM = calculateDistance(
+            customer.lat,
+            customer.lng,
+            targetLocation.lat,
+            targetLocation.lng,
+          );
+          if (Number.isFinite(customerToRestM) && customerToRestM !== Infinity) {
+            return customerToRestM;
+          }
+        }
+      }
+
+      // Already at restaurant — snap GPS noise to ~0 for UI.
+      if (Number.isFinite(liveM) && liveM <= NEAR_M) {
+        return liveM;
+      }
+    }
+
+    return liveM;
+  }, [riderLocation, targetLocation, tripStatus, activeOrder]);
 
   // Dev mode bypass
   const isDevMode = import.meta.env.VITE_APP_MODE === 'developer' ||

@@ -51,10 +51,27 @@ export const formatDeliveryAddressText = (address = {}, fallback = "") => {
 export const normalizeLocationPoint = (value) => {
   if (!value || typeof value !== "object") return null;
 
+  // Prefer explicit lat/lng (socket payload sets these correctly from GeoJSON).
+  // Checking coordinates first can pick swapped [lat,lng] stored by mistake.
+  const explicitLat = Number(value.lat ?? value.latitude);
+  const explicitLng = Number(value.lng ?? value.longitude);
+  if (Number.isFinite(explicitLat) && Number.isFinite(explicitLng)) {
+    return { lat: explicitLat, lng: explicitLng };
+  }
+
   if (Array.isArray(value.coordinates) && value.coordinates.length >= 2) {
-    const lng = Number(value.coordinates[0]);
-    const lat = Number(value.coordinates[1]);
-    if (Number.isFinite(lat) && Number.isFinite(lng)) return { lat, lng };
+    const a = Number(value.coordinates[0]);
+    const b = Number(value.coordinates[1]);
+    if (!Number.isFinite(a) || !Number.isFinite(b)) {
+      // fall through
+    } else {
+      // GeoJSON is [lng, lat]. Swapped [lat, lng] is common in bad data:
+      // for India, lat ≈ 8–35 and lng ≈ 68–97, so |first|<45 & |second|>45 ⇒ swapped.
+      const looksSwapped = Math.abs(a) <= 45 && Math.abs(b) > 45;
+      const lat = looksSwapped ? a : b;
+      const lng = looksSwapped ? b : a;
+      if (Number.isFinite(lat) && Number.isFinite(lng)) return { lat, lng };
+    }
   }
 
   if (value.location && typeof value.location === "object") {
@@ -62,9 +79,6 @@ export const normalizeLocationPoint = (value) => {
     if (nested) return nested;
   }
 
-  const lat = Number(value.lat ?? value.latitude);
-  const lng = Number(value.lng ?? value.longitude);
-  if (Number.isFinite(lat) && Number.isFinite(lng)) return { lat, lng };
   return null;
 };
 

@@ -1,9 +1,11 @@
 import mongoose from 'mongoose';
+import { embeddedWalletTransactionSchema } from '../../../../core/payments/models/embeddedWalletTransaction.schema.js';
 
 /**
  * AdminWallet — tracks the platform's overall financial balance.
  * Credited with platform fees + delivery fee margins on every order.
  * This represents the platform's revenue.
+ * Embedded `transactions` complements the universal `transactions` collection.
  */
 const adminWalletSchema = new mongoose.Schema(
     {
@@ -15,7 +17,9 @@ const adminWalletSchema = new mongoose.Schema(
         /** Total paid out to restaurants + delivery partners */
         totalPayouts: { type: Number, default: 0, min: 0 },
         /** Total refunds issued */
-        totalRefunds: { type: Number, default: 0, min: 0 }
+        totalRefunds: { type: Number, default: 0, min: 0 },
+        /** Per-document balance mutation history (same wallet document) */
+        transactions: { type: [embeddedWalletTransactionSchema], default: [] }
     },
     { collection: 'food_admin_wallets', timestamps: true }
 );
