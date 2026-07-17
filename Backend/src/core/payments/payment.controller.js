@@ -59,7 +59,36 @@ export const getRestaurantWalletController = async (req, res, next) => {
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 20;
         const data = await getWalletWithTransactions('restaurant', restaurantId, { page, limit });
-        return sendResponse(res, 200, 'Restaurant wallet fetched (referral ledger; order earnings via finance API)', data);
+
+        // Dual-ledger: wallet.balance is referral/creditWallet only — attach order payout from food_transactions.
+        const {
+            getRestaurantAvailableWithdrawalBalance,
+            getRestaurantLifetimeOrderEarnings,
+        } = await import(
+            '../../modules/food/restaurant/services/restaurantFinance.service.js'
+        );
+        const [orderPayout, totalOrderEarnings] = await Promise.all([
+            getRestaurantAvailableWithdrawalBalance(restaurantId),
+            getRestaurantLifetimeOrderEarnings(restaurantId),
+        ]);
+
+        return sendResponse(
+            res,
+            200,
+            'Restaurant wallet fetched (referral ledger; order earnings via finance API)',
+            {
+                ...data,
+                ledger: 'referral_subscription',
+                orderPayout: {
+                    availableBalance: orderPayout.availableBalance,
+                    pendingOrderShare: orderPayout.globalEstimatedPayout,
+                    referralEarnings: orderPayout.referralBalance,
+                    totalOrderEarnings,
+                    totalPendingWithdrawals: orderPayout.totalPendingWithdrawals,
+                    source: 'food_transactions',
+                },
+            }
+        );
     } catch (err) {
         next(err);
     }

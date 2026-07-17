@@ -173,6 +173,36 @@ export async function getRestaurantAvailableWithdrawalBalance(
     };
 }
 
+/**
+ * Lifetime restaurant order earnings from `food_transactions` (delivered + captured).
+ * Does not read `food_restaurant_wallets.balance` / `totalEarnings`.
+ */
+export async function getRestaurantLifetimeOrderEarnings(
+    restaurantId,
+    { session = null } = {}
+) {
+    if (!restaurantId || !mongoose.Types.ObjectId.isValid(restaurantId)) {
+        return 0;
+    }
+    const rid = new mongoose.Types.ObjectId(restaurantId);
+
+    let query = FoodTransaction.find({
+        restaurantId: rid,
+        status: { $in: ['captured'] },
+    })
+        .populate('orderId', 'orderStatus deliveryState')
+        .select('amounts.restaurantShare orderId')
+        .lean();
+    if (session) query = query.session(session);
+
+    const txs = await query;
+    const total = txs
+        .filter((tx) => isDeliveredOrderForPayout(tx.orderId))
+        .reduce((sum, tx) => sum + (Number(tx.amounts?.restaurantShare) || 0), 0);
+
+    return Math.round(total * 100) / 100;
+}
+
 function mapTransactionToCycleOrder(tx) {
     const order = tx.orderId || {};
     const items = Array.isArray(order.items) ? order.items : [];
@@ -235,16 +265,27 @@ export async function getRestaurantFinance(restaurantId, query = {}) {
     );
 
     // Global estimated payout: unsettled + delivered only (excludes cancelled / in-progress).
-    const {
-        availableBalance,
-        globalEstimatedPayout,
-        referralBalance,
-        totalPendingWithdrawals,
-    } = await getRestaurantAvailableWithdrawalBalance(restaurantId);
+    // Lifetime order earnings from food_transactions (not wallet.totalEarnings).
+    const [
+        {
+            availableBalance,
+            globalEstimatedPayout,
+            referralBalance,
+            totalPendingWithdrawals,
+        },
+        totalOrderEarnings,
+        wallet,
+    ] = await Promise.all([
+        getRestaurantAvailableWithdrawalBalance(restaurantId),
+        getRestaurantLifetimeOrderEarnings(restaurantId),
+        FoodRestaurantWallet.findOne({ restaurantId: rid })
+            .select('balance referralEarnings totalEarnings')
+            .lean(),
+    ]);
 
-    const wallet = await FoodRestaurantWallet.findOne({ restaurantId: rid })
-        .select('balance referralEarnings totalEarnings')
-        .lean();
+    const referralLifetimeEarnings = Number(wallet?.totalEarnings || 0);
+    const totalEarnings =
+        Math.round((totalOrderEarnings + referralLifetimeEarnings) * 100) / 100;
 
     const currentCycle = {
         start: { ...nowWindow.startMeta },
@@ -308,8 +349,19 @@ export async function getRestaurantFinance(restaurantId, query = {}) {
             availableBalance: availableBalance,
             pendingPayout: globalEstimatedPayout,
             referralEarnings: referralBalance,
-            // Wallet lifetime total (referral / creditWallet only — not order share; see currentCycle)
-            totalEarnings: Number(wallet?.totalEarnings || 0)
+            /** Lifetime delivered order share from food_transactions */
+            totalOrderEarnings,
+            /**
+             * Lifetime total = order ledger + referral credits on wallet.
+             * Not wallet.totalEarnings alone (that field excludes order share).
+             */
+            totalEarnings,
+            /** Dual-ledger snapshot — referral/subscription wallet only */
+            walletLedger: {
+                balance: Number(wallet?.balance || 0),
+                referralEarnings: Number(wallet?.referralEarnings || 0),
+                totalEarnings: referralLifetimeEarnings,
+            },
         },
         withdrawalLimits: {
             min: restaurantMinWithdrawalLimit,
