@@ -6133,6 +6133,16 @@ export async function completeDelivery(orderId, deliveryPartnerId, body = {}) {
     note: `Delivery completed. Prev status: ${prevPayStatus}`
   });
 
+  // Restaurant Quick Share → settlement component only (never restaurant wallet).
+  // Idempotent; no-op when share is 0 / missing (historical orders).
+  try {
+    await foodTransactionService.realizeFoodQuickRestaurantShare(order);
+  } catch (err) {
+    logger.warn(
+      `[QuickFinance] realize restaurant share failed for ${order.orderId || order._id}: ${err?.message || err}`,
+    );
+  }
+
   await consumeOrderCouponUsageOnDelivery(order, order.userId);
   emitOrderUpdate(order, deliveryPartnerId);
   enqueueOrderEvent('delivery_completed', {
