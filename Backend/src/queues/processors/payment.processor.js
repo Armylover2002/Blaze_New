@@ -48,7 +48,10 @@ export const processPaymentJob = async (job) => {
 
 /**
  * After delivery is completed and payment is confirmed:
- * Split money to all parties.
+ * Credit delivery partner + platform wallets only.
+ *
+ * Restaurant order share stays on `food_transactions` (captured on delivery in
+ * order.service). It is intentionally NOT credited to `food_restaurant_wallets`.
  */
 async function handleDeliveryCompleted(data) {
     const {

@@ -1,16 +1,53 @@
 import mongoose from 'mongoose';
 import { Settlement } from './models/settlement.model.js';
-import { Transaction } from './models/transaction.model.js';
-import { debitWallet, unlockWalletAmount } from './wallet.service.js';
+import { debitWallet } from './wallet.service.js';
 import { logger } from '../../utils/logger.js';
 
 /**
- * Create a settlement (payout request) for a restaurant or delivery partner.
- * Locks the settlement amount in their wallet until processed.
+ * Legacy generic settlement batch API (`settlements` collection).
+ *
+ * FOOD RESTAURANTS — DO NOT USE for payouts.
+ * Canonical restaurant payout flow:
+ *   POST /food/restaurant/withdraw
+ *   PATCH /food/admin/withdrawals/:id  → settleRestaurantSharesForWithdrawal
+ *   (food_restaurant_withdrawals + food_transactions settlement flags)
+ *
+ * Creating/processing entityType=restaurant via this service is rejected.
+ * Delivery-boy usage is legacy; prefer /food/delivery/wallet/withdraw +
+ * /food/admin/delivery/withdrawals when possible.
+ */
+
+export const RESTAURANT_SETTLEMENT_DEPRECATED_MESSAGE =
+    'Restaurant settlements via /food/payments/admin/settlements are deprecated. ' +
+    'Use restaurant withdrawals: POST /food/restaurant/withdraw and ' +
+    'PATCH /food/admin/withdrawals/:id (food_transactions ledger).';
+
+export const RESTAURANT_PAYOUT_SUCCESSORS = {
+    restaurantWithdraw: '/api/v1/food/restaurant/withdraw',
+    restaurantWithdrawals: '/api/v1/food/restaurant/withdrawals',
+    adminWithdrawals: '/api/v1/food/admin/withdrawals',
+    finance: '/api/v1/food/restaurant/finance',
+};
+
+function throwRestaurantSettlementDeprecated() {
+    const err = new Error(RESTAURANT_SETTLEMENT_DEPRECATED_MESSAGE);
+    err.statusCode = 410;
+    err.code = 'RESTAURANT_SETTLEMENT_DEPRECATED';
+    err.useInstead = RESTAURANT_PAYOUT_SUCCESSORS;
+    throw err;
+}
+
+/**
+ * Create a settlement (payout request) for a delivery partner (legacy).
+ * Restaurant entityType is blocked — use food restaurant withdrawals instead.
  */
 export async function createSettlement({ entityType, entityId, amount, notes = '', periodStart, periodEnd }) {
     if (!['restaurant', 'deliveryBoy'].includes(entityType)) {
         throw new Error('Settlements only for restaurant or deliveryBoy');
+    }
+
+    if (entityType === 'restaurant') {
+        throwRestaurantSettlementDeprecated();
     }
 
     const settlement = await Settlement.create({
@@ -30,12 +67,17 @@ export async function createSettlement({ entityType, entityId, amount, notes = '
 
 /**
  * Process a settlement — debit entity wallet + mark as processed.
+ * Restaurant settlements are blocked (use withdrawal approval flow).
  */
 export async function processSettlement(settlementId, { processedBy, payoutRef = '' } = {}) {
     const settlement = await Settlement.findById(settlementId);
     if (!settlement) throw new Error('Settlement not found');
     if (settlement.status === 'processed') return settlement.toObject();
     if (settlement.status === 'failed') throw new Error('Cannot process a failed settlement');
+
+    if (settlement.entityType === 'restaurant') {
+        throwRestaurantSettlementDeprecated();
+    }
 
     try {
         // Debit the entity's wallet
@@ -64,6 +106,7 @@ export async function processSettlement(settlementId, { processedBy, payoutRef =
         logger.info(`Settlement processed: ${settlementId} payoutRef=${payoutRef}`);
         return settlement.toObject();
     } catch (err) {
+        if (err?.code === 'RESTAURANT_SETTLEMENT_DEPRECATED') throw err;
         settlement.status = 'failed';
         settlement.metadata = { error: err.message };
         await settlement.save();
@@ -74,7 +117,6 @@ export async function processSettlement(settlementId, { processedBy, payoutRef =
 function resolveWalletForSettlement(entityType, entityId) {
     const id = new mongoose.Types.ObjectId(entityId);
     if (entityType === 'restaurant') {
-        // Dynamic import would be circular — import at top
         return {
             Model: mongoose.model('FoodRestaurantWallet'),
             filter: { restaurantId: id }
@@ -90,7 +132,7 @@ function resolveWalletForSettlement(entityType, entityId) {
 }
 
 /**
- * List settlements with filters.
+ * List settlements with filters (legacy collection; restaurant payouts live elsewhere).
  */
 export async function listSettlements({ entityType, entityId, status, page = 1, limit = 20 } = {}) {
     const filter = {};
@@ -109,7 +151,10 @@ export async function listSettlements({ entityType, entityId, status, page = 1, 
         total,
         page,
         limit,
-        totalPages: Math.ceil(total / limit)
+        totalPages: Math.ceil(total / limit) || 0,
+        note:
+            'Legacy settlements collection. Food restaurant payouts use food_restaurant_withdrawals + food_transactions.',
+        restaurantPayoutUseInstead: RESTAURANT_PAYOUT_SUCCESSORS,
     };
 }
 

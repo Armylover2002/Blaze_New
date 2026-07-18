@@ -6,11 +6,12 @@ import { exportCustomersToCSV, exportCustomersToExcel, exportCustomersToPDF, exp
 import { adminAPI } from "@food/api"
 import { toast } from "sonner"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@food/components/ui/dialog"
+import { PAGE_SIZE as PAGINATION_PAGE_SIZE } from "@/shared/constants/pagination"
 const debugLog = (...args) => { }
 const debugWarn = (...args) => { }
 const debugError = (...args) => { }
 
-const PAGE_SIZE = 50
+const PAGE_SIZE = PAGINATION_PAGE_SIZE.FIFTY
 
 export default function Customers() {
   const [searchQuery, setSearchQuery] = useState("")

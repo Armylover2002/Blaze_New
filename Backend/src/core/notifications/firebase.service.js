@@ -218,6 +218,50 @@ const normalizeTokenList = (tokens = []) => {
     return normalized.slice(-10);
 };
 
+/**
+ * FCM tokens are typically "<installationId>:<credential>".
+ * Same installation can rotate the credential; treat that as one device.
+ */
+export const getFcmTokenInstanceId = (token) => {
+    const normalized = sanitizeString(token);
+    if (!normalized) return '';
+    const colonIndex = normalized.indexOf(':');
+    if (colonIndex > 0) return normalized.slice(0, colonIndex);
+    return normalized;
+};
+
+/**
+ * Merge a device token into an existing list:
+ * - exact match → no change (unless collapsing same-device siblings)
+ * - same installation id → replace old token (token refresh)
+ * - otherwise → append (multi-device)
+ * Caps at 10 unique tokens. Also collapses any existing same-installation dupes.
+ */
+export const mergeDeviceToken = (existingTokens = [], newToken) => {
+    const normalizedToken = sanitizeString(newToken);
+    const previous = (Array.isArray(existingTokens) ? existingTokens : [])
+        .map(sanitizeString)
+        .filter(Boolean);
+    const prevNormalized = normalizeTokenList(previous);
+
+    const byInstance = new Map();
+    for (const token of previous) {
+        byInstance.set(getFcmTokenInstanceId(token), token);
+    }
+
+    if (normalizedToken) {
+        byInstance.set(getFcmTokenInstanceId(normalizedToken), normalizedToken);
+    }
+
+    const tokens = normalizeTokenList([...byInstance.values()]);
+    const changed =
+        tokens.length !== prevNormalized.length ||
+        tokens.some((token) => !prevNormalized.includes(token)) ||
+        prevNormalized.some((token) => !tokens.includes(token));
+
+    return { tokens, changed };
+};
+
 const readTokensFromDoc = (doc, platform) => {
     if (!doc) return [];
     if (platform) {
@@ -262,13 +306,17 @@ export const upsertFirebaseDeviceToken = async ({ ownerType, ownerId, token, pla
     const field = getTokenFieldForPlatform(normalizedPlatform);
     const existingTokens = Array.isArray(doc[field]) ? doc[field] : [];
     console.log(`[FCM-DEBUG] upsert - Current tokens in DB count: ${existingTokens.length}`);
-    
-    const tokens = normalizeTokenList([...existingTokens, normalizedToken]);
+
+    const { tokens, changed } = mergeDeviceToken(existingTokens, normalizedToken);
+    if (!changed) {
+        console.log('[FCM-DEBUG] upsert - Token unchanged; skipping save');
+        return { success: true, unchanged: true };
+    }
+
     doc[field] = tokens;
-    
     await doc.save();
     console.log(`[FCM-DEBUG] upsert - Token list updated. New count: ${tokens.length}`);
-    return { success: true };
+    return { success: true, unchanged: false };
 };
 
 export const removeFirebaseDeviceToken = async ({ ownerType, ownerId, token, platform }) => {

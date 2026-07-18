@@ -5,6 +5,7 @@ import { toast } from "sonner"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@food/components/ui/dropdown-menu"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@food/components/ui/dialog"
 import { exportReportsToCSV, exportReportsToExcel, exportReportsToPDF, exportReportsToJSON } from "@food/components/admin/reports/reportsExportUtils"
+import { PAGE_SIZE as PAGINATION_PAGE_SIZE } from "@/shared/constants/pagination"
 import searchIcon from "@food/assets/Dashboard-icons/image8.png"
 import exportIcon from "@food/assets/Dashboard-icons/image9.png"
 import scheduledIcon from "@food/assets/Dashboard-icons/image24.png"
@@ -34,7 +35,7 @@ const statusMeta = {
   Refunded: { label: "Refunded", color: "text-teal-600", bg: "bg-teal-50", icon: refundedIcon },
 }
 
-const PAGE_SIZE = 25
+const PAGE_SIZE = PAGINATION_PAGE_SIZE.THIRTY
 
 const EMPTY_STATUS_COUNTS = {
   total: 0,

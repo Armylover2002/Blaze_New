@@ -4,6 +4,7 @@ import { useToast } from "@shared/components/ui/Toast";
 import { useAuth } from "@core/context/AuthContext";
 import { getCurrentUser } from "@food/utils/auth";
 import { canPerformAdminPermissionAction, extractAdminPermissions, extractAdminRoleId, fetchAdminRolePermissions } from "@food/utils/adminPermissions";
+import { PAGINATION_CONFIG } from "@/shared/constants/pagination";
 
 export default function SupportTickets() {
   const { showToast } = useToast();
@@ -46,7 +47,7 @@ export default function SupportTickets() {
   const [tickets, setTickets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
-  const [limit, setLimit] = useState(25);
+  const [limit, setLimit] = useState(PAGINATION_CONFIG.defaultPageSize);
   const [total, setTotal] = useState(0);
   const [filters, setFilters] = useState({ status: "", type: "", search: "" });
   const [drafts, setDrafts] = useState({});

@@ -11,6 +11,7 @@ import { FoodTransaction } from "../../food/orders/models/foodTransaction.model.
 import { getDeliveryCashLimitSettings } from "../../food/admin/services/admin.service.js";
 import { getDeliveryPartnerWalletEnhanced } from "../../food/delivery/services/deliveryFinance.service.js";
 import { recoverNegativeBalanceOnSettlement } from "./sellerLedger.service.js";
+import { PAGINATION_DEFAULTS, buildPaginationOptions } from "../../../utils/helpers.js";
 
 const ACTIVE_ORDER_FILTER = {
   orderType: { $in: ["quick", "mixed"] },
@@ -212,9 +213,11 @@ const mapQuickSellerFinanceEntry = (txn) => {
   };
 };
 
-export async function getQuickCommerceFinanceLedger({ page = 1, limit = 25 } = {}) {
-  const safePage = Math.max(1, Number(page) || 1);
-  const safeLimit = Math.max(1, Math.min(200, Number(limit) || 25));
+export async function getQuickCommerceFinanceLedger({ page = 1, limit = PAGINATION_DEFAULTS.defaultLimit } = {}) {
+  const { page: safePage, limit: safeLimit } = buildPaginationOptions(
+    { page, limit },
+    { defaultLimit: PAGINATION_DEFAULTS.defaultLimit, maxLimit: 200 }
+  );
   const fetchLimit = Math.min(1000, safePage * safeLimit * 3);
 
   // QC wallet page should show only pure quick-commerce parent orders,
@@ -358,13 +361,14 @@ export async function getQuickCommerceFinancePayouts({
 
 export async function getQuickCommerceSellerWithdrawals({
   page = 1,
-  limit = 25,
+  limit = PAGINATION_DEFAULTS.defaultLimit,
   status,
   search,
 } = {}) {
-  const safePage = Math.max(1, Number(page) || 1);
-  const safeLimit = Math.max(1, Math.min(100, Number(limit) || 25));
-  const skip = (safePage - 1) * safeLimit;
+  const { page: safePage, limit: safeLimit, skip } = buildPaginationOptions(
+    { page, limit },
+    { defaultLimit: PAGINATION_DEFAULTS.defaultLimit, maxLimit: 100 }
+  );
   const filter = {
     type: "Withdrawal",
     ...sellerStatusFilter(status),
@@ -426,15 +430,16 @@ export async function getQuickCommerceSellerWithdrawals({
 
 export async function getQuickCommerceSellerTransactions({
   page = 1,
-  limit = 25,
+  limit = PAGINATION_DEFAULTS.defaultLimit,
   status,
   type,
   search,
   sellerId,
 } = {}) {
-  const safePage = Math.max(1, Number(page) || 1);
-  const safeLimit = Math.max(1, Math.min(200, Number(limit) || 25));
-  const skip = (safePage - 1) * safeLimit;
+  const { page: safePage, limit: safeLimit, skip } = buildPaginationOptions(
+    { page, limit },
+    { defaultLimit: PAGINATION_DEFAULTS.defaultLimit, maxLimit: 200 }
+  );
 
   const normalizedStatus = String(status || "").trim().toLowerCase();
   const normalizedType = String(type || "").trim().toLowerCase();
@@ -629,13 +634,14 @@ export async function getQuickCommerceSellerTransactions({
 
 export async function getQuickCommerceDeliveryWithdrawals({
   page = 1,
-  limit = 25,
+  limit = PAGINATION_DEFAULTS.defaultLimit,
   status,
   search,
 } = {}) {
-  const safePage = Math.max(1, Number(page) || 1);
-  const safeLimit = Math.max(1, Math.min(100, Number(limit) || 25));
-  const skip = (safePage - 1) * safeLimit;
+  const { page: safePage, limit: safeLimit, skip } = buildPaginationOptions(
+    { page, limit },
+    { defaultLimit: PAGINATION_DEFAULTS.defaultLimit, maxLimit: 100 }
+  );
   const filter = deliveryStatusFilter(status);
 
   const term = String(search || "").trim();
@@ -694,12 +700,13 @@ export async function getQuickCommerceDeliveryWithdrawals({
 
 export async function getQuickCommerceDeliveryCashBalances({
   page = 1,
-  limit = 25,
+  limit = PAGINATION_DEFAULTS.defaultLimit,
   search = "",
 } = {}) {
-  const safePage = Math.max(1, Number(page) || 1);
-  const safeLimit = Math.max(1, Math.min(100, Number(limit) || 25));
-  const skip = (safePage - 1) * safeLimit;
+  const { page: safePage, limit: safeLimit, skip } = buildPaginationOptions(
+    { page, limit },
+    { defaultLimit: PAGINATION_DEFAULTS.defaultLimit, maxLimit: 100 }
+  );
   const searchTerm = String(search || "").trim();
   const partnerFilter = { status: "approved" };
   if (searchTerm) {
@@ -802,12 +809,13 @@ export async function getQuickCommerceDeliveryCashBalances({
 
 export async function getQuickCommerceCashSettlementHistory({
   page = 1,
-  limit = 25,
+  limit = PAGINATION_DEFAULTS.defaultLimit,
   search = "",
 } = {}) {
-  const safePage = Math.max(1, Number(page) || 1);
-  const safeLimit = Math.max(1, Math.min(100, Number(limit) || 25));
-  const skip = (safePage - 1) * safeLimit;
+  const { page: safePage, limit: safeLimit, skip } = buildPaginationOptions(
+    { page, limit },
+    { defaultLimit: PAGINATION_DEFAULTS.defaultLimit, maxLimit: 100 }
+  );
   const searchTerm = String(search || "").trim();
   const filter = { status: "Completed" };
 

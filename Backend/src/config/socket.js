@@ -79,8 +79,51 @@ export const initSocket = async (server) => {
                 tokenPreview: maskToken(token),
             });
             const decoded = verifyAccessToken(token);
+            if (decoded?.purpose === 'restaurant_onboarding') {
+                return next(new Error('AUTH_INVALID'));
+            }
             const normalizedRole = String(decoded.role || '').trim().toUpperCase();
             const userId = decoded.userId || decoded.sub;
+            if (!userId) {
+                return next(new Error('AUTH_INVALID'));
+            }
+
+            // Live account-status check (mirrors HTTP authMiddleware)
+            if (normalizedRole === 'USER') {
+                const { FoodUser } = await import('../core/users/user.model.js');
+                const doc = await FoodUser.findById(userId).select('isActive').lean();
+                if (!doc || doc.isActive === false) {
+                    return next(new Error('AUTH_INACTIVE'));
+                }
+            } else if (normalizedRole === 'DELIVERY_PARTNER') {
+                const { FoodDeliveryPartner } = await import('../modules/food/delivery/models/deliveryPartner.model.js');
+                const doc = await FoodDeliveryPartner.findById(userId).select('isActive').lean();
+                if (!doc || doc.isActive === false) {
+                    return next(new Error('AUTH_INACTIVE'));
+                }
+            } else if (normalizedRole === 'ADMIN' || normalizedRole === 'EMPLOYEE') {
+                const { FoodAdmin } = await import('../core/admin/admin.model.js');
+                const doc = await FoodAdmin.findById(userId).select('isActive').lean();
+                if (!doc || doc.isActive === false) {
+                    return next(new Error('AUTH_INACTIVE'));
+                }
+            } else if (normalizedRole === 'RESTAURANT') {
+                const { FoodRestaurant } = await import('../modules/food/restaurant/models/restaurant.model.js');
+                const doc = await FoodRestaurant.findById(userId)
+                    .select('status isActive isDeleted accountStatus')
+                    .lean();
+                if (!doc || doc.isDeleted === true || doc.accountStatus === 'deleted') {
+                    return next(new Error('AUTH_INACTIVE'));
+                }
+                const status = String(doc.status || '').toLowerCase();
+                if (status === 'rejected') {
+                    return next(new Error('AUTH_INACTIVE'));
+                }
+                if (doc.isActive === false && status !== 'pending') {
+                    return next(new Error('AUTH_INACTIVE'));
+                }
+            }
+
             socket.user = { userId, role: decoded.role, authType: 'food' };
             socket.auth = {
                 sub: userId,

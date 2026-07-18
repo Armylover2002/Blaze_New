@@ -1,5 +1,5 @@
 import { FoodRestaurant } from '../models/restaurant.model.js';
-import { FoodRestaurantWallet } from '../models/restaurantWallet.model.js';
+import { FoodRestaurantWallet, ensureRestaurantWallet } from '../models/restaurantWallet.model.js';
 import { FoodReferralSettings } from '../../admin/models/referralSettings.model.js';
 import { FoodReferralLog } from '../../admin/models/referralLog.model.js';
 import { attachOutletTimingsToRestaurants, syncOutletTimingsFromOpenDays } from './outletTimings.service.js';
@@ -1573,6 +1573,15 @@ export const registerRestaurant = async (payload, files, authUserId) => {
             });
         } catch (e) {
             console.error('Failed to notify admins of new restaurant registration:', e);
+        }
+
+        // Zero-balance wallet row so food_restaurant_wallets is always present for this restaurant.
+        try {
+            await ensureRestaurantWallet(restaurant._id);
+        } catch (e) {
+            logger.warn(
+                `Failed to initialize restaurant wallet for ${restaurant._id}: ${e?.message || e}`
+            );
         }
 
         return restaurant.toObject();

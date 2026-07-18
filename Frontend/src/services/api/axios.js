@@ -67,6 +67,15 @@ function getAccessToken(config) {
   const module = getModuleFromConfig(config);
   const key = `${module}_accessToken`;
   try {
+    // OTP registration token for onboarding draft/step and final /register (not a session JWT).
+    if (module === "restaurant") {
+      const url = String(config?.url || "").toLowerCase();
+      if (url.includes("/onboarding/") || url.includes("/restaurant/register")) {
+        const registrationToken = sessionStorage.getItem("restaurant_registrationToken");
+        if (registrationToken) return registrationToken;
+      }
+    }
+
     const moduleToken = localStorage.getItem(key);
     if (moduleToken) return moduleToken;
     
@@ -198,9 +207,16 @@ apiClient.interceptors.response.use(
       const refreshUrl = baseURL ? `${baseURL}/food/auth/refresh-token` : "/api/v1/food/auth/refresh-token";
       const { data } = await axios.post(refreshUrl, { refreshToken }, { timeout: 10000 });
       const newAccessToken = data?.data?.accessToken || data?.accessToken;
+      const newRefreshToken = data?.data?.refreshToken || data?.refreshToken;
       if (newAccessToken) {
         try {
           localStorage.setItem(`${module}_accessToken`, newAccessToken);
+          if (newRefreshToken) {
+            localStorage.setItem(`${module}_refreshToken`, newRefreshToken);
+            if (module === "user") {
+              localStorage.setItem("refreshToken", newRefreshToken);
+            }
+          }
           
           if (module === "admin") {
             localStorage.setItem("adminToken", newAccessToken);

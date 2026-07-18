@@ -14,6 +14,7 @@ import { bulkWriteInChunks } from '../../../../core/notifications/utils/bulkWrit
 import { getTopicChannelFlagsByOwnerTypes } from './notificationChannel.service.js';
 import { getIO, rooms } from '../../../../config/socket.js';
 import { logger } from '../../../../utils/logger.js';
+import { buildPaginationMeta, buildPaginationOptions } from '../../../../utils/helpers.js';
 
 /** Audience / delivery batch size — keeps peak memory nearly constant. */
 const BROADCAST_BATCH_SIZE = 750;
@@ -348,13 +349,12 @@ const emitRealtimeNotificationsBatch = async (targets = [], broadcast) => {
 };
 
 const paginationMeta = ({ page = 1, limit = 10 } = {}) => {
-    const nextPage = Math.max(1, Number(page) || 1);
-    const nextLimit = Math.max(1, Math.min(100, Number(limit) || 10));
-    return {
-        page: nextPage,
-        limit: nextLimit,
-        skip: (nextPage - 1) * nextLimit
-    };
+    const { page: nextPage, limit: nextLimit, skip } = buildPaginationOptions(
+        { page, limit },
+        { defaultLimit: 10, maxLimit: 100 }
+    );
+
+    return { page: nextPage, limit: nextLimit, skip };
 };
 
 export const createBroadcastNotification = async ({
@@ -643,7 +643,8 @@ export const getBroadcastNotifications = async ({ page = 1, limit = 10 } = {}) =
             page: meta.page,
             limit: meta.limit,
             total,
-            totalPages: Math.max(1, Math.ceil(total / meta.limit))
+            totalItems: total,
+            ...buildPaginationMeta({ totalItems: total, page: meta.page, limit: meta.limit })
         }
     };
 };

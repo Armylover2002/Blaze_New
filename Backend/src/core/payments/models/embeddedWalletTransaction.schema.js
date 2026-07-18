@@ -4,6 +4,10 @@ import mongoose from 'mongoose';
  * Embedded wallet ledger entry (stored on the wallet document itself).
  * Complements the universal `transactions` collection — does not replace it.
  * Not a separate Mongo collection.
+ *
+ * For FoodRestaurantWallet: entries are referral / subscription / withdrawal
+ * settlement audit only. Order earnings are NOT written here on delivery —
+ * those live on `food_transactions`.
  */
 export const embeddedWalletTransactionSchema = new mongoose.Schema(
     {

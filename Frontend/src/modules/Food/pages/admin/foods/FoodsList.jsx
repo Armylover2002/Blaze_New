@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@food/componen
 import { Popover, PopoverContent, PopoverTrigger } from "@food/components/ui/popover"
 import { getFoodDisplayPrice, getFoodVariants } from "@food/utils/foodVariants"
 import ApprovalAuditCard from "@food/components/admin/ApprovalAuditCard"
+import { PAGINATION_CONFIG } from "@/shared/constants/pagination"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -108,7 +109,7 @@ export default function FoodsList() {
   const [selectedImageFile, setSelectedImageFile] = useState(null)
   const [imagePreviewUrl, setImagePreviewUrl] = useState("")
   const [currentPage, setCurrentPage] = useState(1)
-  const [pageSize, setPageSize] = useState(20)
+  const [pageSize, setPageSize] = useState(PAGINATION_CONFIG.defaultPageSize)
   const [imageVersion, setImageVersion] = useState(() => Date.now())
 
   const getItemCreatedMs = (item = {}) => {
@@ -750,9 +751,9 @@ export default function FoodsList() {
                 onChange={(e) => setPageSize(Number(e.target.value))}
                 className="px-2.5 py-1.5 text-sm rounded-md border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-slate-400"
               >
-                <option value={10}>10 / page</option>
-                <option value={20}>20 / page</option>
-                <option value={50}>50 / page</option>
+                {PAGINATION_CONFIG.allowedPageSizeOptions.map((size) => (
+                  <option key={size} value={size}>{size} / page</option>
+                ))}
               </select>
 
               <button

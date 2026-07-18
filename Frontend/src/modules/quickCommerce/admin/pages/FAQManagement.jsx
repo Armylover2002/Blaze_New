@@ -30,6 +30,7 @@ import { cn } from '@/lib/utils';
 import { useToast } from '@shared/components/ui/Toast';
 import { motion, AnimatePresence } from 'framer-motion';
 import Pagination from '@shared/components/ui/Pagination';
+import { PAGINATION_CONFIG } from '@/shared/constants/pagination';
 import { adminApi } from '../services/adminApi';
 import { useAuth } from "@core/context/AuthContext";
 import { getCurrentUser } from "@food/utils/auth";
@@ -119,7 +120,7 @@ const FAQManagement = () => {
 
     const [faqs, setFaqs] = useState([]);
     const [page, setPage] = useState(1);
-    const [pageSize, setPageSize] = useState(25);
+    const [pageSize, setPageSize] = useState(PAGINATION_CONFIG.defaultPageSize);
     const [total, setTotal] = useState(0);
 
     useEffect(() => {

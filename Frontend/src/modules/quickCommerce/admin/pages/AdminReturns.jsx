@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import Card from "@shared/components/ui/Card";
 import Badge from "@shared/components/ui/Badge";
 import Pagination from "@shared/components/ui/Pagination";
+import { PAGINATION_CONFIG } from "@/shared/constants/pagination";
 import { adminApi } from "../services/adminApi";
 import { toast } from "sonner";
 import {
@@ -37,7 +38,7 @@ const AdminReturns = () => {
   const [refundLoading, setRefundLoading] = useState(false);
   const [confirmPayoutLoading, setConfirmPayoutLoading] = useState(false);
   const [page, setPage] = useState(1);
-  const [pageSize] = useState(25);
+  const [pageSize] = useState(PAGINATION_CONFIG.defaultPageSize);
   const [total, setTotal] = useState(0);
   const [statusFilter, setStatusFilter] = useState("");
   const [refundMethodFilter, setRefundMethodFilter] = useState("all");

@@ -3,6 +3,7 @@ import Card from '@shared/components/ui/Card';
 import Badge from '@shared/components/ui/Badge';
 import Modal from '@shared/components/ui/Modal';
 import Pagination from '@shared/components/ui/Pagination';
+import { PAGINATION_CONFIG } from '@/shared/constants/pagination';
 import { adminApi } from '../services/adminApi';
 import { toast } from 'sonner';
 import { Loader2 } from 'lucide-react';
@@ -43,7 +44,7 @@ const SellerTransactions = () => {
     const [isExporting, setIsExporting] = useState(false);
     const [transactions, setTransactions] = useState([]);
     const [page, setPage] = useState(1);
-    const [pageSize, setPageSize] = useState(25);
+    const [pageSize, setPageSize] = useState(PAGINATION_CONFIG.defaultPageSize);
     const [total, setTotal] = useState(0);
     const [loading, setLoading] = useState(true);
 

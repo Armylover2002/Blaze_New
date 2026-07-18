@@ -23,6 +23,7 @@ function resolveWallet(entityType, entityId) {
         }
         case 'restaurant': {
             const id = new mongoose.Types.ObjectId(entityId);
+            // Order earnings are NOT credited here — see FoodTransaction + restaurantFinance.service.
             return { Model: FoodRestaurantWallet, filter: { restaurantId: id }, idField: 'restaurantId' };
         }
         case 'deliveryBoy': {

@@ -1,12 +1,27 @@
+/**
+ * Restaurant finance (Hub / payouts) — reads order earnings from `food_transactions`,
+ * not from `food_restaurant_wallets.balance`.
+ *
+ * Available withdrawal = sum(unsettled delivered `restaurantShare`) + wallet
+ * `referralEarnings` − pending/processing withdrawals.
+ *
+ * An empty `food_restaurant_wallets` collection after orders-only activity is
+ * expected for legacy restaurants; new ones get a zero-balance row on register/
+ * approve. Wallet balances still do not hold order earnings.
+ *
+ * On Hub Finance / withdrawal reads, `selfHealRestaurantFinanceLedger` repairs
+ * missed capture + Quick Share on food_transactions (never creditWallet order earnings).
+ */
 import mongoose from 'mongoose';
-import { FoodOrder } from '../../orders/models/order.model.js';
 import { FoodTransaction } from '../../orders/models/foodTransaction.model.js';
 import { FoodRestaurant } from '../models/restaurant.model.js';
-import { FoodRestaurantWallet } from '../models/restaurantWallet.model.js';
+import { FoodRestaurantWallet, ensureRestaurantWallet } from '../models/restaurantWallet.model.js';
 import { FoodRestaurantWithdrawal } from '../models/foodRestaurantWithdrawal.model.js';
 import { FoodDailyPass } from '../../subscriptions/models/foodDailyPass.model.js';
 import { FoodWalletLedger } from '../../subscriptions/models/foodWalletLedger.model.js';
 import { getRestaurantWithdrawalLimitSettings } from '../../admin/services/admin.service.js';
+import { realizeFoodQuickRestaurantShare } from '../../orders/services/foodTransaction.service.js';
+import { logger } from '../../../../utils/logger.js';
 import dayjs from 'dayjs';
 import timezone from 'dayjs/plugin/timezone.js';
 import utc from 'dayjs/plugin/utc.js';
@@ -86,6 +101,227 @@ function isDeliveredOrderForPayout(orderLike) {
     return phase === 'delivered';
 }
 
+/**
+ * Self-heal restaurant finance ledger (Option A — not wallet.balance credits).
+ *
+ * Mirrors delivery wallet self-heal, but repairs `food_transactions`:
+ * 1. Ensure zero-balance wallet row exists
+ * 2. Mark delivered-order txs as `captured` if still pending/authorized
+ * 3. Realize missed Quick Restaurant Share into restaurantShare
+ *
+ * Never calls creditWallet for restaurant order earnings.
+ */
+export async function selfHealRestaurantFinanceLedger(restaurantId) {
+    if (!restaurantId || !mongoose.Types.ObjectId.isValid(String(restaurantId))) {
+        return { healedCapture: 0, healedQuickShare: 0 };
+    }
+
+    const rid = new mongoose.Types.ObjectId(String(restaurantId));
+    let healedCapture = 0;
+    let healedQuickShare = 0;
+
+    try {
+        await ensureRestaurantWallet(rid);
+
+        const candidates = await FoodTransaction.find({
+            restaurantId: rid,
+            $or: [
+                { status: { $in: ['pending', 'authorized'] } },
+                { 'amounts.quickRestaurantShareRealized': { $ne: true } },
+            ],
+        })
+            .populate('orderId', 'orderStatus deliveryState pricing.quickRestaurantShare orderId')
+            .select('orderId status amounts.quickRestaurantShareRealized amounts.quickRestaurantShare')
+            .sort({ createdAt: -1 })
+            .limit(200)
+            .lean();
+
+        for (const tx of candidates) {
+            const order = tx.orderId;
+            if (!isDeliveredOrderForPayout(order)) continue;
+
+            const status = String(tx.status || '').trim().toLowerCase();
+            if (status === 'pending' || status === 'authorized') {
+                const captured = await FoodTransaction.updateOne(
+                    {
+                        _id: tx._id,
+                        status: { $in: ['pending', 'authorized'] },
+                    },
+                    {
+                        $set: { status: 'captured' },
+                        $push: {
+                            history: {
+                                kind: 'payment_snapshot_sync',
+                                at: new Date(),
+                                note: 'Self-heal: delivered order transaction marked captured',
+                            },
+                        },
+                    }
+                );
+                if (captured.modifiedCount > 0) {
+                    healedCapture += 1;
+                    logger.info(
+                        `[RestaurantFinance] Self-healed capture for tx ${tx._id} restaurant ${rid}`
+                    );
+                }
+            }
+
+            const share =
+                Math.round(
+                    (Number(
+                        order?.pricing?.quickRestaurantShare ??
+                            tx.amounts?.quickRestaurantShare ??
+                            0
+                    ) || 0) * 100
+                ) / 100;
+
+            if (!(share > 0) || tx.amounts?.quickRestaurantShareRealized === true) {
+                continue;
+            }
+
+            try {
+                const updated = await realizeFoodQuickRestaurantShare({
+                    _id: order?._id || tx.orderId,
+                    pricing: {
+                        quickRestaurantShare: share,
+                    },
+                    amounts: {
+                        quickRestaurantShare: share,
+                    },
+                });
+                if (updated) {
+                    healedQuickShare += 1;
+                    logger.info(
+                        `[RestaurantFinance] Self-healed Quick Share ₹${share} for order ${order?.orderId || order?._id}`
+                    );
+                }
+            } catch (err) {
+                logger.warn(
+                    `[RestaurantFinance] Quick Share self-heal failed for ${tx._id}: ${err?.message || err}`
+                );
+            }
+        }
+    } catch (err) {
+        logger.error(
+            `[RestaurantFinance] Self-heal failed for restaurant ${restaurantId}: ${err?.message || err}`
+        );
+    }
+
+    return { healedCapture, healedQuickShare };
+}
+
+/**
+ * Available withdrawal balance for a restaurant.
+ * Computed from `food_transactions` (delivered + captured, unsettled share) plus
+ * wallet `referralEarnings`, minus pending withdrawals — not from wallet.balance.
+ * Pass `session` so create-withdrawal can evaluate balance inside the same txn.
+ */
+export async function getRestaurantAvailableWithdrawalBalance(
+    restaurantId,
+    { session = null, skipSelfHeal = false } = {}
+) {
+    if (!restaurantId || !mongoose.Types.ObjectId.isValid(restaurantId)) {
+        return { availableBalance: 0, globalEstimatedPayout: 0, referralBalance: 0, totalPendingWithdrawals: 0 };
+    }
+
+    // Self-heal outside Mongo sessions (withdrawal txn must not nest heal writes).
+    if (!session && !skipSelfHeal) {
+        await selfHealRestaurantFinanceLedger(restaurantId);
+    }
+
+    const rid = new mongoose.Types.ObjectId(restaurantId);
+
+    let unsettledQuery = FoodTransaction.find({
+        restaurantId: rid,
+        status: { $in: ['captured'] },
+        'settlement.isRestaurantSettled': { $ne: true },
+    })
+        .populate('orderId', 'orderStatus deliveryState')
+        .select('amounts.restaurantShare settlement.restaurantSettledAmount orderId')
+        .lean();
+    if (session) unsettledQuery = unsettledQuery.session(session);
+
+    let walletQuery = FoodRestaurantWallet.findOne({ restaurantId: rid })
+        .select('referralEarnings')
+        .lean();
+    if (session) walletQuery = walletQuery.session(session);
+
+    const pendingAgg = FoodRestaurantWithdrawal.aggregate(
+        [
+            {
+                $match: {
+                    restaurantId: rid,
+                    $expr: {
+                        $in: [
+                            { $toLower: { $trim: { input: '$status' } } },
+                            ['pending', 'processing'],
+                        ],
+                    },
+                },
+            },
+            { $group: { _id: null, total: { $sum: '$amount' } } },
+        ],
+        session ? { session } : undefined
+    );
+
+    const [allUnsettledTransactionsRaw, wallet, pendingWithdrawalsAgg] =
+        await Promise.all([unsettledQuery, walletQuery, pendingAgg]);
+
+    const allUnsettledTransactions = allUnsettledTransactionsRaw.filter((tx) =>
+        isDeliveredOrderForPayout(tx.orderId)
+    );
+
+    const globalEstimatedPayout = allUnsettledTransactions.reduce((sum, tx) => {
+        const share = Number(tx.amounts?.restaurantShare) || 0;
+        const settled = Number(tx.settlement?.restaurantSettledAmount) || 0;
+        return sum + Math.max(0, share - settled);
+    }, 0);
+
+    const referralBalance = Number(wallet?.referralEarnings || 0);
+    const totalPendingWithdrawals = Number(pendingWithdrawalsAgg?.[0]?.total || 0);
+    const availableBalance = Math.max(
+        0,
+        globalEstimatedPayout + referralBalance - totalPendingWithdrawals
+    );
+
+    return {
+        availableBalance,
+        globalEstimatedPayout,
+        referralBalance,
+        totalPendingWithdrawals,
+    };
+}
+
+/**
+ * Lifetime restaurant order earnings from `food_transactions` (delivered + captured).
+ * Does not read `food_restaurant_wallets.balance` / `totalEarnings`.
+ */
+export async function getRestaurantLifetimeOrderEarnings(
+    restaurantId,
+    { session = null } = {}
+) {
+    if (!restaurantId || !mongoose.Types.ObjectId.isValid(restaurantId)) {
+        return 0;
+    }
+    const rid = new mongoose.Types.ObjectId(restaurantId);
+
+    let query = FoodTransaction.find({
+        restaurantId: rid,
+        status: { $in: ['captured'] },
+    })
+        .populate('orderId', 'orderStatus deliveryState')
+        .select('amounts.restaurantShare orderId')
+        .lean();
+    if (session) query = query.session(session);
+
+    const txs = await query;
+    const total = txs
+        .filter((tx) => isDeliveredOrderForPayout(tx.orderId))
+        .reduce((sum, tx) => sum + (Number(tx.amounts?.restaurantShare) || 0), 0);
+
+    return Math.round(total * 100) / 100;
+}
+
 function mapTransactionToCycleOrder(tx) {
     const order = tx.orderId || {};
     const items = Array.isArray(order.items) ? order.items : [];
@@ -112,6 +348,9 @@ function mapTransactionToCycleOrder(tx) {
 export async function getRestaurantFinance(restaurantId, query = {}) {
     if (!restaurantId || !mongoose.Types.ObjectId.isValid(restaurantId)) return null;
     const rid = new mongoose.Types.ObjectId(restaurantId);
+
+    // Repair missed capture / Quick Share before reading Hub balances.
+    await selfHealRestaurantFinanceLedger(restaurantId);
 
     // Fetch restaurant profile for header display.
     const restaurant = await FoodRestaurant.findById(rid)
@@ -148,56 +387,33 @@ export async function getRestaurantFinance(restaurantId, query = {}) {
     );
 
     // Global estimated payout: unsettled + delivered only (excludes cancelled / in-progress).
-    const allUnsettledTransactionsRaw = await FoodTransaction.find({
-        restaurantId: rid,
-        status: { $in: ['captured'] },
-        'settlement.isRestaurantSettled': { $ne: true }
-    })
-        .populate('orderId', 'orderStatus deliveryState')
-        .select('amounts.restaurantShare settlement.restaurantSettledAmount orderId')
-        .lean();
-
-    const allUnsettledTransactions = allUnsettledTransactionsRaw.filter((tx) =>
-        isDeliveredOrderForPayout(tx.orderId)
-    );
-
-    // Use open (unsettled) share only — partial withdrawals must not hide leftover earnings
-    const globalEstimatedPayout = allUnsettledTransactions.reduce((sum, tx) => {
-        const share = Number(tx.amounts?.restaurantShare) || 0;
-        const settled = Number(tx.settlement?.restaurantSettledAmount) || 0;
-        return sum + Math.max(0, share - settled);
-    }, 0);
-
-    // Fetch referral earnings from wallet for withdrawal eligibility
-    const wallet = await FoodRestaurantWallet.findOne({ restaurantId: rid })
-        .select('balance referralEarnings totalEarnings')
-        .lean();
-
-    const referralBalance = Number(wallet?.referralEarnings || 0);
-
-    // Lock pending + in-flight (processing) withdrawals from available balance.
-    // Approved/rejected/cancelled are terminal and must not keep locking payout.
-    const pendingWithdrawalsAgg = await FoodRestaurantWithdrawal.aggregate([
+    // Lifetime order earnings from food_transactions (not wallet.totalEarnings).
+    const [
         {
-            $match: {
-                restaurantId: rid,
-                $expr: {
-                    $in: [
-                        { $toLower: { $trim: { input: '$status' } } },
-                        ['pending', 'processing'],
-                    ],
-                },
-            },
+            availableBalance,
+            globalEstimatedPayout,
+            referralBalance,
+            totalPendingWithdrawals,
         },
-        { $group: { _id: null, total: { $sum: '$amount' } } }
+        totalOrderEarnings,
+        wallet,
+    ] = await Promise.all([
+        getRestaurantAvailableWithdrawalBalance(restaurantId, { skipSelfHeal: true }),
+        getRestaurantLifetimeOrderEarnings(restaurantId),
+        FoodRestaurantWallet.findOne({ restaurantId: rid })
+            .select('balance referralEarnings totalEarnings')
+            .lean(),
     ]);
-    const totalPendingWithdrawals = Number(pendingWithdrawalsAgg?.[0]?.total || 0);
-    const availableBalance = Math.max(0, globalEstimatedPayout + referralBalance - totalPendingWithdrawals);
+
+    const referralLifetimeEarnings = Number(wallet?.totalEarnings || 0);
+    const totalEarnings =
+        Math.round((totalOrderEarnings + referralLifetimeEarnings) * 100) / 100;
 
     const currentCycle = {
         start: { ...nowWindow.startMeta },
         end: { ...nowWindow.endMeta },
-        totalEarnings: currentCycleEstimatedPayout, // We still show current cycle earnings label
+        /** Cycle-scoped order payout (not lifetime — see earnings.totalEarnings) */
+        totalEarnings: currentCycleEstimatedPayout,
         totalWithdrawn: totalPendingWithdrawals,
         estimatedPayout: availableBalance, // This is what UI shows as "Estimated Payout" (Available Balance)
         totalOrders: currentCycleOrders.length,
@@ -256,7 +472,19 @@ export async function getRestaurantFinance(restaurantId, query = {}) {
             availableBalance: availableBalance,
             pendingPayout: globalEstimatedPayout,
             referralEarnings: referralBalance,
-            totalEarnings: Number(wallet?.totalEarnings || 0)
+            /** Lifetime delivered order share from food_transactions */
+            totalOrderEarnings,
+            /**
+             * Lifetime total = order ledger + referral credits on wallet.
+             * Not wallet.totalEarnings alone (that field excludes order share).
+             */
+            totalEarnings,
+            /** Dual-ledger snapshot — referral/subscription wallet only */
+            walletLedger: {
+                balance: Number(wallet?.balance || 0),
+                referralEarnings: Number(wallet?.referralEarnings || 0),
+                totalEarnings: referralLifetimeEarnings,
+            },
         },
         withdrawalLimits: {
             min: restaurantMinWithdrawalLimit,
@@ -271,6 +499,8 @@ export async function getRestaurantFinance(restaurantId, query = {}) {
 export async function getRestaurantSubscriptionWallet(restaurantId) {
     if (!restaurantId || !mongoose.Types.ObjectId.isValid(restaurantId)) return null;
     const rid = new mongoose.Types.ObjectId(restaurantId);
+
+    await ensureRestaurantWallet(rid);
 
     const todayIST = dayjs().tz(IST_TIMEZONE).format('YYYY-MM-DD');
     const [wallet, activePass, recentLedger] = await Promise.all([
@@ -292,8 +522,15 @@ export async function getRestaurantSubscriptionWallet(restaurantId) {
             .lean()
     ]);
 
+    const subscriptionBalance = Number(wallet?.subscriptionBalance || 0);
+    const minBalance = 1000;
+    const requiredTopup = Math.max(0, minBalance - subscriptionBalance);
+
     return {
-        subscriptionBalance: Number(wallet?.subscriptionBalance || 0),
+        subscriptionBalance,
+        minBalance,
+        requiredTopup,
+        topupRequired: requiredTopup > 0,
         activePass: activePass ? {
             id: activePass._id,
             date: activePass.date,
