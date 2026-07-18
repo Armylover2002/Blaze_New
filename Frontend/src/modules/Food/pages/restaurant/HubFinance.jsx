@@ -1,12 +1,23 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import { motion, AnimatePresence } from "framer-motion"
-import { Bell, Menu, ChevronDown, Calendar, Download, ArrowRight, FileText, Wallet, X, Gift } from "lucide-react"
-import { toast } from 'sonner'
-import { Bell, Menu, ChevronDown, Calendar, Download, ArrowRight, FileText, Wallet, X, Gift, AlertCircle, RefreshCw } from "lucide-react"
+import {
+  Bell,
+  Menu,
+  ChevronDown,
+  Calendar,
+  Download,
+  ArrowRight,
+  FileText,
+  Wallet,
+  X,
+  Gift,
+  AlertCircle,
+  RefreshCw,
+} from "lucide-react"
+import { toast } from "sonner"
 import BottomNavOrders from "@food/components/restaurant/BottomNavOrders"
 import { restaurantAPI } from "@food/api"
-import { toast } from "sonner"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -1512,11 +1523,14 @@ export default function HubFinance() {
                           toast.error(response.data?.message || 'Failed to submit withdrawal request')
                         }
                       } catch (error) {
-                        debugError('Error submitting withdrawal request:', error)
-                        toast.error(error.response?.data?.message || 'Failed to submit withdrawal request. Please try again.')
                         if (error?.response?.status !== 401) {
-                          toast.error(getApiErrorMessage(error, 'Failed to submit withdrawal request. Please try again.'))
-                          debugError('Error submitting withdrawal request:', error)
+                          toast.error(
+                            getApiErrorMessage(
+                              error,
+                              "Failed to submit withdrawal request. Please try again.",
+                            ),
+                          )
+                          debugError("Error submitting withdrawal request:", error)
                         }
                       } finally {
                         setSubmittingWithdrawal(false)

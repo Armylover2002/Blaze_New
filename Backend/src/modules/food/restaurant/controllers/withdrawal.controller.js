@@ -131,22 +131,18 @@ export const createWithdrawalRequestController = async (req, res, next) => {
                 { upsert: true, session, new: true }
             );
 
-            const finance = await getRestaurantFinance(restaurantId);
-            const availableBalance = Number(
-                finance?.earnings?.availableBalance ??
-                    finance?.currentCycle?.estimatedPayout ??
-                    0
-            );
-            const effectiveMax =
-                maxLimit != null ? Math.min(availableBalance, maxLimit) : availableBalance;
+            // Session-aware ledger balance (pending withdrawals already deducted).
             const { availableBalance } = await getRestaurantAvailableWithdrawalBalance(
                 restaurantId,
                 { session }
             );
+            const balance = Number(availableBalance) || 0;
+            const effectiveMax =
+                maxLimit != null ? Math.min(balance, maxLimit) : balance;
 
-            if (numericAmount > availableBalance) {
+            if (numericAmount > balance) {
                 const err = new Error(
-                    `Insufficient balance. Available: ₹${availableBalance}`
+                    `Insufficient balance. Available: ₹${balance}`
                 );
                 err.statusCode = 400;
                 throw err;
