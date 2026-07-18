@@ -8,6 +8,7 @@ import { restaurantAPI, zoneAPI } from "@food/api"
 import { getGoogleMapsApiKey } from "@food/utils/googleMapsApiKey"
 import { loadGoogleMaps as loadGoogleMapsSdk } from "@core/services/googleMapsLoader"
 import { updateStoredModuleUser } from "@food/utils/auth"
+import { resolveOutletAddressParts } from "@food/utils/addressParts"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -170,37 +171,14 @@ export default function ZoneSetup() {
       const geocoder = new window.google.maps.Geocoder()
       geocoder.geocode({ location: { lat, lng } }, (results, status) => {
         if (status === "OK" && results[0]) {
-          const components = results[0].address_components
-          const parts = {
-            addressLine1: "",
-            area: "",
-            city: "",
-            state: "",
-            pincode: "",
-            landmark: ""
-          }
-          
-          components.forEach(comp => {
-            const types = comp.types
-            if (types.includes("premise") || types.includes("street_number") || types.includes("route") || types.includes("sublocality_level_3")) {
-              parts.addressLine1 += (parts.addressLine1 ? ", " : "") + comp.long_name
-            }
-            if (types.includes("sublocality_level_1") || types.includes("sublocality_level_2") || types.includes("neighborhood")) {
-              parts.area = comp.long_name
-            }
-            if (types.includes("locality")) {
-              parts.city = comp.long_name
-            }
-            if (types.includes("administrative_area_level_1")) {
-              parts.state = comp.long_name
-            }
-            if (types.includes("postal_code")) {
-              parts.pincode = comp.long_name
-            }
-          })
+          const formattedAddress = results[0].formatted_address
+          const parts = resolveOutletAddressParts(
+            results[0].address_components,
+            formattedAddress,
+          )
           
           resolve({ 
-            formattedAddress: results[0].formatted_address, 
+            formattedAddress, 
             parts 
           })
         } else {
@@ -491,6 +469,16 @@ export default function ZoneSetup() {
       setSaving(true)
       
       const { lat, lng, address } = selectedLocation
+      // Ensure area/city/state/pincode are filled even when Google omits locality types (common in India).
+      const resolvedParts = resolveOutletAddressParts([], address)
+      const mergedParts = {
+        addressLine1: addressParts.addressLine1 || resolvedParts.addressLine1 || address.split(',')[0] || "",
+        area: addressParts.area || resolvedParts.area || "",
+        city: addressParts.city || resolvedParts.city || "",
+        state: addressParts.state || resolvedParts.state || "",
+        pincode: addressParts.pincode || resolvedParts.pincode || "",
+        landmark: addressParts.landmark || resolvedParts.landmark || "",
+      }
 
       // Calculate current zone name if possible
       const currentZone = zones.find(z => {
@@ -503,11 +491,11 @@ export default function ZoneSetup() {
       // Update restaurant location and trigger re-verification
       const payload = {
         // Top level address fields for DB update
-        addressLine1: addressParts.addressLine1 || address.split(',')[0] || "",
-        area: addressParts.area || "",
-        city: addressParts.city || "",
-        state: addressParts.state || "",
-        pincode: addressParts.pincode || "",
+        addressLine1: mergedParts.addressLine1,
+        area: mergedParts.area,
+        city: mergedParts.city,
+        state: mergedParts.state,
+        pincode: mergedParts.pincode,
         formattedAddress: address,
         zoneId: currentZone?._id || currentZone?.id || null, // Critical: Update the zone ID in DB
         
@@ -519,11 +507,11 @@ export default function ZoneSetup() {
           coordinates: [lng, lat], // GeoJSON format: [longitude, latitude]
           formattedAddress: address,
           address: address,
-          addressLine1: addressParts.addressLine1 || address.split(',')[0] || "",
-          area: addressParts.area || "",
-          city: addressParts.city || "",
-          state: addressParts.state || "",
-          pincode: addressParts.pincode || "",
+          addressLine1: mergedParts.addressLine1,
+          area: mergedParts.area,
+          city: mergedParts.city,
+          state: mergedParts.state,
+          pincode: mergedParts.pincode,
         },
         // Meta data for admin review
         reVerification: {
@@ -554,11 +542,11 @@ export default function ZoneSetup() {
               longitude: lng,
               coordinates: [lng, lat],
               formattedAddress: address,
-              addressLine1: addressParts.addressLine1 || address.split(',')[0] || "",
-              area: addressParts.area || "",
-              city: addressParts.city || "",
-              state: addressParts.state || "",
-              pincode: addressParts.pincode || ""
+              addressLine1: mergedParts.addressLine1,
+              area: mergedParts.area,
+              city: mergedParts.city,
+              state: mergedParts.state,
+              pincode: mergedParts.pincode,
             }
           }
         }

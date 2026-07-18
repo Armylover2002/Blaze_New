@@ -5,6 +5,7 @@ import useRestaurantBackNavigation from "@food/hooks/useRestaurantBackNavigation
 import Lenis from "lenis"
 import { jsPDF } from "jspdf"
 import autoTable from "jspdf-autotable"
+import { generateOrderInvoice } from "../../utils/printOrderInvoice"
 import { restaurantAPI } from "@food/api"
 import {
   ArrowLeft,
@@ -246,6 +247,7 @@ export default function OrderDetails({ orderId: propOrderId, isSidebar = false, 
             } : null,
             dispatchStatus: order.dispatch?.status || null,
             reason: order.cancellationReason || '',
+            originalOrder: order,
             timeline: [
               { event: 'Order placed', timestamp: new Date(order.createdAt).toLocaleString('en-GB'), status: 'completed' },
               ...(reached.confirmed ? [{ event: 'Order confirmed', timestamp: order.tracking?.confirmed?.timestamp ? new Date(order.tracking.confirmed.timestamp).toLocaleString('en-GB') : '', status: 'completed' }] : []),
@@ -311,300 +313,25 @@ export default function OrderDetails({ orderId: propOrderId, isSidebar = false, 
       setToastMessage("Generating receipt...")
       setShowToast(true)
       
-      // Small delay to show the toast
       await new Promise(resolve => setTimeout(resolve, 300))
       
-      // Check if orderData exists
       if (!orderData) {
         throw new Error("Order data not found")
       }
       
-      const doc = new jsPDF()
-    const pageWidth = doc.internal.pageSize.getWidth()
-    const pageHeight = doc.internal.pageSize.getHeight()
-    const leftMargin = 15
-    const rightMargin = 15
-    const bottomMargin = 20
-    let yPosition = 20
-
-    const ensureSpace = (requiredHeight = 0, resetY = 20) => {
-      if (yPosition + requiredHeight > pageHeight - bottomMargin) {
-        doc.addPage()
-        yPosition = resetY
-      }
-    }
-
-    // Header - Restaurant Name
-    doc.setFontSize(18)
-    doc.setFont("helvetica", "bold")
-    doc.text(orderData.restaurant, pageWidth / 2, yPosition, { align: "center" })
-    yPosition += 7
-
-    doc.setFontSize(10)
-    doc.setFont("helvetica", "normal")
-    doc.text(orderData.address, pageWidth / 2, yPosition, { align: "center" })
-    yPosition += 15
-
-    // Order Receipt Title
-    doc.setFontSize(16)
-    doc.setFont("helvetica", "bold")
-    doc.text("ORDER RECEIPT", pageWidth / 2, yPosition, { align: "center" })
-    yPosition += 10
-
-    // Horizontal line
-    doc.setLineWidth(0.5)
-    doc.line(leftMargin, yPosition, pageWidth - rightMargin, yPosition)
-    yPosition += 10
-
-    // Order Information
-    doc.setFontSize(11)
-    doc.setFont("helvetica", "bold")
-    doc.text("Order ID:", leftMargin, yPosition)
-    doc.setFont("helvetica", "normal")
-    doc.text(orderData.id, 50, yPosition)
-    yPosition += 7
-
-    doc.setFont("helvetica", "bold")
-    doc.text("Date & Time:", leftMargin, yPosition)
-    doc.setFont("helvetica", "normal")
-    doc.text(`${orderData.date}, ${orderData.time}`, 50, yPosition)
-    yPosition += 7
-
-    doc.setFont("helvetica", "bold")
-    doc.text("Status:", leftMargin, yPosition)
-    doc.setFont("helvetica", "normal")
-    // Set color based on status
-    if (orderData.status === "REJECTED" || orderData.status === "CANCELLED") {
-      doc.setTextColor(220, 38, 38) // Red
-    } else if (orderData.status === "DELIVERED") {
-      doc.setTextColor(22, 163, 74) // Green
-    }
-    doc.text(orderData.status, 50, yPosition)
-    doc.setTextColor(0, 0, 0) // Reset to black
-    yPosition += 10
-
-    // Customer Details Section
-    doc.setLineWidth(0.5)
-    ensureSpace(35)
-    doc.line(leftMargin, yPosition, pageWidth - rightMargin, yPosition)
-    yPosition += 8
-
-    doc.setFontSize(12)
-    doc.setFont("helvetica", "bold")
-    doc.text("CUSTOMER DETAILS", leftMargin, yPosition)
-    yPosition += 8
-
-    doc.setFontSize(10)
-    doc.setFont("helvetica", "bold")
-    doc.text("Name:", leftMargin, yPosition)
-    doc.setFont("helvetica", "normal")
-    doc.text(orderData.customer.name, 50, yPosition)
-    yPosition += 6
-
-    doc.setFont("helvetica", "bold")
-    doc.text("Location:", leftMargin, yPosition)
-    doc.setFont("helvetica", "normal")
-    const locationLines = doc.splitTextToSize(orderData.customer.location || "-", pageWidth - 65)
-    doc.text(locationLines, 50, yPosition)
-    yPosition += locationLines.length * 5
-
-    doc.setFont("helvetica", "bold")
-    doc.text("Distance:", leftMargin, yPosition)
-    doc.setFont("helvetica", "normal")
-    doc.text(orderData.customer.distance || "-", 50, yPosition)
-    yPosition += 10
-
-    // Items Section
-    doc.setLineWidth(0.5)
-    ensureSpace(20)
-    doc.line(leftMargin, yPosition, pageWidth - rightMargin, yPosition)
-    yPosition += 8
-
-    doc.setFontSize(12)
-    doc.setFont("helvetica", "bold")
-    doc.text("ITEM DETAILS", 15, yPosition)
-    yPosition += 5
-
-    // Items Table
-    const itemsTableData = orderData.items.map(item => [
-      `${item.quantity}x`,
-      item.name,
-      item.type || "-",
-      formatMoney(item.price)
-    ])
-
-    // Use autoTable with the doc instance
-    autoTable(doc, {
-      startY: yPosition,
-      head: [["Qty", "Item Name", "Type", "Price"]],
-      body: itemsTableData,
-      theme: "grid",
-      headStyles: {
-        fillColor: [55, 65, 81],
-        textColor: [255, 255, 255],
-        fontSize: 10,
-        fontStyle: "bold"
-      },
-      bodyStyles: {
-        fontSize: 9
-      },
-      margin: { left: leftMargin, right: rightMargin }
-    })
-
-    yPosition = doc.lastAutoTable.finalY + 10
-
-    // Bill Details Section
-    doc.setLineWidth(0.5)
-    ensureSpace(50)
-    doc.line(leftMargin, yPosition, pageWidth - rightMargin, yPosition)
-    yPosition += 8
-
-    doc.setFontSize(12)
-    doc.setFont("helvetica", "bold")
-    doc.text("BILL DETAILS", 15, yPosition)
-    yPosition += 8
-
-    doc.setFontSize(10)
-    doc.setFont("helvetica", "normal")
-    const billRows = [
-      ["Item Subtotal:", formatMoney(orderData.billing.itemSubtotal)],
-      ["Taxes:", formatMoney(orderData.billing.taxes)],
-    ]
-    if (Number(orderData.billing.packagingFee) > 0) {
-      billRows.push(["Packaging Fee:", formatMoney(orderData.billing.packagingFee)])
-    }
-    if (Number(orderData.billing.deliveryFee) > 0) {
-      billRows.push(["Delivery Fee:", formatMoney(orderData.billing.deliveryFee)])
-    }
-    if (Number(orderData.billing.platformFee) > 0) {
-      billRows.push(["Platform Fee:", formatMoney(orderData.billing.platformFee)])
-    }
-    if (Number(orderData.billing.discount) > 0) {
-      billRows.push(["Discount:", formatDiscount(orderData.billing.discount)])
-    }
-    if (Number(orderData.billing.couponDiscount) > 0) {
-      billRows.push(["Coupon Discount:", formatDiscount(orderData.billing.couponDiscount)])
-    }
-    if (Number(orderData.billing.referralDiscount) > 0) {
-      billRows.push(["Referral Discount:", formatDiscount(orderData.billing.referralDiscount)])
-    }
-    billRows.forEach(([label, value]) => {
-      doc.text(label, 15, yPosition)
-      doc.text(value, pageWidth - rightMargin, yPosition, { align: "right" })
-      yPosition += 6
-    })
-
-    // Dashed line for total
-    doc.setLineDash([2, 2])
-    doc.line(leftMargin, yPosition, pageWidth - rightMargin, yPosition)
-    yPosition += 6
-    doc.setLineDash([]) // Reset to solid line
-
-    doc.setFont("helvetica", "bold")
-    doc.setFontSize(11)
-    doc.text("Total Bill:", leftMargin, yPosition)
-    doc.text(formatMoney(orderData.billing.total), pageWidth - rightMargin, yPosition, { align: "right" })
-    yPosition += 6
-    if (Number(orderData.billing.paidAmount) > 0) {
-      doc.setFont("helvetica", "normal")
-      doc.setFontSize(10)
-      doc.text("Amount Paid:", leftMargin, yPosition)
-      doc.text(formatMoney(orderData.billing.paidAmount), pageWidth - rightMargin, yPosition, { align: "right" })
-      yPosition += 6
-    }
-
-    doc.setFontSize(9)
-    doc.setFont("helvetica", "normal")
-    doc.text(`Payment Status: ${orderData.billing.paymentStatus}`, leftMargin, yPosition)
-    yPosition += 10
-
-    // Rejection/Cancellation Reason (if exists)
-    if (orderData.reason) {
-      doc.setLineWidth(0.5)
-      ensureSpace(25)
-      doc.line(leftMargin, yPosition, pageWidth - rightMargin, yPosition)
-      yPosition += 8
-
-      doc.setFontSize(11)
-      doc.setFont("helvetica", "bold")
-      doc.setTextColor(220, 38, 38)
-      doc.text("REASON:", leftMargin, yPosition)
-      yPosition += 6
-
-      doc.setFontSize(9)
-      doc.setFont("helvetica", "normal")
-      const reasonLines = doc.splitTextToSize(orderData.reason, pageWidth - (leftMargin + rightMargin))
-      doc.text(reasonLines, leftMargin, yPosition)
-      yPosition += (reasonLines.length * 5) + 5
-      doc.setTextColor(0, 0, 0)
-    }
-
-    // Order Timeline
-    ensureSpace(40)
-
-    doc.setLineWidth(0.5)
-    doc.line(leftMargin, yPosition, pageWidth - rightMargin, yPosition)
-    yPosition += 8
-
-    doc.setFontSize(12)
-    doc.setFont("helvetica", "bold")
-    doc.text("ORDER TIMELINE", leftMargin, yPosition)
-    yPosition += 8
-
-    orderData.timeline.forEach((event) => {
-      ensureSpace(15)
-      doc.setFontSize(10)
-      doc.setFont("helvetica", "bold")
+      await generateOrderInvoice(orderData.originalOrder)
       
-      // Add status indicator
-      if (event.status === "completed") {
-        doc.setFillColor(22, 163, 74)
-      } else if (event.status === "rejected") {
-        doc.setFillColor(220, 38, 38)
-      } else {
-        doc.setFillColor(156, 163, 175)
-      }
-      doc.circle(18, yPosition - 1, 2, "F")
-      
-      doc.setTextColor(0, 0, 0)
-      doc.text(event.event, 25, yPosition)
-      yPosition += 5
-      
-      doc.setFontSize(8)
-      doc.setFont("helvetica", "normal")
-      doc.setTextColor(100, 100, 100)
-      doc.text(event.timestamp || "-", 25, yPosition)
-      yPosition += 8
-      doc.setTextColor(0, 0, 0)
-    })
-
-    ensureSpace(15)
-    // Footer
-    yPosition = pageHeight - bottomMargin
-    doc.setFontSize(8)
-    doc.setFont("helvetica", "italic")
-    doc.setTextColor(100, 100, 100)
-    doc.text("Thank you for your business!", pageWidth / 2, yPosition, { align: "center" })
-    yPosition += 5
-    doc.text(`Generated on: ${new Date().toLocaleString()}`, pageWidth / 2, yPosition, { align: "center" })
-
-    // Save the PDF
-    doc.save(`Order_Receipt_${orderData.id}.pdf`)
-    
-    // Show success message
-    setToastMessage("Receipt downloaded successfully!")
-    setShowToast(true)
-    setTimeout(() => setShowToast(false), 2000)
+      setToastMessage("Receipt downloaded successfully!")
+      setShowToast(true)
+      setTimeout(() => setShowToast(false), 2000)
     } catch (error) {
-      debugError("Error generating PDF:", error)
-      debugError("Error details:", error.message, error.stack)
+      console.error("Error generating PDF:", error)
       setToastMessage(`Failed: ${error.message || "Unknown error"}`)
       setShowToast(true)  
       setTimeout(() => setShowToast(false), 3000)
     } finally {
       setIsGeneratingPDF(false)
     }
-    
   }
 
   const getStatusColor = (status) => {

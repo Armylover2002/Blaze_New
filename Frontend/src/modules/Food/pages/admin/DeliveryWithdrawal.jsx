@@ -77,6 +77,8 @@ export default function DeliveryWithdrawal() {
   const [processingAction, setProcessingAction] = useState(null)
   const [rejectionReason, setRejectionReason] = useState("")
   const [showRejectModal, setShowRejectModal] = useState(false)
+  const [showApproveModal, setShowApproveModal] = useState(false)
+  const [requestToApprove, setRequestToApprove] = useState(null)
 
   useEffect(() => {
     fetchRequests()
@@ -137,20 +139,27 @@ export default function DeliveryWithdrawal() {
     setIsViewOpen(true)
   }
 
-  const handleApprove = async (id) => {
+  const handleApprove = (id) => {
     if (!canEdit) {
       toast.error("Permission denied")
       return
     }
-    if (!confirm("Are you sure you want to approve this withdrawal request?")) return
+    setRequestToApprove(id)
+    setShowApproveModal(true)
+  }
+
+  const confirmApprove = async () => {
+    if (!requestToApprove) return
+    const id = requestToApprove
     try {
       setProcessingAction(id)
       const response = await adminAPI.updateDeliveryWithdrawalStatus(id, { status: "Approved" })
       if (response?.data?.success) {
         toast.success("Withdrawal request approved successfully")
+        setShowApproveModal(false)
+        setRequestToApprove(null)
         fetchRequests()
-      }
- else {
+      } else {
         toast.error(response?.data?.message || "Failed to approve")
       }
     } catch (error) {
@@ -457,6 +466,38 @@ export default function DeliveryWithdrawal() {
                 className="px-4 py-2 text-sm font-medium rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-all"
               >
                 Close
+              </button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Approve modal */}
+        <Dialog open={showApproveModal} onOpenChange={setShowApproveModal}>
+          <DialogContent className="max-w-md bg-white p-0">
+            <DialogHeader className="px-6 pt-6 pb-4">
+              <DialogTitle>Approve withdrawal request</DialogTitle>
+            </DialogHeader>
+            <div className="px-6 pb-6">
+              <p className="text-sm text-slate-600">
+                Are you sure you want to approve this withdrawal request?
+              </p>
+            </div>
+            <DialogFooter className="px-6 pb-6 flex gap-2">
+              <button
+                onClick={() => {
+                  setShowApproveModal(false)
+                  setRequestToApprove(null)
+                }}
+                className="px-4 py-2 text-sm font-medium rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmApprove}
+                disabled={processingAction === requestToApprove || !canEdit}
+                className="px-4 py-2 text-sm font-medium rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {processingAction === requestToApprove ? "Approving…" : "Approve"}
               </button>
             </DialogFooter>
           </DialogContent>

@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useMemo } from 'react';
 import { restaurantAPI } from "@food/api";
 import { normalizeImageUrl, extractImages, slugify } from "@food/utils/common";
-import { getRoadDistancesFromOrigin } from "@/shared/services/roadDistance";
+import { getRoadDistancesToDestination } from "@/shared/services/roadDistance";
 
 export const useHomeData = (location, zoneId) => {
   const [loadingConfig, setLoadingConfig] = useState(true);
@@ -62,7 +62,7 @@ export const useHomeData = (location, zoneId) => {
         });
 
         const roadDistances = (userLat != null && userLng != null)
-          ? await getRoadDistancesFromOrigin(userLat, userLng, restaurantCoords)
+          ? await getRoadDistancesToDestination(restaurantCoords, userLat, userLng)
           : [];
 
         const transformed = raw.map((r, index) => {

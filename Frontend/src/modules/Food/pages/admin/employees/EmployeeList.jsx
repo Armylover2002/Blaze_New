@@ -8,6 +8,12 @@ import { useNavigate } from "react-router-dom"
 import { useAuth } from "@core/context/AuthContext"
 import { getCurrentUser } from "@food/utils/auth"
 import { canPerformAdminPermissionAction, extractAdminPermissions, extractAdminRoleId, fetchAdminRolePermissions } from "@food/utils/adminPermissions"
+import {
+  exportEmployeesToCSV,
+  exportEmployeesToExcel,
+  exportEmployeesToPDF,
+  exportEmployeesToJSON,
+} from "@food/components/admin/employees/employeesExportUtils"
 
 export default function EmployeeList() {
   const navigate = useNavigate()
@@ -149,12 +155,54 @@ export default function EmployeeList() {
     }
   }
 
-  const handleExport = (format) => {
+  const handleExport = async (format) => {
     if (filteredEmployees.length === 0) {
       alert("No data to export")
       return
     }
-    debugLog(`Exporting as ${format}`, filteredEmployees)
+    const headers = [
+      { key: "si", label: "SI" },
+      { key: "employeeId", label: "Employee ID" },
+      { key: "name", label: "Employee Name" },
+      { key: "phone", label: "Phone" },
+      { key: "email", label: "Email" },
+      { key: "role", label: "Role" },
+      { key: "createdAt", label: "Created At" },
+      { key: "status", label: "Status" },
+    ]
+    const rows = filteredEmployees.map((employee, index) => ({
+      si: index + 1,
+      employeeId: employee.employeeId || employee._id || "N/A",
+      name: employee.name || "N/A",
+      phone: employee.phone || "N/A",
+      email: employee.email || "N/A",
+      role: employee.role?.name || employee.roleName || employee.role || "N/A",
+      createdAt: employee.createdAt
+        ? new Date(employee.createdAt).toLocaleString("en-IN")
+        : "N/A",
+      status: employee.isActive === false || employee.status === "inactive" ? "Inactive" : "Active",
+    }))
+
+    try {
+      switch (format) {
+        case "csv":
+          exportEmployeesToCSV(rows, headers, "employees")
+          break
+        case "excel":
+          exportEmployeesToExcel(rows, headers, "employees")
+          break
+        case "pdf":
+          await exportEmployeesToPDF(rows, headers, "employees", "Employees Report")
+          break
+        case "json":
+          exportEmployeesToJSON(rows, "employees")
+          break
+        default:
+          break
+      }
+    } catch (error) {
+      toast.error("Failed to export employees")
+    }
   }
 
   const toggleColumn = (columnKey) => {

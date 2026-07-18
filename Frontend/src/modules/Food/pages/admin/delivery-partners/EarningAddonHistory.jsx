@@ -23,6 +23,12 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@food/components/ui/dialog"
 import { adminAPI } from "@food/api"
 import { toast } from "sonner"
+import {
+  exportReportsToCSV,
+  exportReportsToExcel,
+  exportReportsToPDF,
+  exportReportsToJSON,
+} from "@food/components/admin/reports/reportsExportUtils"
 const debugLog = (...args) => { }
 const debugWarn = (...args) => { }
 const debugError = (...args) => { }
@@ -219,13 +225,71 @@ export default function EarningAddonHistory() {
     )
   }
 
-  const handleExport = (format) => {
+  const handleExport = async (format) => {
     if (filteredHistory.length === 0) {
       toast.error("No data to export")
       return
     }
-    // Export functionality can be added here
-    toast.info(`Export as ${format.toUpperCase()} - Feature coming soon`)
+
+    const headers = [
+      { key: "sl", label: "SI" },
+      { key: "deliveryman", label: "Deliveryman" },
+      { key: "offerTitle", label: "Offer Title" },
+      { key: "ordersCompleted", label: "Orders Completed" },
+      { key: "earningAmount", label: "Earning Amount" },
+      { key: "date", label: "Date" },
+      { key: "status", label: "Status" },
+    ]
+
+    const rows = filteredHistory.map((item, index) => ({
+      sl: index + 1,
+      deliveryman:
+        item.deliveryman?.name ||
+        item.deliverymanName ||
+        item.deliveryPartnerName ||
+        "N/A",
+      offerTitle: item.offerTitle || item.offer?.title || "N/A",
+      ordersCompleted: item.ordersCompleted ?? item.completedOrders ?? 0,
+      earningAmount: `\u20B9${Number(item.earningAmount || 0).toLocaleString("en-IN", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      })}`,
+      date: (item.date || item.createdAt)
+        ? new Date(item.date || item.createdAt).toLocaleString("en-IN")
+        : "N/A",
+      status: item.status || "N/A",
+    }))
+
+    try {
+      switch (format) {
+        case "csv":
+          exportReportsToCSV(rows, headers, "earning_addon_history")
+          toast.success("CSV exported successfully")
+          break
+        case "excel":
+          exportReportsToExcel(rows, headers, "earning_addon_history")
+          toast.success("Excel exported successfully")
+          break
+        case "pdf":
+          await exportReportsToPDF(
+            rows,
+            headers,
+            "earning_addon_history",
+            "Earning Addon History",
+          )
+          toast.success("PDF exported successfully")
+          break
+        case "json":
+          exportReportsToJSON(rows, "earning_addon_history")
+          toast.success("JSON exported successfully")
+          break
+        default:
+          toast.error("Invalid export format")
+      }
+    } catch (error) {
+      debugError("Export error:", error)
+      toast.error("Failed to export history")
+    }
   }
 
   const handleCheckAllCompletions = async () => {

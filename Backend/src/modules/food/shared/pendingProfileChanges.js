@@ -176,17 +176,116 @@ export const mergePendingProfileChanges = (existingPending = {}, stagedFields = 
     };
 };
 
+/** Parse area/city/state/pincode from a Google-style formatted address when components were empty. */
+const fillAddressPartsFromFormatted = (formatted = '', parts = {}) => {
+    const next = {
+        addressLine1: String(parts.addressLine1 || '').trim(),
+        area: String(parts.area || '').trim(),
+        city: String(parts.city || '').trim(),
+        state: String(parts.state || '').trim(),
+        pincode: String(parts.pincode || '').trim(),
+    };
+
+    const text = String(formatted || '').trim();
+    if (!text) return next;
+
+    const pinMatch = text.match(/\b(\d{6})\b/);
+    if (!next.pincode && pinMatch) next.pincode = pinMatch[1];
+
+    const chunks = text
+        .split(',')
+        .map((part) => part.trim())
+        .filter(Boolean)
+        .filter((part) => !/^india$/i.test(part));
+
+    if (!chunks.length) return next;
+
+    const last = chunks[chunks.length - 1] || '';
+    const lastWithoutPin = last.replace(/\b\d{6}\b/, '').trim();
+    if (!next.state && lastWithoutPin) next.state = lastWithoutPin;
+    if (!next.city && chunks.length >= 2) next.city = chunks[chunks.length - 2];
+    if (!next.area && chunks.length >= 3) next.area = chunks[chunks.length - 3];
+    if (!next.addressLine1 && chunks[0]) next.addressLine1 = chunks[0];
+
+    return next;
+};
+
+const enrichStagedAddressFields = (proposed = {}) => {
+    const next = { ...proposed };
+    const loc =
+        next.location && typeof next.location === 'object' && !Array.isArray(next.location)
+            ? { ...next.location }
+            : null;
+    const formatted =
+        loc?.formattedAddress || loc?.address || next.formattedAddress || '';
+    if (!formatted) return next;
+
+    const filled = fillAddressPartsFromFormatted(formatted, {
+        addressLine1: next.addressLine1 || loc?.addressLine1 || '',
+        area: next.area || loc?.area || '',
+        city: next.city || loc?.city || '',
+        state: next.state || loc?.state || '',
+        pincode: next.pincode || loc?.pincode || '',
+    });
+
+    if (!String(next.addressLine1 || '').trim()) next.addressLine1 = filled.addressLine1;
+    if (!String(next.area || '').trim()) next.area = filled.area;
+    if (!String(next.city || '').trim()) next.city = filled.city;
+    if (!String(next.state || '').trim()) next.state = filled.state;
+    if (!String(next.pincode || '').trim()) next.pincode = filled.pincode;
+
+    if (loc) {
+        if (!String(loc.addressLine1 || '').trim()) loc.addressLine1 = filled.addressLine1;
+        if (!String(loc.area || '').trim()) loc.area = filled.area;
+        if (!String(loc.city || '').trim()) loc.city = filled.city;
+        if (!String(loc.state || '').trim()) loc.state = filled.state;
+        if (!String(loc.pincode || '').trim()) loc.pincode = filled.pincode;
+        next.location = loc;
+    }
+
+    return next;
+};
+
 export const buildApplyPendingProfileChangesUpdate = (pending = {}) => {
-    const proposed = pending?.proposed && typeof pending.proposed === 'object' ? pending.proposed : {};
-    if (!Object.keys(proposed).length) {
+    const proposedRaw = pending?.proposed && typeof pending.proposed === 'object' ? pending.proposed : {};
+    if (!Object.keys(proposedRaw).length) {
         return {
             $unset: { pendingProfileChanges: 1, reVerification: 1 },
         };
     }
 
+    // Fill empty area/city/state/pincode from formatted address when map picker left them blank.
+    const proposed = enrichStagedAddressFields(proposedRaw);
+
+    // Never $set reVerification while also $unsetting it — Mongo conflict:
+    // "Updating the path 'reVerification' would create a conflict at 'reVerification'"
+    // reVerification is review metadata only; location fields in proposed are what go live.
+    const META_SKIP = new Set(['reVerification', 'pendingProfileChanges']);
+    // Don't wipe live outlet address parts with empty staged strings from the map picker.
+    const SKIP_EMPTY_OVERWRITE = new Set([
+        'area',
+        'city',
+        'state',
+        'pincode',
+        'addressLine2',
+        'landmark',
+    ]);
+
+    const fieldsToApply = {};
+    for (const [key, value] of Object.entries(proposed)) {
+        if (META_SKIP.has(key)) continue;
+        if (
+            SKIP_EMPTY_OVERWRITE.has(key) &&
+            (value === '' || value === null || value === undefined)
+        ) {
+            continue;
+        }
+        fieldsToApply[key] = value;
+    }
+
     return {
         $set: {
-            ...proposed,
+            ...fieldsToApply,
             status: 'approved',
             isActive: true,
             wasEverApproved: true,

@@ -127,6 +127,41 @@ export const reverseGeocode = async (req, res) => {
 
 export const getDistancesBatch = async (req, res) => {
   try {
+    // Checkout-aligned mode: many restaurant origins → one user destination
+    const toDestLat = toFinite(req.body?.destination?.lat ?? req.body?.destLat);
+    const toDestLng = toFinite(req.body?.destination?.lng ?? req.body?.destLng);
+    const origins = Array.isArray(req.body?.origins) ? req.body.origins : null;
+
+    if (origins && toDestLat !== null && toDestLng !== null) {
+      const normalizedOrigins = origins.slice(0, 25).map((origin) => ({
+        lat: toFinite(origin?.lat),
+        lng: toFinite(origin?.lng),
+      }));
+      if (normalizedOrigins.some((o) => o.lat === null || o.lng === null)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Each origin must include valid lat and lng',
+        });
+      }
+
+      const { getRoadDistancesToDestination } = await import('../../../services/roadDistance.service.js');
+      const results = await getRoadDistancesToDestination(
+        normalizedOrigins,
+        { lat: toDestLat, lng: toDestLng },
+      );
+      return res.json({
+        success: true,
+        data: {
+          distances: results.map((item) => ({
+            distanceKm: item.distanceKm,
+            distanceMeters: item.distanceMeters,
+            durationMin: item.durationMin,
+            estimated: Boolean(item.estimated),
+          })),
+        },
+      });
+    }
+
     const originLat = toFinite(req.body?.originLat ?? req.body?.origin?.lat);
     const originLng = toFinite(req.body?.originLng ?? req.body?.origin?.lng);
     const destinations = Array.isArray(req.body?.destinations) ? req.body.destinations : [];

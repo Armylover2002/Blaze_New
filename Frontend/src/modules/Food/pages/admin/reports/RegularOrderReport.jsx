@@ -60,12 +60,14 @@ const transformOrderForReport = (order) => {
   }, 0)
 
   const subtotal = itemsSubtotal > 0 ? itemsSubtotal : Number(pricing.subtotal || 0)
+  const packagingFee = Number(pricing.packagingFee || 0)
   const deliveryCharge = Number(pricing.deliveryFee || 0)
   const quickDeliveryFee = Number(pricing.quickDeliveryFee || 0)
   const platformFee = Number(pricing.platformFee || 0)
   const vatTax = Number(pricing.tax || 0)
   const couponDiscount = Number(pricing.discount || 0)
-  const computedTotal = subtotal + deliveryCharge + quickDeliveryFee + platformFee + vatTax - couponDiscount
+  const computedTotal =
+    subtotal + packagingFee + deliveryCharge + quickDeliveryFee + platformFee + vatTax - couponDiscount
   const totalAmount = pricing.total != null ? Number(pricing.total) : computedTotal
 
   const restaurantName = order.restaurantId?.restaurantName || order.restaurantName || ""
@@ -101,6 +103,7 @@ const transformOrderForReport = (order) => {
     deliveryMode: order.deliveryMode || "basic",
     slaBreached: Boolean(order?.sla?.breached),
     platformFee,
+    packagingFee,
     totalAmount,
     orderStatus: displayStatus,
   }
@@ -268,6 +271,7 @@ export default function RegularOrderReport() {
 
   const handleExport = async (format) => {
     const headers = [
+      { key: "sl", label: "SI" },
       { key: "orderId", label: "Order ID" },
       { key: "restaurant", label: "Restaurant" },
       { key: "customerName", label: "Customer Name" },
@@ -278,25 +282,75 @@ export default function RegularOrderReport() {
       { key: "quickDeliveryFee", label: "Quick Charge" },
       { key: "deliveryMode", label: "Delivery Mode" },
       { key: "platformFee", label: "Platform Fee" },
+      { key: "packagingFee", label: "Packaging Fee" },
       { key: "totalAmount", label: "Order Amount" },
       { key: "orderStatus", label: "Status" },
     ]
 
-    try {
-      const response = await adminAPI.getOrders(buildReportParams(1, 500))
-      const exportRows = (response?.data?.data?.orders || []).map(transformOrderForReport)
+    const money = (amount) =>
+      `\u20B9${Number(amount || 0).toLocaleString("en-IN", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      })}`
 
-      if (exportRows.length === 0) {
+    try {
+      toast.info("Preparing export...")
+      // Fetch all matching pages (cap at 2000 rows for safe browser export)
+      const allRows = []
+      let page = 1
+      let totalPages = 1
+      const limit = 200
+      do {
+        const response = await adminAPI.getOrders(buildReportParams(page, limit))
+        const batch = (response?.data?.data?.orders || []).map(transformOrderForReport)
+        allRows.push(...batch)
+        const meta = response?.data?.data?.meta || response?.data?.data?.pagination || {}
+        totalPages = Number(meta.totalPages || meta.pages || 1)
+        page += 1
+      } while (page <= totalPages && page <= 20)
+
+      if (allRows.length === 0) {
         alert("No data to export")
         return
       }
 
+      const exportRows = allRows.map((order, index) => ({
+        sl: index + 1,
+        orderId: order.orderId || "N/A",
+        restaurant: order.restaurant || "N/A",
+        customerName: order.customerName || "N/A",
+        totalItemAmount: money(order.totalItemAmount),
+        couponDiscount: money(order.couponDiscount),
+        vatTax: money(order.vatTax),
+        deliveryCharge: money(order.deliveryCharge),
+        quickDeliveryFee: money(order.quickDeliveryFee),
+        deliveryMode:
+          String(order.deliveryMode || "basic").toLowerCase() === "quick"
+            ? order.slaBreached
+              ? "Quick·SLA"
+              : "Quick"
+            : "Basic",
+        platformFee: money(order.platformFee),
+        packagingFee: money(order.packagingFee),
+        totalAmount: money(order.totalAmount),
+        orderStatus: order.orderStatus || "N/A",
+      }))
+
       switch (format) {
-        case "csv": exportReportsToCSV(exportRows, headers, "regular_order_report"); break
-        case "excel": exportReportsToExcel(exportRows, headers, "regular_order_report"); break
-        case "pdf": exportReportsToPDF(exportRows, headers, "regular_order_report", "Regular Order Report"); break
-        case "json": exportReportsToJSON(exportRows, "regular_order_report"); break
+        case "csv":
+          exportReportsToCSV(exportRows, headers, "regular_order_report")
+          break
+        case "excel":
+          exportReportsToExcel(exportRows, headers, "regular_order_report")
+          break
+        case "pdf":
+          await exportReportsToPDF(exportRows, headers, "regular_order_report", "Regular Order Report")
+          break
+        case "json":
+          exportReportsToJSON(exportRows, "regular_order_report")
+          break
       }
+      toast.success(`Exported ${exportRows.length} orders`)
     } catch (err) {
       debugError("Error exporting order report:", err)
       toast.error("Failed to export order report")
@@ -590,8 +644,11 @@ export default function RegularOrderReport() {
                   <th className="px-1.5 py-1 text-left text-[8px] font-bold text-slate-700 uppercase tracking-wider" style={{ width: "5%" }}>
                     Mode
                   </th>
-                  <th className="px-1.5 py-1 text-left text-[8px] font-bold text-slate-700 uppercase tracking-wider" style={{ width: "7%" }}>
+                  <th className="px-1.5 py-1 text-left text-[8px] font-bold text-slate-700 uppercase tracking-wider" style={{ width: "6%" }}>
                     Platform Fee
+                  </th>
+                  <th className="px-1.5 py-1 text-left text-[8px] font-bold text-slate-700 uppercase tracking-wider" style={{ width: "6%" }}>
+                    Packaging Fee
                   </th>
                   <th className="px-1.5 py-1 text-left text-[8px] font-bold text-slate-700 uppercase tracking-wider" style={{ width: "8%" }}>
                     Order Amount
@@ -629,7 +686,7 @@ export default function RegularOrderReport() {
                         <span className="text-[10px] text-slate-700 truncate block">{order.customerName}</span>
                       </td>
                       <td className="px-1.5 py-1">
-                        <span className="text-[10px] text-slate-700">{formatAmount(order.totalAmount)}</span>
+                        <span className="text-[10px] text-slate-700">{formatAmount(order.totalItemAmount)}</span>
                       </td>
                       <td className="px-1.5 py-1">
                         <span className="text-[10px] text-slate-700">{formatAmount(order.couponDiscount)}</span>
@@ -652,6 +709,9 @@ export default function RegularOrderReport() {
                       </td>
                       <td className="px-1.5 py-1">
                         <span className="text-[10px] text-slate-700">{formatAmount(order.platformFee)}</span>
+                      </td>
+                      <td className="px-1.5 py-1">
+                        <span className="text-[10px] text-slate-700">{formatAmount(order.packagingFee || 0)}</span>
                       </td>
                       <td className="px-1.5 py-1">
                         <span className="text-[10px] font-medium text-slate-900">{formatAmount(order.totalAmount || order.totalItemAmount)}</span>

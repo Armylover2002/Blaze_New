@@ -3,6 +3,12 @@ import { Search, Download, ChevronDown, IndianRupee, Calendar, Filter, Loader2, 
 import { adminAPI } from "@food/api"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@food/components/ui/dropdown-menu"
 import { toast } from "sonner"
+import {
+  exportReportsToCSV,
+  exportReportsToExcel,
+  exportReportsToPDF,
+  exportReportsToJSON,
+} from "@food/components/admin/reports/reportsExportUtils"
 const debugLog = (...args) => { }
 const debugWarn = (...args) => { }
 const debugError = (...args) => { }
@@ -109,68 +115,87 @@ export default function DeliveryEarnings() {
     setPagination(prev => ({ ...prev, page: newPage }))
   }
 
-  const handleExport = (format) => {
-    if (earnings.length === 0) {
-      toast.info("No data to export")
-      return
-    }
+  const handleExport = async (format) => {
+    try {
+      toast.info("Preparing export...")
+      const allEarnings = []
+      let currentPage = 1
+      let totalPagesToFetch = 1
+      const exportLimit = 200
 
-    const headers = [
-      { key: "sl", label: "SI" },
-      { key: "deliveryPartnerName", label: "Delivery Boy" },
-      { key: "deliveryPartnerPhone", label: "Phone" },
-      { key: "orderId", label: "Order ID" },
-      { key: "restaurantName", label: "Restaurant" },
-      { key: "amount", label: "Earning" },
-      { key: "orderTotal", label: "Order Total" },
-      { key: "deliveryFee", label: "Delivery Fee" },
-      { key: "orderStatus", label: "Status" },
-      { key: "createdAt", label: "Date" },
-    ]
+      do {
+        const params = {
+          page: currentPage,
+          limit: exportLimit,
+          period: filters.period,
+          ...(filters.deliveryPartnerId && { deliveryPartnerId: filters.deliveryPartnerId }),
+          ...(filters.fromDate && { fromDate: filters.fromDate }),
+          ...(filters.toDate && { toDate: filters.toDate }),
+          ...(searchQuery.trim() && { search: searchQuery.trim() }),
+        }
+        const response = await adminAPI.getDeliveryEarnings(params)
+        if (!response.data?.success) break
+        const batch = response.data.data.earnings || []
+        allEarnings.push(...batch)
+        const paginationMeta = response.data.data.pagination || {}
+        totalPagesToFetch = Number(paginationMeta.pages || paginationMeta.totalPages || 1)
+        currentPage += 1
+      } while (currentPage <= totalPagesToFetch && currentPage <= 50)
 
-    const data = earnings.map((earning, index) => ({
-      sl: (pagination.page - 1) * pagination.limit + index + 1,
-      deliveryPartnerName: earning.deliveryPartnerName || 'N/A',
-      deliveryPartnerPhone: earning.deliveryPartnerPhone || 'N/A',
-      orderId: earning.orderId || 'N/A',
-      restaurantName: earning.restaurantName || 'N/A',
-      amount: formatCurrency(earning.amount),
-      orderTotal: formatCurrency(earning.orderTotal),
-      deliveryFee: formatCurrency(earning.deliveryFee),
-      orderStatus: earning.orderStatus || 'N/A',
-      createdAt: formatDate(earning.createdAt)
-    }))
+      if (allEarnings.length === 0) {
+        toast.info("No data to export")
+        return
+      }
 
-    switch (format) {
-      case "csv":
-        const csvContent = [
-          headers.map(h => h.label).join(","),
-          ...data.map(row => headers.map(h => `"${row[h.key] || ''}"`).join(","))
-        ].join("\n")
-        const csvBlob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" })
-        const csvLink = document.createElement("a")
-        csvLink.href = URL.createObjectURL(csvBlob)
-        csvLink.download = `delivery_earnings_${new Date().toISOString().split('T')[0]}.csv`
-        csvLink.click()
-        toast.success("CSV exported successfully")
-        break
-      case "excel":
-        toast.info("Excel export coming soon")
-        break
-      case "pdf":
-        toast.info("PDF export coming soon")
-        break
-      case "json":
-        const jsonContent = JSON.stringify(data, null, 2)
-        const jsonBlob = new Blob([jsonContent], { type: "application/json" })
-        const jsonLink = document.createElement("a")
-        jsonLink.href = URL.createObjectURL(jsonBlob)
-        jsonLink.download = `delivery_earnings_${new Date().toISOString().split('T')[0]}.json`
-        jsonLink.click()
-        toast.success("JSON exported successfully")
-        break
-      default:
-        toast.error("Invalid export format")
+      const headers = [
+        { key: "sl", label: "SI" },
+        { key: "deliveryPartnerName", label: "Delivery Boy" },
+        { key: "deliveryPartnerPhone", label: "Phone" },
+        { key: "orderId", label: "Order ID" },
+        { key: "restaurantName", label: "Restaurant" },
+        { key: "amount", label: "Earning" },
+        { key: "orderTotal", label: "Order Total" },
+        { key: "deliveryFee", label: "Delivery Fee" },
+        { key: "orderStatus", label: "Status" },
+        { key: "createdAt", label: "Date" },
+      ]
+
+      const data = allEarnings.map((earning, index) => ({
+        sl: index + 1,
+        deliveryPartnerName: earning.deliveryPartnerName || "N/A",
+        deliveryPartnerPhone: earning.deliveryPartnerPhone || "N/A",
+        orderId: earning.orderId || "N/A",
+        restaurantName: earning.restaurantName || "N/A",
+        amount: formatCurrency(earning.amount),
+        orderTotal: formatCurrency(earning.orderTotal),
+        deliveryFee: formatCurrency(earning.deliveryFee),
+        orderStatus: earning.orderStatus || "N/A",
+        createdAt: formatDate(earning.createdAt),
+      }))
+
+      switch (format) {
+        case "csv":
+          exportReportsToCSV(data, headers, "delivery_earnings")
+          toast.success(`CSV exported (${data.length} rows)`)
+          break
+        case "excel":
+          exportReportsToExcel(data, headers, "delivery_earnings")
+          toast.success(`Excel exported (${data.length} rows)`)
+          break
+        case "pdf":
+          await exportReportsToPDF(data, headers, "delivery_earnings", "Delivery Earnings Report")
+          toast.success(`PDF exported (${data.length} rows)`)
+          break
+        case "json":
+          exportReportsToJSON(data, "delivery_earnings")
+          toast.success(`JSON exported (${data.length} rows)`)
+          break
+        default:
+          toast.error("Invalid export format")
+      }
+    } catch (error) {
+      debugError("Export error:", error)
+      toast.error("Failed to export earnings")
     }
   }
 
@@ -324,6 +349,10 @@ export default function DeliveryEarnings() {
                 <DropdownMenuItem onClick={() => handleExport("excel")}>
                   <FileSpreadsheet className="w-4 h-4 mr-2" />
                   Export as Excel
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleExport("pdf")}>
+                  <FileText className="w-4 h-4 mr-2" />
+                  Export as PDF
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => handleExport("json")}>
                   <Code className="w-4 h-4 mr-2" />

@@ -171,6 +171,8 @@ export default function DeliveryBoyWallet() {
                     <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider text-red-600">Cash in hand</th>
                     <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">Rem. cash limit</th>
                     <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">Total earning</th>
+                    <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider text-green-600">Order Earning</th>
+                    <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider text-blue-600">Addon Earning</th>
                     <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">Bonus</th>
                     <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">Total withdrawal</th>
                     <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">Total Orders</th>
@@ -193,10 +195,19 @@ export default function DeliveryBoyWallet() {
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-700">{(page - 1) * limit + i + 1}</td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-slate-900">{w.name || "—"}</td>
                         <td className="px-6 py-4 whitespace-nowrap text-xs font-medium text-slate-500">{w.deliveryIdString || "—"}</td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-emerald-600">{formatCurrency(w.pocketBalance)}</td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="flex flex-col">
+                            <span className="text-sm font-bold text-emerald-600">{formatCurrency(w.pocketBalance)}</span>
+                            <span className="text-[10px] text-slate-500 font-medium mt-0.5">
+                              (Earn: {formatCurrency(w.totalEarning)} + Bonus: {formatCurrency(w.bonus)})
+                            </span>
+                          </div>
+                        </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-red-600">{formatCurrency(w.cashCollected)}</td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-700">{formatCurrency(w.remainingCashLimit)}</td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-700">{formatCurrency(w.totalEarning)}</td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-green-600">{formatCurrency(w.orderEarning)}</td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-blue-600">{formatCurrency(w.addonEarning)}</td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-700">{formatCurrency(w.bonus)}</td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-700">{formatCurrency(w.totalWithdrawn)}</td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-slate-900">{w.totalDeliveries || 0}</td>

@@ -5,7 +5,10 @@ const debugError = (...args) => {}
 const INR = "\u20B9"
 
 const formatAmount = (amount) =>
-  `${INR}${(Number(amount) || 0).toFixed(2)}`
+  `${INR}${(Number(amount) || 0).toLocaleString("en-IN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`
 
 const getCodAllowedLabel = (customer) =>
   customer?.isCodAllowed !== false ? "Yes" : "No"
@@ -22,15 +25,13 @@ const CUSTOMER_HEADERS = [
   "Status",
 ]
 
-const buildCustomerRow = (customer, index, { withCurrency = true } = {}) => [
+const buildCustomerRow = (customer, index) => [
   customer.sl || index + 1,
   customer.name || "N/A",
   customer.email || "N/A",
   customer.phone || "N/A",
   customer.totalOrder || 0,
-  withCurrency
-    ? formatAmount(customer.totalOrderAmount)
-    : (Number(customer.totalOrderAmount) || 0).toFixed(2),
+  formatAmount(customer.totalOrderAmount),
   customer.joiningDate || "N/A",
   getCodAllowedLabel(customer),
   customer.status ? "Active" : "Inactive",
@@ -84,9 +85,7 @@ export const exportCustomersToExcel = (customers, filename = "customers") => {
 
   const headers = CUSTOMER_HEADERS
   const rows = customers.map((customer, index) =>
-    buildCustomerRow(customer, index, { withCurrency: false }).map((cell, i) =>
-      i === 5 ? `${INR}${cell}` : cell
-    )
+    buildCustomerRow(customer, index)
   )
   
   // Create HTML table for better Excel compatibility
@@ -97,7 +96,8 @@ export const exportCustomersToExcel = (customers, filename = "customers") => {
         <style>
           table { border-collapse: collapse; width: 100%; }
           th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-          th { background-color: #f2f2f2; font-weight: bold; }
+          th { background-color: #3b82f6; color: white; font-weight: bold; }
+          tr:nth-child(even) { background-color: #f9fafb; }
         </style>
       </head>
       <body>

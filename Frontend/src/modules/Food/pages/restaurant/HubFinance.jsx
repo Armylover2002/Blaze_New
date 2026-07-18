@@ -2,6 +2,7 @@ import { useState, useMemo, useRef, useEffect } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import { motion, AnimatePresence } from "framer-motion"
 import { Bell, Menu, ChevronDown, Calendar, Download, ArrowRight, FileText, Wallet, X, Gift } from "lucide-react"
+import { toast } from 'sonner'
 import BottomNavOrders from "@food/components/restaurant/BottomNavOrders"
 import { restaurantAPI } from "@food/api"
 const debugLog = (...args) => {}
@@ -40,6 +41,13 @@ export default function HubFinance() {
     rawMaxWithdrawal != null && Number(rawMaxWithdrawal) > 0
       ? Number(rawMaxWithdrawal)
       : null
+  const availableBalance = Number(financeData?.earnings?.availableBalance || 0)
+  const maxAllowedWithdrawal =
+    maxWithdrawalLimit != null
+      ? Math.min(availableBalance, maxWithdrawalLimit)
+      : availableBalance
+  const canOpenWithdraw =
+    availableBalance > 0 && maxAllowedWithdrawal >= minWithdrawalLimit
 
   // Fetch finance data on mount
   useEffect(() => {
@@ -700,7 +708,7 @@ export default function HubFinance() {
     } catch (error) {
       debugError('? Error downloading PDF:', error)
       debugError('Error details:', error.stack)
-      alert(`Failed to download PDF: ${error.message}. Please check console for details.`)
+      toast.error(`Failed to download PDF: ${error.message}. Please check console for details.`)
     setShowDownloadMenu(false)
     }
   }
@@ -820,17 +828,32 @@ export default function HubFinance() {
                     <>
                       <p className="mb-1 text-sm text-gray-400">Available for withdrawal</p>
                       <p className="mb-2 text-4xl font-black md:text-5xl">
-                        ₹{(financeData?.earnings?.availableBalance || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        ₹{availableBalance.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </p>
-                      <p className="mb-6 text-xs font-medium text-gray-400 opacity-80">
-                        Limit: Min ₹{minWithdrawalLimit.toLocaleString('en-IN')} 
+                      <p className="mb-1 text-xs font-medium text-gray-400 opacity-80">
+                        Limit: Min ₹{minWithdrawalLimit.toLocaleString('en-IN')}
                         {maxWithdrawalLimit != null ? ` • Max ₹${maxWithdrawalLimit.toLocaleString('en-IN')}` : ''}
                       </p>
+                      {maxWithdrawalLimit != null && availableBalance > maxWithdrawalLimit && (
+                        <p className="mb-6 text-xs font-semibold text-amber-300">
+                          You can withdraw up to ₹{maxAllowedWithdrawal.toLocaleString('en-IN')} per request
+                        </p>
+                      )}
+                      {!(maxWithdrawalLimit != null && availableBalance > maxWithdrawalLimit) && (
+                        <div className="mb-6" />
+                      )}
                       <button
-                        onClick={() => setShowWithdrawalModal(true)}
-                        disabled={!(financeData?.earnings?.availableBalance > 0)}
+                        onClick={() => {
+                          setWithdrawalAmount(
+                            maxAllowedWithdrawal >= minWithdrawalLimit
+                              ? String(Number(maxAllowedWithdrawal.toFixed(2)))
+                              : ''
+                          )
+                          setShowWithdrawalModal(true)
+                        }}
+                        disabled={!canOpenWithdraw}
                         className={`flex w-full items-center justify-center gap-2 rounded-xl px-4 py-4 font-bold transition-all ${
-                          financeData?.earnings?.availableBalance > 0
+                          canOpenWithdraw
                             ? "bg-white text-black hover:bg-gray-100 active:scale-95"
                             : "cursor-not-allowed bg-gray-800 text-gray-500"
                         }`}
@@ -1300,13 +1323,19 @@ export default function HubFinance() {
                 
                 <div className="mb-4">
                   <p className="text-sm text-gray-600 mb-2">
-                    Available Balance: <span className="font-semibold text-gray-900">₹{(financeData?.earnings?.availableBalance || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                    Available Balance:{' '}
+                    <span className="font-semibold text-gray-900">
+                      ₹{availableBalance.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
                   </p>
-                  <p className="text-xs text-gray-500 mb-3">
+                  <p className="text-xs text-gray-500 mb-1">
                     Min: ₹{minWithdrawalLimit.toLocaleString('en-IN')}
                     {maxWithdrawalLimit != null
                       ? ` · Max: ₹${maxWithdrawalLimit.toLocaleString('en-IN')}`
                       : ' · Max: Unlimited'}
+                  </p>
+                  <p className="text-xs font-semibold text-slate-700 mb-3">
+                    Enter any amount between ₹{minWithdrawalLimit.toLocaleString('en-IN')} and ₹{maxAllowedWithdrawal.toLocaleString('en-IN')}
                   </p>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Enter Amount to Withdraw
@@ -1314,18 +1343,28 @@ export default function HubFinance() {
                   <input
                     type="number"
                     min={minWithdrawalLimit}
-                    max={
-                      maxWithdrawalLimit != null
-                        ? Math.min(maxWithdrawalLimit, financeData?.earnings?.availableBalance || 0)
-                        : (financeData?.earnings?.availableBalance || 0)
-                    }
+                    max={maxAllowedWithdrawal}
                     step="0.01"
                     value={withdrawalAmount}
-                    onChange={(e) => setWithdrawalAmount(e.target.value)}
-                    placeholder="0.00"
+                    onChange={(e) => {
+                      const raw = e.target.value
+                      if (raw === '' || raw === '.') {
+                        setWithdrawalAmount(raw)
+                        return
+                      }
+                      const n = Number(raw)
+                      if (!Number.isFinite(n)) return
+                      // Soft-clamp while typing above max allowed
+                      if (n > maxAllowedWithdrawal) {
+                        setWithdrawalAmount(String(Number(maxAllowedWithdrawal.toFixed(2))))
+                        return
+                      }
+                      setWithdrawalAmount(raw)
+                    }}
+                    placeholder={`${minWithdrawalLimit} - ${maxAllowedWithdrawal}`}
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-black focus:border-transparent outline-none"
                   />
-                  {withdrawalAmount && parseFloat(withdrawalAmount) > (financeData?.earnings?.availableBalance || 0) && (
+                  {withdrawalAmount && parseFloat(withdrawalAmount) > availableBalance && (
                     <p className="text-sm text-red-600 mt-1">Amount cannot exceed available balance</p>
                   )}
                   {withdrawalAmount && parseFloat(withdrawalAmount) > 0 && parseFloat(withdrawalAmount) < minWithdrawalLimit && (
@@ -1350,19 +1389,23 @@ export default function HubFinance() {
                     onClick={async () => {
                       const amount = parseFloat(withdrawalAmount)
                       if (!amount || amount <= 0) {
-                        alert('Please enter a valid amount')
+                        toast.error('Please enter a valid amount')
                         return
                       }
                       if (amount < minWithdrawalLimit) {
-                        alert(`Minimum withdrawal amount is ₹${minWithdrawalLimit}`)
+                        toast.error(`Minimum withdrawal amount is ₹${minWithdrawalLimit}`)
                         return
                       }
                       if (maxWithdrawalLimit != null && amount > maxWithdrawalLimit) {
-                        alert(`Maximum withdrawal amount is ₹${maxWithdrawalLimit}`)
+                        toast.error(`Maximum withdrawal amount is ₹${maxWithdrawalLimit}`)
                         return
                       }
-                      if (amount > (financeData?.earnings?.availableBalance || 0)) {
-                        alert('Amount cannot exceed available balance')
+                      if (amount > availableBalance) {
+                        toast.error('Amount cannot exceed available balance')
+                        return
+                      }
+                      if (amount > maxAllowedWithdrawal) {
+                        toast.error(`You can withdraw maximum ₹${maxAllowedWithdrawal} in one request`)
                         return
                       }
                       
@@ -1370,7 +1413,7 @@ export default function HubFinance() {
                         setSubmittingWithdrawal(true)
                         const response = await restaurantAPI.createWithdrawalRequest(amount)
                         if (response.data?.success) {
-                          alert('Withdrawal request submitted successfully!')
+                          toast.success('Withdrawal request submitted successfully!')
                           setShowWithdrawalModal(false)
                           setWithdrawalAmount('')
                           // Refresh finance data
@@ -1387,11 +1430,11 @@ export default function HubFinance() {
                               : []
                           setWithdrawalRequests(withdrawalList)
                         } else {
-                          alert(response.data?.message || 'Failed to submit withdrawal request')
+                          toast.error(response.data?.message || 'Failed to submit withdrawal request')
                         }
                       } catch (error) {
                         debugError('Error submitting withdrawal request:', error)
-                        alert(error.response?.data?.message || 'Failed to submit withdrawal request. Please try again.')
+                        toast.error(error.response?.data?.message || 'Failed to submit withdrawal request. Please try again.')
                       } finally {
                         setSubmittingWithdrawal(false)
                       }
@@ -1402,7 +1445,8 @@ export default function HubFinance() {
                       parseFloat(withdrawalAmount) <= 0 ||
                       parseFloat(withdrawalAmount) < minWithdrawalLimit ||
                       (maxWithdrawalLimit != null && parseFloat(withdrawalAmount) > maxWithdrawalLimit) ||
-                      parseFloat(withdrawalAmount) > (financeData?.earnings?.availableBalance || 0)
+                      parseFloat(withdrawalAmount) > availableBalance ||
+                      parseFloat(withdrawalAmount) > maxAllowedWithdrawal
                     }
                     className="flex-1 px-4 py-3 bg-black text-white rounded-lg font-medium hover:bg-gray-800 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed"
                   >

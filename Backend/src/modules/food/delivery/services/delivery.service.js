@@ -4,7 +4,9 @@ import { FoodDeliveryCashDeposit } from '../models/foodDeliveryCashDeposit.model
 import { DeliverySupportTicket } from '../models/supportTicket.model.js';
 import { DeliveryBonusTransaction } from '../../admin/models/deliveryBonusTransaction.model.js';
 import { FoodEarningAddon } from '../../admin/models/earningAddon.model.js';
+import { FoodEarningAddonHistory } from '../../admin/models/earningAddonHistory.model.js';
 import { FoodOrder } from '../../orders/models/order.model.js';
+import { Transaction } from '../../../../core/payments/models/transaction.model.js';
 import { SellerReturn } from '../../../quick-commerce/seller/models/sellerReturn.model.js';
 import { resolveReturnPickupCharge } from '../../../quick-commerce/utils/return.helpers.js';
 import { uploadImageBuffer } from '../../../../services/cloudinary.service.js';
@@ -1068,7 +1070,7 @@ export const getDeliveryPartnerEarnings = async (deliveryPartnerId, query = {}) 
     const includeFood = shouldIncludeFood(query.module);
     const includePorter = shouldIncludePorter(query.module);
 
-    const [totalOrders, agg, returnPickupEarnings, porterEarnings] = await Promise.all([
+    const [totalOrders, agg, returnPickupEarnings, porterEarnings, adjustmentTransactions] = await Promise.all([
         includeFood ? FoodOrder.countDocuments(match) : Promise.resolve(0),
         includeFood ? FoodOrder.aggregate([
             { $match: match },
@@ -1081,12 +1083,32 @@ export const getDeliveryPartnerEarnings = async (deliveryPartnerId, query = {}) 
         ]) : Promise.resolve([]),
         includeFood ? sumReturnPickupEarnings(partnerId, range) : Promise.resolve({ totalEarnings: 0, totalTrips: 0 }),
         includePorter ? sumPorterDriverEarnings(partnerId, range) : Promise.resolve({ totalEarnings: 0, totalTrips: 0 }),
+        Transaction.aggregate([
+            {
+                $match: {
+                    entityId: partnerId,
+                    entityType: 'deliveryBoy',
+                    type: 'credit',
+                    category: 'adjustment',
+                    ...(range ? { createdAt: { $gte: range.start, $lte: range.end } } : {})
+                }
+            },
+            {
+                $group: {
+                    _id: null,
+                    totalAdjustment: { $sum: { $ifNull: ['$amount', 0] } }
+                }
+            }
+        ])
     ]);
+
+    const adjustmentEarnings = Number(adjustmentTransactions?.[0]?.totalAdjustment || 0);
 
     const totalEarnings =
         (Number(agg?.[0]?.totalEarnings) || 0) +
         (Number(returnPickupEarnings?.totalEarnings) || 0) +
-        (Number(porterEarnings?.totalEarnings) || 0);
+        (Number(porterEarnings?.totalEarnings) || 0) +
+        adjustmentEarnings;
     const combinedOrders =
         totalOrders +
         (Number(returnPickupEarnings?.totalTrips) || 0) +
@@ -1098,9 +1120,9 @@ export const getDeliveryPartnerEarnings = async (deliveryPartnerId, query = {}) 
         totalOrders: combinedOrders,
         totalHours: 0,
         totalMinutes: 0,
-        orderEarning: totalEarnings,
-        incentive: 0,
-        otherEarnings: 0
+        orderEarning: totalEarnings - adjustmentEarnings,
+        incentive: adjustmentEarnings,
+        otherEarnings: adjustmentEarnings
     };
 
     return {
@@ -1361,7 +1383,7 @@ export const getDeliveryPocketDetails = async (deliveryPartnerId, query = {}) =>
     const includeFood = shouldIncludeFood(query.module);
     const includePorter = shouldIncludePorter(query.module);
 
-    const [orders, returnPickups, bonusTxList, porterTrips, porterPaymentTx] = await Promise.all([
+    const [orders, returnPickups, bonusTxList, addonTxList, addonHistoryList, porterTrips, porterPaymentTx] = await Promise.all([
         includeFood ? FoodOrder.find({
         'dispatch.deliveryPartnerId': partnerId,
         orderStatus: 'delivered',
@@ -1392,6 +1414,27 @@ export const getDeliveryPocketDetails = async (deliveryPartnerId, query = {}) =>
         .sort({ createdAt: -1 })
         .limit(limit)
         .lean(),
+        // Addon / incentive wallet credits — never mix into order earning
+        Transaction.find({
+            entityId: partnerId,
+            entityType: 'deliveryBoy',
+            category: 'adjustment',
+            type: 'credit',
+            createdAt: { $gte: start, $lte: end },
+        }).sort({ createdAt: -1 }).limit(limit).lean(),
+        FoodEarningAddonHistory.find({
+            deliveryPartnerId: partnerId,
+            status: 'credited',
+            $or: [
+                { creditedAt: { $gte: start, $lte: end } },
+                { completedAt: { $gte: start, $lte: end } },
+                { updatedAt: { $gte: start, $lte: end } },
+            ],
+        })
+            .populate({ path: 'offerId', select: 'title' })
+            .sort({ creditedAt: -1, completedAt: -1, createdAt: -1 })
+            .limit(limit)
+            .lean(),
         includePorter ? listPorterDriverTrips(partnerId, { statusFilter: 'completed', range: { start, end }, limit }) : Promise.resolve([]),
         includePorter ? listPorterDriverPaymentTransactions(partnerId, { range: { start, end }, limit }) : Promise.resolve([]),
     ]);
@@ -1400,6 +1443,7 @@ export const getDeliveryPocketDetails = async (deliveryPartnerId, query = {}) =>
         .sort((a, b) => new Date(b.completedAt || b.deliveredAt || b.createdAt) - new Date(a.completedAt || a.deliveredAt || a.createdAt))
         .slice(0, limit);
 
+    // Pure trip earnings only (orders + returns + porter). Addon/adjustment credits stay out.
     const paymentTransactions = [
         ...(orders || []).map((o) => ({
         _id: o._id,
@@ -1441,16 +1485,66 @@ export const getDeliveryPocketDetails = async (deliveryPartnerId, query = {}) =>
         description: t.reference ? `Bonus - ${t.reference}` : 'Bonus'
     }));
 
+    const historyById = new Map(
+        (addonHistoryList || []).map((h) => [String(h._id), h]),
+    );
+
+    const addonFromTransactions = (addonTxList || []).map((t) => {
+        const historyId = t?.metadata?.historyId ? String(t.metadata.historyId) : '';
+        const history = historyId ? historyById.get(historyId) : null;
+        const title = history?.offerId?.title || t.description || 'Earning Addon';
+        return {
+            _id: t._id,
+            type: 'addon',
+            amount: Number(t.amount) || 0,
+            status: 'Completed',
+            date: t.createdAt,
+            createdAt: t.createdAt,
+            metadata: {
+                ...(t.metadata || {}),
+                source: t?.metadata?.source || 'adjustment',
+            },
+            description: title,
+        };
+    });
+
+    const coveredHistoryIds = new Set(
+        addonFromTransactions
+            .map((t) => (t.metadata?.historyId ? String(t.metadata.historyId) : ''))
+            .filter(Boolean),
+    );
+    const addonFromHistoryOnly = (addonHistoryList || [])
+        .filter((h) => !coveredHistoryIds.has(String(h._id)))
+        .map((h) => ({
+            _id: h._id,
+            type: 'addon',
+            amount: Number(h.earningAmount || h.totalEarning || 0) || 0,
+            status: 'Completed',
+            date: h.creditedAt || h.completedAt || h.updatedAt || h.createdAt,
+            createdAt: h.creditedAt || h.completedAt || h.updatedAt || h.createdAt,
+            metadata: {
+                source: 'earning_addon_history',
+                historyId: String(h._id),
+                offerId: h.offerId?._id ? String(h.offerId._id) : undefined,
+            },
+            description: h.offerId?.title || 'Earning Addon',
+        }));
+
+    const addonTransactions = [...addonFromTransactions, ...addonFromHistoryOnly]
+        .sort((a, b) => new Date(b.date || b.createdAt) - new Date(a.date || a.createdAt));
+
     const totalEarning = paymentTransactions.reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
     const totalBonus = bonusTransactions.reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+    const totalAddon = addonTransactions.reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
 
     return {
         week: { start: start.toISOString(), end: end.toISOString() },
-        summary: { totalEarning, totalBonus, grandTotal: totalEarning + totalBonus },
+        summary: { totalEarning, totalBonus, totalAddon, grandTotal: totalEarning + totalBonus + totalAddon },
         trips,
         transactions: {
             payment: paymentTransactions,
-            bonus: bonusTransactions
+            bonus: bonusTransactions,
+            addon: addonTransactions
         }
     };
 };

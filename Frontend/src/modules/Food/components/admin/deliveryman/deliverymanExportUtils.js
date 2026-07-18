@@ -172,7 +172,7 @@ export const exportReviewsToCSV = (reviews, filename = "deliveryman_reviews") =>
   
   const csvContent = [
     headers.join(","),
-    ...rows.map(row => row.map(cell => `"${cell}"`).join(","))
+    ...rows.map(row => row.map(cell => `"${String(cell || "").replace(/"/g, '""')}"`).join(","))
   ].join("\n")
   
   const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" })
@@ -212,56 +212,75 @@ export const exportReviewsToExcel = (reviews, filename = "deliveryman_reviews") 
   document.body.removeChild(link)
 }
 
-export const exportReviewsToPDF = (reviews, filename = "deliveryman_reviews") => {
-  const headers = ["SI", "Deliveryman", "Customer", "Review", "Rating"]
-  
-  let htmlContent = `
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <title>Deliveryman Reviews Report</title>
-      <style>
-        body { font-family: Arial, sans-serif; margin: 20px; }
-        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; font-size: 10px; }
-        th { background-color: #f2f2f2; font-weight: bold; }
-        tr:nth-child(even) { background-color: #f9f9f9; }
-        h1 { text-align: center; }
-      </style>
-    </head>
-    <body>
-      <h1>Deliveryman Reviews Report</h1>
-      <p>Generated on: ${new Date().toLocaleString()}</p>
-      <table>
-        <thead>
-          <tr>
-            ${headers.map(h => `<th>${h}</th>`).join("")}
-          </tr>
-        </thead>
-        <tbody>
-          ${reviews.map(review => `
-            <tr>
-              <td>${review.sl}</td>
-              <td>${review.deliveryman}</td>
-              <td>${review.customer}</td>
-              <td>${review.review}</td>
-              <td>${review.rating}</td>
-            </tr>
-          `).join("")}
-        </tbody>
-      </table>
-    </body>
-    </html>
-  `
-  
-  const printWindow = window.open("", "_blank")
-  printWindow.document.write(htmlContent)
-  printWindow.document.close()
-  printWindow.focus()
-  setTimeout(() => {
-    printWindow.print()
-    printWindow.close()
-  }, 250)
+export const exportReviewsToPDF = async (reviews, filename = "deliveryman_reviews") => {
+  if (!reviews || reviews.length === 0) {
+    alert("No data to export")
+    return
+  }
+
+  try {
+    const { default: jsPDF } = await import('jspdf')
+    const { default: autoTable } = await import('jspdf-autotable')
+    
+    const doc = new jsPDF({
+      orientation: 'landscape',
+      unit: 'mm',
+      format: 'a4'
+    })
+
+    doc.setFontSize(16)
+    doc.setTextColor(30, 30, 30)
+    const title = filename.charAt(0).toUpperCase() + filename.slice(1).replace(/_/g, ' ')
+    doc.text(title, 148, 15, { align: 'center' })
+    
+    doc.setFontSize(10)
+    doc.setTextColor(100, 100, 100)
+    const exportDate = new Date().toLocaleDateString('en-GB', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    })
+    doc.text(`Exported on: ${exportDate} | Total Records: ${reviews.length}`, 148, 22, { align: 'center' })
+    
+    const headers = [["SI", "Deliveryman", "Customer", "Review", "Rating"]]
+    const tableData = reviews.map((review, index) => [
+      review.sl || index + 1,
+      review.deliveryman || 'N/A',
+      review.customer || 'N/A',
+      review.review || 'N/A',
+      review.rating || 'N/A'
+    ])
+
+    autoTable(doc, {
+      head: headers,
+      body: tableData,
+      startY: 28,
+      styles: {
+        fontSize: 8,
+        cellPadding: 2,
+      },
+      headStyles: {
+        fillColor: [59, 130, 246],
+        textColor: 255,
+        fontStyle: 'bold',
+      },
+      alternateRowStyles: {
+        fillColor: [248, 250, 252]
+      },
+      columnStyles: {
+        3: { cellWidth: 100 }, // Review text column wider
+      },
+      margin: { top: 28, left: 10, right: 10 },
+    })
+
+    const fileTimestamp = new Date().toISOString().split("T")[0]
+    doc.save(`${filename}_${fileTimestamp}.pdf`)
+  } catch (error) {
+    console.error("Error loading PDF library:", error)
+    alert("Failed to load PDF library. Please try again.")
+  }
 }
 
 export const exportReviewsToJSON = (reviews, filename = "deliveryman_reviews") => {
@@ -280,8 +299,11 @@ export const exportReviewsToJSON = (reviews, filename = "deliveryman_reviews") =
 // Export utilities for bonus transactions
 const formatMoneyCell = (value) => {
   const num = Number(value)
-  if (!Number.isFinite(num)) return '₹0.00'
-  return `₹${num.toFixed(2)}`
+  if (!Number.isFinite(num)) return '\u20B90.00'
+  return `\u20B9${num.toLocaleString('en-IN', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`
 }
 
 export const exportBonusToCSV = (transactions, filename = "deliveryman_bonus") => {
@@ -317,7 +339,7 @@ export const exportBonusToCSV = (transactions, filename = "deliveryman_bonus") =
     ),
   ].join("\n")
 
-  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" })
+  const blob = new Blob(["\uFEFF" + csvContent], { type: "text/csv;charset=utf-8;" })
   const link = document.createElement("a")
   const url = URL.createObjectURL(blob)
   link.setAttribute("href", url)

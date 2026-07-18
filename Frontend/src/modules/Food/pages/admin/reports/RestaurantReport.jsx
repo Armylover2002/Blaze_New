@@ -90,7 +90,7 @@ export default function RestaurantReport() {
     setSearchQuery("")
   }
 
-  const handleExport = (format) => {
+  const handleExport = async (format) => {
     if (filteredRestaurants.length === 0) {
       alert("No data to export")
       return
@@ -105,12 +105,29 @@ export default function RestaurantReport() {
       { key: "totalAdminCommission", label: "Total Admin Commission" },
       { key: "totalVATTAX", label: "Total VAT/TAX" },
       { key: "averageRatings", label: "Average Ratings" },
+      { key: "zoneName", label: "Zone" },
     ]
+    const exportRows = filteredRestaurants.map((restaurant, index) => {
+      const rating = Number(restaurant.averageRatings || 0)
+      const reviews = Number(restaurant.reviews || 0)
+      return {
+        sl: restaurant.sl || index + 1,
+        restaurantName: restaurant.restaurantName || "N/A",
+        totalFood: restaurant.totalFood ?? 0,
+        totalOrder: restaurant.totalOrder ?? 0,
+        totalOrderAmount: restaurant.totalOrderAmount || "\u20B90.00",
+        totalDiscountGiven: restaurant.totalDiscountGiven || "\u20B90.00",
+        totalAdminCommission: restaurant.totalAdminCommission || "\u20B90.00",
+        totalVATTAX: restaurant.totalVATTAX || "\u20B90.00",
+        averageRatings: rating === 0 ? "0 (0 reviews)" : `${rating.toFixed(1)} (${reviews} reviews)`,
+        zoneName: restaurant.zoneName || "N/A",
+      }
+    })
     switch (format) {
-      case "csv": exportReportsToCSV(filteredRestaurants, headers, "restaurant_report"); break
-      case "excel": exportReportsToExcel(filteredRestaurants, headers, "restaurant_report"); break
-      case "pdf": exportReportsToPDF(filteredRestaurants, headers, "restaurant_report", "Restaurant Report"); break
-      case "json": exportReportsToJSON(filteredRestaurants, "restaurant_report"); break
+      case "csv": exportReportsToCSV(exportRows, headers, "restaurant_report"); break
+      case "excel": exportReportsToExcel(exportRows, headers, "restaurant_report"); break
+      case "pdf": await exportReportsToPDF(exportRows, headers, "restaurant_report", "Restaurant Report"); break
+      case "json": exportReportsToJSON(exportRows, "restaurant_report"); break
     }
   }
 

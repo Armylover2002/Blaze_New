@@ -8,6 +8,7 @@ import {
 import { FoodDeliveryPartner } from "../models/deliveryPartner.model.js";
 import { uploadImageBuffer } from "../../../../services/cloudinary.service.js";
 import { DeliveryBonusTransaction } from "../../admin/models/deliveryBonusTransaction.model.js";
+import { Transaction } from "../../../../core/payments/models/transaction.model.js";
 import { getDeliveryCashLimitSettings } from "../../admin/services/admin.service.js";
 import { ValidationError } from "../../../../core/auth/errors.js";
 import {
@@ -17,7 +18,7 @@ import {
   isRazorpayConfigured,
   verifyPaymentSignature,
 } from "../../orders/helpers/razorpay.helper.js";
-import { Transaction } from "../../../../core/payments/models/transaction.model.js";
+
 import { getTransactionsByEntity } from "../../../../core/payments/transaction.service.js";
 import { FoodDeliveryWallet } from "../models/deliveryWallet.model.js";
 import { creditWallet } from "../../../../core/payments/wallet.service.js";
@@ -151,6 +152,7 @@ export const getDeliveryPartnerWalletEnhanced = async (deliveryPartnerId) => {
     pendingWithdrawalsAgg,
     transactionsResult,
     totalDeliveries,
+    addonEarningsAgg,
   ] = await Promise.all([
     getDeliveryCashLimitSettings(),
     FoodDeliveryWallet.findOne({ deliveryPartnerId: partnerId }).lean(),
@@ -236,6 +238,22 @@ export const getDeliveryPartnerWalletEnhanced = async (deliveryPartnerId) => {
       "dispatch.deliveryPartnerId": partnerId,
       orderStatus: "delivered",
     }),
+    Transaction.aggregate([
+      {
+        $match: {
+          entityId: partnerId,
+          entityType: "deliveryBoy",
+          type: "credit",
+          category: "adjustment",
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          total: { $sum: { $ifNull: ["$amount", 0] } },
+        },
+      },
+    ]),
   ]);
 
   // Fold in Porter (parcel) cash + deliveries so the SHARED pocket / cash-limit
@@ -312,6 +330,9 @@ export const getDeliveryPartnerWalletEnhanced = async (deliveryPartnerId) => {
     module: t.module,
   }));
 
+  const addonEarnings = Number(addonEarningsAgg?.[0]?.total) || 0;
+  const pureOrderEarnings = Math.max(0, (wallet.totalEarnings || 0) - addonEarnings);
+
   return {
     totalBalance: (wallet.totalEarnings || 0) + effectiveBonus,
     pocketBalance,
@@ -320,7 +341,9 @@ export const getDeliveryPartnerWalletEnhanced = async (deliveryPartnerId) => {
     availableToDeposit,
     totalWithdrawn: wallet.totalSettled || 0,
     pendingWithdrawals,
-    totalEarned: wallet.totalEarnings || 0,
+    totalEarned: (wallet.totalEarnings || 0),
+    orderEarnings: pureOrderEarnings,
+    addonEarnings: addonEarnings,
     totalBonus: effectiveBonus,
     totalCashLimit,
     availableCashLimit: Math.max(0, totalCashLimit - cashInHand),
@@ -397,8 +420,11 @@ export async function assertDeliveryPartnerCodHeadroom(
  * Serializes concurrent creates per partner so pending totals cannot oversubscribe pocket balance.
  */
 export const requestDeliveryWithdrawal = async (deliveryPartnerId, payload) => {
-  const { amount, bankDetails, paymentMethod = "bank_transfer" } = payload;
-  if (!amount || amount < 1) throw new ValidationError("Invalid amount");
+  const { bankDetails, paymentMethod = "bank_transfer" } = payload;
+  const amount = Number(payload?.amount);
+  if (!Number.isFinite(amount) || amount < 1) {
+    throw new ValidationError("Invalid amount");
+  }
 
   if (!mongoose.Types.ObjectId.isValid(deliveryPartnerId)) {
     throw new ValidationError("Invalid delivery partner ID");
@@ -419,21 +445,29 @@ export const requestDeliveryWithdrawal = async (deliveryPartnerId, payload) => {
       );
 
       const wallet = await getDeliveryPartnerWalletEnhanced(deliveryPartnerId);
-      if (amount < wallet.deliveryWithdrawalLimit) {
-        throw new ValidationError(
-          `Minimum withdrawal amount is ₹${wallet.deliveryWithdrawalLimit}`,
-        );
-      }
-      if (
+      const minLimit = Number(wallet.deliveryWithdrawalLimit) || 1;
+      const maxLimit =
         wallet.deliveryMaxWithdrawalLimit != null &&
-        amount > wallet.deliveryMaxWithdrawalLimit
-      ) {
-        throw new ValidationError(
-          `Maximum withdrawal amount is ₹${wallet.deliveryMaxWithdrawalLimit}`,
-        );
+        Number(wallet.deliveryMaxWithdrawalLimit) > 0
+          ? Number(wallet.deliveryMaxWithdrawalLimit)
+          : null;
+      const pocketBalance = Number(wallet.pocketBalance) || 0;
+      const effectiveMax =
+        maxLimit != null ? Math.min(pocketBalance, maxLimit) : pocketBalance;
+
+      if (amount < minLimit) {
+        throw new ValidationError(`Minimum withdrawal amount is ₹${minLimit}`);
       }
-      if (amount > wallet.pocketBalance) {
+      if (maxLimit != null && amount > maxLimit) {
+        throw new ValidationError(`Maximum withdrawal amount is ₹${maxLimit}`);
+      }
+      if (amount > pocketBalance) {
         throw new ValidationError("Insufficient balance for this withdrawal");
+      }
+      if (amount > effectiveMax) {
+        throw new ValidationError(
+          `You can withdraw maximum ₹${effectiveMax} in one request`,
+        );
       }
 
       const [created] = await FoodDeliveryWithdrawal.create(

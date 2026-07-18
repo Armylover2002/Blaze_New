@@ -934,6 +934,18 @@ Order again from this restaurant in the ${companyName} app.`
                         <span className="text-gray-800 dark:text-white font-medium">{"\u20B9"}{order.deliveryFee.toFixed(2)}</span>
                       </div>
                     )}
+                    {(order.pricing?.platformFee || order.platformFee) > 0 && (
+                      <div className="flex justify-between text-xs">
+                        <span className="text-gray-600 dark:text-gray-300">Platform Fee</span>
+                        <span className="text-gray-800 dark:text-white font-medium">{"\u20B9"}{(order.pricing?.platformFee || order.platformFee).toFixed(2)}</span>
+                      </div>
+                    )}
+                    {(order.pricing?.packagingFee || order.packagingFee) > 0 && (
+                      <div className="flex justify-between text-xs">
+                        <span className="text-gray-600 dark:text-gray-300">Packaging Fee</span>
+                        <span className="text-gray-800 dark:text-white font-medium">{"\u20B9"}{(order.pricing?.packagingFee || order.packagingFee).toFixed(2)}</span>
+                      </div>
+                    )}
                     {order.tax > 0 && (
                       <div className="flex justify-between text-xs">
                         <span className="text-gray-600 dark:text-gray-300">Tax</span>

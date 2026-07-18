@@ -243,7 +243,7 @@ export default function AllOrdersPage() {
       address,
       customer: customerName,
       items,
-      totalPrice: order.pricing?.total || 0,
+      totalPrice: order.pricing?.total ?? order.payment?.amountDue ?? order.payment?.amount ?? order.totalAmount ?? order.total ?? order.amount ?? 0,
       reason,
       tags: tags.length > 0 ? tags : undefined,
       createdAt: order.createdAt,
@@ -681,9 +681,9 @@ export default function AllOrdersPage() {
               </button>
             </div>
 
-            {/* Restaurant Info */}
-            <p className="text-sm text-gray-900 mb-1">
-              {order.restaurant}, {order.address}
+            {/* Delivery Info */}
+            <p className="text-sm text-gray-900 mb-1 font-medium">
+              Deliver to: {order.address}
             </p>
 
             {/* Customer Info */}
@@ -707,6 +707,10 @@ export default function AllOrdersPage() {
               {order.items.length > 1 && (
                 <p className="text-sm text-gray-500">+{order.items.length - 1} more items</p>
               )}
+              <div className="pt-2 mt-2 border-t border-gray-100 flex items-center justify-between">
+                <span className="text-sm font-bold text-gray-900">Total Bill (PAID)</span>
+                <span className="text-sm font-bold text-gray-900">{formatMoney(order.totalPrice)}</span>
+              </div>
             </div>
 
             {/* Reason/Status Message */}

@@ -32,15 +32,17 @@ export default function NewAdvertisement() {
     const load = async () => {
       try {
         setLoadingRestaurants(true)
-        const response = await adminAPI.getRestaurants({ limit: 1000 })
+        const response = await adminAPI.getRestaurants({ limit: 1000, status: "approved" })
         const data = response?.data?.data
         const raw = Array.isArray(data) ? data : (data?.restaurants || [])
         if (!cancelled) {
           setRestaurants(
-            raw.map((r) => ({
-              _id: r._id,
-              name: r.name || r.restaurantName || String(r._id),
-            }))
+            raw
+              .filter((r) => String(r.status || "").toLowerCase() === "approved")
+              .map((r) => ({
+                _id: r._id,
+                name: r.name || r.restaurantName || String(r._id),
+              }))
           )
         }
       } catch (err) {

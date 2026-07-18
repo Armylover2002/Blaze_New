@@ -11,7 +11,7 @@ import OptimizedImage from "@food/components/OptimizedImage"
 import { RestaurantGridSkeleton } from "@food/components/ui/loading-skeletons"
 import { useDelayedLoading } from "@food/hooks/useDelayedLoading"
 import { useLocation } from "@food/hooks/useLocation"
-import { getRoadDistancesFromOrigin } from "@/shared/services/roadDistance"
+import { getRoadDistancesToDestination } from "@/shared/services/roadDistance"
 
 // Import banner
 import gourmetBanner from "@food/assets/groumetpagebanner.png"
@@ -86,7 +86,8 @@ export default function Gourmet() {
         return { lat: restaurantLat, lng: restaurantLng }
       })
 
-      const distances = await getRoadDistancesFromOrigin(userLat, userLng, destinations)
+      // Same direction as checkout fee: restaurant → user
+      const distances = await getRoadDistancesToDestination(destinations, userLat, userLng)
       if (cancelled) return
 
       const next = {}

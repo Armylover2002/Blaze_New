@@ -28,26 +28,27 @@ export default function TaxReport() {
   const [detailLoading, setDetailLoading] = useState(false)
   const [reportDetail, setReportDetail] = useState(null)
 
-  const fetchTaxReport = async () => {
+  const fetchTaxReport = async (overrideFilters = null) => {
     try {
       setLoading(true)
+      const activeFilters = overrideFilters || filters
 
       let fromDate = null
       let toDate = null
       const now = new Date()
 
-      if (filters.dateRangeType === "Today") {
+      if (activeFilters.dateRangeType === "Today") {
         fromDate = new Date(now.getFullYear(), now.getMonth(), now.getDate())
         toDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59)
-      } else if (filters.dateRangeType === "This Week") {
+      } else if (activeFilters.dateRangeType === "This Week") {
         const dayOfWeek = now.getDay()
         const diff = now.getDate() - dayOfWeek
         fromDate = new Date(now.getFullYear(), now.getMonth(), diff)
         toDate = new Date(now.getFullYear(), now.getMonth(), diff + 6, 23, 59, 59)
-      } else if (filters.dateRangeType === "This Month") {
+      } else if (activeFilters.dateRangeType === "This Month") {
         fromDate = new Date(now.getFullYear(), now.getMonth(), 1)
         toDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59)
-      } else if (filters.dateRangeType === "This Year") {
+      } else if (activeFilters.dateRangeType === "This Year") {
         fromDate = new Date(now.getFullYear(), 0, 1)
         toDate = new Date(now.getFullYear(), 11, 31, 23, 59, 59)
       }
@@ -55,7 +56,12 @@ export default function TaxReport() {
       const params = {
         fromDate: fromDate ? fromDate.toISOString() : undefined,
         toDate: toDate ? toDate.toISOString() : undefined,
-        limit: 1000
+        limit: 1000,
+        calculateTax: activeFilters.calculateTax || undefined,
+        taxRate:
+          activeFilters.taxRate && activeFilters.taxRate !== "Select Tax Rate"
+            ? activeFilters.taxRate
+            : undefined,
       }
 
       const response = await adminAPI.getTaxReport(params)
@@ -86,11 +92,13 @@ export default function TaxReport() {
   }, [filters.dateRangeType])
 
   const handleReset = () => {
-    setFilters({
+    const defaults = {
       dateRangeType: "All Time",
       calculateTax: "Percentage",
       taxRate: "Select Tax Rate",
-    })
+    }
+    setFilters(defaults)
+    fetchTaxReport(defaults)
   }
 
   const handleSubmit = () => {
@@ -124,6 +132,11 @@ export default function TaxReport() {
       const params = {
         fromDate: fromDate ? fromDate.toISOString() : undefined,
         toDate: toDate ? toDate.toISOString() : undefined,
+        calculateTax: filters.calculateTax || undefined,
+        taxRate:
+          filters.taxRate && filters.taxRate !== "Select Tax Rate"
+            ? filters.taxRate
+            : undefined,
       }
 
       const response = await adminAPI.getTaxReportDetail(report.id, params)
@@ -140,7 +153,7 @@ export default function TaxReport() {
     }
   }
 
-  const handleExport = (format) => {
+  const handleExport = async (format) => {
     if (reports.length === 0) {
       alert("No data to export")
       return
@@ -151,11 +164,17 @@ export default function TaxReport() {
       { key: "totalIncome", label: "Total Income" },
       { key: "totalTax", label: "Total Tax" },
     ]
+    const exportRows = reports.map((report, index) => ({
+      sl: report.sl || index + 1,
+      incomeSource: report.incomeSource || "N/A",
+      totalIncome: report.totalIncome || "\u20B90.00",
+      totalTax: report.totalTax || "\u20B90.00",
+    }))
     switch (format) {
-      case "csv": exportReportsToCSV(reports, headers, "tax_report"); break
-      case "excel": exportReportsToExcel(reports, headers, "tax_report"); break
-      case "pdf": exportReportsToPDF(reports, headers, "tax_report", "Tax Report"); break
-      case "json": exportReportsToJSON(reports, "tax_report"); break
+      case "csv": exportReportsToCSV(exportRows, headers, "tax_report"); break
+      case "excel": exportReportsToExcel(exportRows, headers, "tax_report"); break
+      case "pdf": await exportReportsToPDF(exportRows, headers, "tax_report", "Tax Report"); break
+      case "json": exportReportsToJSON(exportRows, "tax_report"); break
     }
   }
 
@@ -446,7 +465,7 @@ export default function TaxReport() {
                     <tr>
                       <th className="px-4 py-2 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">Order ID</th>
                       <th className="px-4 py-2 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">Date</th>
-                      <th className="px-4 py-2 text-right text-[10px] font-bold text-slate-700 uppercase tracking-wider">Amount</th>
+                      <th className="px-4 py-2 text-right text-[10px] font-bold text-slate-700 uppercase tracking-wider">Taxable Amount</th>
                       <th className="px-4 py-2 text-right text-[10px] font-bold text-slate-700 uppercase tracking-wider">Tax</th>
                     </tr>
                   </thead>

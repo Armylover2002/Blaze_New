@@ -9,6 +9,7 @@ import { loadGoogleMaps as loadGoogleMapsSdk } from "@core/services/googleMapsLo
 import { toast } from "react-hot-toast"
 import { useRef, useCallback } from "react"
 import { Search, MapPin, Save } from "lucide-react"
+import { resolveOutletAddressParts } from "@food/utils/addressParts"
 
 const debugLog = (...args) => console.log(...args)
 const debugWarn = (...args) => console.warn(...args)
@@ -176,7 +177,7 @@ export default function EditRestaurantAddress() {
           setAddress(formattedAddr)
           
           // Extract address parts
-          const parts = extractAddressParts(place.address_components)
+          const parts = extractAddressParts(place.address_components, place.formatted_address || "")
           setAddressParts(parts)
           
           setLat(newLat)
@@ -189,38 +190,8 @@ export default function EditRestaurantAddress() {
     }
   }, [mapLoading])
 
-  const extractAddressParts = (components) => {
-    const parts = {
-      addressLine1: "",
-      area: "",
-      city: "",
-      state: "",
-      pincode: "",
-      landmark: ""
-    }
-    
-    if (!components) return parts
-
-    components.forEach(comp => {
-      const types = comp.types
-      if (types.includes("premise") || types.includes("street_number") || types.includes("route") || types.includes("sublocality_level_3")) {
-        parts.addressLine1 += (parts.addressLine1 ? ", " : "") + comp.long_name
-      }
-      if (types.includes("sublocality_level_1") || types.includes("sublocality_level_2") || types.includes("neighborhood")) {
-        parts.area = comp.long_name
-      }
-      if (types.includes("locality")) {
-        parts.city = comp.long_name
-      }
-      if (types.includes("administrative_area_level_1")) {
-        parts.state = comp.long_name
-      }
-      if (types.includes("postal_code")) {
-        parts.pincode = comp.long_name
-      }
-    })
-    return parts
-  }
+  const extractAddressParts = (components, formattedAddress = "") =>
+    resolveOutletAddressParts(components, formattedAddress)
 
   const initializeMap = (google, zone, startLat, startLng) => {
     if (isMapInitializedRef.current || !mapRef.current) return
@@ -341,7 +312,10 @@ export default function EditRestaurantAddress() {
           setAddress(formatted)
           setLocationSearch(formatted)
           
-          const parts = extractAddressParts(results[0].address_components)
+          const parts = extractAddressParts(
+            results[0].address_components,
+            results[0].formatted_address || ""
+          )
           setAddressParts(parts)
           resolve(formatted)
         } else {
@@ -386,6 +360,15 @@ export default function EditRestaurantAddress() {
   const handleUpdateClick = async () => {
     try {
       setSaving(true)
+
+      const resolvedParts = resolveOutletAddressParts([], address)
+      const mergedParts = {
+        addressLine1: addressParts.addressLine1 || resolvedParts.addressLine1 || address.split(',')[0] || "",
+        area: addressParts.area || resolvedParts.area || "",
+        city: addressParts.city || resolvedParts.city || "",
+        state: addressParts.state || resolvedParts.state || "",
+        pincode: addressParts.pincode || resolvedParts.pincode || "",
+      }
       
       const updatedLocation = {
         ...(restaurantData?.location || {}),
@@ -395,19 +378,19 @@ export default function EditRestaurantAddress() {
         coordinates: [lng, lat],
         formattedAddress: address,
         address: address,
-        addressLine1: addressParts.addressLine1 || address.split(',')[0] || "",
-        area: addressParts.area || "",
-        city: addressParts.city || "",
-        state: addressParts.state || "",
-        pincode: addressParts.pincode || ""
+        addressLine1: mergedParts.addressLine1,
+        area: mergedParts.area,
+        city: mergedParts.city,
+        state: mergedParts.state,
+        pincode: mergedParts.pincode,
       }
 
       const payload = {
-        addressLine1: addressParts.addressLine1 || address.split(',')[0] || "",
-        area: addressParts.area || "",
-        city: addressParts.city || "",
-        state: addressParts.state || "",
-        pincode: addressParts.pincode || "",
+        addressLine1: mergedParts.addressLine1,
+        area: mergedParts.area,
+        city: mergedParts.city,
+        state: mergedParts.state,
+        pincode: mergedParts.pincode,
         formattedAddress: address,
         zoneId: currentZone?._id || currentZone?.id || null,
         location: updatedLocation,
