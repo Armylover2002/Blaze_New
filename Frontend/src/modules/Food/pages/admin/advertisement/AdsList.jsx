@@ -5,6 +5,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@food/components/ui/dialog"
 import SettingsDialog from "@food/components/admin/orders/SettingsDialog"
 import { exportAdvertisementsToCSV, exportAdvertisementsToExcel, exportAdvertisementsToPDF, exportAdvertisementsToJSON } from "@food/components/admin/advertisements/advertisementsExportUtils"
+import EditAdvertisementDialog from "./EditAdvertisementDialog"
 import { adminAPI } from "@food/api"
 import { toast } from "sonner"
 
@@ -17,6 +18,7 @@ export default function AdsList() {
   const [isFilterOpen, setIsFilterOpen] = useState(false)
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
   const [isViewOpen, setIsViewOpen] = useState(false)
+  const [isEditOpen, setIsEditOpen] = useState(false)
   const [isDeleteOpen, setIsDeleteOpen] = useState(false)
   const [selectedAd, setSelectedAd] = useState(null)
   const [filters, setFilters] = useState({
@@ -136,8 +138,9 @@ export default function AdsList() {
     setIsViewOpen(true)
   }
 
-  const handleEditAd = (_ad) => {
-    navigate("/admin/food/advertisement/requests")
+  const handleEditAd = (ad) => {
+    setSelectedAd(ad)
+    setIsEditOpen(true)
   }
 
   const handleDeleteClick = (ad) => {
@@ -556,6 +559,30 @@ export default function AdsList() {
                   <p className="text-sm text-slate-900">{selectedAd.priority || "N/A"}</p>
                 </div>
               </div>
+
+              {(selectedAd.imageUrl || selectedAd.image || selectedAd.profileImage || selectedAd.videoUrl || selectedAd.video || selectedAd.coverImage) && (
+                <div className="pt-4 border-t border-slate-100 mt-4">
+                  <p className="text-sm font-semibold text-slate-700 mb-2">Banner / Media</p>
+                  <div className="rounded-lg overflow-hidden bg-slate-50 border border-slate-200 flex items-center justify-center p-2">
+                    {selectedAd.adsType === "Video Promotion" || selectedAd.videoUrl || selectedAd.video || selectedAd.coverImage ? (
+                      <video 
+                        src={selectedAd.videoUrl || selectedAd.video || selectedAd.coverImage} 
+                        controls 
+                        className="max-h-[200px] w-auto rounded"
+                      />
+                    ) : (
+                      <img 
+                        src={selectedAd.imageUrl || selectedAd.image || selectedAd.profileImage} 
+                        alt="Advertisement Banner" 
+                        className="max-h-[200px] w-auto object-contain rounded"
+                        onError={(e) => {
+                          e.target.style.display = 'none';
+                        }}
+                      />
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </DialogContent>
@@ -586,6 +613,13 @@ export default function AdsList() {
           </div>
         </DialogContent>
       </Dialog>
+
+      <EditAdvertisementDialog
+        isOpen={isEditOpen}
+        onOpenChange={setIsEditOpen}
+        ad={selectedAd}
+        onSuccess={fetchAds}
+      />
     </div>
   )
 }

@@ -4,7 +4,8 @@ import {
     createAdminAdvertisement,
     updateAdminAdvertisementStatus,
     updateAdminAdvertisementPriority,
-    deleteAdminAdvertisement
+    deleteAdminAdvertisement,
+    updateAdminAdvertisement
 } from '../../restaurant/services/advertisement.service.js';
 import { sendResponse } from '../../../../utils/response.js';
 import { invalidateCache } from '../../../../middleware/cache.js';
@@ -62,6 +63,17 @@ export const deleteAdminAdvertisementController = async (req, res, next) => {
         const result = await deleteAdminAdvertisement(req.params.id);
         invalidateCache('landing_advertisements*');
         return sendResponse(res, 200, 'Advertisement deleted successfully', result);
+    } catch (error) {
+        next(error);
+    }
+};
+
+export const updateAdminAdvertisementController = async (req, res, next) => {
+    try {
+        const adId = req.params.id;
+        const updated = await updateAdminAdvertisement(adId, req.body || {}, req.files || {});
+        invalidateCache('landing_advertisements*');
+        return sendResponse(res, 200, 'Advertisement updated successfully', updated);
     } catch (error) {
         next(error);
     }

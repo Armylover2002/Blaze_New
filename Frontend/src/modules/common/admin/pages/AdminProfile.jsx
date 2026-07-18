@@ -59,7 +59,7 @@ export default function AdminProfile() {
         setFormData({
           name: adminData.name || "",
           email: adminData.email || "",
-          phone: adminData.phone || "",
+          phone: String(adminData.phone || "").replace(/\D/g, "").slice(0, 10),
           profileImage: adminData.profileImage || "",
         });
         return;
@@ -84,7 +84,7 @@ export default function AdminProfile() {
           setFormData({
             name: fallback.name || "",
             email: fallback.email || "",
-            phone: fallback.phone || "",
+            phone: String(fallback.phone || "").replace(/\D/g, "").slice(0, 10),
             profileImage: fallback.profileImage || "",
           });
           toast.info("Showing saved profile. Backend disconnected — updates may not persist.");
@@ -104,6 +104,11 @@ export default function AdminProfile() {
       ...prev,
       [field]: value,
     }));
+  };
+
+  const handlePhoneChange = (value) => {
+    const digitsOnly = String(value || "").replace(/\D/g, "").slice(0, 10);
+    handleInputChange("phone", digitsOnly);
   };
 
   const handleFileSelect = (e) => {
@@ -158,6 +163,12 @@ export default function AdminProfile() {
     e.preventDefault();
     
     try {
+      const phone = String(formData.phone || "").trim();
+      if (phone && !/^\d{10}$/.test(phone)) {
+        toast.error("Phone number must be exactly 10 digits");
+        return;
+      }
+
       const currentPassword = String(passwordData.currentPassword || "").trim();
       const newPassword = String(passwordData.newPassword || "").trim();
       const confirmPassword = String(passwordData.confirmPassword || "").trim();
@@ -211,7 +222,7 @@ export default function AdminProfile() {
       const response = await adminAPI.updateAdminProfile({
         name: formData.name,
         email: formData.email || undefined,
-        phone: formData.phone || undefined,
+        phone: phone || undefined,
         profileImage: profileImageUrl || undefined,
       });
 
@@ -222,7 +233,7 @@ export default function AdminProfile() {
         setFormData({
           name: updatedAdmin.name || "",
           email: updatedAdmin.email || "",
-          phone: updatedAdmin.phone || "",
+          phone: String(updatedAdmin.phone || "").replace(/\D/g, "").slice(0, 10),
           profileImage: updatedAdmin.profileImage || "",
         });
         // Clear selected file and preview
@@ -269,7 +280,7 @@ export default function AdminProfile() {
     setFormData({
       name: profile?.name || "",
       email: profile?.email || "",
-      phone: profile?.phone || "",
+      phone: String(profile?.phone || "").replace(/\D/g, "").slice(0, 10),
       profileImage: profile?.profileImage || "",
     });
     setSelectedFile(null);
@@ -285,7 +296,7 @@ export default function AdminProfile() {
     setFormData({
       name: profile?.name || "",
       email: profile?.email || "",
-      phone: profile?.phone || "",
+      phone: String(profile?.phone || "").replace(/\D/g, "").slice(0, 10),
       profileImage: profile?.profileImage || "",
     });
     setSelectedFile(null);
@@ -447,12 +458,18 @@ export default function AdminProfile() {
                 <Input
                   id="phone"
                   type="tel"
+                  inputMode="numeric"
+                  pattern="[0-9]{10}"
+                  maxLength={10}
                   value={formData.phone}
-                  onChange={(e) => handleInputChange("phone", e.target.value)}
-                  placeholder="Enter phone number (optional)"
+                  onChange={(e) => handlePhoneChange(e.target.value)}
+                  placeholder="Enter 10-digit phone number"
                   disabled={!isEditMode || saving || uploading}
                   className={`h-11 ${!isEditMode ? "bg-neutral-50 cursor-not-allowed" : ""}`}
                 />
+                {isEditMode && formData.phone && formData.phone.length !== 10 && (
+                  <p className="text-xs text-red-500">Phone number must be exactly 10 digits</p>
+                )}
               </div>
 
               <div className="space-y-2 md:col-span-2">

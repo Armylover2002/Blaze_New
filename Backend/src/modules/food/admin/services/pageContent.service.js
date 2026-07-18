@@ -78,7 +78,11 @@ export const upsertLegalPage = async (key, payload, updatedBy, role = 'user') =>
     const legal = { title, content };
 
     if (k === 'support') {
-        legal.contactNumber = String(payload?.contactNumber || '').trim();
+        const contactNumber = String(payload?.contactNumber || '').replace(/\D/g, '').trim();
+        if (contactNumber && !/^\d{10}$/.test(contactNumber)) {
+            throw new ValidationError('Contact number must be exactly 10 digits');
+        }
+        legal.contactNumber = contactNumber;
         legal.email = String(payload?.email || '').trim().toLowerCase();
         legal.faqs = normalizeFaqs(payload?.faqs);
     }
