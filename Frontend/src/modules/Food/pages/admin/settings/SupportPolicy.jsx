@@ -10,6 +10,9 @@ import SupportInfoView, { normalizeSupportPayload } from "@food/components/share
 
 const emptyFaq = () => ({ question: "", answer: "" })
 
+const normalizeContactNumber = (value) =>
+  String(value || "").replace(/\D/g, "").slice(0, 10)
+
 const emptySupportData = () => ({
   title: "Support",
   content: "",
@@ -38,7 +41,7 @@ export default function SupportPolicy() {
         setSupportData({
           title: payload?.title || "Support",
           content: legalHtmlToPlainText(payload?.content || ""),
-          contactNumber: payload?.contactNumber || "",
+          contactNumber: normalizeContactNumber(payload?.contactNumber),
           email: payload?.email || "",
           faqs: Array.isArray(payload?.faqs)
             ? payload.faqs.map((faq) => ({
@@ -80,6 +83,12 @@ export default function SupportPolicy() {
 
   const handleSubmit = async () => {
     try {
+      const contactNumber = normalizeContactNumber(supportData.contactNumber)
+      if (contactNumber && !/^\d{10}$/.test(contactNumber)) {
+        toast.error("Contact number must be exactly 10 digits")
+        return
+      }
+
       setSaving(true)
       const htmlContent = plainTextToLegalHtml(supportData.content)
       const faqs = supportData.faqs
@@ -95,7 +104,7 @@ export default function SupportPolicy() {
         {
           title: supportData.title,
           content: htmlContent,
-          contactNumber: supportData.contactNumber.trim(),
+          contactNumber,
           email: supportData.email.trim(),
           faqs,
           role,
@@ -109,7 +118,7 @@ export default function SupportPolicy() {
         setSupportData({
           title: payload?.title || "Support",
           content: legalHtmlToPlainText(payload?.content || ""),
-          contactNumber: payload?.contactNumber || "",
+          contactNumber: normalizeContactNumber(payload?.contactNumber),
           email: payload?.email || "",
           faqs: Array.isArray(payload?.faqs)
             ? payload.faqs.map((faq) => ({
@@ -200,10 +209,22 @@ export default function SupportPolicy() {
                 <div>
                   <label className="block text-sm font-semibold text-slate-700 mb-1.5">Contact Number</label>
                   <Input
+                    type="tel"
+                    inputMode="numeric"
+                    pattern="[0-9]{10}"
+                    maxLength={10}
                     value={supportData.contactNumber}
-                    onChange={(e) => setSupportData((prev) => ({ ...prev, contactNumber: e.target.value }))}
-                    placeholder="+91 9876543210"
+                    onChange={(e) =>
+                      setSupportData((prev) => ({
+                        ...prev,
+                        contactNumber: normalizeContactNumber(e.target.value),
+                      }))
+                    }
+                    placeholder="Enter 10-digit contact number"
                   />
+                  {supportData.contactNumber && supportData.contactNumber.length !== 10 && (
+                    <p className="mt-1 text-xs text-red-500">Contact number must be exactly 10 digits</p>
+                  )}
                 </div>
                 <div>
                   <label className="block text-sm font-semibold text-slate-700 mb-1.5">Support Email</label>

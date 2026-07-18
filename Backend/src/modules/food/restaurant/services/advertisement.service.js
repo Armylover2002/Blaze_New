@@ -43,11 +43,9 @@ function displayStatus(ad) {
     if (ad.status === 'Paused') return 'Paused';
     if (ad.status === 'Approved') {
         const now = Date.now();
-        const start = ad.startDate ? new Date(ad.startDate).getTime() : 0;
         const end = ad.endDate ? new Date(ad.endDate).getTime() : Number.POSITIVE_INFINITY;
         if (now > end) return 'Expired';
-        if (now < start) return 'Approve';
-        return 'Running';
+        return 'Approved';
     }
     return ad.status;
 }
@@ -474,3 +472,39 @@ export async function deleteAdminAdvertisement(adId) {
     if (!updated) throw new ValidationError('Advertisement not found');
     return { deleted: true, id: String(updated._id) };
 }
+
+export async function updateAdminAdvertisement(adId, body, files = {}) {
+    if (!mongoose.Types.ObjectId.isValid(String(adId))) {
+        throw new ValidationError('Invalid advertisement id');
+    }
+
+    const existing = await FoodAdvertisement.findOne({
+        _id: adId,
+        isDeleted: false
+    });
+    if (!existing) throw new ValidationError('Advertisement not found');
+
+    const payload = normalizePayload({
+        title: body.title ?? existing.title,
+        description: body.description ?? existing.description,
+        adsType: body.adsType || body.category || existing.adsType,
+        validity: body.validity ?? existing.validity,
+        fileDescription: body.fileDescription ?? existing.fileDescription,
+        videoDescription: body.videoDescription ?? existing.videoDescription
+    });
+
+    const media = await uploadMediaFromFiles(files);
+
+    if (media.imageUrl && existing.imagePublicId) {
+        await destroyCloudinary(existing.imagePublicId, 'image');
+    }
+    if (media.videoUrl && existing.videoPublicId) {
+        await destroyCloudinary(existing.videoPublicId, 'video');
+    }
+
+    Object.assign(existing, payload, media);
+
+    await existing.save();
+    return toAdminListView(existing);
+}
+

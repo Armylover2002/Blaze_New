@@ -1703,7 +1703,8 @@ const mapCustomerListItem = (u, stats = { totalOrder: 0, totalOrderAmount: 0 }) 
 });
 
 function buildCustomerListFilter(query = {}) {
-    const filter = { role: 'USER' };
+    // Include 'USER' role, as well as documents where role is missing/null (since default was commented out)
+    const filter = { $or: [{ role: 'USER' }, { role: { $exists: false } }, { role: null }] };
 
     if (query.status) {
         if (String(query.status) === 'active') filter.isActive = true;

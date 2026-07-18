@@ -837,6 +837,15 @@ export const adminAPI = {
       params,
       contextModule: "admin",
     }),
+  getAdvertisements: (params = {}) =>
+    apiClient.get("/food/admin/advertisements", {
+      params,
+      contextModule: "admin",
+    }),
+  updateAdvertisement: (adId, body) =>
+    apiClient.patch(`/food/admin/advertisements/${String(adId)}`, body, {
+      contextModule: "admin",
+    }),
   addDeliveryPartnerBonus: (deliveryPartnerId, amount, reference = "", idempotencyKey = null) =>
     apiClient.post(
       "/food/admin/delivery/bonus",
