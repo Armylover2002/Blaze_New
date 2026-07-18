@@ -178,8 +178,11 @@ export default function ItemDetailsPage() {
 
   const showNonVegFoodType = canSelectNonVegFoodType({
     pureVegRestaurant: isPureVegRestaurant,
-    categoryFoodTypeScope: displayCategory?.foodTypeScope,
+    categoryFoodTypeScope: selectedCategory?.foodTypeScope,
   })
+
+  const isCategoryInactive = categoryLiveStatus?.liveStatus === "INACTIVE" || selectedCategory?.liveStatus === "INACTIVE"
+  const isCategoryPending = categoryLiveStatus?.liveStatus === "PENDING" || selectedCategory?.liveStatus === "PENDING"
 
   useEffect(() => {
     if (!showNonVegFoodType && foodType !== "Veg") {
@@ -1607,7 +1610,7 @@ export default function ItemDetailsPage() {
               className="w-full px-4 py-3 border border-gray-300 rounded-xl text-left flex items-center justify-between gap-3 bg-white hover:bg-gray-50 transition-colors"
             >
               {(() => {
-                const selected = displayCategory
+                const selected = selectedCategory
                 if (!selected) {
                   return (
                     <>
