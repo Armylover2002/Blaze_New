@@ -196,15 +196,38 @@ export default function NewAdvertisement() {
               </div>
             </div>
 
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Validity</label>
-              <input
-                type="text"
-                value={formData.validity}
-                onChange={(e) => setFormData((prev) => ({ ...prev, validity: e.target.value }))}
-                className="w-full h-11 px-3 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-                placeholder="YYYY-MM-DD or YYYY-MM-DD to YYYY-MM-DD"
-              />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Start Date (Validity)</label>
+                <input
+                  type="date"
+                  value={formData.validity.split(" to ")[0] || ""}
+                  onChange={(e) => {
+                    const start = e.target.value;
+                    const end = formData.validity.split(" to ")[1] || "";
+                    setFormData((prev) => ({ ...prev, validity: end ? `${start} to ${end}` : start }));
+                  }}
+                  className="w-full h-11 px-3 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">End Date (Optional)</label>
+                <input
+                  type="date"
+                  value={formData.validity.split(" to ")[1] || ""}
+                  min={formData.validity.split(" to ")[0] || ""}
+                  onChange={(e) => {
+                    const end = e.target.value;
+                    const start = formData.validity.split(" to ")[0] || "";
+                    if (start || !end) {
+                       setFormData((prev) => ({ ...prev, validity: end ? `${start} to ${end}` : start }));
+                    } else {
+                       toast.error("Please select a start date first");
+                    }
+                  }}
+                  className="w-full h-11 px-3 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                />
+              </div>
             </div>
 
             {formData.adsType === "Video Promotion" ? (

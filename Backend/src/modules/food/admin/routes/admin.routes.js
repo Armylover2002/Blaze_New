@@ -147,8 +147,18 @@ router.post(
     upload.fields([{ name: 'image', maxCount: 1 }, { name: 'video', maxCount: 1 }]),
     advertisementController.createAdminAdvertisementController
 );
+router.patch(
+    '/advertisements/:id',
+    checkPermission('food::promotions_management::coupons', 'edit'),
+    upload.fields([{ name: 'image', maxCount: 1 }, { name: 'video', maxCount: 1 }]),
+    advertisementController.updateAdminAdvertisementController
+);
 router.get('/advertisement-requests', checkPermission('food::promotions_management::coupons', 'view'), advertisementController.listAdminAdvertisementRequestsController);
-router.patch('/advertisements/:id/status', checkPermission('food::promotions_management::coupons', 'edit'), advertisementController.updateAdminAdvertisementStatusController);
+router.patch(
+    '/advertisements/:id/status',
+    checkPermission('food::promotions_management::coupons', 'edit'),
+    advertisementController.updateAdminAdvertisementStatusController
+);
 router.patch('/advertisements/:id/priority', checkPermission('food::promotions_management::coupons', 'edit'), advertisementController.updateAdminAdvertisementPriorityController);
 router.delete('/advertisements/:id', checkPermission('food::promotions_management::coupons', 'delete'), advertisementController.deleteAdminAdvertisementController);
 

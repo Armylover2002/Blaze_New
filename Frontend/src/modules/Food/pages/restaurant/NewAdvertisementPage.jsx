@@ -285,7 +285,12 @@ export default function NewAdvertisementPage() {
                       <input
                         type="date"
                         value={formData.endDate}
+                        min={formData.startDate}
                         onChange={(e) => {
+                          if (!formData.startDate) {
+                             toast.error("Please select a start date first");
+                             return;
+                          }
                           handleInputChange("endDate", e.target.value)
                           setShowEndDatePicker(false)
                         }}

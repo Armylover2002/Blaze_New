@@ -300,17 +300,39 @@ export default function EditAdvertisementPage() {
                   <motion.div
                     initial={{ opacity: 0, y: -10 }}
                     animate={{ opacity: 1, y: 0 }}
-                    className="absolute top-full left-0 right-0 mt-2 bg-white border border-gray-200 rounded-lg shadow-lg z-50 p-4"
+                    className="absolute top-full left-0 right-0 mt-2 bg-white border border-gray-200 rounded-lg shadow-lg z-50 p-4 space-y-3"
                   >
-                    <input
-                      type="date"
-                      value={formData.validity}
-                      onChange={(e) => {
-                        handleInputChange("validity", e.target.value)
-                        setShowValidityPicker(false)
-                      }}
-                      className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#ff8100]"
-                    />
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">Start Date</label>
+                      <input
+                        type="date"
+                        value={formData.validity.split(" to ")[0] || ""}
+                        onChange={(e) => {
+                          const start = e.target.value;
+                          const end = formData.validity.split(" to ")[1] || "";
+                          handleInputChange("validity", end ? `${start} to ${end}` : start);
+                        }}
+                        className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#ff8100]"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">End Date (Optional)</label>
+                      <input
+                        type="date"
+                        value={formData.validity.split(" to ")[1] || ""}
+                        min={formData.validity.split(" to ")[0] || ""}
+                        onChange={(e) => {
+                          const end = e.target.value;
+                          const start = formData.validity.split(" to ")[0] || "";
+                          if (start || !end) {
+                             handleInputChange("validity", end ? `${start} to ${end}` : start);
+                          } else {
+                             toast.error("Please select a start date first");
+                          }
+                        }}
+                        className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#ff8100]"
+                      />
+                    </div>
                   </motion.div>
                 )}
               </div>
