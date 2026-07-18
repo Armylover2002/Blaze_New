@@ -423,12 +423,30 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order }) {
           </div>
 
           {/* Restaurant Information */}
-          {order.restaurant && (
+          {(order.restaurant || order.restaurantId) && (
             <div className="border-t border-slate-200 pt-4">
               <h3 className="text-sm font-semibold text-slate-700 mb-4">Restaurant Information</h3>
-              <div className="space-y-1">
-                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Restaurant Name</p>
-                <p className="text-sm font-medium text-slate-900">{order.restaurant}</p>
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Restaurant Name</p>
+                  <p className="text-sm font-medium text-slate-900">
+                    {order.restaurant || order.restaurantId?.name || order.restaurantId?.restaurantName || "N/A"}
+                  </p>
+                </div>
+                {(order.restaurantAddress || order.restaurantId?.address || order.restaurantId?.location?.address || order.restaurantId?.location?.formattedAddress) && (
+                  <div className="space-y-1">
+                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Address</p>
+                    <p className="text-sm font-medium text-slate-900">
+                      {typeof order.restaurantAddress === 'string' && order.restaurantAddress 
+                        ? order.restaurantAddress 
+                        : (order.restaurantId?.location?.formattedAddress || 
+                           order.restaurantId?.location?.address || 
+                           (typeof order.restaurantId?.address === 'string' 
+                            ? order.restaurantId.address 
+                            : formatAddress(order.restaurantId?.address || order.restaurantAddress)))}
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
           )}

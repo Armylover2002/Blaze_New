@@ -148,8 +148,16 @@ router.get('/onboarding/draft', requireRestaurantRegistrationToken, getOnboardin
 
 // Public: approved restaurants list (for user app)
 router.get('/menus/batch', cacheResponse(300, 'restaurant_menus_batch'), getPublicMenusBatchController);
-router.get('/restaurants', cacheResponse(300, 'restaurants'), listApprovedRestaurantsController);
-router.get('/restaurants/under-250', cacheResponse(300, 'restaurants_under_250'), listUnder250RestaurantsController);
+// Skip Redis cache when lat/lng present — distanceInKm is request-specific and goes stale
+// after outlet address updates if the geo-keyed list response is cached.
+router.get('/restaurants', (req, res, next) => {
+    if (req.query?.lat != null && req.query?.lng != null) return next();
+    return cacheResponse(300, 'restaurants')(req, res, next);
+}, listApprovedRestaurantsController);
+router.get('/restaurants/under-250', (req, res, next) => {
+    if (req.query?.lat != null && req.query?.lng != null) return next();
+    return cacheResponse(300, 'restaurants_under_250')(req, res, next);
+}, listUnder250RestaurantsController);
 router.get('/restaurants/:id', cacheResponse(600, 'restaurant_detail'), getApprovedRestaurantController);
 router.get('/restaurants/:id/menu', cacheResponse(600, 'restaurant_menu'), getPublicRestaurantMenuController);
 router.get('/restaurants/:id/outlet-timings', cacheResponse(600, 'restaurant_timings'), getOutletTimingsByRestaurantIdController);

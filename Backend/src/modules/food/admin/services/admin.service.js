@@ -42,6 +42,7 @@ import { FoodSupportTicket } from '../../user/models/supportTicket.model.js';
 import { FoodRestaurantSupportTicket } from '../../restaurant/models/supportTicket.model.js';
 import { FoodOrder } from '../../orders/models/order.model.js';
 import { FoodTransaction } from '../../orders/models/foodTransaction.model.js';
+import { Transaction } from '../../../../core/payments/models/transaction.model.js';
 import { buildOrderIdentityFilter } from '../../orders/services/order.helpers.js';
 import { FoodRestaurantWithdrawal } from '../../restaurant/models/foodRestaurantWithdrawal.model.js';
 import { applyPendingOpenDaysUpdate, discardPendingOpenDaysUpdate, syncOutletTimingsFromOpenDays } from '../../restaurant/services/outletTimings.service.js';
@@ -1056,7 +1057,8 @@ function formatTimeAgo(date) {
 
 const mapTransactionReportRow = (tx) => {
     const order = tx.orderId || {};
-    const pricing = { ...(tx.pricing || {}), ...(order.pricing || {}) };
+    // Transaction snapshot wins; fall back to live order pricing fields.
+    const pricing = { ...(order.pricing || {}), ...(tx.pricing || {}) };
     const subtotal = Number(pricing.subtotal || 0) || 0;
     const packagingFee = Number(pricing.packagingFee || 0) || 0;
     const deliveryFee = Number(pricing.deliveryFee || 0) || 0;
@@ -1087,6 +1089,7 @@ const mapTransactionReportRow = (tx) => {
         vatTax: tx.amounts?.taxAmount || pricing.tax || 0,
         deliveryCharge: pricing.deliveryFee || 0,
         platformFee,
+        packagingFee,
         orderAmount: tx.amounts?.totalCustomerPaid || pricing.total || 0,
         status: tx.status
     };
@@ -1217,7 +1220,16 @@ export async function getTransactionReport(query = {}) {
         }
     }
 
-    const [total, transactionRows, summaryRows] = await Promise.all([
+    const addonMatch = {
+        entityType: 'deliveryBoy',
+        type: 'credit',
+        category: 'adjustment',
+    };
+    if (fromDate && toDate) {
+        addonMatch.createdAt = { $gte: new Date(fromDate), $lte: new Date(toDate) };
+    }
+
+    const [total, transactionRows, summaryRows, addonEarningsRows] = await Promise.all([
         FoodTransaction.countDocuments(match),
         FoodTransaction.find(match)
             .populate('orderId')
@@ -1230,16 +1242,29 @@ export async function getTransactionReport(query = {}) {
         FoodTransaction.aggregate([
             { $match: match },
             ...buildTransactionReportSummaryPipeline()
-        ])
+        ]),
+        Transaction.aggregate([
+            { $match: addonMatch },
+            {
+                $group: {
+                    _id: null,
+                    total: { $sum: { $ifNull: ['$amount', 0] } },
+                },
+            },
+        ]),
     ]);
 
     const summaryDoc = summaryRows?.[0] || {};
+    const deliverymanOrderEarning = Number(summaryDoc.deliverymanEarning || 0);
+    const deliverymanAddonEarning = Number(addonEarningsRows?.[0]?.total || 0);
     const summary = {
         completedTransaction: Number(summaryDoc.completedTransaction || 0),
         refundedTransaction: Number(summaryDoc.refundedTransaction || 0),
         adminEarning: Number(summaryDoc.adminEarning || 0),
         restaurantEarning: Number(summaryDoc.restaurantEarning || 0),
-        deliverymanEarning: Number(summaryDoc.deliverymanEarning || 0),
+        deliverymanOrderEarning,
+        deliverymanAddonEarning,
+        deliverymanEarning: deliverymanOrderEarning + deliverymanAddonEarning,
     };
 
     return {
@@ -1465,7 +1490,7 @@ export async function getRestaurantReport(query = {}) {
 }
 
 export async function getTaxReport(query = {}) {
-    const { fromDate, toDate, search } = query;
+    const { fromDate, toDate, search, calculateTax, taxRate } = query;
     const match = {
         orderType: 'food',
         orderStatus: 'delivered' // Typically tax is reported on delivered/completed orders
@@ -1480,25 +1505,70 @@ export async function getTaxReport(query = {}) {
         match.orderId = { $regex: search, $options: 'i' };
     }
 
-    // Aggregate tax by income source (Restaurants, Delivery, Platform)
-    // For now, we'll group by Restaurant as the primary income source
+    // Taxable income = food subtotal (GST is calculated on subtotal in order-pricing).
+    // Fall back when legacy rows miss subtotal.
+    const taxableIncomeExpr = {
+        $ifNull: [
+            '$pricing.subtotal',
+            {
+                $max: [
+                    0,
+                    {
+                        $subtract: [
+                            { $ifNull: ['$pricing.total', 0] },
+                            {
+                                $add: [
+                                    { $ifNull: ['$pricing.tax', 0] },
+                                    { $ifNull: ['$pricing.deliveryFee', 0] },
+                                    { $ifNull: ['$pricing.packagingFee', 0] },
+                                    { $ifNull: ['$pricing.platformFee', 0] },
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+    };
+
+    // Optional recalculation when admin selects Percentage + a tax rate.
+    let ratePercent = null;
+    if (String(calculateTax || '').trim().toLowerCase() === 'percentage') {
+        const matched = String(taxRate || '').match(/(\d+(?:\.\d+)?)/);
+        if (matched) {
+            const parsed = Number(matched[1]);
+            if (Number.isFinite(parsed) && parsed >= 0) ratePercent = parsed;
+        }
+    }
+
+    const taxExpr =
+        ratePercent != null
+            ? {
+                  $round: [
+                      { $multiply: [taxableIncomeExpr, ratePercent / 100] },
+                      0,
+                  ],
+              }
+            : { $ifNull: ['$pricing.tax', 0] };
+
+    // Aggregate tax by income source (Restaurants)
     const taxData = await FoodOrder.aggregate([
         { $match: match },
         {
             $group: {
                 _id: '$restaurantId',
-                totalIncome: { $sum: { $ifNull: ['$pricing.total', 0] } },
-                totalTax: { $sum: { $ifNull: ['$pricing.tax', 0] } },
-                orderCount: { $sum: 1 }
-            }
+                totalIncome: { $sum: taxableIncomeExpr },
+                totalTax: { $sum: taxExpr },
+                orderCount: { $sum: 1 },
+            },
         },
         {
             $lookup: {
                 from: 'food_restaurants',
                 localField: '_id',
                 foreignField: '_id',
-                as: 'restaurant'
-            }
+                as: 'restaurant',
+            },
         },
         { $unwind: { path: '$restaurant', preserveNullAndEmptyArrays: true } },
         {
@@ -1506,27 +1576,29 @@ export async function getTaxReport(query = {}) {
                 incomeSource: { $ifNull: ['$restaurant.restaurantName', 'Unknown Restaurant'] },
                 totalIncome: 1,
                 totalTax: 1,
-                orderCount: 1
-            }
+                orderCount: 1,
+            },
         },
-        { $sort: { totalTax: -1 } }
+        { $sort: { totalTax: -1 } },
     ]);
 
     const stats = {
         totalIncome: 0,
-        totalTax: 0
+        totalTax: 0,
     };
 
     const reports = taxData.map((item, index) => {
-        stats.totalIncome += item.totalIncome;
-        stats.totalTax += item.totalTax;
+        const income = Number(item.totalIncome || 0);
+        const tax = Number(item.totalTax || 0);
+        stats.totalIncome += income;
+        stats.totalTax += tax;
         return {
             sl: index + 1,
             id: item._id,
             incomeSource: item.incomeSource,
-            totalIncome: `\u20B9${item.totalIncome.toFixed(2)}`,
-            totalTax: `\u20B9${item.totalTax.toFixed(2)}`,
-            orderCount: item.orderCount
+            totalIncome: `\u20B9${income.toFixed(2)}`,
+            totalTax: `\u20B9${tax.toFixed(2)}`,
+            orderCount: item.orderCount,
         };
     });
 
@@ -1534,8 +1606,8 @@ export async function getTaxReport(query = {}) {
         reports,
         stats: {
             totalIncome: `\u20B9${stats.totalIncome.toFixed(2)}`,
-            totalTax: `\u20B9${stats.totalTax.toFixed(2)}`
-        }
+            totalTax: `\u20B9${stats.totalTax.toFixed(2)}`,
+        },
     };
 }
 
@@ -1544,15 +1616,24 @@ export async function getTaxReportDetail(restaurantId, query = {}) {
         throw new ValidationError('Invalid restaurant ID');
     }
 
-    const { fromDate, toDate } = query;
+    const { fromDate, toDate, calculateTax, taxRate } = query;
     const match = {
         orderType: 'food',
         restaurantId: new mongoose.Types.ObjectId(restaurantId),
-        orderStatus: 'delivered'
+        orderStatus: 'delivered',
     };
 
     if (fromDate && toDate) {
         match.createdAt = { $gte: new Date(fromDate), $lte: new Date(toDate) };
+    }
+
+    let ratePercent = null;
+    if (String(calculateTax || '').trim().toLowerCase() === 'percentage') {
+        const matched = String(taxRate || '').match(/(\d+(?:\.\d+)?)/);
+        if (matched) {
+            const parsed = Number(matched[1]);
+            if (Number.isFinite(parsed) && parsed >= 0) ratePercent = parsed;
+        }
     }
 
     const orders = await FoodOrder.find(match)
@@ -1562,15 +1643,35 @@ export async function getTaxReportDetail(restaurantId, query = {}) {
 
     const restaurant = await FoodRestaurant.findById(restaurantId).select('restaurantName').lean();
 
+    const resolveTaxableIncome = (pricing = {}) => {
+        if (pricing.subtotal != null && Number.isFinite(Number(pricing.subtotal))) {
+            return Number(pricing.subtotal) || 0;
+        }
+        const total = Number(pricing.total || 0) || 0;
+        const fees =
+            (Number(pricing.tax || 0) || 0) +
+            (Number(pricing.deliveryFee || 0) || 0) +
+            (Number(pricing.packagingFee || 0) || 0) +
+            (Number(pricing.platformFee || 0) || 0);
+        return Math.max(0, total - fees);
+    };
+
     return {
         restaurantName: restaurant?.restaurantName || 'Unknown Restaurant',
-        orders: orders.map(o => ({
-            id: o._id,
-            orderId: o.orderId,
-            totalAmount: `\u20B9${(o.pricing?.total || 0).toFixed(2)}`,
-            taxAmount: `\u20B9${(o.pricing?.tax || 0).toFixed(2)}`,
-            date: o.createdAt
-        }))
+        orders: orders.map((o) => {
+            const taxable = resolveTaxableIncome(o.pricing || {});
+            const taxAmount =
+                ratePercent != null
+                    ? Math.round(taxable * (ratePercent / 100))
+                    : Number(o.pricing?.tax || 0) || 0;
+            return {
+                id: o._id,
+                orderId: o.orderId,
+                totalAmount: `\u20B9${taxable.toFixed(2)}`,
+                taxAmount: `\u20B9${taxAmount.toFixed(2)}`,
+                date: o.createdAt,
+            };
+        }),
     };
 }
 
@@ -4696,6 +4797,17 @@ export async function approveRestaurant(id, performer = null) {
             console.error('Failed to send opening-days approval notification:', e);
         }
         invalidateDashboardStatsCache();
+        try {
+            const { invalidateCache } = await import('../../../../middleware/cache.js');
+            await Promise.all([
+                invalidateCache('restaurants*'),
+                invalidateCache('restaurants_under_250*'),
+                invalidateCache('restaurant_detail*'),
+                invalidateCache('food_search*'),
+            ]);
+        } catch (cacheErr) {
+            console.error('Failed to invalidate restaurant caches after open-days reapproval', cacheErr);
+        }
         return updated;
     }
 
@@ -4730,6 +4842,17 @@ export async function approveRestaurant(id, performer = null) {
             console.error('Failed to send profile-changes approval notification:', e);
         }
         invalidateDashboardStatsCache();
+        try {
+            const { invalidateCache } = await import('../../../../middleware/cache.js');
+            await Promise.all([
+                invalidateCache('restaurants*'),
+                invalidateCache('restaurants_under_250*'),
+                invalidateCache('restaurant_detail*'),
+                invalidateCache('food_search*'),
+            ]);
+        } catch (cacheErr) {
+            console.error('Failed to invalidate restaurant caches after profile reapproval', cacheErr);
+        }
         return updated;
     }
 
@@ -6596,19 +6719,6 @@ export async function creditEarningAddonHistory(historyId, notes) {
                 offerId: doc.offerId?._id ? String(doc.offerId._id) : undefined,
             },
         });
-
-        // 3. Create a transaction for bonus/addon admin ledger (unchanged side ledger)
-        try {
-            await DeliveryBonusTransaction.create({
-                deliveryPartnerId: doc.deliveryPartnerId,
-                transactionId: `ADDON-${String(doc._id).slice(-8).toUpperCase()}-${Date.now().toString().slice(-4)}`,
-                amount: amountToCredit,
-                reference: `Earning Addon: ${doc.offerId?.title || 'Offer Reward'}`
-            });
-        } catch (txnError) {
-            console.error('Failed to create bonus transaction:', txnError);
-            // Non-blocking but should be logged.
-        }
     }
 
     try {
@@ -7249,7 +7359,7 @@ export async function getWithdrawals(query = {}) {
 
     const [withdrawals, total] = await Promise.all([
         FoodRestaurantWithdrawal.find(filter)
-            .populate('restaurantId', 'restaurantName profileImage ownerName phone ownerPhone accountHolderName accountNumber ifscCode accountType upiId upiQrImage')
+            .populate('restaurantId', 'restaurantId restaurantName profileImage ownerName phone ownerPhone accountHolderName accountNumber ifscCode accountType upiId upiQrImage')
             .sort({ createdAt: -1 })
             .skip(skip)
             .limit(limit)
@@ -7258,21 +7368,30 @@ export async function getWithdrawals(query = {}) {
     ]);
 
     // UI expects status with first letter capitalized, and data in 'requests' key
-    const requests = withdrawals.map((w) => ({
-        ...w,
-        id: w._id,
-        restaurantName: w.restaurantId?.restaurantName || 'N/A',
-        restaurantIdString: w.restaurantId ? `REST${w.restaurantId._id.toString().slice(-6).padStart(6, '0')}` : 'N/A',
-        restaurantBankDetails: {
-            accountHolderName: w.restaurantId?.accountHolderName || '',
-            accountNumber: w.restaurantId?.accountNumber || '',
-            ifscCode: w.restaurantId?.ifscCode || '',
-            accountType: w.restaurantId?.accountType || '',
-            upiId: w.restaurantId?.upiId || '',
-            upiQrImage: w.restaurantId?.upiQrImage || ''
-        },
-        status: w.status.charAt(0).toUpperCase() + w.status.slice(1)
-    }));
+    const requests = withdrawals.map((w) => {
+        const restaurantDoc = w.restaurantId && typeof w.restaurantId === 'object' ? w.restaurantId : null;
+        const mongoId = restaurantDoc?._id || w.restaurantId;
+        // Prefer the real restaurant code (e.g. REST000008), not a fabricated last-6 slice
+        const restaurantIdString =
+            (restaurantDoc?.restaurantId && String(restaurantDoc.restaurantId).trim()) ||
+            (mongoId ? `REST${String(mongoId).slice(-6).padStart(6, '0')}` : 'N/A');
+
+        return {
+            ...w,
+            id: w._id,
+            restaurantName: restaurantDoc?.restaurantName || 'N/A',
+            restaurantIdString,
+            restaurantBankDetails: {
+                accountHolderName: restaurantDoc?.accountHolderName || '',
+                accountNumber: restaurantDoc?.accountNumber || '',
+                ifscCode: restaurantDoc?.ifscCode || '',
+                accountType: restaurantDoc?.accountType || '',
+                upiId: restaurantDoc?.upiId || '',
+                upiQrImage: restaurantDoc?.upiQrImage || ''
+            },
+            status: w.status.charAt(0).toUpperCase() + w.status.slice(1)
+        };
+    });
 
     return { requests, total, page, limit };
 }
@@ -7296,13 +7415,18 @@ export async function updateWithdrawalStatus(id, { status, adminNote, rejectionR
             throw new ValidationError(`Withdrawal is already ${currentStatus}`);
         }
 
+        const reason = typeof rejectionReason === 'string' ? rejectionReason.trim() : '';
+        if (!reason) {
+            throw new ValidationError('Rejection reason is required');
+        }
+
         const claimed = await FoodRestaurantWithdrawal.findOneAndUpdate(
             { _id: id, status: 'pending' },
             {
                 $set: {
                     status: 'rejected',
                     adminNote,
-                    rejectionReason,
+                    rejectionReason: reason,
                     transactionId,
                     processedAt: new Date(),
                 },
@@ -7325,7 +7449,7 @@ export async function updateWithdrawalStatus(id, { status, adminNote, rejectionR
                 {
                     title: 'Withdrawal rejected',
                     body: `Your withdrawal of ₹${Number(claimed.amount || 0).toFixed(2)} was rejected${
-                        rejectionReason ? `: ${rejectionReason}` : '.'
+                        reason ? `: ${reason}` : '.'
                     }`,
                     data: {
                         type: 'withdrawal_request_status',
@@ -7641,6 +7765,8 @@ export async function getDeliveryWallets(query = {}) {
             remainingCashLimit: Number(wallet?.availableCashLimit || 0),
             cashCollected: Number(wallet?.cashInHand || 0),
             totalEarning: Number(wallet?.totalEarned || 0),
+            orderEarning: Number(wallet?.orderEarnings || 0),
+            addonEarning: Number(wallet?.addonEarnings || 0),
             bonus: Number(wallet?.totalBonus || 0),
             totalWithdrawn: Number(wallet?.totalWithdrawn || 0),
             totalDeliveries: Number(wallet?.totalDeliveries || 0)

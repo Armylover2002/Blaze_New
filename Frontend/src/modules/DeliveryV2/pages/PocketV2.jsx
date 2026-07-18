@@ -247,7 +247,7 @@ export const PocketV2 = () => {
           >
              <p className="text-gray-500 text-[11px] font-bold uppercase tracking-widest mb-2">Earnings: {getCurrentWeekRange()}</p>
              <h2 className="text-4xl font-black text-black tracking-tighter">
-                ₹{walletState.weeklyEarnings.toFixed(0)}
+                ₹{walletState.weeklyEarnings.toFixed(2)}
              </h2>
           </div>
 

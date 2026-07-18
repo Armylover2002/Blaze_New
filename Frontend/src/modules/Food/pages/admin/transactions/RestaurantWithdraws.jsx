@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from "react"
 import { Search, Download, ChevronDown, Eye, Settings, Building, ArrowUpDown, FileText, FileSpreadsheet, Code, Check, Columns, CheckCircle, XCircle, Loader2 } from "lucide-react"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@food/components/ui/dropdown-menu"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@food/components/ui/dialog"
-import { exportTransactionsToExcel, exportTransactionsToPDF } from "@food/components/admin/transactions/transactionsExportUtils"
+import { exportTransactionsToCSV, exportTransactionsToExcel, exportTransactionsToPDF, exportTransactionsToJSON } from "@food/components/admin/transactions/transactionsExportUtils"
 import { adminAPI } from "@food/api"
 import { toast } from "sonner"
 import { useAuth } from "@core/context/AuthContext"
@@ -67,6 +67,7 @@ export default function RestaurantWithdraws() {
   const [processingAction, setProcessingAction] = useState(null)
   const [rejectionReason, setRejectionReason] = useState("")
   const [showRejectModal, setShowRejectModal] = useState(false)
+  const [showApproveModal, setShowApproveModal] = useState(false)
   const [visibleColumns, setVisibleColumns] = useState({
     si: true,
     amount: true,
@@ -145,20 +146,21 @@ export default function RestaurantWithdraws() {
     setIsViewOpen(true)
   }
 
-  const handleApprove = async (id) => {
+  const handleApprove = async () => {
     if (!canEdit) {
       toast.error("Permission denied")
       return
     }
-    if (!confirm('Are you sure you want to approve this withdrawal request?')) {
-      return
-    }
+    const id = selectedWithdraw?.id
+    if (!id) return
 
     try {
       setProcessingAction(id)
       const response = await adminAPI.approveWithdrawalRequest(id)
       if (response.data?.success) {
         toast.success('Withdrawal request approved successfully')
+        setShowApproveModal(false)
+        setSelectedWithdraw(null)
         fetchWithdrawals()
       } else {
         toast.error(response.data?.message || 'Failed to approve withdrawal request')
@@ -171,23 +173,26 @@ export default function RestaurantWithdraws() {
     }
   }
 
-  const handleReject = async (id) => {
+  const handleReject = async () => {
     if (!canEdit) {
       toast.error("Permission denied")
       return
     }
+    const id = selectedWithdraw?.id
+    if (!id) return
     if (!rejectionReason.trim()) {
-      alert('Please provide a rejection reason')
+      toast.error('Please provide a rejection reason')
       return
     }
 
     try {
       setProcessingAction(id)
-      const response = await adminAPI.rejectWithdrawalRequest(id, rejectionReason)
+      const response = await adminAPI.rejectWithdrawalRequest(id, rejectionReason.trim())
       if (response.data?.success) {
         toast.success('Withdrawal request rejected successfully')
         setShowRejectModal(false)
         setRejectionReason("")
+        setSelectedWithdraw(null)
         fetchWithdrawals()
       } else {
         toast.error(response.data?.message || 'Failed to reject withdrawal request')
@@ -260,11 +265,21 @@ export default function RestaurantWithdraws() {
       rejectionReason: w.rejectionReason || ''
     }))
     switch (format) {
+      case "csv":
+        exportTransactionsToCSV(exportData, headers, "restaurant_withdraws_full_details")
+        toast.success("CSV exported successfully")
+        break
       case "excel":
         exportTransactionsToExcel(exportData, headers, "restaurant_withdraws_full_details")
+        toast.success("Excel exported successfully")
         break
       case "pdf":
         await exportTransactionsToPDF(exportData, headers, "restaurant_withdraws_full_details", "Restaurant Withdraws Report")
+        toast.success("PDF exported successfully")
+        break
+      case "json":
+        exportTransactionsToJSON(exportData, "restaurant_withdraws_full_details")
+        toast.success("JSON exported successfully")
         break
       default: break
     }
@@ -348,11 +363,17 @@ export default function RestaurantWithdraws() {
                 <DropdownMenuContent align="end" className="w-56 bg-white border border-slate-200 rounded-lg shadow-lg z-50">
                   <DropdownMenuLabel>Export Format</DropdownMenuLabel>
                   <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => handleExport("csv")} className="cursor-pointer flex items-center gap-2">
+                    <FileText className="w-4 h-4" /> CSV
+                  </DropdownMenuItem>
                   <DropdownMenuItem onClick={() => handleExport("excel")} className="cursor-pointer flex items-center gap-2">
                     <FileSpreadsheet className="w-4 h-4" /> Excel
                   </DropdownMenuItem>
                   <DropdownMenuItem onClick={() => handleExport("pdf")} className="cursor-pointer flex items-center gap-2">
                     <Code className="w-4 h-4" /> PDF
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleExport("json")} className="cursor-pointer flex items-center gap-2">
+                    <Code className="w-4 h-4" /> JSON
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -439,7 +460,10 @@ export default function RestaurantWithdraws() {
                             {withdraw.status === 'Pending' && canEdit && (
                               <>
                                 <button
-                                  onClick={() => handleApprove(withdraw.id)}
+                                  onClick={() => {
+                                    setSelectedWithdraw(withdraw)
+                                    setShowApproveModal(true)
+                                  }}
                                   disabled={processingAction === withdraw.id}
                                   className="p-2 rounded-lg bg-green-50 hover:bg-green-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                   title="Approve"
@@ -453,6 +477,7 @@ export default function RestaurantWithdraws() {
                                 <button
                                   onClick={() => {
                                     setSelectedWithdraw(withdraw)
+                                    setRejectionReason("")
                                     setShowRejectModal(true)
                                   }}
                                   disabled={processingAction === withdraw.id}
@@ -574,13 +599,82 @@ export default function RestaurantWithdraws() {
           </DialogContent>
         </Dialog>
 
+        {/* Approve Confirm Modal */}
+        <Dialog open={showApproveModal} onOpenChange={(open) => {
+          setShowApproveModal(open)
+          if (!open && !showRejectModal && !isViewOpen) setSelectedWithdraw(null)
+        }}>
+          <DialogContent className="max-w-md bg-white p-0">
+            <DialogHeader className="px-6 pt-6 pb-4">
+              <DialogTitle>Confirm Approval</DialogTitle>
+            </DialogHeader>
+            <div className="px-6 pb-2 space-y-3">
+              <p className="text-sm text-slate-700">
+                Are you sure you want to approve this withdrawal request?
+              </p>
+              {selectedWithdraw && (
+                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-1.5">
+                  <p className="text-sm text-slate-800">
+                    <span className="font-semibold">Restaurant:</span>{' '}
+                    {selectedWithdraw.restaurantName || 'N/A'}
+                  </p>
+                  <p className="text-sm text-slate-800">
+                    <span className="font-semibold">Restaurant ID:</span>{' '}
+                    {selectedWithdraw.restaurantIdString || 'N/A'}
+                  </p>
+                  <p className="text-sm text-slate-800">
+                    <span className="font-semibold">Amount:</span>{' '}
+                    {formatCurrency(selectedWithdraw.amount)}
+                  </p>
+                </div>
+              )}
+            </div>
+            <DialogFooter className="px-6 pb-6 flex gap-2">
+              <button
+                onClick={() => {
+                  setShowApproveModal(false)
+                  setSelectedWithdraw(null)
+                }}
+                className="px-4 py-2 text-sm font-medium rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleApprove}
+                disabled={processingAction === selectedWithdraw?.id || !canEdit}
+                className="px-4 py-2 text-sm font-medium rounded-lg bg-green-600 text-white hover:bg-green-700 transition-all shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {processingAction === selectedWithdraw?.id ? 'Approving...' : 'Confirm Approve'}
+              </button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
         {/* Reject Modal */}
-        <Dialog open={showRejectModal} onOpenChange={setShowRejectModal}>
+        <Dialog open={showRejectModal} onOpenChange={(open) => {
+          setShowRejectModal(open)
+          if (!open) {
+            setRejectionReason("")
+            if (!showApproveModal && !isViewOpen) setSelectedWithdraw(null)
+          }
+        }}>
           <DialogContent className="max-w-md bg-white p-0">
             <DialogHeader className="px-6 pt-6 pb-4">
               <DialogTitle>Reject Withdrawal Request</DialogTitle>
             </DialogHeader>
             <div className="px-6 pb-6 space-y-4">
+              {selectedWithdraw && (
+                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-1.5">
+                  <p className="text-sm text-slate-800">
+                    <span className="font-semibold">Restaurant:</span>{' '}
+                    {selectedWithdraw.restaurantName || 'N/A'}
+                  </p>
+                  <p className="text-sm text-slate-800">
+                    <span className="font-semibold">Amount:</span>{' '}
+                    {formatCurrency(selectedWithdraw.amount)}
+                  </p>
+                </div>
+              )}
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2">
                   Rejection Reason <span className="text-red-500">*</span>
@@ -599,13 +693,14 @@ export default function RestaurantWithdraws() {
                 onClick={() => {
                   setShowRejectModal(false)
                   setRejectionReason("")
+                  setSelectedWithdraw(null)
                 }}
                 className="px-4 py-2 text-sm font-medium rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 transition-all"
               >
                 Cancel
               </button>
               <button
-                onClick={() => selectedWithdraw && handleReject(selectedWithdraw.id)}
+                onClick={handleReject}
                 disabled={!rejectionReason.trim() || processingAction === selectedWithdraw?.id || !canEdit}
                 className="px-4 py-2 text-sm font-medium rounded-lg bg-red-600 text-white hover:bg-red-700 transition-all shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
               >

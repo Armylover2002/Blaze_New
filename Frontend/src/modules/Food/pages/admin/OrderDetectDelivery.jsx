@@ -4,7 +4,7 @@ import { adminAPI } from "@food/api"
 import { toast } from "sonner"
 import OrdersTopbar from "@food/components/admin/orders/OrdersTopbar"
 import OrderDetectDeliveryTable from "@food/components/admin/orders/OrderDetectDeliveryTable"
-import ViewOrderDetectDeliveryDialog from "@food/components/admin/orders/ViewOrderDetectDeliveryDialog"
+import ViewOrderDialog from "@food/components/admin/orders/ViewOrderDialog"
 import FilterPanel from "@food/components/admin/orders/FilterPanel"
 import SettingsDialog from "@food/components/admin/orders/SettingsDialog"
 import { useGenericTableManagement } from "@food/components/admin/orders/useGenericTableManagement"
@@ -245,6 +245,56 @@ const transformOrder = (order, index) => {
   const displayStatus = mapOrderStatus(normalizedOrder)
   const statusHistory = buildStatusHistory(normalizedOrder)
 
+  const paymentMethod = order.payment?.method || order.paymentMethod || ""
+  let paymentType = order.paymentType
+  if (!paymentType) {
+    if (paymentMethod === "cash" || paymentMethod === "cod") paymentType = "Cash on Delivery"
+    else if (paymentMethod === "wallet") paymentType = "Wallet"
+    else if (paymentMethod) paymentType = "Online"
+    else paymentType = "N/A"
+  }
+
+  const paymentStatusRaw = order.payment?.status || ""
+  let paymentStatus = order.paymentStatus
+  if (!paymentStatus) {
+    const s = String(paymentStatusRaw || "").toLowerCase()
+    if (s === "refunded") paymentStatus = "Refunded"
+    else if (s === "paid" || s === "authorized" || s === "captured" || s === "settled") paymentStatus = "Paid"
+    else if (s === "failed") paymentStatus = "Failed"
+    else paymentStatus = "Pending"
+  }
+
+  const customerName = order.customerName || order.userName || user?.name || "N/A"
+  const customerPhone = order.customerPhone || order.userNumber || user?.phone || order.deliveryAddress?.phone || "N/A"
+  const customerEmail = user?.email || ""
+
+  const restaurantNameResolved =
+    order.restaurant ||
+    order.restaurantName ||
+    restaurant?.restaurantName ||
+    ""
+
+  const items = Array.isArray(order.items)
+    ? order.items.map((item) => ({
+        quantity: item.quantity || 1,
+        name: item.name || item.foodName || item.title || "Item",
+        price: item.price || 0,
+        isVeg: item.isVeg,
+      }))
+    : []
+
+  const pricing = order.pricing || {}
+  const subtotal = Number(pricing.subtotal || 0)
+  const deliveryFee = Number(pricing.deliveryFee || 0)
+  const platformFee = Number(pricing.platformFee || 0)
+  const packagingFee = Number(pricing.packagingFee || 0)
+  const taxAmount = Number(pricing.tax || 0)
+  const discountAmount = Number(pricing.discount || 0)
+  const computedTotal = subtotal + deliveryFee + platformFee + packagingFee + taxAmount - discountAmount
+  const totalAmount = Number(
+    pricing.total != null ? pricing.total : computedTotal
+  )
+
   return {
     sl: index + 1,
     orderId: order.orderId,
@@ -258,7 +308,26 @@ const transformOrder = (order, index) => {
     orderDate: dateStr,
     orderTime: timeStr,
     // Keep original order data for detail view
-    originalOrder: order
+    originalOrder: {
+      ...order,
+      orderStatus: displayStatus,
+      paymentType,
+      paymentStatus,
+      deliveryType: order.deliveryType || "Home Delivery",
+      customerName,
+      customerPhone,
+      customerEmail,
+      restaurant: restaurantNameResolved,
+      items,
+      totalItemAmount: subtotal,
+      couponDiscount: discountAmount,
+      itemDiscount: 0,
+      deliveryCharge: deliveryFee,
+      vatTax: taxAmount,
+      platformFee,
+      packagingFee,
+      totalAmount,
+    }
   }
 }
 
@@ -561,10 +630,10 @@ export default function OrderDetectDelivery() {
           actions: "Actions",
         }}
       />
-      <ViewOrderDetectDeliveryDialog
+      <ViewOrderDialog
         isOpen={isViewOrderOpen}
         onOpenChange={setIsViewOrderOpen}
-        order={selectedOrder}
+        order={selectedOrder?.originalOrder || selectedOrder}
       />
       <OrderDetectDeliveryTable 
         orders={filteredData} 

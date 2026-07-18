@@ -40,6 +40,8 @@ export default function TransactionReport() {
     refundedTransaction: 0,
     adminEarning: 0,
     restaurantEarning: 0,
+    deliverymanOrderEarning: 0,
+    deliverymanAddonEarning: 0,
     deliverymanEarning: 0
   })
   const [filters, setFilters] = useState({
@@ -121,6 +123,8 @@ export default function TransactionReport() {
             refundedTransaction: 0,
             adminEarning: 0,
             restaurantEarning: 0,
+            deliverymanOrderEarning: 0,
+            deliverymanAddonEarning: 0,
             deliverymanEarning: 0
           })
           setPagination(response.data.data.pagination || {
@@ -188,8 +192,22 @@ export default function TransactionReport() {
 
   const handleExport = async (format) => {
     try {
-      const response = await adminAPI.getTransactionReport(buildReportParams(1, 500))
-      const exportRows = response?.data?.data?.transactions || transactions
+      toast.info("Preparing export...")
+      const allRows = []
+      let page = 1
+      let totalPages = 1
+      const limit = 500
+
+      do {
+        const response = await adminAPI.getTransactionReport(buildReportParams(page, limit))
+        const batch = response?.data?.data?.transactions || []
+        allRows.push(...batch)
+        const meta = response?.data?.data?.pagination || {}
+        totalPages = Number(meta.totalPages || meta.pages || 1)
+        page += 1
+      } while (page <= totalPages && page <= 20)
+
+      const exportRows = allRows.length > 0 ? allRows : transactions
 
       if (exportRows.length === 0) {
         alert("No data to export")
@@ -199,9 +217,10 @@ export default function TransactionReport() {
       switch (format) {
         case "csv": exportTransactionReportToCSV(exportRows); break
         case "excel": exportTransactionReportToExcel(exportRows); break
-        case "pdf": exportTransactionReportToPDF(exportRows); break
+        case "pdf": await exportTransactionReportToPDF(exportRows); break
         case "json": exportTransactionReportToJSON(exportRows); break
       }
+      toast.success(`Exported ${exportRows.length} transactions`)
     } catch (error) {
       debugError("Error exporting transaction report:", error)
       toast.error("Failed to export transaction report")
@@ -417,19 +436,46 @@ export default function TransactionReport() {
 
             {/* Deliveryman Earning */}
             <div className="rounded-lg shadow-sm border border-slate-200 p-3" style={{ backgroundColor: '#f1f5f9' }}>
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-lg bg-green-100 flex items-center justify-center">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-10 h-10 rounded-lg bg-green-100 flex items-center justify-center flex-shrink-0">
                     <img src={deliverymanEarningIcon} alt="Deliveryman Earning" className="w-6 h-6" />
                   </div>
-                  <div className="flex items-center gap-2">
-                    <p className="text-sm font-semibold text-slate-900">Deliveryman Earning</p>
-                    <div className="w-5 h-5 rounded-full bg-red-500 flex items-center justify-center">
-                      <Info className="w-3 h-3 text-white" />
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-semibold text-slate-900">Deliveryman Earning</p>
+                      <div className="w-5 h-5 rounded-full bg-red-500 flex items-center justify-center">
+                        <Info className="w-3 h-3 text-white" />
+                      </div>
+                    </div>
+                    <div className="mt-1.5 space-y-0.5">
+                      <p className="text-[11px] text-slate-600">
+                        Order Earning:{' '}
+                        <span className="font-semibold text-slate-800">
+                          {formatFullCurrency(Number(summary.deliverymanOrderEarning || 0))}
+                        </span>
+                      </p>
+                      <p className="text-[11px] text-slate-600">
+                        Addon Earning:{' '}
+                        <span className="font-semibold text-blue-600">
+                          {formatFullCurrency(Number(summary.deliverymanAddonEarning || 0))}
+                        </span>
+                      </p>
                     </div>
                   </div>
                 </div>
-                <p className="text-base font-bold text-red-600">{formatCurrency(summary.deliverymanEarning)}</p>
+                <div className="text-right flex-shrink-0">
+                  <p className="text-[10px] font-medium text-slate-500 uppercase tracking-wide">Total</p>
+                  <p className="text-base font-bold text-red-600">
+                    {formatCurrency(
+                      Number(
+                        summary.deliverymanEarning ??
+                          (Number(summary.deliverymanOrderEarning || 0) +
+                            Number(summary.deliverymanAddonEarning || 0))
+                      )
+                    )}
+                  </p>
+                </div>
               </div>
             </div>
           </div>
@@ -506,7 +552,8 @@ export default function TransactionReport() {
                   <th className="px-1.5 py-1 text-left text-[8px] font-bold text-slate-700 uppercase tracking-wider" style={{ width: '9%' }}>Coupon Discount</th>
                   <th className="px-1.5 py-1 text-left text-[8px] font-bold text-slate-700 uppercase tracking-wider" style={{ width: '9%' }}>Vat/Tax</th>
                   <th className="px-1.5 py-1 text-left text-[8px] font-bold text-slate-700 uppercase tracking-wider" style={{ width: '10%' }}>Delivery Charge</th>
-                  <th className="px-1.5 py-1 text-left text-[8px] font-bold text-slate-700 uppercase tracking-wider" style={{ width: '9%' }}>Platform Fee</th>
+                  <th className="px-1.5 py-1 text-left text-[8px] font-bold text-slate-700 uppercase tracking-wider" style={{ width: '8%' }}>Platform Fee</th>
+                  <th className="px-1.5 py-1 text-left text-[8px] font-bold text-slate-700 uppercase tracking-wider" style={{ width: '8%' }}>Packaging Fee</th>
                   <th className="px-1.5 py-1 text-left text-[8px] font-bold text-slate-700 uppercase tracking-wider" style={{ width: '9%' }}>Order Amount</th>
                   <th className="px-1.5 py-1 text-left text-[8px] font-bold text-slate-700 uppercase tracking-wider" style={{ width: '8%' }}>Status</th>
                 </tr>
@@ -559,6 +606,9 @@ export default function TransactionReport() {
                       </td>
                       <td className="px-1.5 py-1">
                         <span className="text-[10px] text-slate-700">{formatFullCurrency(transaction.platformFee || 0)}</span>
+                      </td>
+                      <td className="px-1.5 py-1">
+                        <span className="text-[10px] text-slate-700">{formatFullCurrency(transaction.packagingFee || 0)}</span>
                       </td>
                       <td className="px-1.5 py-1">
                         <span className="text-[10px] font-medium text-slate-900">{formatFullCurrency(transaction.orderAmount)}</span>

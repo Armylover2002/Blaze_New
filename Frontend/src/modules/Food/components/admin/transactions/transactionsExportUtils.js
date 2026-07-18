@@ -11,7 +11,7 @@ export const exportTransactionsToCSV = (transactions, headers, filename = "trans
     }).join(","))
   ].join("\n");
 
-  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+  const blob = new Blob(["\uFEFF" + csvContent], { type: "text/csv;charset=utf-8;" });
   const link = document.createElement("a");
   const url = URL.createObjectURL(blob);
   link.setAttribute("href", url);
@@ -31,8 +31,9 @@ export const exportTransactionsToExcel = (transactions, headers, filename = "tra
         <style>
           table { border-collapse: collapse; width: 100%; }
           th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-          th { background-color: #f2f2f2; font-weight: bold; }
+          th { background-color: #3b82f6; color: white; font-weight: bold; }
           td { white-space: nowrap; }
+          tr:nth-child(even) { background-color: #f9fafb; }
         </style>
       </head>
       <body>
@@ -113,8 +114,8 @@ export const exportTransactionsToPDF = async (transactions, headers, filename = 
     body,
     startY: 28,
     styles: { fontSize: 8, cellPadding: 2 },
-    headStyles: { fillColor: [0, 0, 0], textColor: 255, fontStyle: 'bold' },
-    alternateRowStyles: { fillColor: [245, 245, 245] },
+    headStyles: { fillColor: [59, 130, 246], textColor: 255, fontStyle: 'bold' },
+    alternateRowStyles: { fillColor: [248, 250, 252] },
     margin: { left: 14, right: 14 }
   })
 
@@ -122,8 +123,13 @@ export const exportTransactionsToPDF = async (transactions, headers, filename = 
 };
 
 export const exportTransactionsToJSON = (transactions, filename = "transactions") => {
-  const jsonContent = JSON.stringify(transactions, null, 2);
-  const blob = new Blob([jsonContent], { type: "application/json" });
+  const payload = {
+    exportDate: new Date().toISOString(),
+    totalRecords: transactions.length,
+    rows: transactions,
+  };
+  const jsonContent = JSON.stringify(payload, null, 2);
+  const blob = new Blob([jsonContent], { type: "application/json;charset=utf-8" });
   const link = document.createElement("a");
   const url = URL.createObjectURL(blob);
   link.setAttribute("href", url);

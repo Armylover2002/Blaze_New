@@ -97,7 +97,7 @@ export default function FeedbackExperienceReport() {
     setSearchQuery("")
   }
 
-  const handleExport = (format) => {
+  const handleExport = async (format) => {
     if (filteredFeedback.length === 0) {
       toast.error("No data to export")
       return
@@ -117,15 +117,24 @@ export default function FeedbackExperienceReport() {
       userName: fb.userName || 'N/A',
       userEmail: fb.userEmail || 'N/A',
       userPhone: fb.userPhone || 'N/A',
-      rating: fb.rating,
+      rating: fb.rating ?? 'N/A',
       experience: fb.experience || 'N/A',
       module: fb.module || 'N/A',
-      createdAt: new Date(fb.createdAt).toLocaleString(),
+      createdAt: fb.createdAt
+        ? new Date(fb.createdAt).toLocaleString('en-IN', {
+            day: '2-digit',
+            month: 'short',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: true,
+          })
+        : 'N/A',
     }))
     switch (format) {
       case "csv": exportReportsToCSV(exportData, headers, "feedback_experience_report"); break;
       case "excel": exportReportsToExcel(exportData, headers, "feedback_experience_report"); break;
-      case "pdf": exportReportsToPDF(exportData, headers, "feedback_experience_report", "Feedback Experience Report"); break;
+      case "pdf": await exportReportsToPDF(exportData, headers, "feedback_experience_report", "Feedback Experience Report"); break;
       case "json": exportReportsToJSON(exportData, "feedback_experience_report"); break;
     }
   }

@@ -1,8 +1,8 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from "react"
-import { Search, Wallet, Settings, Folder, Download, ChevronDown, FileText, FileSpreadsheet, Check, Columns, Loader2, CheckCircle2, ChevronLeft, ChevronRight } from "lucide-react"
+import { Search, Wallet, Settings, Folder, Download, ChevronDown, FileText, FileSpreadsheet, Code, Check, Columns, Loader2, CheckCircle2, ChevronLeft, ChevronRight } from "lucide-react"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@food/components/ui/dropdown-menu"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@food/components/ui/dialog"
-import { exportBonusToCSV, exportBonusToExcel, exportBonusToPDF } from "@food/components/admin/deliveryman/deliverymanExportUtils"
+import { exportBonusToCSV, exportBonusToExcel, exportBonusToPDF, exportBonusToJSON } from "@food/components/admin/deliveryman/deliverymanExportUtils"
 import { adminAPI } from "@food/api"
 import { API_BASE_URL } from "@food/api/config"
 import { useAuth } from "@core/context/AuthContext"
@@ -341,6 +341,9 @@ export default function DeliverymanBonus() {
         case "pdf":
           exportBonusToPDF(rows)
           break
+        case "json":
+          exportBonusToJSON(rows)
+          break
         default:
           break
       }
@@ -538,6 +541,10 @@ export default function DeliverymanBonus() {
                   <DropdownMenuItem onClick={() => handleExport("pdf")} className="cursor-pointer">
                     <FileText className="w-4 h-4 mr-2" />
                     Export as PDF
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleExport("json")} className="cursor-pointer">
+                    <Code className="w-4 h-4 mr-2" />
+                    Export as JSON
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>

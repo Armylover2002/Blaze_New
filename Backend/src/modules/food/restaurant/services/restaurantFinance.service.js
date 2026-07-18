@@ -354,7 +354,7 @@ export async function getRestaurantFinance(restaurantId, query = {}) {
 
     // Fetch restaurant profile for header display.
     const restaurant = await FoodRestaurant.findById(rid)
-        .select('restaurantName addressLine1 addressLine2 area city state pincode location')
+        .select('restaurantId restaurantName addressLine1 addressLine2 area city state pincode location')
         .lean();
 
     const address =
@@ -465,7 +465,7 @@ export async function getRestaurantFinance(restaurantId, query = {}) {
     return {
         restaurant: {
             name: restaurant?.restaurantName || '',
-            restaurantId: restaurant?._id ? `REST${restaurant._id.toString().slice(-6).padStart(6, '0')}` : 'N/A',
+            restaurantId: restaurant?.restaurantId || (restaurant?._id ? `REST${restaurant._id.toString().slice(-6).padStart(6, '0')}` : 'N/A'),
             address
         },
         earnings: {

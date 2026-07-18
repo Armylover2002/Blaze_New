@@ -35,7 +35,8 @@ export const PocketDetailsV2 = () => {
   const [orders, setOrders] = useState([]);
   const [paymentTransactions, setPaymentTransactions] = useState([]);
   const [bonusTransactions, setBonusTransactions] = useState([]);
-  const [summaryData, setSummaryData] = useState({ totalEarning: 0, totalBonus: 0, grandTotal: 0 });
+  const [addonTransactions, setAddonTransactions] = useState([]);
+  const [summaryData, setSummaryData] = useState({ totalEarning: 0, totalBonus: 0, totalAddon: 0, grandTotal: 0 });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -56,16 +57,19 @@ export const PocketDetailsV2 = () => {
         setOrders(Array.isArray(trips) ? trips : []);
         setPaymentTransactions(Array.isArray(payments) ? payments : []);
         setBonusTransactions(Array.isArray(bonuses) ? bonuses : []);
+        setAddonTransactions(Array.isArray(payload?.transactions?.addon) ? payload.transactions.addon : []);
         setSummaryData({
           totalEarning: Number(summary.totalEarning) || 0,
           totalBonus: Number(summary.totalBonus) || 0,
+          totalAddon: Number(summary.totalAddon) || 0,
           grandTotal: Number(summary.grandTotal) || 0,
         });
       } catch (error) {
         setOrders([]);
         setPaymentTransactions([]);
         setBonusTransactions([]);
-        setSummaryData({ totalEarning: 0, totalBonus: 0, grandTotal: 0 });
+        setAddonTransactions([]);
+        setSummaryData({ totalEarning: 0, totalBonus: 0, totalAddon: 0, grandTotal: 0 });
       } finally {
         setLoading(false);
       }
@@ -76,14 +80,20 @@ export const PocketDetailsV2 = () => {
   const summary = useMemo(() => {
     let totalEarning = 0;
     let totalBonus = 0;
-    paymentTransactions.forEach((p) => { totalEarning += p.amount || 0; });
-    bonusTransactions.forEach((b) => { totalBonus += b.amount || 0; });
+    let totalAddon = 0;
+    paymentTransactions.forEach((p) => { totalEarning += Number(p.amount) || 0; });
+    bonusTransactions.forEach((b) => { totalBonus += Number(b.amount) || 0; });
+    addonTransactions.forEach((a) => { totalAddon += Number(a.amount) || 0; });
+    const orderEarning = summaryData.totalEarning || totalEarning;
+    const weeklyBonus = summaryData.totalBonus || totalBonus;
+    const addonEarning = summaryData.totalAddon || totalAddon;
     return {
-      totalEarning: summaryData.totalEarning || totalEarning,
-      totalBonus: summaryData.totalBonus || totalBonus,
-      grandTotal: summaryData.grandTotal || (summaryData.totalEarning || totalEarning) + (summaryData.totalBonus || totalBonus),
+      totalEarning: orderEarning,
+      totalBonus: weeklyBonus,
+      totalAddon: addonEarning,
+      grandTotal: summaryData.grandTotal || (orderEarning + weeklyBonus + addonEarning),
     };
-  }, [paymentTransactions, bonusTransactions, summaryData]);
+  }, [paymentTransactions, bonusTransactions, addonTransactions, summaryData]);
 
   const getOrderEarning = (orderId) => {
     const p = paymentTransactions.find(p => (p.orderId || p.metadata?.orderId) === orderId);
@@ -137,10 +147,14 @@ export const PocketDetailsV2 = () => {
                     <TrendingUp className="w-6 h-6 text-[#FF0000]" />
                  </div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
+                 <div className="grid grid-cols-3 gap-4">
                  <div className="bg-white/5 p-4 rounded-2xl border border-white/5">
-                    <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest mb-1">Trip Earnings</p>
+                    <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest mb-1">Order Earning</p>
                     <p className="text-lg font-black text-white">{formatCurrency(summary.totalEarning)}</p>
+                 </div>
+                 <div className="bg-white/5 p-4 rounded-2xl border border-white/5">
+                    <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest mb-1">Addon Earning</p>
+                    <p className="text-lg font-black text-blue-400">+{formatCurrency(summary.totalAddon)}</p>
                  </div>
                  <div className="bg-white/5 p-4 rounded-2xl border border-white/5">
                     <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest mb-1">Weekly Bonus</p>
@@ -213,6 +227,45 @@ export const PocketDetailsV2 = () => {
             </div>
           )}
         </div>
+
+        {/* ─── ADDON HISTORY ─── */}
+        {addonTransactions && addonTransactions.length > 0 && (
+           <div className="space-y-4 pt-4">
+             <div className="flex items-center justify-between px-1">
+                <h3 className="text-xs font-black text-gray-950 uppercase tracking-widest">Addon Earning History</h3>
+                <span className="bg-blue-100 text-blue-600 px-3 py-1 rounded-full text-[10px] font-bold">{addonTransactions.length} Addons</span>
+             </div>
+             <div className="grid gap-3">
+               {addonTransactions.map((addon, idx) => (
+                 <motion.div 
+                   initial={{ opacity: 0, y: 10 }}
+                   animate={{ opacity: 1, y: 0 }}
+                   transition={{ delay: idx * 0.05 }}
+                   key={addon._id || idx}
+                   className="bg-white p-5 rounded-3xl shadow-sm border border-gray-100 flex items-center justify-between active:scale-[0.98] transition-all"
+                 >
+                   <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 bg-blue-50 rounded-2xl flex items-center justify-center text-blue-500 border border-blue-100">
+                         <Receipt className="w-6 h-6" />
+                      </div>
+                      <div>
+                         <div className="flex items-center gap-2 mb-0.5">
+                            <h4 className="text-sm font-black text-gray-950 uppercase tracking-tight">Addon Earning</h4>
+                            <span className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">• {new Date(addon.date || addon.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}</span>
+                         </div>
+                         <p className="text-[10px] font-bold text-gray-500 uppercase tracking-tight truncate max-w-[140px]">
+                           {addon.description || "Bonus Credit"}
+                         </p>
+                      </div>
+                   </div>
+                   <div className="text-right">
+                      <p className="text-base font-black text-blue-600 leading-none mb-1">+{formatCurrency(addon.amount)}</p>
+                   </div>
+                 </motion.div>
+               ))}
+             </div>
+           </div>
+        )}
       </div>
     </div>
   );

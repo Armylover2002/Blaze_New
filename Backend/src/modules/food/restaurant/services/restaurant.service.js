@@ -15,7 +15,7 @@ import {
 import { isPointInPolygon } from '../../../../utils/geo.js';
 import { ensureDailyPassEligibility, activateDailyPass, checkRestaurantEligibilityReadOnly } from '../../subscriptions/services/wallet.service.js';
 import { logger } from '../../../../utils/logger.js';
-import { getRoadDistancesFromOrigin } from '../../../../services/roadDistance.service.js';
+import { getRoadDistancesToDestination } from '../../../../services/roadDistance.service.js';
 import { parseGeoPoint } from '../../shared/geo.utils.js';
 import {
     splitReviewableUpdate,
@@ -56,9 +56,10 @@ async function enrichRestaurantsWithRoadDistance(restaurants, userLat, userLng, 
 
     if (!entries.length) return restaurants;
 
-    const distances = await getRoadDistancesFromOrigin(
-        { lat, lng },
+    // Same direction as checkout fee: restaurant → user (not user → restaurant).
+    const distances = await getRoadDistancesToDestination(
         entries.map((entry) => ({ lat: entry.lat, lng: entry.lng })),
+        { lat, lng },
     );
 
     entries.forEach((entry, i) => {

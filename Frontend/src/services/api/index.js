@@ -2978,7 +2978,12 @@ export const orderAPI = {
       if (pending) return pending;
 
       const p = apiClient
-        .get(`/food/orders/${key}`, { contextModule: "user" })
+        .get(`/food/orders/${key}`, {
+          contextModule: "user",
+          ...(force
+            ? { params: { _t: Date.now() }, headers: { "Cache-Control": "no-cache" } }
+            : {}),
+        })
         .then((res) => {
           cache.set(key, { at: Date.now(), res });
           return res;

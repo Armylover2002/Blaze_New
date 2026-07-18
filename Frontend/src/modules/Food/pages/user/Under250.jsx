@@ -20,7 +20,7 @@ import api from "@food/api"
 import { restaurantAPI, adminAPI } from "@food/api"
 import { isModuleAuthenticated } from "@food/utils/auth"
 import { formatDistance } from "@food/utils/common"
-import { getRoadDistancesFromOrigin } from "@/shared/services/roadDistance"
+import { getRoadDistancesToDestination } from "@/shared/services/roadDistance"
 
 const enrichRestaurantDistance = (restaurant, distanceInKm) => {
   const fallbackDistance =
@@ -134,7 +134,7 @@ export default function Under250() {
       })
 
       const roadDistances = (Number.isFinite(userLat) && Number.isFinite(userLng))
-        ? await getRoadDistancesFromOrigin(userLat, userLng, destinations)
+        ? await getRoadDistancesToDestination(destinations, userLat, userLng)
         : []
 
       if (cancelled) return

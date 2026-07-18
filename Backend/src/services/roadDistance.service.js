@@ -274,6 +274,83 @@ export async function getRoadDistancesFromOrigin(origin, destinations = []) {
 }
 
 /**
+ * Batch road distances from many origins to one destination (restaurant → user).
+ * Matches checkout fee direction used by resolveRestaurantToUserRoadDistanceKm.
+ * @param {Array<{ lat: number, lng: number }>} origins
+ * @param {{ lat: number, lng: number }} destination
+ * @returns {Promise<RoadDistanceResult[]>}
+ */
+export async function getRoadDistancesToDestination(origins = [], destination) {
+  const to = toPoint(destination);
+  if (!to) {
+    return origins.map((origin) => buildFallbackRoadDistance(origin, destination));
+  }
+
+  const normalized = origins.map((origin) => {
+    const from = toPoint(origin);
+    if (!from) return { from: null, cached: buildFallbackRoadDistance(origin, destination) };
+    const key = cacheKey(from, to);
+    const cached = readCache(key);
+    return { from, cached: cached || null };
+  });
+
+  const results = normalized.map((entry) => entry.cached);
+  const uncachedIndexes = [];
+  const uncachedOrigins = [];
+
+  normalized.forEach((entry, index) => {
+    if (entry.cached) return;
+    if (!entry.from) {
+      results[index] = buildFallbackRoadDistance(origins[index], destination);
+      return;
+    }
+    uncachedIndexes.push(index);
+    uncachedOrigins.push(entry.from);
+  });
+
+  if (uncachedOrigins.length === 0) return results;
+
+  const apiKey = getApiKey();
+  if (!apiKey) {
+    uncachedIndexes.forEach((idx, i) => {
+      results[idx] = buildFallbackRoadDistance(uncachedOrigins[i], to);
+    });
+    return results;
+  }
+
+  // Distance Matrix allows multiple origins with a single destination.
+  for (let offset = 0; offset < uncachedOrigins.length; offset += MATRIX_DEST_LIMIT) {
+    const chunk = uncachedOrigins.slice(offset, offset + MATRIX_DEST_LIMIT);
+    const chunkIndexes = uncachedIndexes.slice(offset, offset + MATRIX_DEST_LIMIT);
+    const originStr = chunk.map((o) => `${o.lat},${o.lng}`).join('|');
+    const destStr = `${to.lat},${to.lng}`;
+
+    try {
+      const data = await googleGet(
+        `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${originStr}&destinations=${destStr}&mode=driving&key=${apiKey}`,
+      );
+      const rows = data?.rows || [];
+
+      chunk.forEach((origin, i) => {
+        const idx = chunkIndexes[i];
+        const parsed = parseDistanceElement(rows[i]?.elements?.[0]);
+        const value = parsed || buildFallbackRoadDistance(origin, to);
+        results[idx] = value;
+        if (!value.estimated) writeCache(cacheKey(origin, to), value);
+      });
+    } catch (err) {
+      logger.warn(`[RoadDistance] Multi-origin Distance Matrix failed (${err?.code || err?.message}); using fallback`);
+      chunk.forEach((origin, i) => {
+        const idx = chunkIndexes[i];
+        results[idx] = buildFallbackRoadDistance(origin, to);
+      });
+    }
+  }
+
+  return results;
+}
+
+/**
  * Score destinations by road distance from an origin; filters by maxKm and sorts ascending.
  * @param {{ lat: number, lng: number }} origin
  * @param {Array<{ lat: number, lng: number, [key: string]: unknown }>} points

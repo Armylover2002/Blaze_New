@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect, useCallback, useRef } from "react"
 import { useSearchParams } from "react-router-dom"
 import { Search, Download, ChevronDown, Eye, FileDown, FileSpreadsheet, FileText, Mail, Phone, MapPin, Package, IndianRupee, Calendar as CalendarIcon, User, CheckCircle, XCircle } from "lucide-react"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@food/components/ui/dropdown-menu"
-import { exportCustomersToCSV, exportCustomersToExcel, exportCustomersToPDF } from "@food/components/admin/customers/customersExportUtils"
+import { exportCustomersToCSV, exportCustomersToExcel, exportCustomersToPDF, exportCustomersToJSON } from "@food/components/admin/customers/customersExportUtils"
 import { adminAPI } from "@food/api"
 import { toast } from "sonner"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@food/components/ui/dialog"
@@ -299,26 +299,71 @@ export default function Customers() {
     }
   }
 
-  const handleExport = (format) => {
-    if (displayCustomers.length === 0) {
-      toast.error("No customers to export")
-      return
-    }
-
-    const filename = "customers"
+  const handleExport = async (format) => {
     try {
+      toast.info("Preparing export...")
+      const allCustomers = []
+      let currentPage = 1
+      let totalPagesToFetch = 1
+      const exportLimit = 200
+
+      do {
+        const params = {
+          page: currentPage,
+          limit: exportLimit,
+          ...(searchQuery && { search: searchQuery }),
+          ...(filters.status && { status: filters.status }),
+          ...(filters.joiningDate && { joiningDate: filters.joiningDate }),
+          ...(filters.orderDate && { orderDate: filters.orderDate }),
+          ...(filters.sortBy && { sortBy: filters.sortBy }),
+          ...(filters.chooseFirst && { chooseFirst: filters.chooseFirst }),
+        }
+        const response = await adminAPI.getCustomers(params)
+        const data = response?.data?.data || response?.data
+        const list = data?.customers || data?.users || []
+        if (Array.isArray(list) && list.length) {
+          allCustomers.push(...list)
+        }
+        const total = Number(data?.total ?? data?.pagination?.total ?? allCustomers.length)
+        totalPagesToFetch = Math.max(1, Math.ceil(total / exportLimit))
+        currentPage += 1
+      } while (currentPage <= totalPagesToFetch && currentPage <= 50)
+
+      if (allCustomers.length === 0) {
+        toast.error("No customers to export")
+        return
+      }
+
+      const exportRows = allCustomers.map((customer, index) => ({
+        ...customer,
+        sl: index + 1,
+        name: customer.name || "N/A",
+        email: customer.email || "N/A",
+        phone: customer.phone || "N/A",
+        totalOrder: Number(customer.totalOrder || 0),
+        totalOrderAmount: Number(customer.totalOrderAmount || 0),
+        joiningDate: formatDateTime(customer.joiningDate),
+        isCodAllowed: customer.isCodAllowed !== false,
+        status: Boolean(customer.status ?? customer.isActive),
+      }))
+
+      const filename = "customers"
       switch (format) {
         case "csv":
-          exportCustomersToCSV(displayCustomers, filename)
-          toast.success("CSV export started")
+          exportCustomersToCSV(exportRows, filename)
+          toast.success(`CSV exported (${exportRows.length} customers)`)
           break
         case "excel":
-          exportCustomersToExcel(displayCustomers, filename)
-          toast.success("Excel export started")
+          exportCustomersToExcel(exportRows, filename)
+          toast.success(`Excel exported (${exportRows.length} customers)`)
           break
         case "pdf":
-          exportCustomersToPDF(displayCustomers, filename)
-          toast.success("PDF download started")
+          exportCustomersToPDF(exportRows, filename)
+          toast.success(`PDF download started (${exportRows.length} customers)`)
+          break
+        case "json":
+          exportCustomersToJSON(exportRows, filename)
+          toast.success(`JSON exported (${exportRows.length} customers)`)
           break
         default:
           toast.error("Invalid export format")
@@ -503,6 +548,10 @@ export default function Customers() {
                   <DropdownMenuItem onClick={() => handleExport("pdf")} className="cursor-pointer hover:bg-[#FFEDED] hover:text-[#FF0000] focus:bg-[#FFEDED] focus:text-[#FF0000]">
                     <FileText className="w-4 h-4 mr-2" />
                     Export as PDF
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleExport("json")} className="cursor-pointer hover:bg-[#FFEDED] hover:text-[#FF0000] focus:bg-[#FFEDED] focus:text-[#FF0000]">
+                    <FileDown className="w-4 h-4 mr-2" />
+                    Export as JSON
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>

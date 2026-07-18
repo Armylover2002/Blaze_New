@@ -131,6 +131,14 @@ export const createWithdrawalRequestController = async (req, res, next) => {
                 { upsert: true, session, new: true }
             );
 
+            const finance = await getRestaurantFinance(restaurantId);
+            const availableBalance = Number(
+                finance?.earnings?.availableBalance ??
+                    finance?.currentCycle?.estimatedPayout ??
+                    0
+            );
+            const effectiveMax =
+                maxLimit != null ? Math.min(availableBalance, maxLimit) : availableBalance;
             const { availableBalance } = await getRestaurantAvailableWithdrawalBalance(
                 restaurantId,
                 { session }
@@ -139,6 +147,13 @@ export const createWithdrawalRequestController = async (req, res, next) => {
             if (numericAmount > availableBalance) {
                 const err = new Error(
                     `Insufficient balance. Available: ₹${availableBalance}`
+                );
+                err.statusCode = 400;
+                throw err;
+            }
+            if (numericAmount > effectiveMax) {
+                const err = new Error(
+                    `You can withdraw maximum ₹${effectiveMax} in one request`
                 );
                 err.statusCode = 400;
                 throw err;

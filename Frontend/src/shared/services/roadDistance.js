@@ -15,7 +15,7 @@ const roundCoord = (value) => {
 };
 
 const cacheKey = (lat1, lng1, lat2, lng2) =>
-  `v2_${roundCoord(lat1)}_${roundCoord(lng1)}_${roundCoord(lat2)}_${roundCoord(lng2)}`;
+  `v3_${roundCoord(lat1)}_${roundCoord(lng1)}_${roundCoord(lat2)}_${roundCoord(lng2)}`;
 
 const readCache = (key) => {
   const entry = cache.get(key);
@@ -168,5 +168,82 @@ export async function getRoadDistancesFromOrigin(originLat, originLng, destinati
     const dest = normalized[index];
     if (!Number.isFinite(dest.lat) || !Number.isFinite(dest.lng)) return null;
     return fallbackDistanceKm(lat, lng, dest.lat, dest.lng);
+  });
+}
+
+/**
+ * Batch road distances from many origins to one destination (restaurant → user).
+ * Matches checkout fee direction used by resolveRestaurantToUserRoadDistanceKm.
+ */
+export async function getRoadDistancesToDestination(origins = [], destLat, destLng) {
+  const destinationLat = Number(destLat);
+  const destinationLng = Number(destLng);
+  if (!Number.isFinite(destinationLat) || !Number.isFinite(destinationLng) || !origins.length) {
+    return origins.map(() => null);
+  }
+
+  const normalized = origins.map((origin) => ({
+    lat: Number(origin?.lat),
+    lng: Number(origin?.lng),
+  }));
+
+  const results = normalized.map((origin) => {
+    if (!Number.isFinite(origin.lat) || !Number.isFinite(origin.lng)) return null;
+    const key = cacheKey(origin.lat, origin.lng, destinationLat, destinationLng);
+    const cached = readCache(key);
+    if (cached != null) return cached.distanceKm;
+    return { origin, key, pending: true };
+  });
+
+  const uncached = results
+    .map((item, index) => (item?.pending ? { index, ...item } : null))
+    .filter(Boolean);
+
+  if (uncached.length) {
+    try {
+      const response = await apiClient.post('/common/maps/distance/batch', {
+        origins: uncached.map((item) => ({ lat: item.origin.lat, lng: item.origin.lng })),
+        destination: { lat: destinationLat, lng: destinationLng },
+      }, mapsRequestConfig());
+      const distances = response?.data?.data?.distances || [];
+      uncached.forEach((item, i) => {
+        const distanceKm = Number(distances[i]?.distanceKm);
+        const estimated = Boolean(distances[i]?.estimated);
+        const value = Number.isFinite(distanceKm)
+          ? { distanceKm, estimated }
+          : (() => {
+              const fallback = fallbackDistanceKm(
+                item.origin.lat,
+                item.origin.lng,
+                destinationLat,
+                destinationLng,
+              );
+              return fallback != null ? { distanceKm: fallback, estimated: true } : null;
+            })();
+        if (value != null) {
+          writeCache(item.key, value);
+          results[item.index] = value.distanceKm;
+        }
+      });
+    } catch {
+      uncached.forEach((item) => {
+        const fallback = fallbackDistanceKm(
+          item.origin.lat,
+          item.origin.lng,
+          destinationLat,
+          destinationLng,
+        );
+        if (fallback != null) {
+          results[item.index] = fallback;
+        }
+      });
+    }
+  }
+
+  return results.map((item, index) => {
+    if (typeof item === 'number') return item;
+    const origin = normalized[index];
+    if (!Number.isFinite(origin.lat) || !Number.isFinite(origin.lng)) return null;
+    return fallbackDistanceKm(origin.lat, origin.lng, destinationLat, destinationLng);
   });
 }

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react"
 import { useParams, Link, useSearchParams, useLocation } from "react-router-dom"
 import { motion, AnimatePresence } from "framer-motion"
+import { generateOrderInvoice } from "../../../utils/printOrderInvoice"
 import { toast } from "sonner"
 import {
   ArrowLeft,
@@ -664,7 +665,10 @@ export default function OrderTracking() {
     return isQuickOrder || orderType === "quick" || orderType === "mixed";
   }, [isQuickOrder, order?.orderType, prefetchedOrder?.orderType, location.state?.orderType]);
   const [loading, setLoading] = useState(() => !prefetchedOrder);
+  const [initialLoadDone, setInitialLoadDone] = useState(() => Boolean(prefetchedOrder));
   const [error, setError] = useState(null);
+  const orderRef = useRef(order);
+  orderRef.current = order;
 
   // ── UI state ────────────────────────────────────────────────────────────────
   const [showConfirmation, setShowConfirmation] = useState(confirmed);
@@ -732,9 +736,8 @@ export default function OrderTracking() {
   const trackingOrderIdsRef = useRef(new Set());
   const terminalPollStopRef = useRef(false);
   const lookupIdsRef = useRef([]);
-  const isInitialPollRequestedRef = useRef(null);
-  const lastPollExecutionRef = useRef(0);
   const pollRef = useRef(null);
+  const initialPollGenerationRef = useRef(0);
 
   // ── Derived values ───────────────────────────────────────────────────────────
   const defaultAddress = getDefaultAddress();
@@ -1122,20 +1125,34 @@ export default function OrderTracking() {
   // ── Main polling effect ──────────────────────────────────────────────────────
   useEffect(() => {
     if (!orderId) return;
+    const pollGeneration = ++initialPollGenerationRef.current;
     let isSubscribed = true;
     let requestInProgress = false;
-    const NO_RESULT = Symbol("no-order-result");
+
+    setLoading(true);
+    setInitialLoadDone(Boolean(prefetchedOrder));
+    setError(null);
 
     const poll = async (isInitial = false) => {
       if (!isSubscribed || requestInProgress) return;
       if (terminalPollStopRef.current && !isInitial) return;
-      const now = Date.now();
-      if (isInitial && now - lastPollExecutionRef.current < 1000) return;
-      if (isInitial) lastPollExecutionRef.current = now;
+
+      // Ensure lookup ids exist before any API call (avoids race with ref-sync effect).
+      const syncIds = [resolvedLookupId, orderId]
+        .map(normalizeLookupId)
+        .filter(Boolean);
+      if (syncIds.length) {
+        lookupIdsRef.current = Array.from(new Set([...lookupIdsRef.current, ...syncIds]));
+      }
 
       if (isInitial) {
         const rawContext = isQuickOrder ? null : getOrderById(orderId);
-        if (rawContext) { setOrder(transformOrderForTracking(rawContext)); setLoading(false); }
+        if (rawContext) {
+          setOrder(transformOrderForTracking(rawContext));
+          setError(null);
+          setInitialLoadDone(true);
+          setLoading(false);
+        }
       }
 
       requestInProgress = true;
@@ -1143,31 +1160,34 @@ export default function OrderTracking() {
         let finalOrderData = null;
         let response = null;
 
+        const loadDetail = async (force = false) => {
+          const res = await fetchOrderDetailsWithFallback({ force });
+          return { res, payload: extractOrderDetailsPayload(res) };
+        };
+
         if (isInitial && !isQuickOrder) {
-          const detailPromise = fetchOrderDetailsWithFallback({ force: true }).then((res) => {
-            response = res;
-            const payload = extractOrderDetailsPayload(res);
-            if (!payload) throw new Error("empty payload");
-            return payload;
-          });
-          const listPromise = resolveOrderFromList(orderId).then((m) => {
-            if (!m) throw new Error("not in list");
-            return m;
-          });
-          try { finalOrderData = await Promise.any([detailPromise, listPromise]); }
-          catch {
-            response = await fetchOrderDetailsWithFallback({ force: true });
-            finalOrderData = extractOrderDetailsPayload(response) || NO_RESULT;
-            if (finalOrderData === NO_RESULT) finalOrderData = await resolveOrderFromList(orderId) || null;
+          let detail = await loadDetail(true);
+          response = detail.res;
+          finalOrderData = detail.payload;
+          if (!finalOrderData) {
+            detail = await loadDetail(true);
+            response = detail.res;
+            finalOrderData = detail.payload;
+          }
+          if (!finalOrderData) {
+            finalOrderData = await resolveOrderFromList(orderId);
           }
         } else {
-          response = await fetchOrderDetailsWithFallback({ force: isInitial });
-          finalOrderData = extractOrderDetailsPayload(response);
+          const detail = await loadDetail(isInitial);
+          response = detail.res;
+          finalOrderData = detail.payload;
         }
 
-        if (!isSubscribed) return;
+        if (!isSubscribed || pollGeneration !== initialPollGenerationRef.current) return;
 
-        if (!finalOrderData && isInitial) finalOrderData = await resolveOrderFromList(orderId);
+        if (!finalOrderData && isInitial) {
+          finalOrderData = await resolveOrderFromList(orderId);
+        }
 
         if (finalOrderData) {
           setOrder((prev) => {
@@ -1179,45 +1199,49 @@ export default function OrderTracking() {
             return transformed;
           });
           setError(null);
+          setInitialLoadDone(true);
           setLoading(false);
           return;
         }
 
-        // Only set error if we don't already have an order (from prefetched)
-        if (isInitial && !order) {
+        if (isInitial && !orderRef.current) {
           setError(response?.data?.message || 'Order not found');
-          terminalPollStopRef.current = true;
         }
       } catch (err) {
-        // Only set error if we don't already have an order (from prefetched)
-        if (isInitial && !order) {
+        if (!isSubscribed || pollGeneration !== initialPollGenerationRef.current) return;
+        if (isInitial && !orderRef.current) {
           try {
             const matched = await resolveOrderFromList(orderId);
-            if (matched && isSubscribed) {
+            if (matched && isSubscribed && pollGeneration === initialPollGenerationRef.current) {
               setOrder((prev) => transformOrderForTracking(matched, prev));
               setError(null);
+              setInitialLoadDone(true);
               setLoading(false);
               return;
             }
-          } catch { }
-          if (!isSubscribed) return;
+          } catch { /* fall through */ }
           setError(err.response?.data?.message || 'Failed to fetch order details');
-          terminalPollStopRef.current = true;
         }
       } finally {
         requestInProgress = false;
-        if (isInitial && isSubscribed) setLoading(false);
+        if (
+          isInitial &&
+          isSubscribed &&
+          pollGeneration === initialPollGenerationRef.current
+        ) {
+          setInitialLoadDone(true);
+          if (!orderRef.current) {
+            setLoading(false);
+          }
+        }
       }
     };
 
     pollRef.current = poll;
     terminalPollStopRef.current = false;
-    if (isInitialPollRequestedRef.current !== orderId) {
-      isInitialPollRequestedRef.current = orderId;
-      poll(true);
-    }
+    poll(true);
     return () => { isSubscribed = false; };
-  }, [getOrderById, isQuickOrder, orderId, fetchOrderDetailsWithFallback, resolveOrderFromList]);
+  }, [getOrderById, isQuickOrder, orderId, fetchOrderDetailsWithFallback, resolveOrderFromList, resolvedLookupId, prefetchedOrder]);
 
   // Poll interval (separate so socket reconnect doesn't restart fetching logic)
   useEffect(() => {
@@ -1444,93 +1468,10 @@ export default function OrderTracking() {
     }
   }, [order, orderId, selectedRestaurantRating, selectedDeliveryRating, restaurantFeedbackText, deliveryFeedbackText, handleCloseRating]);
 
-  const handleDownloadInvoice = useCallback(() => {
+  const handleDownloadInvoice = useCallback(async () => {
     if (!order) { toast.error("Order details are not ready yet"); return; }
     try {
-      const doc = new jsPDF({ unit: "pt", format: "a4" });
-      const pageWidth = doc.internal.pageSize.getWidth();
-      const pageHeight = doc.internal.pageSize.getHeight();
-      const margin = 40;
-      let y = 54;
-      const paymentMethodLabel = String(order?.paymentMethod || order?.payment?.method || "N/A").replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-      const paymentStatusLabel = String(order?.payment?.status || "N/A").replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-      const customerName = String(order?.userName || profile?.name || "Customer").trim();
-      const customerPhone = String(order?.userPhone || profile?.phone || "").trim();
-      const pickupSourceList = Array.isArray(order?.pickupSources) ? order.pickupSources : [];
-      const deliveryAddress = String(order?.address?.formattedAddress || [order?.address?.street, order?.address?.additionalDetails, order?.address?.city, order?.address?.state, order?.address?.zipCode].filter(Boolean).join(", ")).trim() || "Address not available";
-      const pickupSummary = pickupSourceList.map((source, index) => `${pickupSourceList.length > 1 ? `${source.label || "Pickup"} ${index + 1}` : (source.label || "Pickup")}: ${source.name || "Source"}${source.address ? `, ${source.address}` : ""}`);
-      doc.setFillColor(220, 38, 38);
-      doc.rect(0, 0, pageWidth, 116, "F");
-      doc.setTextColor(255, 255, 255);
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(24);
-      doc.text(companyName || INVOICE_BRAND_NAME, margin, 52);
-      doc.setFontSize(11);
-      doc.setFont("helvetica", "normal");
-      doc.text("Tax Invoice", margin, 72);
-      doc.text(`Order Invoice`, pageWidth - margin, 52, { align: "right" });
-      doc.text(`Invoice Ref: INV-${order?.orderId || order?.id || "N/A"}`, pageWidth - margin, 72, { align: "right" });
-      doc.text(`Issued: ${formatInvoiceDateTime(order?.createdAt)}`, pageWidth - margin, 90, { align: "right" });
-      y = 148;
-      doc.setTextColor(17, 24, 39);
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(11);
-      doc.text("Billed To", margin, y);
-      doc.text("Order Snapshot", pageWidth / 2 + 10, y);
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(10);
-      const billedToLines = [customerName, customerPhone ? `Phone: ${customerPhone}` : "", deliveryAddress].filter(Boolean);
-      const snapshotLines = [`Order ID: ${order?.orderId || order?.id || "N/A"}`, `Order Type: ${String(order?.orderType || "food").toUpperCase()}`, `Status: ${String(order?.status || orderStatus || "created").replace(/_/g, " ")}`, `Payment Method: ${paymentMethodLabel}`, `Payment Status: ${paymentStatusLabel}`];
-      let billedY = y + 18;
-      billedToLines.forEach((line) => { const lines = doc.splitTextToSize(line, pageWidth / 2 - 60); doc.text(lines, margin, billedY); billedY += lines.length * 14; });
-      let snapshotY = y + 18;
-      snapshotLines.forEach((line) => { doc.text(line, pageWidth / 2 + 10, snapshotY); snapshotY += 14; });
-      y = Math.max(billedY, snapshotY) + 18;
-      doc.setDrawColor(229, 231, 235);
-      doc.line(margin, y, pageWidth - margin, y);
-      y += 22;
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(11);
-      doc.text(order?.orderType === "mixed" ? "Pickup Points" : "Pickup Source", margin, y);
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(10);
-      y += 16;
-      const pickupLines = pickupSummary.length > 0 ? pickupSummary : [`${order?.restaurant || "Restaurant"}${order?.restaurantAddress ? `, ${order.restaurantAddress}` : ""}`];
-      pickupLines.forEach((line) => { const wrapped = doc.splitTextToSize(line, pageWidth - margin * 2); doc.text(wrapped, margin, y); y += wrapped.length * 14; });
-      y += 10;
-      autoTable(doc, {
-        startY: y, margin: { left: margin, right: margin },
-        head: [["Item", "Qty", "Unit Price", "Line Total"]],
-        body: (order?.items || []).map((item) => ([item?.variantName ? `${item.name || "Item"} (${item.variantName})` : (item?.name || "Item"), String(item?.quantity || 1), formatInvoiceCurrency(item?.price || 0), formatInvoiceCurrency((Number(item?.price || 0) * Number(item?.quantity || 1)))])),
-        theme: "striped",
-        headStyles: { fillColor: [220, 38, 38], textColor: 255, fontStyle: "bold" },
-        styles: { font: "helvetica", fontSize: 9, cellPadding: 8, textColor: [31, 41, 55] },
-        columnStyles: { 0: { cellWidth: 250 }, 1: { halign: "center", cellWidth: 55 }, 2: { halign: "right", cellWidth: 90 }, 3: { halign: "right", cellWidth: 90 } },
-      });
-      y = (doc.lastAutoTable?.finalY || y) + 24;
-      const totalsXLabel = pageWidth - margin - 150, totalsXValue = pageWidth - margin;
-      const totals = [["Subtotal", formatInvoiceCurrency(order?.subtotal)], ["Delivery Fee", formatInvoiceCurrency(order?.deliveryFee)]];
-      if (Number(order?.quickDeliveryFee || 0) > 0) totals.push(["Quick Delivery", formatInvoiceCurrency(order?.quickDeliveryFee)]);
-      totals.push(["Platform Fee", formatInvoiceCurrency(order?.platformFee)], ["Packaging Fee", formatInvoiceCurrency(order?.packagingFee)], ["GST & Taxes", formatInvoiceCurrency(order?.gst)]);
-      if (Number(order?.discount || 0) > 0) totals.push(["Discount", `- ${formatInvoiceCurrency(order?.discount)}`]);
-      doc.setFontSize(10);
-      totals.forEach(([label, value]) => { doc.setFont("helvetica", "normal"); doc.text(label, totalsXLabel, y); doc.text(value, totalsXValue, y, { align: "right" }); y += 16; });
-      doc.setDrawColor(17, 24, 39);
-      doc.line(totalsXLabel, y + 2, totalsXValue, y + 2);
-      y += 20;
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(13);
-      doc.text("Grand Total", totalsXLabel, y);
-      doc.text(formatInvoiceCurrency(order?.totalAmount || order?.total || 0), totalsXValue, y, { align: "right" });
-      const footerY = pageHeight - 72;
-      doc.setDrawColor(229, 231, 235);
-      doc.line(margin, footerY - 18, pageWidth - margin, footerY - 18);
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(9);
-      doc.setTextColor(107, 114, 128);
-      doc.text(`${companyName || INVOICE_BRAND_NAME} order support invoice`, margin, footerY);
-      doc.text("This is a system-generated invoice for your order.", pageWidth - margin, footerY, { align: "right" });
-      doc.save(`${companyName || INVOICE_BRAND_NAME}_Invoice_${order?.orderId || order?.id || Date.now()}.pdf`);
+      await generateOrderInvoice(order);
       toast.success("Invoice downloaded");
     } catch (error) {
       debugError("Error generating invoice PDF:", error);
@@ -1545,7 +1486,8 @@ export default function OrderTracking() {
   }, [order?.note]);
 
   // ── Early returns (after all hooks) ─────────────────────────────────────────
-  if (loading) {
+  const showLoadingShell = loading || (!order && !initialLoadDone);
+  if (showLoadingShell) {
     return (
       <AnimatedPage className="min-h-screen bg-gray-50 p-4">
         <div className="max-w-lg mx-auto text-center py-20">
@@ -1556,7 +1498,7 @@ export default function OrderTracking() {
     );
   }
 
-  if (error || !order) {
+  if (!order) {
     return (
       <AnimatedPage className="min-h-screen bg-gray-50 p-4">
         <div className="max-w-lg mx-auto text-center py-20">

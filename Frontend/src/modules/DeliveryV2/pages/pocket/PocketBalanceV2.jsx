@@ -33,6 +33,7 @@ export const PocketBalanceV2 = () => {
      disabledReason: ''
   });
   const [withdrawSubmitting, setWithdrawSubmitting] = useState(false);
+  const [withdrawalAmount, setWithdrawalAmount] = useState('');
 
   useEffect(() => {
     const fetchData = async () => {
@@ -47,38 +48,45 @@ export const PocketBalanceV2 = () => {
         const summary = earningsRes?.data?.data?.summary || {};
         const wallet = walletRes?.data?.data?.wallet || {};
         
-        // Use wallet data from backend instead of non-existent profile.walletBalance
         const pocketBalance = Number(wallet.pocketBalance) || 0;
         const withdrawalLimit = Number(wallet.deliveryWithdrawalLimit) || 100;
         const rawMax = wallet.deliveryMaxWithdrawalLimit;
         const maxWithdrawalLimit =
           rawMax != null && Number(rawMax) > 0 ? Number(rawMax) : null;
-        // Cap request amount at max when pocket exceeds max limit
-        const withdrawableAmount =
+        const maxAllowed =
           maxWithdrawalLimit != null
             ? Math.min(pocketBalance, maxWithdrawalLimit)
             : pocketBalance;
-        const canWithdraw = withdrawableAmount >= withdrawalLimit;
+        const canWithdraw = pocketBalance > 0 && maxAllowed >= withdrawalLimit;
         let disabledReason = '';
         if (pocketBalance <= 0) {
           disabledReason = 'Withdrawable amount is ₹0';
-        } else if (withdrawableAmount < withdrawalLimit) {
+        } else if (maxAllowed < withdrawalLimit) {
           disabledReason = `Minimum withdrawal requirement is ₹${withdrawalLimit}`;
         }
 
         setWalletState({
-           pocketBalance: pocketBalance,
+           pocketBalance,
+           totalEarning: Number(wallet.totalEarned) || 0,
+           orderEarning: Number(wallet.orderEarnings) || 0,
+           addonEarning: Number(wallet.addonEarnings) || 0,
            weeklyEarnings: Number(summary.totalEarnings) || 0,
            totalBonus: Number(wallet.totalBonus) || 0,
            totalWithdrawn: Number(wallet.totalWithdrawn) || 0,
            cashCollected: Number(wallet.cashInHand) || 0,
-           deductions: 0, // Mocked
+           deductions: 0,
            withdrawalLimit,
            maxWithdrawalLimit,
-           withdrawableAmount,
+           withdrawableAmount: maxAllowed,
            canWithdraw,
            disabledReason
         });
+
+        if (canWithdraw) {
+          setWithdrawalAmount(String(Number(maxAllowed.toFixed(2))));
+        } else {
+          setWithdrawalAmount('');
+        }
       } catch (err) {
         toast.error('Failed to load pocket details');
       } finally {
@@ -88,8 +96,22 @@ export const PocketBalanceV2 = () => {
     fetchData();
   }, []);
 
+  const handleAmountChange = (raw) => {
+    if (raw === '' || raw === '.') {
+      setWithdrawalAmount(raw);
+      return;
+    }
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return;
+    const maxAllowed = walletState.withdrawableAmount;
+    if (n > maxAllowed) {
+      setWithdrawalAmount(String(Number(maxAllowed.toFixed(2))));
+      return;
+    }
+    setWithdrawalAmount(raw);
+  };
+
   const handleWithdraw = async () => {
-     // Simplified verification
      const profileRes = await deliveryAPI.getProfile();
      const profile = profileRes?.data?.data?.profile || {};
      const bank = profile?.documents?.bankDetails;
@@ -100,7 +122,11 @@ export const PocketBalanceV2 = () => {
         return;
      }
 
-     const amount = walletState.withdrawableAmount;
+     const amount = Number(withdrawalAmount);
+     if (!Number.isFinite(amount) || amount <= 0) {
+        toast.error('Please enter a valid amount');
+        return;
+     }
      if (amount < walletState.withdrawalLimit) {
         toast.error(`Minimum withdrawal amount is ₹${walletState.withdrawalLimit}`);
         return;
@@ -110,6 +136,14 @@ export const PocketBalanceV2 = () => {
        amount > walletState.maxWithdrawalLimit
      ) {
         toast.error(`Maximum withdrawal amount is ₹${walletState.maxWithdrawalLimit}`);
+        return;
+     }
+     if (amount > walletState.pocketBalance) {
+        toast.error('Amount cannot exceed pocket balance');
+        return;
+     }
+     if (amount > walletState.withdrawableAmount) {
+        toast.error(`You can withdraw maximum ₹${walletState.withdrawableAmount} in one request`);
         return;
      }
 
@@ -172,17 +206,60 @@ export const PocketBalanceV2 = () => {
 
              {/* Top Withdraw Section */}
              <div className="bg-white p-8 mb-4 text-center border-b border-gray-100 shadow-sm">
-                <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Withdrawable Amount</p>
-                <h2 className="text-5xl font-black text-black mb-6 tracking-tighter">₹{walletState.withdrawableAmount.toFixed(0)}</h2>
+                <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Pocket Balance</p>
+                <h2 className="text-4xl font-black text-black mb-2 tracking-tighter">{formatCurrency(walletState.pocketBalance)}</h2>
+                <p className="text-[11px] font-medium text-gray-500 mb-5">
+                  Min ₹{walletState.withdrawalLimit}
+                  {walletState.maxWithdrawalLimit != null
+                    ? ` · Max ₹${walletState.maxWithdrawalLimit}`
+                    : ' · Max Unlimited'}
+                  {' '}· Per request up to {formatCurrency(walletState.withdrawableAmount)}
+                </p>
+
+                <div className="text-left mb-5">
+                  <label className="block text-[11px] font-bold text-gray-500 uppercase tracking-widest mb-2">
+                    Enter withdrawal amount
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-lg font-black text-gray-900">₹</span>
+                    <input
+                      type="number"
+                      min={walletState.withdrawalLimit}
+                      max={walletState.withdrawableAmount}
+                      step="0.01"
+                      value={withdrawalAmount}
+                      onChange={(e) => handleAmountChange(e.target.value)}
+                      disabled={!walletState.canWithdraw}
+                      placeholder={`${walletState.withdrawalLimit} - ${walletState.withdrawableAmount}`}
+                      className="w-full pl-9 pr-4 py-4 rounded-xl border border-gray-200 bg-gray-50 text-2xl font-black text-gray-950 focus:outline-none focus:ring-2 focus:ring-black disabled:opacity-50"
+                    />
+                  </div>
+                  {withdrawalAmount !== '' && Number(withdrawalAmount) > 0 && Number(withdrawalAmount) < walletState.withdrawalLimit && (
+                    <p className="text-xs text-red-600 font-medium mt-2">
+                      Minimum withdrawal amount is ₹{walletState.withdrawalLimit}
+                    </p>
+                  )}
+                  {withdrawalAmount !== '' && Number(withdrawalAmount) > walletState.withdrawableAmount && (
+                    <p className="text-xs text-red-600 font-medium mt-2">
+                      Maximum you can withdraw now is {formatCurrency(walletState.withdrawableAmount)}
+                    </p>
+                  )}
+                </div>
                 
                 <button 
                   onClick={handleWithdraw}
-                  disabled={!walletState.canWithdraw || withdrawSubmitting}
+                  disabled={
+                    !walletState.canWithdraw ||
+                    withdrawSubmitting ||
+                    !withdrawalAmount ||
+                    Number(withdrawalAmount) < walletState.withdrawalLimit ||
+                    Number(withdrawalAmount) > walletState.withdrawableAmount
+                  }
                   className={`w-full py-4 rounded-xl font-bold text-sm shadow-lg transition-all active:scale-[0.98] ${
                      walletState.canWithdraw 
                      ? 'bg-black text-white' 
                      : 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                  } flex items-center justify-center gap-2`}
+                  } flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed`}
                 >
                    {withdrawSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
                    {withdrawSubmitting ? 'Processing...' : 'Withdraw'}
@@ -195,25 +272,17 @@ export const PocketBalanceV2 = () => {
              </div>
 
              <div className="bg-white px-4">
-                <DetailRow label="Earnings" value={formatCurrency(walletState.weeklyEarnings)} />
+                <DetailRow label="Total Earnings" value={formatCurrency(walletState.totalEarning)} />
+                <DetailRow label="Order Earnings" value={formatCurrency(walletState.orderEarning)} />
+                <DetailRow label="Addon Earnings" value={formatCurrency(walletState.addonEarning)} />
                 <DetailRow label="Bonus" value={formatCurrency(walletState.totalBonus)} />
                 <DetailRow label="Amount withdrawn" value={formatCurrency(walletState.totalWithdrawn)} />
                 <DetailRow label="Cash collected" value={formatCurrency(walletState.cashCollected)} />
-                <DetailRow label="Deductions" value={formatCurrency(walletState.deductions)} />
-                <DetailRow label="Pocket balance" value={formatCurrency(walletState.pocketBalance)} />
+
                 <DetailRow 
-                   label="Min. withdrawal amount" 
-                   value={formatCurrency(walletState.withdrawalLimit)} 
-                   subLabel="Withdrawal allowed only when amount is at least this limit."
-                />
-                <DetailRow 
-                   label="Max. withdrawal amount" 
-                   value={
-                     walletState.maxWithdrawalLimit != null
-                       ? formatCurrency(walletState.maxWithdrawalLimit)
-                       : 'Unlimited'
-                   } 
-                   subLabel="Single withdrawal cannot exceed this amount."
+                  label="Pocket balance" 
+                  value={formatCurrency(walletState.pocketBalance)} 
+                  subLabel={`(Earn: ${formatCurrency(walletState.totalEarning)} + Bonus: ${formatCurrency(walletState.totalBonus)})`}
                 />
                 <DetailRow label="Withdrawable amount" value={formatCurrency(walletState.withdrawableAmount)} />
              </div>

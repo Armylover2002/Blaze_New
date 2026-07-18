@@ -9,6 +9,7 @@ import ApprovalAuditCard from "@food/components/admin/ApprovalAuditCard"
 import { useAuth } from "@core/context/AuthContext"
 import { getCurrentUser } from "@food/utils/auth"
 import { canPerformAdminPermissionAction, extractAdminPermissions, extractAdminRoleId, fetchAdminRolePermissions } from "@food/utils/adminPermissions"
+import { fillAddressPartsFromFormatted } from "@food/utils/addressParts"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -26,6 +27,77 @@ const normalizeRequestRecord = (request) => ({
   zone: getZoneLabel(request),
   fullData: request?.fullData || request,
 })
+
+/** Enrich empty area/city/state/pincode from location.formattedAddress for admin display. */
+const enrichPendingAddressFields = (fields = {}) => {
+  const next = { ...fields }
+  const loc = next.location && typeof next.location === "object" ? next.location : null
+  const formatted =
+    loc?.formattedAddress ||
+    loc?.address ||
+    next.formattedAddress ||
+    ""
+  if (!formatted) return next
+
+  const filled = fillAddressPartsFromFormatted(formatted, {
+    addressLine1: next.addressLine1 || loc?.addressLine1 || "",
+    area: next.area || loc?.area || "",
+    city: next.city || loc?.city || "",
+    state: next.state || loc?.state || "",
+    pincode: next.pincode || loc?.pincode || "",
+  })
+
+  if (!String(next.addressLine1 || "").trim()) next.addressLine1 = filled.addressLine1
+  if (!String(next.area || "").trim()) next.area = filled.area
+  if (!String(next.city || "").trim()) next.city = filled.city
+  if (!String(next.state || "").trim()) next.state = filled.state
+  if (!String(next.pincode || "").trim()) next.pincode = filled.pincode
+
+  return next
+}
+
+const formatPendingFieldValue = (key, value) => {
+  if (value == null || value === "") return "—"
+
+  if (key === "location" && typeof value === "object") {
+    const address =
+      value.formattedAddress ||
+      value.address ||
+      [value.addressLine1, value.area, value.city, value.state, value.pincode]
+        .filter(Boolean)
+        .join(", ")
+    const lat = value.latitude ?? value.coordinates?.[1]
+    const lng = value.longitude ?? value.coordinates?.[0]
+    const coords =
+      lat != null && lng != null && String(lat) !== "" && String(lng) !== ""
+        ? `Lat ${lat}, Lng ${lng}`
+        : ""
+    return [address, coords].filter(Boolean).join("\n") || "—"
+  }
+
+  if (key === "reVerification" && typeof value === "object") {
+    const lines = []
+    if (value.reVerificationReason) lines.push(`Reason: ${value.reVerificationReason}`)
+    if (value.previousAddress) lines.push(`Previous address: ${value.previousAddress}`)
+    if (value.previousZone || value.updatedZone) {
+      lines.push(
+        `Zone: ${value.previousZone || "—"} → ${value.updatedZone || "—"}`,
+      )
+    }
+    if (value.isZoneUpdate) lines.push("Zone/address update pending review")
+    return lines.length ? lines.join("\n") : "—"
+  }
+
+  if (typeof value === "object") {
+    try {
+      return JSON.stringify(value, null, 0)
+    } catch {
+      return String(value)
+    }
+  }
+
+  return String(value)
+}
 
 const formatTime12Hour = (timeStr) => {
   if (!timeStr || typeof timeStr !== "string" || !timeStr.includes(":")) return "--:-- --"
@@ -1101,15 +1173,11 @@ export default function JoiningRequest() {
                             <div>
                               <p className="text-xs text-purple-700 font-bold uppercase tracking-wider mb-2">Requested Changes</p>
                               <div className="space-y-2 text-xs text-slate-800">
-                                {Object.entries(r.pendingProfileChanges.proposed || {}).map(([key, value]) => (
+                                {Object.entries(enrichPendingAddressFields(r.pendingProfileChanges.proposed || {})).map(([key, value]) => (
                                   <div key={key} className="rounded border border-purple-100 bg-white px-2 py-1.5">
                                     <p className="font-semibold text-purple-900">{key}</p>
-                                    <p className="break-all text-slate-700">
-                                      {value == null
-                                        ? "—"
-                                        : typeof value === "object"
-                                          ? JSON.stringify(value)
-                                          : String(value)}
+                                    <p className="whitespace-pre-wrap break-words text-slate-700">
+                                      {formatPendingFieldValue(key, value)}
                                     </p>
                                   </div>
                                 ))}
@@ -1118,15 +1186,11 @@ export default function JoiningRequest() {
                             <div>
                               <p className="text-xs text-slate-500 font-medium uppercase tracking-wider mb-2">Current Live Details</p>
                               <div className="space-y-2 text-xs text-slate-600">
-                                {Object.entries(r.pendingProfileChanges.previous || {}).map(([key, value]) => (
+                                {Object.entries(enrichPendingAddressFields(r.pendingProfileChanges.previous || {})).map(([key, value]) => (
                                   <div key={key} className="rounded border border-slate-200 bg-slate-50 px-2 py-1.5">
                                     <p className="font-semibold text-slate-700">{key}</p>
-                                    <p className="break-all line-through opacity-70">
-                                      {value == null
-                                        ? "—"
-                                        : typeof value === "object"
-                                          ? JSON.stringify(value)
-                                          : String(value)}
+                                    <p className="whitespace-pre-wrap break-words line-through opacity-70">
+                                      {formatPendingFieldValue(key, value)}
                                     </p>
                                   </div>
                                 ))}

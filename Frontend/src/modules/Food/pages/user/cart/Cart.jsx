@@ -1175,10 +1175,10 @@ export default function Cart() {
       }
 
       const distanceKm = await getRoadDistanceKm(
-        userPoint.lat,
-        userPoint.lng,
         restaurantPoint.lat,
         restaurantPoint.lng,
+        userPoint.lat,
+        userPoint.lng,
       )
       if (!cancelled && Number.isFinite(distanceKm)) {
         setRoadDistanceKm(distanceKm)

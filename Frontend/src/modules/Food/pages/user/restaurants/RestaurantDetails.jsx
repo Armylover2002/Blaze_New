@@ -29,7 +29,7 @@ import { useProfile } from "@food/context/ProfileContext"
 import { getCompanyNameAsync } from "@common/utils/businessSettings"
 import { isModuleAuthenticated } from "@food/utils/auth"
 import { getRoadDistanceKm } from "@/shared/services/roadDistance"
-import { parseGeoPoint } from "@food/utils/geo"
+import { parseGeoPoint, normalizeRestaurantLocation } from "@food/utils/geo"
 import { getRestaurantAvailabilityStatus } from "@food/utils/restaurantAvailability"
 import useAppBackNavigation from "@food/hooks/useAppBackNavigation"
 import {
@@ -427,8 +427,10 @@ function RestaurantDetailsContent() {
             return `${Math.round(distanceInKm * 1000)} m`
           }
 
-          // Get restaurant coordinates (same parseGeoPoint as Cart checkout)
-          const restaurantPoint = parseGeoPoint(locationObj)
+          // Get restaurant coordinates (same parse + normalize as Cart checkout fee)
+          const restaurantPoint = parseGeoPoint(
+            normalizeRestaurantLocation(locationObj) || locationObj,
+          )
           const restaurantLat = restaurantPoint?.lat
           const restaurantLng = restaurantPoint?.lng
 
@@ -441,12 +443,13 @@ function RestaurantDetailsContent() {
           debugLog('? User location:', { userLat, userLng, userLocation, deliveryUserPoint })
 
           // Calculate distance if both coordinates are available
+          // Direction matches checkout fee: restaurant → user
           let calculatedDistance = null
           if (userLat && userLng && restaurantLat && restaurantLng &&
             !isNaN(userLat) && !isNaN(userLng) && !isNaN(restaurantLat) && !isNaN(restaurantLng)) {
-            const distanceInKm = await getRoadDistanceKm(userLat, userLng, restaurantLat, restaurantLng)
+            const distanceInKm = await getRoadDistanceKm(restaurantLat, restaurantLng, userLat, userLng)
             calculatedDistance = formatRoadDistance(distanceInKm)
-            debugLog('? Calculated distance from user to restaurant:', calculatedDistance, 'km:', distanceInKm)
+            debugLog('? Calculated distance from restaurant to user:', calculatedDistance, 'km:', distanceInKm)
           } else {
             debugWarn('? Cannot calculate distance - missing coordinates:', {
               hasUserLocation: !!(userLat && userLng),
@@ -1041,9 +1044,13 @@ function RestaurantDetailsContent() {
   const prevCoordsRef = useRef({ userLat: null, userLng: null, restaurantLat: null, restaurantLng: null })
   const prevDistanceRef = useRef(null)
 
-  // Extract restaurant coordinates as stable values (same as Cart parseGeoPoint)
+  // Extract restaurant coordinates as stable values (same as Cart checkout)
   const restaurantPoint = useMemo(
-    () => parseGeoPoint(restaurant?.locationObject || restaurant?.location),
+    () => parseGeoPoint(
+      normalizeRestaurantLocation(restaurant?.locationObject || restaurant?.location)
+      || restaurant?.locationObject
+      || restaurant?.location,
+    ),
     [restaurant?.locationObject, restaurant?.location],
   )
   const restaurantLat = restaurantPoint?.lat ?? null
@@ -1075,7 +1082,8 @@ function RestaurantDetailsContent() {
     let cancelled = false
 
     const recalculateDistance = async () => {
-      const distanceInKm = await getRoadDistanceKm(userLat, userLng, restaurantLat, restaurantLng)
+      // Same direction as checkout fee: restaurant → user
+      const distanceInKm = await getRoadDistanceKm(restaurantLat, restaurantLng, userLat, userLng)
       if (cancelled || !Number.isFinite(distanceInKm)) return
 
       const calculatedDistance = distanceInKm >= 1
@@ -1083,7 +1091,7 @@ function RestaurantDetailsContent() {
         : `${Math.round(distanceInKm * 1000)} m`
 
       if (calculatedDistance !== prevDistanceRef.current) {
-        debugLog('? Recalculated distance from user to restaurant:', calculatedDistance, 'km:', distanceInKm)
+        debugLog('? Recalculated distance restaurant → user:', calculatedDistance, 'km:', distanceInKm)
         prevDistanceRef.current = calculatedDistance
 
         setRestaurant((prev) => {

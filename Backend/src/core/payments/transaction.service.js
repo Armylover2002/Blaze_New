@@ -257,10 +257,16 @@ export async function recordTransactionWithSession(payload, session) {
             }, { session });
         }
     } else {
-        await Model.updateOne(filter, {
+        const updatePayload = {
             $set: { balance: newBalance },
             ...pushEmbedded,
-        }, { session });
+        };
+        
+        if (category === 'settlement_payout') {
+            updatePayload.$inc = { totalSettled: amount };
+        }
+
+        await Model.updateOne(filter, updatePayload, { session });
     }
 
     if (entityType === 'user') {
