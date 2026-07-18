@@ -184,7 +184,6 @@ export default function ItemDetailsPage() {
   const isCategoryInactive = categoryLiveStatus?.liveStatus === "INACTIVE" || selectedCategory?.liveStatus === "INACTIVE"
   const isCategoryPending = categoryLiveStatus?.liveStatus === "PENDING" || selectedCategory?.liveStatus === "PENDING"
 
-
   useEffect(() => {
     if (!showNonVegFoodType && foodType !== "Veg") {
       setFoodType("Veg")
@@ -271,7 +270,7 @@ export default function ItemDetailsPage() {
         }
 
         const response = await mediaAPI.getSharedMedia(params)
-        
+
         if (response?.data?.success && Array.isArray(response?.data?.data?.items)) {
           const items = response.data.data.items
           // Cache successful result
@@ -317,7 +316,7 @@ export default function ItemDetailsPage() {
         if (draft.variants) setVariants(draft.variants)
         if (draft.preparationTime) setPreparationTime(draft.preparationTime)
         if (draft.images) setImages(draft.images)
-        
+
         // Clear draft after restoring
         sessionStorage.removeItem('item_form_draft')
       } catch (e) {
@@ -690,7 +689,7 @@ export default function ItemDetailsPage() {
   const handleCropSave = async () => {
     try {
       const croppedImage = await getCroppedImg(imageToCrop, croppedAreaPixels)
-      
+
       // Multiple-image mode: append the cropped preview URL
       const previewUrl = URL.createObjectURL(croppedImage)
 
@@ -886,13 +885,13 @@ export default function ItemDetailsPage() {
     }
 
     const matchedCategory =
-      displayCategory ||
+      selectedCategory ||
       (categoryLiveStatus && String(categoryLiveStatus.id) === String(selectedCategoryId || "")
         ? {
-            id: categoryLiveStatus.id,
-            name: categoryLiveStatus.name,
-            foodTypeScope: categoryLiveStatus.foodTypeScope || "Veg",
-          }
+          id: categoryLiveStatus.id,
+          name: categoryLiveStatus.name,
+          foodTypeScope: categoryLiveStatus.foodTypeScope || "Veg",
+        }
         : null)
     const categoryId = String(selectedCategoryId || matchedCategory?.id || "").trim()
     if (!isRealCategoryId(categoryId)) {
@@ -924,14 +923,14 @@ export default function ItemDetailsPage() {
 
     const normalizedVariants = itemHasVariants
       ? variants
-          .map((variant) => ({
-            persistedId: String(variant.persistedId || "").trim(),
-            name: String(variant.name || "").trim(),
-            unit: normalizeFoodVariantUnit(variant.unit),
-            price: Number(variant.price),
-            otherPrice: Number(variant.otherPrice) || 0,
-          }))
-          .filter((variant) => variant.name || variant.persistedId || variant.price)
+        .map((variant) => ({
+          persistedId: String(variant.persistedId || "").trim(),
+          name: String(variant.name || "").trim(),
+          unit: normalizeFoodVariantUnit(variant.unit),
+          price: Number(variant.price),
+          otherPrice: Number(variant.otherPrice) || 0,
+        }))
+        .filter((variant) => variant.name || variant.persistedId || variant.price)
       : []
 
     if (itemHasVariants) {
@@ -1379,583 +1378,581 @@ export default function ItemDetailsPage() {
               </div>
             </div>
           ) : (
-          <div className="lg:grid lg:grid-cols-[minmax(300px,380px)_minmax(0,1fr)] lg:gap-8 lg:items-start">
-            <div className="lg:sticky lg:top-24">
-        {!isNewItem && currentApprovalStatus === "rejected" && currentRejectionReason ? (
-          <div className="px-4 pt-4 lg:px-0">
-            <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3">
-              <p className="text-sm font-semibold text-red-700">Approval rejected</p>
-              <p className="mt-1 text-sm leading-5 text-red-600">Reason: {currentRejectionReason}</p>
-              <p className="mt-2 text-xs font-medium uppercase tracking-[0.18em] text-red-500">
-                Update the dish and save to send it for approval again
-              </p>
-            </div>
-          </div>
-        ) : null}
+            <div className="lg:grid lg:grid-cols-[minmax(300px,380px)_minmax(0,1fr)] lg:gap-8 lg:items-start">
+              <div className="lg:sticky lg:top-24">
+                {!isNewItem && currentApprovalStatus === "rejected" && currentRejectionReason ? (
+                  <div className="px-4 pt-4 lg:px-0">
+                    <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3">
+                      <p className="text-sm font-semibold text-red-700">Approval rejected</p>
+                      <p className="mt-1 text-sm leading-5 text-red-600">Reason: {currentRejectionReason}</p>
+                      <p className="mt-2 text-xs font-medium uppercase tracking-[0.18em] text-red-500">
+                        Update the dish and save to send it for approval again
+                      </p>
+                    </div>
+                  </div>
+                ) : null}
 
-        {/* Image Carousel */}
-        <div className="relative bg-white lg:rounded-2xl lg:border lg:border-slate-200 lg:shadow-sm lg:overflow-hidden">
-          {images.length > 0 ? (
-            <div className="relative w-full h-80 lg:h-72 overflow-hidden bg-gray-100">
-              {/* Image container with swipe support */}
-              <div
-                ref={carouselRef}
-                onTouchStart={onTouchStart}
-                onTouchMove={onTouchMove}
-                onTouchEnd={onTouchEnd}
-                className="relative w-full h-full"
-              >
-                <AnimatePresence mode="wait" custom={direction}>
-                  <motion.div
-                    key={currentImageIndex}
-                    custom={direction}
-                    initial={{ opacity: 0, x: direction > 0 ? 300 : -300 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    exit={{ opacity: 0, x: direction > 0 ? -300 : 300 }}
-                    transition={{ duration: 0.3, ease: "easeInOut" }}
-                    className="absolute inset-0"
-                  >
-                    {images[currentImageIndex] ? (
-                      <img
-                        src={images[currentImageIndex]}
-                        alt={`${itemName} - Image ${currentImageIndex + 1}`}
-                        className="w-full h-full object-cover"
-                      />
-                    ) : null}
-                  </motion.div>
-                </AnimatePresence>
+                {/* Image Carousel */}
+                <div className="relative bg-white lg:rounded-2xl lg:border lg:border-slate-200 lg:shadow-sm lg:overflow-hidden">
+                  {images.length > 0 ? (
+                    <div className="relative w-full h-80 lg:h-72 overflow-hidden bg-gray-100">
+                      {/* Image container with swipe support */}
+                      <div
+                        ref={carouselRef}
+                        onTouchStart={onTouchStart}
+                        onTouchMove={onTouchMove}
+                        onTouchEnd={onTouchEnd}
+                        className="relative w-full h-full"
+                      >
+                        <AnimatePresence mode="wait" custom={direction}>
+                          <motion.div
+                            key={currentImageIndex}
+                            custom={direction}
+                            initial={{ opacity: 0, x: direction > 0 ? 300 : -300 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            exit={{ opacity: 0, x: direction > 0 ? -300 : 300 }}
+                            transition={{ duration: 0.3, ease: "easeInOut" }}
+                            className="absolute inset-0"
+                          >
+                            {images[currentImageIndex] ? (
+                              <img
+                                src={images[currentImageIndex]}
+                                alt={`${itemName} - Image ${currentImageIndex + 1}`}
+                                className="w-full h-full object-cover"
+                              />
+                            ) : null}
+                          </motion.div>
+                        </AnimatePresence>
 
-                {/* Navigation arrows */}
-                {images.length > 1 && (
-                  <>
+                        {/* Navigation arrows */}
+                        {images.length > 1 && (
+                          <>
+                            <button
+                              onClick={goToPrevious}
+                              className="absolute left-3 top-1/2 -translate-y-1/2 w-10 h-10 bg-white/90 backdrop-blur-sm rounded-full flex items-center justify-center shadow-lg hover:bg-white transition-all z-10"
+                            >
+                              <ChevronLeft className="w-5 h-5 text-gray-900" />
+                            </button>
+                            <button
+                              onClick={goToNext}
+                              className="absolute right-3 top-1/2 -translate-y-1/2 w-10 h-10 bg-white/90 backdrop-blur-sm rounded-full flex items-center justify-center shadow-lg hover:bg-white transition-all z-10"
+                            >
+                              <ChevronRight className="w-5 h-5 text-gray-900" />
+                            </button>
+                          </>
+                        )}
+
+                        {/* Delete image button */}
+                        <button
+                          onClick={() => handleImageDelete(currentImageIndex)}
+                          className="absolute top-4 right-4 w-10 h-10 bg-white/90 backdrop-blur-sm rounded-full flex items-center justify-center shadow-lg hover:bg-white transition-all z-10"
+                        >
+                          <Trash2 className="w-5 h-5 text-gray-900" />
+                        </button>
+
+                        {/* Image counter */}
+                        {images.length > 1 && (
+                          <div className="absolute top-4 left-4 bg-black/60 backdrop-blur-sm px-3 py-1.5 rounded-full z-10">
+                            <span className="text-white text-xs font-medium">
+                              {currentImageIndex + 1} / {images.length}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Carousel dots */}
+                      {images.length > 1 && (
+                        <div className="flex items-center justify-center gap-2 py-4 bg-white">
+                          {images.map((_, index) => (
+                            <button
+                              key={index}
+                              onClick={() => {
+                                setDirection(index > currentImageIndex ? 1 : -1)
+                                setCurrentImageIndex(index)
+                              }}
+                              className={`transition-all duration-300 rounded-full ${index === currentImageIndex
+                                ? "w-8 h-2 bg-gray-900"
+                                : "w-2 h-2 bg-gray-300 hover:bg-gray-400"
+                                }`}
+                            />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="relative w-full h-80 lg:h-72 bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center">
+                      <div className="text-center">
+                        <div className="w-20 h-20 bg-white/80 rounded-full flex items-center justify-center mx-auto mb-3 shadow-lg">
+                          <Camera className="w-10 h-10 text-gray-400" />
+                        </div>
+                        <p className="text-sm font-medium text-gray-600">No images added yet</p>
+                        <p className="text-xs text-gray-500 mt-1">Tap the button below to add images</p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Add image button - redesigned */}
+                  <div className="px-4 py-4 bg-white border-t border-gray-100 lg:px-5 lg:py-5">
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => handleImageAdd(e.target.files?.[0])}
+                      className="hidden"
+                    />
                     <button
-                      onClick={goToPrevious}
-                      className="absolute left-3 top-1/2 -translate-y-1/2 w-10 h-10 bg-white/90 backdrop-blur-sm rounded-full flex items-center justify-center shadow-lg hover:bg-white transition-all z-10"
+                      onClick={handleCameraClick}
+                      className="w-full flex items-center justify-center gap-2.5 px-6 py-3.5 bg-[#FF0000] hover:bg-[#E64D02] text-white rounded-xl text-sm font-semibold cursor-pointer transition-all shadow-md hover:shadow-lg active:scale-95"
                     >
-                      <ChevronLeft className="w-5 h-5 text-gray-900" />
+                      <div className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center">
+                        <Plus className="w-4 h-4" />
+                      </div>
+                      <span>Add Image</span>
                     </button>
                     <button
-                      onClick={goToNext}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 w-10 h-10 bg-white/90 backdrop-blur-sm rounded-full flex items-center justify-center shadow-lg hover:bg-white transition-all z-10"
+                      type="button"
+                      onClick={() => setIsLibraryOpen(true)}
+                      className="w-full mt-3 flex items-center justify-center gap-2.5 px-6 py-3.5 bg-white border border-gray-300 hover:bg-gray-50 text-gray-800 rounded-xl text-sm font-semibold cursor-pointer transition-all shadow-sm active:scale-95"
                     >
-                      <ChevronRight className="w-5 h-5 text-gray-900" />
+                      <div className="w-5 h-5 rounded-full bg-gray-100 flex items-center justify-center">
+                        <Plus className="w-4 h-4 text-gray-600" />
+                      </div>
+                      <span>Choose from Library</span>
                     </button>
-                  </>
-                )}
+                  </div>
+                </div>
 
-                {/* Delete image button */}
-                <button
-                  onClick={() => handleImageDelete(currentImageIndex)}
-                  className="absolute top-4 right-4 w-10 h-10 bg-white/90 backdrop-blur-sm rounded-full flex items-center justify-center shadow-lg hover:bg-white transition-all z-10"
-                >
-                  <Trash2 className="w-5 h-5 text-gray-900" />
-                </button>
-
-                {/* Image counter */}
-                {images.length > 1 && (
-                  <div className="absolute top-4 left-4 bg-black/60 backdrop-blur-sm px-3 py-1.5 rounded-full z-10">
-                    <span className="text-white text-xs font-medium">
-                      {currentImageIndex + 1} / {images.length}
-                    </span>
+                {/* Suggested Images Section */}
+                {(loadingSuggestions || (suggestedImages && suggestedImages.length > 0)) && (
+                  <div className="px-4 py-3 bg-white border-t border-b border-gray-100 flex flex-col gap-2 lg:mt-4 lg:rounded-2xl lg:border lg:border-slate-200 lg:shadow-sm lg:px-5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                        Suggested Images
+                      </span>
+                      {loadingSuggestions && (
+                        <span className="text-[11px] text-gray-400 animate-pulse">
+                          Finding matching images...
+                        </span>
+                      )}
+                    </div>
+                    {!loadingSuggestions && suggestedImages && suggestedImages.length > 0 && (
+                      <div className="flex gap-3 overflow-x-auto pb-1 no-scrollbar">
+                        {suggestedImages.slice(0, 6).map((item) => (
+                          <button
+                            key={item._id}
+                            type="button"
+                            onClick={() => handleSelectSuggestedImage(item.url)}
+                            className="relative flex-shrink-0 w-20 h-20 rounded-lg overflow-hidden border border-gray-200 hover:border-gray-400 active:scale-95 transition-all focus:outline-none"
+                          >
+                            <img
+                              src={item.thumbnailUrl || item.url}
+                              alt="Suggested food template"
+                              className="w-full h-full object-cover"
+                            />
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
 
-              {/* Carousel dots */}
-              {images.length > 1 && (
-                <div className="flex items-center justify-center gap-2 py-4 bg-white">
-                  {images.map((_, index) => (
-                    <button
-                      key={index}
-                      onClick={() => {
-                        setDirection(index > currentImageIndex ? 1 : -1)
-                        setCurrentImageIndex(index)
-                      }}
-                      className={`transition-all duration-300 rounded-full ${index === currentImageIndex
-                        ? "w-8 h-2 bg-gray-900"
-                        : "w-2 h-2 bg-gray-300 hover:bg-gray-400"
-                        }`}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="relative w-full h-80 lg:h-72 bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center">
-              <div className="text-center">
-                <div className="w-20 h-20 bg-white/80 rounded-full flex items-center justify-center mx-auto mb-3 shadow-lg">
-                  <Camera className="w-10 h-10 text-gray-400" />
-                </div>
-                <p className="text-sm font-medium text-gray-600">No images added yet</p>
-                <p className="text-xs text-gray-500 mt-1">Tap the button below to add images</p>
-              </div>
-            </div>
-          )}
-
-          {/* Add image button - redesigned */}
-          <div className="px-4 py-4 bg-white border-t border-gray-100 lg:px-5 lg:py-5">
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              onChange={(e) => handleImageAdd(e.target.files?.[0])}
-              className="hidden"
-            />
-            <button
-              onClick={handleCameraClick}
-              className="w-full flex items-center justify-center gap-2.5 px-6 py-3.5 bg-[#FF0000] hover:bg-[#E64D02] text-white rounded-xl text-sm font-semibold cursor-pointer transition-all shadow-md hover:shadow-lg active:scale-95"
-            >
-              <div className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center">
-                <Plus className="w-4 h-4" />
-              </div>
-              <span>Add Image</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setIsLibraryOpen(true)}
-              className="w-full mt-3 flex items-center justify-center gap-2.5 px-6 py-3.5 bg-white border border-gray-300 hover:bg-gray-50 text-gray-800 rounded-xl text-sm font-semibold cursor-pointer transition-all shadow-sm active:scale-95"
-            >
-              <div className="w-5 h-5 rounded-full bg-gray-100 flex items-center justify-center">
-                <Plus className="w-4 h-4 text-gray-600" />
-              </div>
-              <span>Choose from Library</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Suggested Images Section */}
-        {(loadingSuggestions || (suggestedImages && suggestedImages.length > 0)) && (
-          <div className="px-4 py-3 bg-white border-t border-b border-gray-100 flex flex-col gap-2 lg:mt-4 lg:rounded-2xl lg:border lg:border-slate-200 lg:shadow-sm lg:px-5">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                Suggested Images
-              </span>
-              {loadingSuggestions && (
-                <span className="text-[11px] text-gray-400 animate-pulse">
-                  Finding matching images...
-                </span>
-              )}
-            </div>
-            {!loadingSuggestions && suggestedImages && suggestedImages.length > 0 && (
-              <div className="flex gap-3 overflow-x-auto pb-1 no-scrollbar">
-                {suggestedImages.slice(0, 6).map((item) => (
-                  <button
-                    key={item._id}
-                    type="button"
-                    onClick={() => handleSelectSuggestedImage(item.url)}
-                    className="relative flex-shrink-0 w-20 h-20 rounded-lg overflow-hidden border border-gray-200 hover:border-gray-400 active:scale-95 transition-all focus:outline-none"
-                  >
-                    <img
-                      src={item.thumbnailUrl || item.url}
-                      alt="Suggested food template"
-                      className="w-full h-full object-cover"
-                    />
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-            </div>
-
-        {/* Form Fields */}
-        <div className="p-4 space-y-3 lg:p-0 lg:space-y-5">
-          <div className="lg:bg-white lg:rounded-2xl lg:border lg:border-slate-200 lg:shadow-sm lg:p-6 lg:space-y-5">
-          {/* Variant type (shown after choice; editable on edit) */}
-          <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3">
-            <div className="flex items-center justify-between gap-3 flex-wrap">
-              <div>
-                <p className="text-sm font-medium text-gray-900">Item type</p>
-                <p className="text-xs text-gray-500 mt-0.5">
-                  {itemHasVariants
-                    ? "This item has variants — pricing is set per variant only."
-                    : "This item has a single price — no variants."}
-                </p>
-              </div>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleVariantChoice(false)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                    !itemHasVariants
-                      ? "border-gray-900 border-2 text-gray-900 bg-white"
-                      : "bg-white text-gray-600 hover:bg-gray-100 border border-gray-200"
-                  }`}
-                >
-                  {!itemHasVariants && <Check className="w-3.5 h-3.5" />}
-                  <span>No variants</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleVariantChoice(true)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                    itemHasVariants
-                      ? "border-gray-900 border-2 text-gray-900 bg-white"
-                      : "bg-white text-gray-600 hover:bg-gray-100 border border-gray-200"
-                  }`}
-                >
-                  {itemHasVariants && <Check className="w-3.5 h-3.5" />}
-                  <span>Has variants</span>
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* Category Selector */}
-          <div>
-            <label className="block text-sm font-medium text-gray-900 mb-2">
-              Category
-            </label>
-            <button
-              onClick={() => setIsCategoryPopupOpen(true)}
-              className="w-full px-4 py-3 border border-gray-300 rounded-xl text-left flex items-center justify-between gap-3 bg-white hover:bg-gray-50 transition-colors"
-            >
-              {(() => {
-                const selected = selectedCategory
-                if (!selected) {
-                  return (
-                    <>
-                      <span className="text-sm text-gray-500">Select category</span>
-                      <ChevronDown className="w-5 h-5 text-gray-500 shrink-0" />
-                    </>
-                  )
-                }
-                return (
-                  <>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-sm font-medium text-gray-900 truncate">{selected.name}</span>
-                        <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold ${scopePillClass(selected.foodTypeScope)}`}>
-                          {scopePillLabel(selected.foodTypeScope)}
-                        </span>
-                        <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${globalPillClass(selected.isGlobal)}`}>
-                          {selected.isGlobal ? (
-                            <>
-                              <Globe className="mr-1 h-3 w-3" />
-                              Global
-                            </>
-                          ) : (
-                            "Local"
-                          )}
-                        </span>
+              {/* Form Fields */}
+              <div className="p-4 space-y-3 lg:p-0 lg:space-y-5">
+                <div className="lg:bg-white lg:rounded-2xl lg:border lg:border-slate-200 lg:shadow-sm lg:p-6 lg:space-y-5">
+                  {/* Variant type (shown after choice; editable on edit) */}
+                  <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3">
+                    <div className="flex items-center justify-between gap-3 flex-wrap">
+                      <div>
+                        <p className="text-sm font-medium text-gray-900">Item type</p>
+                        <p className="text-xs text-gray-500 mt-0.5">
+                          {itemHasVariants
+                            ? "This item has variants — pricing is set per variant only."
+                            : "This item has a single price — no variants."}
+                        </p>
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleVariantChoice(false)}
+                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${!itemHasVariants
+                              ? "border-gray-900 border-2 text-gray-900 bg-white"
+                              : "bg-white text-gray-600 hover:bg-gray-100 border border-gray-200"
+                            }`}
+                        >
+                          {!itemHasVariants && <Check className="w-3.5 h-3.5" />}
+                          <span>No variants</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleVariantChoice(true)}
+                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${itemHasVariants
+                              ? "border-gray-900 border-2 text-gray-900 bg-white"
+                              : "bg-white text-gray-600 hover:bg-gray-100 border border-gray-200"
+                            }`}
+                        >
+                          {itemHasVariants && <Check className="w-3.5 h-3.5" />}
+                          <span>Has variants</span>
+                        </button>
                       </div>
                     </div>
-                    <ChevronDown className="w-5 h-5 text-gray-500 shrink-0" />
-                  </>
-                )
-              })()}
-            </button>
-            {isCategoryInactive && (
-              <div className="mt-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
-                {INACTIVE_CATEGORY_WARNING}
-              </div>
-            )}
-            {!isCategoryInactive && isCategoryPending && (
-              <div className="mt-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
-                {PENDING_CATEGORY_WARNING}
-              </div>
-            )}
-          </div>
+                  </div>
 
-          {/* Item Name */}
-          <div>
-            <label className="block text-sm font-medium text-gray-900 mb-2">
-              Item name
-            </label>
-            <div className="relative">
-              <input
-                type="text"
-                value={itemName}
-                onChange={(e) => setItemName(e.target.value)}
-                maxLength={maxNameLength}
-                className="w-full px-4 py-3 pr-12 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="Enter item name"
-              />
-              <button className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-full hover:bg-gray-100">
-                <EditIcon className="w-4 h-4 text-gray-500" />
-              </button>
-            </div>
-            <div className="text-right mt-1">
-              <span className="text-xs text-gray-500">
-                {nameLength} / {maxNameLength}
-              </span>
-            </div>
-          </div>
+                  {/* Category Selector */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-900 mb-2">
+                      Category
+                    </label>
+                    <button
+                      onClick={() => setIsCategoryPopupOpen(true)}
+                      className="w-full px-4 py-3 border border-gray-300 rounded-xl text-left flex items-center justify-between gap-3 bg-white hover:bg-gray-50 transition-colors"
+                    >
+                      {(() => {
+                        const selected = selectedCategory
+                        if (!selected) {
+                          return (
+                            <>
+                              <span className="text-sm text-gray-500">Select category</span>
+                              <ChevronDown className="w-5 h-5 text-gray-500 shrink-0" />
+                            </>
+                          )
+                        }
+                        return (
+                          <>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="text-sm font-medium text-gray-900 truncate">{selected.name}</span>
+                                <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold ${scopePillClass(selected.foodTypeScope)}`}>
+                                  {scopePillLabel(selected.foodTypeScope)}
+                                </span>
+                                <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${globalPillClass(selected.isGlobal)}`}>
+                                  {selected.isGlobal ? (
+                                    <>
+                                      <Globe className="mr-1 h-3 w-3" />
+                                      Global
+                                    </>
+                                  ) : (
+                                    "Local"
+                                  )}
+                                </span>
+                              </div>
+                            </div>
+                            <ChevronDown className="w-5 h-5 text-gray-500 shrink-0" />
+                          </>
+                        )
+                      })()}
+                    </button>
+                    {isCategoryInactive && (
+                      <div className="mt-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
+                        {INACTIVE_CATEGORY_WARNING}
+                      </div>
+                    )}
+                    {!isCategoryInactive && isCategoryPending && (
+                      <div className="mt-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
+                        {PENDING_CATEGORY_WARNING}
+                      </div>
+                    )}
+                  </div>
 
-
-          {/* Item Description */}
-          <div>
-            <label className="block text-sm font-medium text-gray-900 mb-2">
-              Item description
-            </label>
-            <div className="relative">
-              <textarea
-                value={itemDescription}
-                onChange={(e) => setItemDescription(e.target.value)}
-                maxLength={maxDescriptionLength}
-                rows={4}
-                placeholder="Eg: Yummy veg paneer burger with a soft patty, veggies, cheese, and special sauce"
-                className="w-full px-4 py-3 pr-12 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
-              />
-              <button className="absolute right-3 top-3 p-1 rounded-full hover:bg-gray-100">
-                <EditIcon className="w-4 h-4 text-gray-500" />
-              </button>
-            </div>
-            <div className="flex items-center justify-between mt-1">
-              <span className={`text-xs ${descriptionLength < minDescriptionLength ? "text-red-500" : "text-gray-500"}`}>
-                {descriptionLength < minDescriptionLength ? "Min 5 characters required" : ""}
-              </span>
-              <span className="text-xs text-gray-500">
-                {descriptionLength} / {maxDescriptionLength}
-              </span>
-            </div>
-            {/* Dietary Options */}
-            <div className="flex gap-2 mt-3">
-              <button
-                onClick={() => setFoodType("Veg")}
-                className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${foodType === "Veg"
-                  ? "border-green-600 border-2 text-green-600"
-                  : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                  }`}
-              >
-                {foodType === "Veg" && <Check className="w-4 h-4" />}
-                <span>Veg</span>
-              </button>
-              {!showNonVegFoodType ? null : (
-                <button
-                  onClick={() => setFoodType("Non-Veg")}
-                  className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${foodType === "Non-Veg"
-                    ? "border-red-600 border-2 text-red-600"
-                    : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                    }`}
-                >
-                  {foodType === "Non-Veg" && <Check className="w-4 h-4" />}
-                  <span>Non-Veg</span>
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* Pricing */}
-          <div>
-            <label className="block text-sm font-medium text-gray-900 mb-2">
-              {itemHasVariants ? "Variants" : "Item price"}
-            </label>
-            <div className="space-y-3">
-              {!itemHasVariants ? (
-                <div className="space-y-3">
-                  <div className="relative">
-                    <label className="block text-xs text-gray-600 mb-1">Base price</label>
+                  {/* Item Name */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-900 mb-2">
+                      Item name
+                    </label>
                     <div className="relative">
                       <input
                         type="text"
-                        value={basePrice}
-                        onChange={(e) => {
-                          const value = e.target.value.replace(/[\u20B9\s,]/g, '').replace(/[^0-9.]/g, '')
-                          const parts = value.split('.')
-                          const cleanedValue = parts.length > 2
-                            ? parts[0] + '.' + parts.slice(1).join('')
-                            : value
-                          setBasePrice(cleanedValue)
-                        }}
-                        onFocus={(e) => {
-                          if (e.target.value.startsWith('\u20B9')) {
-                            e.target.value = e.target.value.replace(/[\u20B9\s]+/g, '')
-                          }
-                        }}
-                        placeholder="Enter price"
-                        className="w-full pl-8 pr-12 py-3 border border-gray-300 rounded-lg text-sm text-gray-900 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        value={itemName}
+                        onChange={(e) => setItemName(e.target.value)}
+                        maxLength={maxNameLength}
+                        className="w-full px-4 py-3 pr-12 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        placeholder="Enter item name"
                       />
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-600">{"\u20B9"}</span>
                       <button className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-full hover:bg-gray-100">
                         <EditIcon className="w-4 h-4 text-gray-500" />
                       </button>
                     </div>
+                    <div className="text-right mt-1">
+                      <span className="text-xs text-gray-500">
+                        {nameLength} / {maxNameLength}
+                      </span>
+                    </div>
                   </div>
 
-                  <div className="relative">
-                    <label className="block text-xs text-gray-600 mb-1">Other platform price (Optional)</label>
+
+                  {/* Item Description */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-900 mb-2">
+                      Item description
+                    </label>
                     <div className="relative">
-                      <input
-                        type="text"
-                        value={otherPrice}
-                        onChange={(e) => {
-                          const value = e.target.value.replace(/[\u20B9\s,]/g, '').replace(/[^0-9.]/g, '')
-                          const parts = value.split('.')
-                          const cleanedValue = parts.length > 2
-                            ? parts[0] + '.' + parts.slice(1).join('')
-                            : value
-                          setOtherPrice(cleanedValue)
-                        }}
-                        placeholder="Enter other platform price"
-                        className="w-full pl-8 pr-12 py-3 border border-gray-300 rounded-lg text-sm text-gray-900 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      <textarea
+                        value={itemDescription}
+                        onChange={(e) => setItemDescription(e.target.value)}
+                        maxLength={maxDescriptionLength}
+                        rows={4}
+                        placeholder="Eg: Yummy veg paneer burger with a soft patty, veggies, cheese, and special sauce"
+                        className="w-full px-4 py-3 pr-12 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
                       />
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-600">{"\u20B9"}</span>
+                      <button className="absolute right-3 top-3 p-1 rounded-full hover:bg-gray-100">
+                        <EditIcon className="w-4 h-4 text-gray-500" />
+                      </button>
+                    </div>
+                    <div className="flex items-center justify-between mt-1">
+                      <span className={`text-xs ${descriptionLength < minDescriptionLength ? "text-red-500" : "text-gray-500"}`}>
+                        {descriptionLength < minDescriptionLength ? "Min 5 characters required" : ""}
+                      </span>
+                      <span className="text-xs text-gray-500">
+                        {descriptionLength} / {maxDescriptionLength}
+                      </span>
+                    </div>
+                    {/* Dietary Options */}
+                    <div className="flex gap-2 mt-3">
+                      <button
+                        onClick={() => setFoodType("Veg")}
+                        className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${foodType === "Veg"
+                          ? "border-green-600 border-2 text-green-600"
+                          : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                          }`}
+                      >
+                        {foodType === "Veg" && <Check className="w-4 h-4" />}
+                        <span>Veg</span>
+                      </button>
+                      {!showNonVegFoodType ? null : (
+                        <button
+                          onClick={() => setFoodType("Non-Veg")}
+                          className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${foodType === "Non-Veg"
+                            ? "border-red-600 border-2 text-red-600"
+                            : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                            }`}
+                        >
+                          {foodType === "Non-Veg" && <Check className="w-4 h-4" />}
+                          <span>Non-Veg</span>
+                        </button>
+                      )}
                     </div>
                   </div>
-                </div>
-              ) : (
-                <div className="rounded-xl border border-gray-200 bg-white p-3 space-y-3">
-                  <div className="rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-700">
-                    Customers will see the lowest variant price on the menu.
-                  </div>
 
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-medium text-gray-900">Variants</p>
-                      <p className="text-xs text-gray-500">Add multiple names and prices like Half, Full, Small, Large.</p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={handleAddVariant}
-                      className="inline-flex items-center gap-1 rounded-full border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-100"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      Add variant
-                    </button>
-                  </div>
-
-                  {variants.length > 0 ? (
+                  {/* Pricing */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-900 mb-2">
+                      {itemHasVariants ? "Variants" : "Item price"}
+                    </label>
                     <div className="space-y-3">
-                      {variants.map((variant, index) => (
-                        <div key={variant.localId} className="grid grid-cols-[1fr_auto] gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3 lg:bg-white">
-                          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
-                            <div>
-                              <label className="block text-xs text-gray-600 mb-1">Variant name</label>
+                      {!itemHasVariants ? (
+                        <div className="space-y-3">
+                          <div className="relative">
+                            <label className="block text-xs text-gray-600 mb-1">Base price</label>
+                            <div className="relative">
                               <input
                                 type="text"
-                                value={variant.name}
-                                onChange={(e) => handleVariantChange(variant.localId, "name", e.target.value)}
-                                placeholder={index === 0 ? "Full" : "Half"}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                value={basePrice}
+                                onChange={(e) => {
+                                  const value = e.target.value.replace(/[\u20B9\s,]/g, '').replace(/[^0-9.]/g, '')
+                                  const parts = value.split('.')
+                                  const cleanedValue = parts.length > 2
+                                    ? parts[0] + '.' + parts.slice(1).join('')
+                                    : value
+                                  setBasePrice(cleanedValue)
+                                }}
+                                onFocus={(e) => {
+                                  if (e.target.value.startsWith('\u20B9')) {
+                                    e.target.value = e.target.value.replace(/[\u20B9\s]+/g, '')
+                                  }
+                                }}
+                                placeholder="Enter price"
+                                className="w-full pl-8 pr-12 py-3 border border-gray-300 rounded-lg text-sm text-gray-900 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                               />
-                            </div>
-                            <div>
-                              <label className="block text-xs text-gray-600 mb-1">Unit</label>
-                              <select
-                                value={variant.unit || DEFAULT_FOOD_VARIANT_UNIT}
-                                onChange={(e) => handleVariantChange(variant.localId, "unit", e.target.value)}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                              >
-                                {FOOD_VARIANT_UNITS.map((unit) => (
-                                  <option key={unit.value} value={unit.value}>
-                                    {unit.label}
-                                  </option>
-                                ))}
-                              </select>
-                            </div>
-                            <div>
-                              <label className="block text-xs text-gray-600 mb-1">Variant price</label>
-                              <div className="relative">
-                                <input
-                                  type="text"
-                                  value={variant.price}
-                                  onChange={(e) => {
-                                    const value = e.target.value.replace(/[\u20B9\s,]/g, '').replace(/[^0-9.]/g, '')
-                                    const parts = value.split('.')
-                                    const cleanedValue = parts.length > 2
-                                      ? parts[0] + '.' + parts.slice(1).join('')
-                                      : value
-                                    handleVariantChange(variant.localId, "price", cleanedValue)
-                                  }}
-                                  placeholder="Price"
-                                  className="w-full pl-8 pr-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                />
-                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-600">{"\u20B9"}</span>
-                              </div>
-                            </div>
-                            <div>
-                              <label className="block text-xs text-gray-600 mb-1">Other price</label>
-                              <div className="relative">
-                                <input
-                                  type="text"
-                                  value={variant.otherPrice}
-                                  onChange={(e) => {
-                                    const value = e.target.value.replace(/[\u20B9\s,]/g, '').replace(/[^0-9.]/g, '')
-                                    const parts = value.split('.')
-                                    const cleanedValue = parts.length > 2
-                                      ? parts[0] + '.' + parts.slice(1).join('')
-                                      : value
-                                    handleVariantChange(variant.localId, "otherPrice", cleanedValue)
-                                  }}
-                                  placeholder="Other"
-                                  className="w-full pl-8 pr-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                />
-                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-600">{"\u20B9"}</span>
-                              </div>
+                              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-600">{"\u20B9"}</span>
+                              <button className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-full hover:bg-gray-100">
+                                <EditIcon className="w-4 h-4 text-gray-500" />
+                              </button>
                             </div>
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveVariant(variant.localId)}
-                            className="self-start rounded-full p-2 text-gray-500 hover:bg-white hover:text-red-500"
-                            aria-label="Remove variant"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+
+                          <div className="relative">
+                            <label className="block text-xs text-gray-600 mb-1">Other platform price (Optional)</label>
+                            <div className="relative">
+                              <input
+                                type="text"
+                                value={otherPrice}
+                                onChange={(e) => {
+                                  const value = e.target.value.replace(/[\u20B9\s,]/g, '').replace(/[^0-9.]/g, '')
+                                  const parts = value.split('.')
+                                  const cleanedValue = parts.length > 2
+                                    ? parts[0] + '.' + parts.slice(1).join('')
+                                    : value
+                                  setOtherPrice(cleanedValue)
+                                }}
+                                placeholder="Enter other platform price"
+                                className="w-full pl-8 pr-12 py-3 border border-gray-300 rounded-lg text-sm text-gray-900 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                              />
+                              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-600">{"\u20B9"}</span>
+                            </div>
+                          </div>
                         </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-xs text-gray-500">Add at least one variant with name and price.</p>
-                  )}
-                </div>
-              )}
+                      ) : (
+                        <div className="rounded-xl border border-gray-200 bg-white p-3 space-y-3">
+                          <div className="rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-700">
+                            Customers will see the lowest variant price on the menu.
+                          </div>
 
-              {/* Availability Slot */}
-              <div className="relative">
-                <label className="block text-xs text-gray-600 mb-1">Availability slot</label>
-                <div className="relative">
-                  <select
-                    value={itemSlotTimingId}
-                    onChange={(e) => setItemSlotTimingId(e.target.value)}
-                    className="w-full pl-4 pr-10 py-3 border border-gray-300 rounded-lg text-sm text-gray-900 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent appearance-none"
-                  >
-                    <option value="">None (Always available)</option>
-                    {slotTimings.map((slot) => (
-                      <option key={slot.id} value={slot.id}>
-                        {slot.name} ({slot.startTime} - {slot.endTime})
-                      </option>
-                    ))}
-                  </select>
-                  <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-500 pointer-events-none" />
-                </div>
-                <p className="mt-1.5 text-xs leading-relaxed text-gray-500">
-                  {itemSlotTimingId ? (
-                    <>
-                      This item will only be visible to customers during the selected slot.
-                      {selectedAvailabilitySlot ? (
-                        <span className="block mt-0.5 font-medium text-gray-600">
-                          {selectedAvailabilitySlot.name} ({selectedAvailabilitySlot.startTime} -{" "}
-                          {selectedAvailabilitySlot.endTime})
-                        </span>
-                      ) : null}
-                    </>
-                  ) : (
-                    "No slot selected — this item will be visible to customers all the time."
-                  )}
-                </p>
-              </div>
+                          <div className="flex items-center justify-between gap-3">
+                            <div>
+                              <p className="text-sm font-medium text-gray-900">Variants</p>
+                              <p className="text-xs text-gray-500">Add multiple names and prices like Half, Full, Small, Large.</p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={handleAddVariant}
+                              className="inline-flex items-center gap-1 rounded-full border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-100"
+                            >
+                              <Plus className="w-3.5 h-3.5" />
+                              Add variant
+                            </button>
+                          </div>
 
-              {/* Preparation Time */}
-              <div className="relative">
-                <label className="block text-xs text-gray-600 mb-1">Preparation Time</label>
-                <div className="relative">
-                  <select
-                    value={preparationTime}
-                    onChange={(e) => setPreparationTime(e.target.value)}
-                    className="w-full pl-4 pr-10 py-3 border border-gray-300 rounded-lg text-sm text-gray-900 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent appearance-none"
-                  >
-                    <option value="">Select timing</option>
-                    <option value="10-20 mins">10-20 mins</option>
-                    <option value="20-25 mins">20-25 mins</option>
-                    <option value="25-35 mins">25-35 mins</option>
-                    <option value="35-45 mins">35-45 mins</option>
-                  </select>
-                  <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-500 pointer-events-none" />
-                </div>
-              </div>
-              {/* <div>
+                          {variants.length > 0 ? (
+                            <div className="space-y-3">
+                              {variants.map((variant, index) => (
+                                <div key={variant.localId} className="grid grid-cols-[1fr_auto] gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3 lg:bg-white">
+                                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+                                    <div>
+                                      <label className="block text-xs text-gray-600 mb-1">Variant name</label>
+                                      <input
+                                        type="text"
+                                        value={variant.name}
+                                        onChange={(e) => handleVariantChange(variant.localId, "name", e.target.value)}
+                                        placeholder={index === 0 ? "Full" : "Half"}
+                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                      />
+                                    </div>
+                                    <div>
+                                      <label className="block text-xs text-gray-600 mb-1">Unit</label>
+                                      <select
+                                        value={variant.unit || DEFAULT_FOOD_VARIANT_UNIT}
+                                        onChange={(e) => handleVariantChange(variant.localId, "unit", e.target.value)}
+                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                      >
+                                        {FOOD_VARIANT_UNITS.map((unit) => (
+                                          <option key={unit.value} value={unit.value}>
+                                            {unit.label}
+                                          </option>
+                                        ))}
+                                      </select>
+                                    </div>
+                                    <div>
+                                      <label className="block text-xs text-gray-600 mb-1">Variant price</label>
+                                      <div className="relative">
+                                        <input
+                                          type="text"
+                                          value={variant.price}
+                                          onChange={(e) => {
+                                            const value = e.target.value.replace(/[\u20B9\s,]/g, '').replace(/[^0-9.]/g, '')
+                                            const parts = value.split('.')
+                                            const cleanedValue = parts.length > 2
+                                              ? parts[0] + '.' + parts.slice(1).join('')
+                                              : value
+                                            handleVariantChange(variant.localId, "price", cleanedValue)
+                                          }}
+                                          placeholder="Price"
+                                          className="w-full pl-8 pr-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                        />
+                                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-600">{"\u20B9"}</span>
+                                      </div>
+                                    </div>
+                                    <div>
+                                      <label className="block text-xs text-gray-600 mb-1">Other price</label>
+                                      <div className="relative">
+                                        <input
+                                          type="text"
+                                          value={variant.otherPrice}
+                                          onChange={(e) => {
+                                            const value = e.target.value.replace(/[\u20B9\s,]/g, '').replace(/[^0-9.]/g, '')
+                                            const parts = value.split('.')
+                                            const cleanedValue = parts.length > 2
+                                              ? parts[0] + '.' + parts.slice(1).join('')
+                                              : value
+                                            handleVariantChange(variant.localId, "otherPrice", cleanedValue)
+                                          }}
+                                          placeholder="Other"
+                                          className="w-full pl-8 pr-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                        />
+                                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-600">{"\u20B9"}</span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRemoveVariant(variant.localId)}
+                                    className="self-start rounded-full p-2 text-gray-500 hover:bg-white hover:text-red-500"
+                                    aria-label="Remove variant"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="text-xs text-gray-500">Add at least one variant with name and price.</p>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Availability Slot */}
+                      <div className="relative">
+                        <label className="block text-xs text-gray-600 mb-1">Availability slot</label>
+                        <div className="relative">
+                          <select
+                            value={itemSlotTimingId}
+                            onChange={(e) => setItemSlotTimingId(e.target.value)}
+                            className="w-full pl-4 pr-10 py-3 border border-gray-300 rounded-lg text-sm text-gray-900 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent appearance-none"
+                          >
+                            <option value="">None (Always available)</option>
+                            {slotTimings.map((slot) => (
+                              <option key={slot.id} value={slot.id}>
+                                {slot.name} ({slot.startTime} - {slot.endTime})
+                              </option>
+                            ))}
+                          </select>
+                          <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-500 pointer-events-none" />
+                        </div>
+                        <p className="mt-1.5 text-xs leading-relaxed text-gray-500">
+                          {itemSlotTimingId ? (
+                            <>
+                              This item will only be visible to customers during the selected slot.
+                              {selectedAvailabilitySlot ? (
+                                <span className="block mt-0.5 font-medium text-gray-600">
+                                  {selectedAvailabilitySlot.name} ({selectedAvailabilitySlot.startTime} -{" "}
+                                  {selectedAvailabilitySlot.endTime})
+                                </span>
+                              ) : null}
+                            </>
+                          ) : (
+                            "No slot selected — this item will be visible to customers all the time."
+                          )}
+                        </p>
+                      </div>
+
+                      {/* Preparation Time */}
+                      <div className="relative">
+                        <label className="block text-xs text-gray-600 mb-1">Preparation Time</label>
+                        <div className="relative">
+                          <select
+                            value={preparationTime}
+                            onChange={(e) => setPreparationTime(e.target.value)}
+                            className="w-full pl-4 pr-10 py-3 border border-gray-300 rounded-lg text-sm text-gray-900 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent appearance-none"
+                          >
+                            <option value="">Select timing</option>
+                            <option value="10-20 mins">10-20 mins</option>
+                            <option value="20-25 mins">20-25 mins</option>
+                            <option value="25-35 mins">25-35 mins</option>
+                            <option value="35-45 mins">35-45 mins</option>
+                          </select>
+                          <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-500 pointer-events-none" />
+                        </div>
+                      </div>
+                      {/* <div>
                 <label className="block text-xs text-gray-600 mb-1">GST</label>
                 <button
                   onClick={() => setIsGstPopupOpen(true)}
@@ -1965,36 +1962,36 @@ export default function ItemDetailsPage() {
                   <ChevronDown className="w-5 h-5 text-gray-500" />
                 </button>
               </div> */}
+                    </div>
+
+                  </div>
+
+                  {/* Recommend and In Stock */}
+                  <div className="flex items-center justify-between py-3 border-t border-gray-200">
+                    <button
+                      onClick={() => setIsRecommended(!isRecommended)}
+                      className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${isRecommended
+                        ? "bg-blue-100 text-blue-700"
+                        : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                        }`}
+                    >
+                      <ThumbsUp className="w-4 h-4" />
+                      <span>Recommend</span>
+                    </button>
+                    <div className="flex items-center gap-2">
+                      <Switch
+                        checked={isInStock}
+                        onCheckedChange={setIsInStock}
+                        className="data-[state=unchecked]:bg-gray-300"
+                      />
+                      <span className="text-sm text-gray-700">In stock</span>
+                    </div>
+                  </div>
+
+
+                </div>
+              </div>
             </div>
-
-          </div>
-
-          {/* Recommend and In Stock */}
-          <div className="flex items-center justify-between py-3 border-t border-gray-200">
-            <button
-              onClick={() => setIsRecommended(!isRecommended)}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${isRecommended
-                ? "bg-blue-100 text-blue-700"
-                : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                }`}
-            >
-              <ThumbsUp className="w-4 h-4" />
-              <span>Recommend</span>
-            </button>
-            <div className="flex items-center gap-2">
-              <Switch
-                checked={isInStock}
-                onCheckedChange={setIsInStock}
-                className="data-[state=unchecked]:bg-gray-300"
-              />
-              <span className="text-sm text-gray-700">In stock</span>
-            </div>
-          </div>
-
-
-        </div>
-          </div>
-        </div>
           )}
         </div>
       </div>
@@ -2094,38 +2091,38 @@ export default function ItemDetailsPage() {
 
       {/* Bottom Sticky Buttons */}
       {(!isNewItem || variantChoiceMade) && (
-      <div
-        className="fixed left-0 right-0 bg-white border-t border-gray-200 z-40 lg:border-slate-200 lg:bg-white/95 lg:backdrop-blur"
-        style={{ bottom: `${keyboardInset}px` }}
-      >
-        <div className={`flex gap-3 px-4 py-4 lg:max-w-6xl lg:mx-auto lg:px-6 ${isNewItem ? "justify-end" : ""}`}>
-          {!isNewItem && (
-            <button
-              onClick={handleDelete}
-              className="flex-1 py-3 px-4 border border-black rounded-lg text-sm font-semibold text-black bg-white hover:bg-gray-50 transition-colors"
-            >
-              Delete
-            </button>
-          )}
-          <button
-            onClick={handleSave}
-            disabled={uploadingImages || (isNewItem && !variantChoiceMade)}
-            className={`${isNewItem ? "w-full lg:w-auto lg:min-w-[220px]" : "flex-1 lg:flex-none lg:min-w-[220px]"} py-3 px-4 rounded-lg text-sm font-semibold transition-colors flex items-center justify-center gap-2 ${!uploadingImages && !(isNewItem && !variantChoiceMade)
-              ? "bg-[#FF0000] text-white hover:bg-[#E64D02]"
-              : "bg-gray-300 text-gray-500 cursor-not-allowed"
-              }`}
-          >
-            {uploadingImages ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                <span>Uploading...</span>
-              </>
-            ) : (
-              "Save"
+        <div
+          className="fixed left-0 right-0 bg-white border-t border-gray-200 z-40 lg:border-slate-200 lg:bg-white/95 lg:backdrop-blur"
+          style={{ bottom: `${keyboardInset}px` }}
+        >
+          <div className={`flex gap-3 px-4 py-4 lg:max-w-6xl lg:mx-auto lg:px-6 ${isNewItem ? "justify-end" : ""}`}>
+            {!isNewItem && (
+              <button
+                onClick={handleDelete}
+                className="flex-1 py-3 px-4 border border-black rounded-lg text-sm font-semibold text-black bg-white hover:bg-gray-50 transition-colors"
+              >
+                Delete
+              </button>
             )}
-          </button>
+            <button
+              onClick={handleSave}
+              disabled={uploadingImages || (isNewItem && !variantChoiceMade)}
+              className={`${isNewItem ? "w-full lg:w-auto lg:min-w-[220px]" : "flex-1 lg:flex-none lg:min-w-[220px]"} py-3 px-4 rounded-lg text-sm font-semibold transition-colors flex items-center justify-center gap-2 ${!uploadingImages && !(isNewItem && !variantChoiceMade)
+                ? "bg-[#FF0000] text-white hover:bg-[#E64D02]"
+                : "bg-gray-300 text-gray-500 cursor-not-allowed"
+                }`}
+            >
+              {uploadingImages ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Uploading...</span>
+                </>
+              ) : (
+                "Save"
+              )}
+            </button>
+          </div>
         </div>
-      </div>
       )}
       {/* Photo Picker */}
       <ImageSourcePicker
