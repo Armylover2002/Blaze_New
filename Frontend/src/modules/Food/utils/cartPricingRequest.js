@@ -1,7 +1,7 @@
 /**
  * Sequenced cart calculateOrder controller.
  * Guarantees only the latest request may update React pricing state.
- * Uses monotonic requestId + AbortController.
+ * Uses monotonic requestId + AbortController + payload fingerprint coalescing.
  */
 
 import { orderAPI } from "@food/api";
@@ -14,10 +14,51 @@ import {
   showQuickDeliveryUnavailableToast,
 } from "@food/utils/quickDelivery";
 
+function stableFingerprint(payload = {}) {
+  try {
+    const items = Array.isArray(payload.items)
+      ? payload.items.map((item) => ({
+          id: String(item?.menuItemId || item?.itemId || item?.id || item?._id || ""),
+          qty: Number(item?.quantity) || 1,
+          type: String(item?.type || item?.orderType || "food"),
+          sourceId: String(item?.sourceId || item?.restaurantId || item?.storeId || ""),
+          price: Number(item?.price) || 0,
+          variantId: String(item?.variantId || item?.variationId || ""),
+        }))
+      : [];
+    const address = payload.address || {};
+    const coords = address?.location?.coordinates;
+    return JSON.stringify({
+      orderType: payload.orderType || "food",
+      restaurantId: String(payload.restaurantId || ""),
+      deliveryAddressId: String(payload.deliveryAddressId || ""),
+      couponCode: String(payload.couponCode || "").toUpperCase(),
+      deliveryMode: String(payload.deliveryMode || "basic").toLowerCase(),
+      deliveryFleet: String(payload.deliveryFleet || ""),
+      scheduledAt: payload.scheduledAt ? String(payload.scheduledAt) : "",
+      addressCoords: Array.isArray(coords) ? coords.map(Number) : null,
+      addressText: String(
+        address.formattedAddress || address.address || address.street || "",
+      ),
+      items,
+    });
+  } catch {
+    return `fallback:${Date.now()}:${Math.random()}`;
+  }
+}
+
 export function createCartPricingRequestController() {
   let latestRequestId = 0;
   /** @type {AbortController | null} */
   let abortController = null;
+  /** @type {string | null} */
+  let inFlightFingerprint = null;
+  /** @type {Promise<object> | null} */
+  let inFlightPromise = null;
+  /** @type {string | null} */
+  let lastCompletedFingerprint = null;
+  /** @type {object | null} */
+  let lastCompletedResult = null;
 
   const begin = () => {
     latestRequestId += 1;
@@ -41,52 +82,117 @@ export function createCartPricingRequestController() {
     error?.code === "ERR_CANCELED" ||
     error?.message === "canceled";
 
+  /** Abort any in-flight calculate (effect cleanup / unmount). */
+  const abort = () => {
+    latestRequestId += 1;
+    inFlightFingerprint = null;
+    inFlightPromise = null;
+    if (abortController) {
+      try {
+        abortController.abort();
+      } catch {
+        // ignore
+      }
+      abortController = null;
+    }
+  };
+
   /**
    * @param {object} payload - calculateOrder body
+   * @param {{ force?: boolean }} [options]
    */
-  const calculate = async (payload = {}) => {
-    const { requestId, signal } = begin();
+  const calculate = async (payload = {}, options = {}) => {
+    const force = options.force === true;
+    const fingerprint = stableFingerprint(payload);
     const requestedDeliveryMode =
       String(payload.deliveryMode || "basic").toLowerCase() === "quick"
         ? "quick"
         : "basic";
 
-    try {
-      const response = await orderAPI.calculateOrder(payload, { signal });
-      if (!isLatest(requestId)) {
-        return {
-          stale: true,
-          requestId,
-          requestedDeliveryMode,
-          pricing: null,
-          response: null,
-        };
-      }
-      const pricing = response?.data?.data?.pricing || null;
+    // Coalesce identical in-flight requests (StrictMode remount / cascading deps).
+    if (
+      !force &&
+      inFlightFingerprint === fingerprint &&
+      inFlightPromise
+    ) {
+      const shared = await inFlightPromise;
       return {
-        stale: false,
-        requestId,
-        requestedDeliveryMode,
-        pricing,
-        response,
+        ...shared,
+        requestedDeliveryMode:
+          shared.requestedDeliveryMode || requestedDeliveryMode,
+        coalesced: true,
       };
-    } catch (error) {
-      if (isAbortError(error) || !isLatest(requestId)) {
-        return {
-          stale: true,
-          aborted: true,
+    }
+
+    // Skip network when the exact same quote just completed successfully.
+    if (
+      !force &&
+      lastCompletedFingerprint === fingerprint &&
+      lastCompletedResult?.pricing
+    ) {
+      return {
+        ...lastCompletedResult,
+        stale: false,
+        requestedDeliveryMode,
+        reused: true,
+      };
+    }
+
+    const { requestId, signal } = begin();
+
+    const run = (async () => {
+      try {
+        const response = await orderAPI.calculateOrder(payload, { signal });
+        if (!isLatest(requestId)) {
+          return {
+            stale: true,
+            requestId,
+            requestedDeliveryMode,
+            pricing: null,
+            response: null,
+            fingerprint,
+          };
+        }
+        const pricing = response?.data?.data?.pricing || null;
+        const result = {
+          stale: false,
           requestId,
           requestedDeliveryMode,
-          pricing: null,
-          response: null,
-          error,
+          pricing,
+          response,
+          fingerprint,
         };
+        lastCompletedFingerprint = fingerprint;
+        lastCompletedResult = result;
+        return result;
+      } catch (error) {
+        if (isAbortError(error) || !isLatest(requestId)) {
+          return {
+            stale: true,
+            aborted: true,
+            requestId,
+            requestedDeliveryMode,
+            pricing: null,
+            response: null,
+            error,
+            fingerprint,
+          };
+        }
+        throw error;
+      } finally {
+        if (inFlightFingerprint === fingerprint) {
+          inFlightFingerprint = null;
+          inFlightPromise = null;
+        }
       }
-      throw error;
-    }
+    })();
+
+    inFlightFingerprint = fingerprint;
+    inFlightPromise = run;
+    return run;
   };
 
-  return { begin, isLatest, calculate };
+  return { begin, isLatest, calculate, abort, stableFingerprint };
 }
 
 /**
@@ -98,6 +204,7 @@ export function applyCartPricingResult({
   setPricing,
   setDeliveryType,
   setQuickFallbackNotice,
+  onSoftFallback,
 }) {
   if (!result || result.stale) return { applied: false, softFallback: false };
   const { pricing, requestedDeliveryMode } = result;
@@ -109,6 +216,8 @@ export function applyCartPricingResult({
   });
 
   if (softFallback) {
+    // Pricing already reflects Basic fees — skip the follow-up effect recalc.
+    onSoftFallback?.();
     setDeliveryType?.("standard");
     const reason = getQuickDeliveryReason(pricing);
     const message =

@@ -212,6 +212,8 @@ export default function Cart() {
   if (!pricingRequestControllerRef.current) {
     pricingRequestControllerRef.current = createCartPricingRequestController()
   }
+  /** Soft-fallback already applied Basic pricing — skip the follow-up effect. */
+  const suppressPricingRecalcRef = useRef(false)
 
   // Defensive check: Ensure CartProvider is available
   const cartContext = useCart() || {};
@@ -1022,10 +1024,12 @@ export default function Cart() {
 
   const runSequencedFoodCalculate = async (
     payloadOptions = {},
-    { apply = true } = {},
+    { apply = true, force = false } = {},
   ) => {
     const payload = buildFoodCalculatePayload(payloadOptions)
-    const result = await pricingRequestControllerRef.current.calculate(payload)
+    const result = await pricingRequestControllerRef.current.calculate(payload, {
+      force,
+    })
     if (result.stale) {
       return { ...result, applied: false }
     }
@@ -1037,30 +1041,103 @@ export default function Cart() {
       setPricing,
       setDeliveryType,
       setQuickFallbackNotice,
+      onSoftFallback: () => {
+        suppressPricingRecalcRef.current = true
+      },
     })
     return { ...result, ...applied }
   }
 
-  // Calculate pricing from backend whenever cart, address, coupon, or Quick mode changes
-  useEffect(() => {
-    const calculatePricing = async () => {
-      // Don't calculate here if it's a mixed or quick cart - those components handle their own pricing
-      if (cart.length === 0 || !hasSavedAddress || (hasQuickItems && hasFoodItems) || isQuickCart) {
-        setPricing(null)
-        return
-      }
+  // Stable key so object-identity churn (cart/address refs) does not retrigger calculate.
+  const foodPricingRequestKey = useMemo(() => {
+    if (
+      cart.length === 0 ||
+      !hasSavedAddress ||
+      (hasQuickItems && hasFoodItems) ||
+      isQuickCart
+    ) {
+      return null
+    }
+    const cartKey = cart
+      .map((item) => {
+        const id = item.itemId || item.id || item._id || ""
+        const variant = item.variantId || ""
+        return `${id}:${variant}:${Number(item.quantity) || 1}:${item.orderType || "food"}`
+      })
+      .join("|")
+    const coords = defaultAddress?.location?.coordinates
+    const addressKey =
+      resolvedDeliveryAddressId ||
+      (Array.isArray(coords)
+        ? coords.map(Number).join(",")
+        : formatFullAddress(defaultAddress) || "")
+    const couponKey = String(
+      appliedCoupon?.code || couponCode || "",
+    ).toUpperCase()
+    const deliveryMode =
+      deliveryType === "quick" && !isScheduled ? "quick" : "basic"
+    const scheduleKey =
+      isScheduled && scheduledDate && scheduledTime
+        ? `${scheduledDate}T${scheduledTime}`
+        : ""
+    return [
+      cartKey,
+      addressKey,
+      couponKey,
+      String(restaurantId || ""),
+      deliveryMode,
+      scheduleKey,
+    ].join("::")
+  }, [
+    cart,
+    hasSavedAddress,
+    hasQuickItems,
+    hasFoodItems,
+    isQuickCart,
+    defaultAddress,
+    resolvedDeliveryAddressId,
+    appliedCoupon?.code,
+    couponCode,
+    restaurantId,
+    deliveryType,
+    isScheduled,
+    scheduledDate,
+    scheduledTime,
+  ])
 
+  // Calculate pricing once per meaningful cart/address/coupon/mode change.
+  // Debounce coalesces StrictMode remount + cascading restaurantId/address settles.
+  useEffect(() => {
+    if (!foodPricingRequestKey) {
+      setPricing(null)
+      setLoadingPricing(false)
+      return undefined
+    }
+
+    // Wait for restaurant resolve so restaurantId does not flip mid-request.
+    if (loadingRestaurant) {
+      return undefined
+    }
+
+    if (suppressPricingRecalcRef.current) {
+      suppressPricingRecalcRef.current = false
+      return undefined
+    }
+
+    let cancelled = false
+    const timer = setTimeout(async () => {
+      if (cancelled) return
       try {
         setLoadingPricing(true)
         const result = await runSequencedFoodCalculate()
-        if (result.stale) return
+        if (cancelled || result.stale) return
 
         if (!result.pricing) {
           setPricing(null)
           return
         }
 
-        // Update applied coupon if backend returns one
+        // Sync coupon object from backend without changing the request key (same code).
         if (result.pricing.appliedCoupon && !appliedCoupon) {
           const coupon = availableCoupons.find(
             (c) => c.code === result.pricing.appliedCoupon.code,
@@ -1070,19 +1147,23 @@ export default function Cart() {
           }
         }
       } catch (error) {
+        if (cancelled) return
         // Network errors or 404 errors - silently handle, fallback to frontend calculation
         if (error.code !== "ERR_NETWORK" && error.response?.status !== 404) {
           debugError("Error calculating pricing:", error)
         }
-        // Only clear if this is still the latest request failure path (non-stale throws)
         setPricing(null)
       } finally {
-        setLoadingPricing(false)
+        if (!cancelled) setLoadingPricing(false)
       }
-    }
+    }, 200)
 
-    calculatePricing()
-  }, [cart, defaultAddress, appliedCoupon, couponCode, restaurantId, deliveryType, isScheduled, scheduledDate, scheduledTime])
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+      pricingRequestControllerRef.current?.abort?.()
+    }
+  }, [foodPricingRequestKey, loadingRestaurant])
 
   // Fetch wallet balance
   useEffect(() => {
@@ -1547,7 +1628,12 @@ export default function Cart() {
           setPricing,
           setDeliveryType,
           setQuickFallbackNotice,
+          onSoftFallback: () => {
+            suppressPricingRecalcRef.current = true
+          },
         })
+        // Pricing already applied — suppress the effect that would re-fire on coupon state.
+        suppressPricingRecalcRef.current = true
         setAppliedCoupon(coupon)
         setCouponCode(coupon.code)
         setManualCouponCode(coupon.code)
@@ -1608,7 +1694,11 @@ export default function Cart() {
         setPricing,
         setDeliveryType,
         setQuickFallbackNotice,
+        onSoftFallback: () => {
+          suppressPricingRecalcRef.current = true
+        },
       })
+      suppressPricingRecalcRef.current = true
       setCouponCode(inputCode)
       setAppliedCoupon(
         matchedCoupon || {
@@ -1628,6 +1718,8 @@ export default function Cart() {
 
 
   const handleRemoveCoupon = async () => {
+    // Handler recalculates — suppress the effect that would fire on coupon clear.
+    suppressPricingRecalcRef.current = true
     setAppliedCoupon(null)
     setCouponCode("")
     setManualCouponCode("")
@@ -1690,7 +1782,7 @@ export default function Cart() {
       let resolvedPricing = pricing
       let placeOrderDeliveryType = deliveryType
       try {
-        const result = await runSequencedFoodCalculate()
+        const result = await runSequencedFoodCalculate({}, { force: true })
         if (!result.stale && result.pricing) {
           resolvedPricing = result.pricing
           if (result.softFallback) {

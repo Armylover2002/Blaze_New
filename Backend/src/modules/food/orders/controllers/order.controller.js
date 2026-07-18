@@ -13,12 +13,36 @@ import {
     validateOrderRatingsDto
 } from '../validators/order.validator.js';
 
+/** Public calculate payload — never leak full zone geometry / internal fee docs. */
+function toPublicCalculateResult(result) {
+    const zone = result?.serviceZone?.zone;
+    return {
+        pricing: result?.pricing ?? null,
+        serviceZone: result?.serviceZone
+            ? {
+                  zoneId: result.serviceZone.zoneId,
+                  status: result.serviceZone.status,
+                  zone: zone
+                      ? {
+                            _id: zone._id,
+                            name: zone.name || zone.zoneName || null,
+                            zoneName: zone.zoneName || zone.name || null,
+                            isActive: zone.isActive,
+                            quickDeliveryEnabled: zone.quickDeliveryEnabled,
+                        }
+                      : null,
+              }
+            : null,
+    };
+}
+
 export async function calculateOrderController(req, res, next) {
     try {
         const userId = req.user?.userId;
         const dto = validateCalculateOrderDto(req.body);
         const result = await orderService.calculateOrder(userId, dto);
-        return sendResponse(res, 200, 'Pricing calculated', result);
+        // feeSettingsDoc + full zone polygon stay internal (createOrder reuse only).
+        return sendResponse(res, 200, 'Pricing calculated', toPublicCalculateResult(result));
     } catch (err) {
         next(err);
     }

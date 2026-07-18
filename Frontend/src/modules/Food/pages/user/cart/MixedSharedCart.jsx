@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, CreditCard, MapPin, ShoppingBag, Truck, Zap } from "lucide-react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import { toast } from "sonner";
@@ -10,6 +10,7 @@ import { orderAPI } from "@food/api";
 import { initRazorpayPayment } from "@food/utils/razorpay";
 import { useCompanyName } from "@food/hooks/useCompanyName";
 import { sanitizeOrderImage, sanitizeOrderNotes } from "@food/utils/orderPayload";
+import { createCartPricingRequestController } from "@food/utils/cartPricingRequest";
 
 const RUPEE_SYMBOL = "\u20B9";
 
@@ -141,6 +142,10 @@ export default function MixedSharedCart({ initialAddress = null, addressMode = "
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState("cash");
   const [selectedDeliveryMode, setSelectedDeliveryMode] = useState("normal");
   const [selectedAddressId, setSelectedAddressId] = useState(null);
+  const pricingRequestControllerRef = useRef(null);
+  if (!pricingRequestControllerRef.current) {
+    pricingRequestControllerRef.current = createCartPricingRequestController();
+  }
 
   const foodItems = cart.filter((item) => getOrderType(item) === "food");
   const quickItems = cart.filter((item) => getOrderType(item) === "quick");
@@ -163,31 +168,48 @@ export default function MixedSharedCart({ initialAddress = null, addressMode = "
   const addressText = formatFullAddress(defaultAddress);
   const deliveryAddress = useMemo(
     () => (defaultAddress ? buildOrderAddress(defaultAddress, userProfile) : null),
-    [defaultAddress, userProfile],
+    [defaultAddress, userProfile?.phone, userProfile?.name],
   );
 
   const mappedItems = useMemo(() => mapCartItemsToPayload(cart), [cart]);
 
-  useEffect(() => {
+  const mixedPricingRequestKey = useMemo(() => {
     if (foodItems.length === 0 || quickItems.length === 0 || !deliveryAddress) {
+      return null;
+    }
+    const cartKey = mappedItems
+      .map(
+        (item) =>
+          `${item.itemId || ""}:${item.variantId || ""}:${item.quantity || 1}:${item.type || ""}`,
+      )
+      .join("|");
+    const coords = deliveryAddress?.location?.coordinates;
+    const addressKey = Array.isArray(coords)
+      ? coords.map(Number).join(",")
+      : formatFullAddress(deliveryAddress);
+    return `${cartKey}::${addressKey}`;
+  }, [foodItems.length, quickItems.length, deliveryAddress, mappedItems]);
+
+  useEffect(() => {
+    if (!mixedPricingRequestKey) {
       setPricing(null);
-      return;
+      setIsPricingLoading(false);
+      return undefined;
     }
 
     let cancelled = false;
-    const loadPricing = async () => {
+    const timer = setTimeout(async () => {
+      if (cancelled) return;
       try {
         setIsPricingLoading(true);
-        const response = await orderAPI.calculateOrder({
+        const result = await pricingRequestControllerRef.current.calculate({
           orderType: "mixed",
           items: mappedItems,
           address: deliveryAddress,
         });
 
-        if (!cancelled) {
-          const nextPricing = response?.data?.data?.pricing || null;
-          setPricing(nextPricing);
-          // Always default to "normal" delivery mode and hide express options in UI
+        if (!cancelled && !result.stale) {
+          setPricing(result.pricing || null);
           setSelectedDeliveryMode("normal");
         }
       } catch (error) {
@@ -203,13 +225,14 @@ export default function MixedSharedCart({ initialAddress = null, addressMode = "
       } finally {
         if (!cancelled) setIsPricingLoading(false);
       }
-    };
+    }, 200);
 
-    loadPricing();
     return () => {
       cancelled = true;
+      clearTimeout(timer);
+      pricingRequestControllerRef.current?.abort?.();
     };
-  }, [deliveryAddress, foodItems.length, quickItems.length, mappedItems]);
+  }, [mixedPricingRequestKey]);
 
   const selectedDeliveryOption =
     pricing?.deliveryOptions?.find((option) => option.code === selectedDeliveryMode) || null;
@@ -252,13 +275,16 @@ export default function MixedSharedCart({ initialAddress = null, addressMode = "
 
       let resolvedPricing = null;
       try {
-        const pricingResponse = await orderAPI.calculateOrder({
-          orderType: "mixed",
-          items: mappedItems,
-          address: deliveryAddress,
-          deliveryFleet: selectedDeliveryMode,
-        });
-        resolvedPricing = pricingResponse?.data?.data?.pricing || null;
+        const result = await pricingRequestControllerRef.current.calculate(
+          {
+            orderType: "mixed",
+            items: mappedItems,
+            address: deliveryAddress,
+            deliveryFleet: selectedDeliveryMode,
+          },
+          { force: true },
+        );
+        resolvedPricing = result?.pricing || null;
         if (resolvedPricing) setPricing(resolvedPricing);
       } catch (pricingError) {
         toast.error(

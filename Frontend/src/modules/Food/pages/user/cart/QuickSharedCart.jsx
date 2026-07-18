@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import { ArrowLeft, CreditCard, MapPin, Minus, Plus, ShoppingBag, Wallet } from "lucide-react";
 import { toast } from "sonner";
@@ -10,6 +10,7 @@ import { sanitizeOrderImage, sanitizeOrderNotes } from "@food/utils/orderPayload
 import { orderAPI } from "@food/api";
 import { initRazorpayPayment } from "@food/utils/razorpay";
 import { useCompanyName } from "@food/hooks/useCompanyName";
+import { createCartPricingRequestController } from "@food/utils/cartPricingRequest";
 
 const RUPEE_SYMBOL = "\u20B9";
 
@@ -111,6 +112,10 @@ export default function QuickSharedCart({ initialAddress = null, addressMode = "
   const [pricing, setPricing] = useState(null);
   const [isPricingLoading, setIsPricingLoading] = useState(false);
   const [isPlacingOrder, setIsPlacingOrder] = useState(false);
+  const pricingRequestControllerRef = useRef(null);
+  if (!pricingRequestControllerRef.current) {
+    pricingRequestControllerRef.current = createCartPricingRequestController();
+  }
 
   useEffect(() => {
     if (!isUserCodAllowed && selectedPaymentMethod === "cash") {
@@ -146,27 +151,44 @@ export default function QuickSharedCart({ initialAddress = null, addressMode = "
     );
   }, [addresses, savedAddress, selectedAddressId, initialAddress]);
 
+  const quickPricingRequestKey = useMemo(() => {
+    if (quickCart.length === 0) return null;
+    const cartKey = quickCart
+      .map(
+        (item) =>
+          `${item.itemId || item.id || ""}:${item.variantId || ""}:${Number(item.quantity) || 1}`,
+      )
+      .join("|");
+    const coords = selectedAddress?.location?.coordinates;
+    const addressKey = selectedAddress
+      ? getAddressId(selectedAddress) ||
+        (Array.isArray(coords) ? coords.map(Number).join(",") : formatFullAddress(selectedAddress))
+      : "";
+    return `${cartKey}::${addressKey}::${userProfile?.phone || ""}`;
+  }, [quickCart, selectedAddress, userProfile?.phone]);
+
   useEffect(() => {
-    if (quickCart.length === 0) {
+    if (!quickPricingRequestKey) {
       setPricing(null);
       setIsPricingLoading(false);
-      return;
+      return undefined;
     }
 
     let cancelled = false;
-    const loadPricing = async () => {
+    const timer = setTimeout(async () => {
+      if (cancelled) return;
       try {
         setIsPricingLoading(true);
         const deliveryAddress = selectedAddress
           ? buildOrderAddress(selectedAddress, userProfile)
           : undefined;
-        const response = await orderAPI.calculateOrder({
+        const result = await pricingRequestControllerRef.current.calculate({
           orderType: "quick",
           items: mapCartItemsToPayload(quickCart),
           ...(deliveryAddress ? { address: deliveryAddress } : {}),
         });
-        if (!cancelled) {
-          setPricing(response?.data?.data?.pricing || null);
+        if (!cancelled && !result.stale) {
+          setPricing(result.pricing || null);
         }
       } catch (error) {
         if (!cancelled) {
@@ -181,13 +203,14 @@ export default function QuickSharedCart({ initialAddress = null, addressMode = "
       } finally {
         if (!cancelled) setIsPricingLoading(false);
       }
-    };
+    }, 200);
 
-    loadPricing();
     return () => {
       cancelled = true;
+      clearTimeout(timer);
+      pricingRequestControllerRef.current?.abort?.();
     };
-  }, [quickCart, selectedAddress, userProfile]);
+  }, [quickPricingRequestKey]);
 
   const subtotal =
     pricing?.subtotal ??
@@ -239,12 +262,15 @@ export default function QuickSharedCart({ initialAddress = null, addressMode = "
       const items = mapCartItemsToPayload(quickCart);
       let resolvedPricing = pricing;
       try {
-        const pricingResponse = await orderAPI.calculateOrder({
-          orderType: "quick",
-          items,
-          address: deliveryAddress,
-        });
-        resolvedPricing = pricingResponse?.data?.data?.pricing || pricing;
+        const result = await pricingRequestControllerRef.current.calculate(
+          {
+            orderType: "quick",
+            items,
+            address: deliveryAddress,
+          },
+          { force: true },
+        );
+        resolvedPricing = result?.pricing || pricing;
         if (resolvedPricing) setPricing(resolvedPricing);
       } catch (pricingError) {
         console.error("Quick order pricing refresh failed", pricingError);
