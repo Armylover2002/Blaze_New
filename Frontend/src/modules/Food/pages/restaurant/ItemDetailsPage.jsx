@@ -885,7 +885,7 @@ export default function ItemDetailsPage() {
     }
 
     const matchedCategory =
-      displayCategory ||
+      selectedCategory ||
       (categoryLiveStatus && String(categoryLiveStatus.id) === String(selectedCategoryId || "")
         ? {
             id: categoryLiveStatus.id,
