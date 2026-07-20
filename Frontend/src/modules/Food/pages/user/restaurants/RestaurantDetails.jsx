@@ -66,41 +66,25 @@ function RestaurantDetailsContent() {
   const showOnlyUnder250 = searchParams.get('under250') === 'true'
   const targetDishId = useMemo(() => String(searchParams.get('dish') || '').trim(), [searchParams])
   const { addToCart, updateQuantity, removeFromCart, getCartItem, cart } = useCart()
-  const { vegMode, addDishFavorite, removeDishFavorite, isDishFavorite, getDishFavorites, getFavorites, addFavorite, removeFavorite, isFavorite, getDefaultAddress } = useProfile()
-  const { location: liveUserLocation } = useLocation()
-  const deliveryAddressMode = useMemo(() => {
-    if (typeof window === "undefined") return "saved"
-    return window.localStorage.getItem("deliveryAddressMode") || "saved"
-  }, [])
-  // Same origin as Home + Cart checkout so listed distance matches fee distance.
-  const deliveryUserPoint = useMemo(() => {
-    const saved = getDefaultAddress?.() || null
-    if (deliveryAddressMode !== "current" && saved) {
-      const fromSaved = parseGeoPoint(saved)
-      if (fromSaved) return fromSaved
-    }
-    return (
-      parseGeoPoint(liveUserLocation) ||
-      parseGeoPoint({
-        latitude: liveUserLocation?.latitude,
-        longitude: liveUserLocation?.longitude,
-        lat: liveUserLocation?.lat,
-        lng: liveUserLocation?.lng,
-      })
-    )
-  }, [deliveryAddressMode, getDefaultAddress, liveUserLocation])
+  const { vegMode, addDishFavorite, removeDishFavorite, isDishFavorite, getDishFavorites, getFavorites, addFavorite, removeFavorite, isFavorite, activeAddress } = useProfile()
+  
   const userLocation = useMemo(() => {
-    if (deliveryUserPoint) {
-      return {
-        ...(liveUserLocation || {}),
-        latitude: deliveryUserPoint.lat,
-        longitude: deliveryUserPoint.lng,
-        lat: deliveryUserPoint.lat,
-        lng: deliveryUserPoint.lng,
-      }
+    if (!activeAddress) return null
+    return {
+      latitude: activeAddress.location?.coordinates?.[1],
+      longitude: activeAddress.location?.coordinates?.[0],
+      lat: activeAddress.location?.coordinates?.[1],
+      lng: activeAddress.location?.coordinates?.[0],
     }
-    return liveUserLocation
-  }, [deliveryUserPoint, liveUserLocation])
+  }, [activeAddress])
+
+  const deliveryUserPoint = useMemo(() => {
+    if (!userLocation) return null
+    return {
+      lat: userLocation.latitude,
+      lng: userLocation.longitude
+    }
+  }, [userLocation])
   const { zoneId, zone, loading: loadingZone, isOutOfService } = useZone(userLocation)
   const [currentImageIndex, setCurrentImageIndex] = useState(0)
   const [highlightIndex, setHighlightIndex] = useState(0)

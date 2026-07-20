@@ -42,6 +42,7 @@ const normalizeLabel = (label) => {
     if (v === 'home' || v === 'Home') return 'Home';
     if (v === 'office' || v === 'Office') return 'Office';
     if (v === 'other' || v === 'Other') return 'Other';
+    if (v === 'Current Location' || v === 'current location') return 'Current Location';
     return 'Other';
 };
 
@@ -82,6 +83,9 @@ export const normalizeAddressInput = (dto = {}) => {
         phone: str(dto.phone),
         placeId: str(dto.placeId || dto.place_id)
     };
+    if (dto.type) {
+        normalized.type = dto.type;
+    }
     const location = resolveGeoPoint(dto);
     if (location) normalized.location = location;
     return normalized;
@@ -119,8 +123,8 @@ export const addAddress = async (userId, dto) => {
         return { address: existing.toObject() };
     }
 
-    // First address becomes default automatically
-    if (!user.addresses.some((a) => a.isDefault)) {
+    // First saved address becomes default automatically
+    if (address.type !== 'current' && address.label !== 'Current Location' && !user.addresses.some((a) => a.isDefault && a.type !== 'current' && a.label !== 'Current Location')) {
         address.isDefault = true;
     }
 

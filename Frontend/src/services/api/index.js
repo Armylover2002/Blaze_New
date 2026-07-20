@@ -2786,8 +2786,9 @@ export const userAPI = {
     const res = await userAPI.getAddresses();
     const addresses =
       res?.data?.data?.addresses || res?.data?.addresses || [];
+    // Only target the Current Location entry
     const target =
-      addresses.find((entry) => entry?.isDefault === true) || addresses[0];
+      addresses.find((entry) => entry?.type === "current" || entry?.label === "Current Location");
     const targetId = target?._id || target?.id;
 
     const resolvedCity = String(payload?.city || target?.city || "").trim();
@@ -2809,22 +2810,24 @@ export const userAPI = {
       zipCode: String(
         payload?.postalCode || payload?.zipCode || target?.zipCode || "",
       ).trim(),
+      label: "Current Location",
+      type: "current"
     };
 
+    if (!body.city || !body.state) {
+      return {
+        data: {
+          success: true,
+          message: "Location skipped (incomplete geocode)",
+          data: null,
+          persisted: false,
+        },
+      };
+    }
+
     if (!targetId) {
-      // No saved address yet: create a default one from the geocoded GPS
-      // location so it survives cache clears / re-login / device switches.
-      if (!body.city || !body.state) {
-        return {
-          data: {
-            success: true,
-            message: "Location skipped (incomplete geocode, no saved address)",
-            data: null,
-            persisted: false,
-          },
-        };
-      }
-      const created = await userAPI.addAddress({ ...body, label: "Home" });
+      // No current location saved yet: create it.
+      const created = await userAPI.addAddress(body);
       return {
         ...(created || {}),
         data: {

@@ -1,4 +1,5 @@
-import { Eye, MapPin, Package, User, Phone, Mail, Calendar, Clock, Truck, CreditCard, X, Receipt, CheckCircle2 } from "lucide-react"
+import { Eye, MapPin, Package, User, Phone, Mail, Calendar, Clock, Truck, CreditCard, X, Receipt, CheckCircle2, Loader2 } from "lucide-react"
+import { useEffect, useState } from "react"
 import {
   Dialog,
   DialogContent,
@@ -8,6 +9,7 @@ import {
 } from "@food/components/ui/dialog"
 import { formatScheduledAt, parseValidDate } from "@food/utils/scheduleTime"
 import { getCancellationDisplayLabel } from "@food/utils/cancellationDisplay"
+import { adminAPI } from "@food/api"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -110,19 +112,59 @@ const getPaymentStatusColor = (paymentStatus) => {
   return "text-slate-600"
 }
 
-export default function ViewOrderDialog({ isOpen, onOpenChange, order }) {
-  if (!order) return null
+export default function ViewOrderDialog({ isOpen, onOpenChange, order: orderProp }) {
+  const [detailOrder, setDetailOrder] = useState(null)
+  const [detailLoading, setDetailLoading] = useState(false)
+
+  useEffect(() => {
+    if (!isOpen || !orderProp) {
+      setDetailOrder(null)
+      return
+    }
+
+    const orderKey =
+      orderProp._id ||
+      orderProp.orderMongoId ||
+      orderProp.orderId ||
+      orderProp.id
+    if (!orderKey) {
+      setDetailOrder(orderProp)
+      return
+    }
+
+    let cancelled = false
+    setDetailLoading(true)
+    adminAPI
+      .getOrderById(orderKey)
+      .then((response) => {
+        if (cancelled) return
+        const full =
+          response?.data?.data?.order ||
+          response?.data?.order ||
+          null
+        setDetailOrder(full ? { ...orderProp, ...full } : orderProp)
+      })
+      .catch((err) => {
+        if (cancelled) return
+        debugWarn("Admin order detail fetch failed; using list row", err)
+        setDetailOrder(orderProp)
+      })
+      .finally(() => {
+        if (!cancelled) setDetailLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [isOpen, orderProp])
+
+  if (!orderProp) return null
+  const order = detailOrder || orderProp
   const statusHistory = normalizeStatusHistory(order.statusHistory)
 
   // Debug: Log order data to check billImageUrl
   if (order.billImageUrl) {
-    debugLog('?? Bill Image URL found:', order.billImageUrl)
-  } else {
-    debugLog('?? Bill Image URL not found in order:', {
-      orderId: order.orderId,
-      hasBillImageUrl: !!order.billImageUrl,
-      orderKeys: Object.keys(order)
-    })
+    debugLog('Bill Image URL found:', order.billImageUrl)
   }
 
   // Format address for display
@@ -185,6 +227,12 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order }) {
           </DialogDescription>
         </DialogHeader>
         <div className="px-6 py-6 space-y-6">
+          {detailLoading && (
+            <div className="flex items-center gap-2 text-sm text-slate-500">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              Loading full order history…
+            </div>
+          )}
           {/* Basic Order Information */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="space-y-4">

@@ -76,7 +76,7 @@ const dispatchPlanSchema = new mongoose.Schema(
 
 const deliveryAddressSchema = new mongoose.Schema(
     {
-        label: { type: String, enum: ['Home', 'Office', 'Other'], default: 'Home' },
+        label: { type: String, enum: ['Home', 'Office', 'Other', 'Current Location'], default: 'Home' },
         street: { type: String, required: true, trim: true },
         additionalDetails: { type: String, default: '', trim: true },
         city: { type: String, required: true, trim: true },
