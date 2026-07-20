@@ -35,6 +35,21 @@ export default function SubmitComplaint() {
     description: '',
   })
 
+  const [isOnline, setIsOnline] = useState(navigator.onLine)
+
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true)
+    const handleOffline = () => setIsOnline(false)
+
+    window.addEventListener('online', handleOnline)
+    window.addEventListener('offline', handleOffline)
+
+    return () => {
+      window.removeEventListener('online', handleOnline)
+      window.removeEventListener('offline', handleOffline)
+    }
+  }, [])
+
   useEffect(() => {
     if (!orderId) {
       debugError("Order ID missing from URL params")
@@ -87,6 +102,11 @@ export default function SubmitComplaint() {
 
   const handleSubmit = async (e) => {
     e.preventDefault()
+
+    if (!navigator.onLine) {
+      toast.error("No internet connection. Please check your network.")
+      return
+    }
 
     if (!formData.complaintType) {
       toast.error("Please select a complaint type")
@@ -163,14 +183,15 @@ export default function SubmitComplaint() {
           <ArrowLeft className="w-6 h-6 text-gray-700" />
         </button>
         <h1 className="text-lg font-semibold text-gray-800 ml-3">Submit Complaint</h1>
-        <button
-          type="button"
-          onClick={() => navigate("/user/profile/support")}
-          className="ml-auto text-sm font-semibold text-[#FF0000]"
-        >
-          View History
-        </button>
       </div>
+
+      {/* Network Status Banner */}
+      {!isOnline && (
+        <div className="bg-red-50 p-3 flex items-center gap-2 text-red-600 text-sm">
+          <AlertCircle className="w-5 h-5 flex-shrink-0" />
+          <p className="font-medium">No internet connection. Please check your network.</p>
+        </div>
+      )}
 
       {/* Order Info */}
       <div className="bg-white mx-4 mt-4 p-4 rounded-xl shadow-sm">

@@ -365,7 +365,7 @@ export default function RestaurantItemDetailSheet({
               <Minus className="h-5 w-5" />
             </button>
             <span className="text-lg font-bold min-w-[1.5rem] text-center text-gray-900 dark:text-white">
-              {quantity}
+              {quantity === 0 ? 1 : quantity}
             </span>
             <button
               type="button"
@@ -373,7 +373,7 @@ export default function RestaurantItemDetailSheet({
                 if (!shouldShowGrayscale) {
                   updateItemQuantity(
                     selectedItem,
-                    quantity + 1,
+                    quantity === 0 ? 2 : quantity + 1,
                     e,
                     getVariantForDish(selectedItem, selectedVariantId),
                   )
@@ -397,7 +397,7 @@ export default function RestaurantItemDetailSheet({
               if (!shouldShowGrayscale) {
                 updateItemQuantity(
                   selectedItem,
-                  quantity + 1,
+                  quantity === 0 ? 1 : quantity + 1,
                   e,
                   getVariantForDish(selectedItem, selectedVariantId),
                 )

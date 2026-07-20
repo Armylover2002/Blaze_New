@@ -1,6 +1,7 @@
 // src/context/cart-context.jsx
 import { createContext, useContext, useCallback, useEffect, useMemo, useState } from "react"
 import { buildCartLineId } from "@food/utils/foodVariants"
+import ReplaceCartModal from "@food/components/user/cart/ReplaceCartModal"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -179,6 +180,9 @@ export function CartProvider({ children }) {
   // Track last remove event for animation
   const [lastRemoveEvent, setLastRemoveEvent] = useState(null)
 
+  // Track pending item when user tries to add item from a different restaurant
+  const [pendingReplaceItem, setPendingReplaceItem] = useState(null)
+
   // Stable normalized cart — avoids redundant normalizeCartData calls across all action fns
   const normalizedCart = useMemo(() => normalizeCartData(cart), [cart])
 
@@ -224,8 +228,16 @@ export function CartProvider({ children }) {
           String(firstItemRestaurantId) !== String(newItemRestaurantId)
 
         if (hasNameMismatch || hasIdMismatch) {
-          const message = `Cart already contains items from "${firstItemRestaurantName || 'another restaurant'}". Please clear cart or complete order first.`
-          return { ok: false, error: message, code: 'RESTAURANT_MISMATCH' }
+          setPendingReplaceItem(prev => {
+            if (prev) return prev; // Keep the first modal if already open
+            return {
+              item,
+              sourcePosition,
+              previousRestaurantName: firstItemRestaurantName || 'another restaurant',
+              newRestaurantName: newItemRestaurantName || 'new restaurant'
+            };
+          })
+          return { ok: true, pendingReplace: true }
         }
       }
     }
@@ -527,7 +539,38 @@ export function CartProvider({ children }) {
      clearCart, cleanCartForRestaurant, replaceCart]
   )
 
-  return <CartContext.Provider value={value}>{children}</CartContext.Provider>
+  return (
+    <CartContext.Provider value={value}>
+      {children}
+      <ReplaceCartModal
+        isOpen={!!pendingReplaceItem}
+        onClose={() => setPendingReplaceItem(null)}
+        onConfirm={() => {
+          if (pendingReplaceItem) {
+            // Overwrite cart directly to avoid stale closures with addToCart
+            const newItem = { ...pendingReplaceItem.item, quantity: 1 };
+            setCart(normalizeCartData([newItem]));
+            
+            if (pendingReplaceItem.sourcePosition) {
+              setLastAddEvent({ 
+                product: { 
+                  id: newItem.id || newItem._id, 
+                  name: newItem.name, 
+                  imageUrl: newItem.image || newItem.imageUrl 
+                }, 
+                sourcePosition: pendingReplaceItem.sourcePosition 
+              });
+              setTimeout(() => setLastAddEvent(null), 1500);
+            }
+            
+            setPendingReplaceItem(null);
+          }
+        }}
+        previousRestaurantName={pendingReplaceItem?.previousRestaurantName}
+        newRestaurantName={pendingReplaceItem?.newRestaurantName}
+      />
+    </CartContext.Provider>
+  )
 }
 
 export function useCart() {

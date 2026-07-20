@@ -115,6 +115,7 @@ const RecommendedSection = memo(({ recommendedForYouRestaurants }) => {
     const itemId = String(item.id || item._id || "");
 
     const cartItem = {
+      ...item,
       id: lineItemId,
       lineItemId,
       itemId,
