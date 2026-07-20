@@ -144,7 +144,7 @@ export default function RegularOrderReport() {
     const fetchFilterData = async () => {
       try {
         // Fetch zones
-        const zonesRes = await adminAPI.getZones({ limit: 100, isActive: true })
+        const zonesRes = await adminAPI.getZones({ limit: 100, isActive: true, view: "summary" })
         if (zonesRes.data?.success) {
           setZones(zonesRes.data.data.zones || [])
         }

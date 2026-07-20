@@ -211,7 +211,7 @@ export default function EditRestaurant() {
     let mounted = true
     setZonesLoading(true)
     adminAPI
-      .getZones({ limit: 1000 })
+      .getZones({ limit: 1000, view: "summary" })
       .then((res) => {
         const list =
           res?.data?.data?.zones ||

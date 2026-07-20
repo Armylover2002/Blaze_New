@@ -106,7 +106,7 @@ export default function AdminHome() {
   useEffect(() => {
     const fetchZones = async () => {
       try {
-        const response = await adminAPI.getZones({ page: 1, limit: 1000 })
+        const response = await adminAPI.getZones({ page: 1, limit: 1000, view: "summary" })
         const list = response?.data?.data?.zones || []
         setZones(Array.isArray(list) ? list : [])
       } catch (error) {

@@ -1041,7 +1041,7 @@ export default function LandingPageManagement() {
   const fetchZones = async () => {
     try {
       setZonesLoading(true)
-      const response = await adminAPI.getZones({ limit: 1000, isActive: true })
+      const response = await adminAPI.getZones({ limit: 1000, isActive: true, view: "summary" })
       const list =
         response?.data?.data?.zones ||
         response?.data?.data?.data?.zones ||

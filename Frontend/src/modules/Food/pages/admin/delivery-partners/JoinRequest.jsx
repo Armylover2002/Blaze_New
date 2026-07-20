@@ -36,7 +36,7 @@ export default function JoinRequest() {
   useEffect(() => {
     const fetchZones = async () => {
       try {
-        const response = await adminAPI.getZones({ limit: 1000 })
+        const response = await adminAPI.getZones({ limit: 1000, view: "summary" })
         if (response.data && response.data.success) {
           setAllZones(response.data.data.zones || [])
         }

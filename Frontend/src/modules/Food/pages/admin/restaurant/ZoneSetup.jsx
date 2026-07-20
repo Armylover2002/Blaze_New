@@ -75,7 +75,7 @@ export default function ZoneSetup() {
   const fetchZones = async () => {
     try {
       setLoading(true)
-      const response = await adminAPI.getZones()
+      const response = await adminAPI.getZones({ view: "summary" })
       if (response.data?.success && response.data.data?.zones) {
         setZones(response.data.data.zones)
       }
@@ -250,10 +250,12 @@ export default function ZoneSetup() {
                       {zone.quickDeliveryEnabled === true ? "Enabled" : "Off"}
                     </span>
                   </div>
-                  {zone.coordinates && zone.coordinates.length > 0 && (
+                  {(zone.coordinatesCount ?? zone.coordinates?.length ?? 0) > 0 && (
                     <div className="flex items-center justify-between">
                       <span className="text-slate-600">Points:</span>
-                      <span className="font-medium text-slate-900">{zone.coordinates.length}</span>
+                      <span className="font-medium text-slate-900">
+                        {zone.coordinatesCount ?? zone.coordinates.length}
+                      </span>
                     </div>
                   )}
                 </div>

@@ -230,6 +230,61 @@ export const notificationAPI = {
     apiClient.delete("/food/notifications/inbox/all", config),
 };
 
+/** Collapse duplicate zone list fetches (StrictMode remounts, overlapping effects). */
+const adminZonesListCache = (() => {
+  let inFlight = new Map();
+  let cache = new Map();
+  const CACHE_MS = 2500;
+
+  const stableKey = (params = {}) => {
+    const normalized = { limit: 1000, ...params };
+    delete normalized._ts;
+    return JSON.stringify(
+      Object.keys(normalized)
+        .sort()
+        .reduce((acc, key) => {
+          acc[key] = normalized[key];
+          return acc;
+        }, {}),
+    );
+  };
+
+  const clear = () => {
+    inFlight.clear();
+    cache.clear();
+  };
+
+  const get = (params = {}) => {
+    const key = stableKey(params);
+    const now = Date.now();
+    const cached = cache.get(key);
+    if (cached && now - cached.at < CACHE_MS) {
+      return Promise.resolve(cached.res);
+    }
+
+    const existing = inFlight.get(key);
+    if (existing) return existing;
+
+    const request = apiClient
+      .get("/food/admin/zones", {
+        params: { limit: 1000, ...params },
+        contextModule: "admin",
+      })
+      .then((res) => {
+        cache.set(key, { at: Date.now(), res });
+        return res;
+      })
+      .finally(() => {
+        inFlight.delete(key);
+      });
+
+    inFlight.set(key, request);
+    return request;
+  };
+
+  return { get, clear };
+})();
+
 /** Admin API - new backend only (GET /auth/me, PATCH /auth/admin/profile, POST /auth/admin/change-password) */
 export const adminAPI = {
   getSidebarBadges: () =>
@@ -696,12 +751,8 @@ export const adminAPI = {
     apiClient.post("/food/admin/restaurants", body ?? {}, {
       contextModule: "admin",
     }),
-  /** List delivery zones. Query: limit, page, isActive, search */
-  getZones: (params = {}) =>
-    apiClient.get("/food/admin/zones", {
-      params: { limit: 1000, ...params },
-      contextModule: "admin",
-    }),
+  /** List delivery zones. Query: limit, page, isActive, search, view=summary|full */
+  getZones: (params = {}) => adminZonesListCache.get(params),
   /** Restaurant report (admin). */
   getRestaurantReport: (params = {}) =>
     apiClient.get("/food/admin/reports/restaurants", {
@@ -762,15 +813,27 @@ export const adminAPI = {
     apiClient.get(`/food/admin/zones/${id}`, { contextModule: "admin" }),
   /** Create zone. Body: name, zoneName?, country?, unit?, coordinates, isActive? */
   createZone: (body) =>
-    apiClient.post("/food/admin/zones", body ?? {}, { contextModule: "admin" }),
+    apiClient
+      .post("/food/admin/zones", body ?? {}, { contextModule: "admin" })
+      .finally(() => {
+        adminZonesListCache.clear();
+      }),
   /** Update zone. Body: name?, zoneName?, country?, unit?, coordinates?, isActive? */
   updateZone: (id, body) =>
-    apiClient.patch(`/food/admin/zones/${id}`, body ?? {}, {
-      contextModule: "admin",
-    }),
+    apiClient
+      .patch(`/food/admin/zones/${id}`, body ?? {}, {
+        contextModule: "admin",
+      })
+      .finally(() => {
+        adminZonesListCache.clear();
+      }),
   /** Delete zone */
   deleteZone: (id) =>
-    apiClient.delete(`/food/admin/zones/${id}`, { contextModule: "admin" }),
+    apiClient
+      .delete(`/food/admin/zones/${id}`, { contextModule: "admin" })
+      .finally(() => {
+        adminZonesListCache.clear();
+      }),
 
   /** Feedback Experience (admin) */
   getFeedbackExperiences: (params = {}) =>
