@@ -62,7 +62,7 @@ export default function SelectAddress() {
 
   const suggestions = useMemo(() => {
     const q = query.trim().toLowerCase()
-    const list = Array.isArray(addresses) ? addresses : []
+    const list = Array.isArray(addresses) ? addresses.filter(a => a.type !== "current" && a.label !== "Current Location") : []
     if (!q) return list.slice(0, 6)
     return list
       .map((a) => ({ a, text: `${a.label || ""} ${formatAddressLine(a)}`.trim().toLowerCase() }))

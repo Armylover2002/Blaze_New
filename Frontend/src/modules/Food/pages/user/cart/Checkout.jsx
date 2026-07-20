@@ -18,10 +18,9 @@ import { restaurantAPI } from "@food/api"
 export default function Checkout() {
   const navigate = useNavigate()
   const { cart, clearCart } = useCart()
-  const { getDefaultAddress, getDefaultPaymentMethod, setDefaultAddress, addresses, paymentMethods } = useProfile()
+  const { getDefaultAddress, getDefaultPaymentMethod, setDefaultAddress, addresses, paymentMethods, activeAddress } = useProfile()
   const { createOrder } = useOrders()
   const getAddressId = (address) => address?.id || address?._id || ""
-  const [selectedAddressId, setSelectedAddressId] = useState(getAddressId(getDefaultAddress()))
   const [selectedPayment, setSelectedPayment] = useState(getDefaultPaymentMethod()?.id || "")
   const [isPlacingOrder, setIsPlacingOrder] = useState(false)
 
@@ -33,17 +32,8 @@ export default function Checkout() {
   const [showCoupons, setShowCoupons] = useState(false)
   const [discount, setDiscount] = useState(0)
 
-  const selectedAddress = addresses.find(addr => getAddressId(addr) === selectedAddressId) || getDefaultAddress()
+  const selectedAddress = activeAddress
   const defaultPayment = paymentMethods.find(pm => pm.id === selectedPayment) || getDefaultPaymentMethod()
-
-  useEffect(() => {
-    const defaultId = getAddressId(getDefaultAddress())
-    const selectedStillExists = addresses.some(addr => getAddressId(addr) === selectedAddressId)
-
-    if (!selectedAddressId || !selectedStillExists) {
-      setSelectedAddressId(defaultId || "")
-    }
-  }, [addresses, selectedAddressId, getDefaultAddress])
 
   const subtotal = cart.reduce((sum, item) => sum + item.price * item.quantity * 83, 0)
   const otherPlatformSubtotal = cart.reduce((sum, item) => sum + (item.otherPrice || item.price) * item.quantity * 83, 0)
@@ -223,21 +213,69 @@ export default function Checkout() {
                 <CardContent className="space-y-4">
                   {addresses.length > 0 ? (
                     <div className="space-y-3">
-                      {addresses.map((address) => {
+                      {/* Current Location Section */}
+                      {(() => {
+                        const currentLocation = addresses.find(a => a.type === "current" || a.label === "Current Location");
+                        if (!currentLocation) return null;
+                        
+                        const addressId = getAddressId(currentLocation);
+                        const isSelected = selectedAddressId === addressId;
+                        const addressString = [
+                          currentLocation.street,
+                          currentLocation.additionalDetails,
+                          `${currentLocation.city}, ${currentLocation.state} ${currentLocation.zipCode}`
+                        ].filter(Boolean).join(", ");
+
+                        return (
+                          <div
+                            key={addressId || `current-${currentLocation.street}`}
+                            className={`border-2 rounded-lg p-4 cursor-pointer transition-colors ${isSelected
+                                ? "border-[#FF0000] bg-red-50 dark:bg-red-900/10"
+                                : "border-gray-200 dark:border-gray-800 hover:border-red-300 dark:hover:border-red-700"
+                              }`}
+                            onClick={() => {
+                              setSelectedAddressId(addressId);
+                            }}
+                          >
+                            <div className="flex items-start justify-between">
+                              <div className="flex-1">
+                                <div className="flex items-center gap-2">
+                                  <MapPin className="h-4 w-4 text-[#FF0000]" />
+                                  <h4 className="font-bold text-[#FF0000]">Current Location</h4>
+                                </div>
+                                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{addressString}</p>
+                              </div>
+                              {isSelected && <CheckCircle className="h-5 w-5 text-[#FF0000]" />}
+                            </div>
+                          </div>
+                        );
+                      })()}
+                      
+                      {/* Saved Addresses Section */}
+                      {(() => {
+                        const savedList = addresses.filter(a => a.type !== "current" && a.label !== "Current Location");
+                        if (savedList.length === 0) return null;
+                        
+                        return (
+                          <>
+                            <h4 className="font-bold text-sm text-gray-500 uppercase tracking-wider mt-6 mb-3 border-b pb-2">Saved Addresses</h4>
+                            {savedList.map((address) => {
                         const addressId = getAddressId(address)
                         const isSelected = selectedAddressId === addressId
                         const addressString = [
                           address.street,
                           address.additionalDetails,
-                          `${address.city}, ${address.state} ${address.zipCode}`
+                          address.city,
+                          address.state,
+                          address.zipCode
                         ].filter(Boolean).join(", ")
 
                         return (
                           <div
                             key={addressId || `${address.label}-${address.street}-${address.city}`}
                             className={`border-2 rounded-lg p-4 cursor-pointer transition-colors ${isSelected
-                                ? "border-[#FF0000] bg-red-50"
-                                : "border-gray-200 hover:border-red-300"
+                                ? "border-[#FF0000] bg-red-50 dark:bg-red-900/10"
+                                : "border-gray-200 dark:border-gray-800 hover:border-red-300 dark:hover:border-red-700"
                               }`}
                             onClick={() => {
                               setSelectedAddressId(addressId)
@@ -248,16 +286,19 @@ export default function Checkout() {
                               <div className="flex-1">
                                 {address.isDefault && (
                                   <Badge className="mb-2 bg-[#FF0000] text-white">Default</Badge>
+
                                 )}
                                 <p className="text-sm font-medium">{addressString}</p>
                               </div>
                               {isSelected && (
                                 <CheckCircle className="h-5 w-5 text-[#FF0000]" />
                               )}
-                            </div>
                           </div>
                         )
                       })}
+                          </>
+                        )
+                      })()}
                     </div>
                   ) : (
                     <div className="text-center py-8">

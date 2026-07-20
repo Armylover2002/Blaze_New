@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { ValidationError } from '../../../../core/auth/errors.js';
 
-const labelSchema = z.enum(['Home', 'Office', 'Other']).default('Home');
+const labelSchema = z.enum(['Home', 'Office', 'Other', 'Current Location']).default('Home');
 
 const coordSchema = z
     .number()
@@ -10,6 +10,7 @@ const coordSchema = z
 
 const createAddressSchema = z.object({
     label: labelSchema.optional(),
+    type: z.enum(['saved', 'current']).optional(),
     address: z.string().max(1000).optional().or(z.literal('')).transform((s) => String(s || '').trim()),
     formattedAddress: z.string().max(1000).optional().or(z.literal('')).transform((s) => String(s || '').trim()),
     placeId: z.string().max(255).optional().or(z.literal('')).transform((s) => String(s || '').trim()),

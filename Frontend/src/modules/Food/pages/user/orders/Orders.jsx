@@ -1089,7 +1089,9 @@ Order again from this restaurant in the ${companyName} app.`
                           {order.cancellationLabel || getCancellationDisplayLabel(order) || "Restaurant Cancelled"}
                         </span>
                       </div>
-                      <p className="text-xs text-gray-600 dark:text-gray-300 ml-7">Refund will be processed in 24-48 hours</p>
+                      {order.payment?.method !== 'cash' && order.payment?.method !== 'cod' && (
+                        <p className="text-xs text-gray-600 dark:text-gray-300 ml-7">Refund will be processed in 24-48 hours</p>
+                      )}
                     </div>
                   ) : paymentFailed ? (
                     <div className="flex items-center gap-2">

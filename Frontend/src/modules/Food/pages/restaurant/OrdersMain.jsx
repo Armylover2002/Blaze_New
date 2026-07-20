@@ -130,8 +130,8 @@ const transformOrderForList = (order) => {
       : getAllOrdersTimestamp(order);
   const isFoodQuick = String(order.deliveryMode || "").toLowerCase() === "quick";
   return {
-  orderId: order.orderId || order._id,
-  mongoId: order._id,
+  orderId: order.orderId || order.orderMongoId || order._id,
+  mongoId: order._id || order.orderMongoId || null,
   status: order.status || "pending",
   customerName: order.userId?.name || order.customerName || "Customer",
   type: "Home Delivery",
@@ -186,8 +186,8 @@ function CompletedOrders({ onSelectOrder, refreshToken = 0, searchQuery = "" }) 
           );
 
           const transformedOrders = completedOrders.map((order) => ({
-            orderId: order.orderId || order._id,
-            mongoId: order._id,
+            orderId: order.orderId || order.orderMongoId || order._id,
+            mongoId: order._id || order.orderMongoId || null,
             status: order.status || "delivered",
             customerName: order.userId?.name || order.customerName || "Customer",
             type: "Home Delivery",
@@ -298,6 +298,7 @@ function CompletedOrders({ onSelectOrder, refreshToken = 0, searchQuery = "" }) 
                   onClick={() =>
                     onSelectOrder?.({
                       orderId: order.orderId,
+                      mongoId: order.mongoId,
                       status: "Delivered",
                       customerName: order.customerName,
                       type: order.type,
@@ -400,8 +401,8 @@ function CancelledOrders({ onSelectOrder, refreshToken = 0, searchQuery = "" }) 
           );
 
           const transformedOrders = cancelledOrders.map((order) => ({
-            orderId: order.orderId || order._id,
-            mongoId: order._id,
+            orderId: order.orderId || order.orderMongoId || order._id,
+            mongoId: order._id || order.orderMongoId || null,
             status: order.status || "cancelled",
             customerName: order.userId?.name || order.customerName || "Customer",
             type: "Home Delivery",
@@ -518,6 +519,7 @@ function CancelledOrders({ onSelectOrder, refreshToken = 0, searchQuery = "" }) 
                   onClick={() =>
                     onSelectOrder?.({
                       orderId: order.orderId,
+                      mongoId: order.mongoId,
                       status: "Cancelled",
                       customerName: order.customerName,
                       type: order.type,
@@ -2072,7 +2074,11 @@ case "cancelled":
             {selectedOrder ? (
               <div className="flex-1 overflow-hidden h-full">
                 <OrderDetails
-                  orderId={selectedOrder.mongoId || selectedOrder.orderId}
+                  orderId={
+                    selectedOrder.mongoId ||
+                    selectedOrder.orderMongoId ||
+                    selectedOrder.orderId
+                  }
                   isSidebar={true}
                   onClose={() => setSelectedOrder(null)}
                 />
@@ -2906,7 +2912,7 @@ function PreparingOrders({
 
             return {
               orderId: order.orderId || order._id,
-              mongoId: order._id,
+              mongoId: order._id || order.orderMongoId || null,
               status: order.status || "preparing",
               customerName: order.userId?.name || "Customer",
               type:
@@ -3225,7 +3231,7 @@ function ReadyOrders({ onSelectOrder, refreshToken = 0, searchQuery = "" }) {
 
           const transformedOrders = readyOrders.map((order) => ({
             orderId: order.orderId || order._id,
-            mongoId: order._id,
+            mongoId: order._id || order.orderMongoId || null,
             status: order.status || "ready",
             customerName: order.userId?.name || "Customer",
             type:
@@ -3350,7 +3356,7 @@ const OutForDeliveryOrders = ({ onSelectOrder, refreshToken = 0, searchQuery = "
 
           const transformedOrders = outForDeliveryOrders.map((order) => ({
             orderId: order.orderId || order._id,
-            mongoId: order._id,
+            mongoId: order._id || order.orderMongoId || null,
             status: order.status || "out_for_delivery",
             customerName: order.userId?.name || "Customer",
             type:
@@ -3477,7 +3483,7 @@ function ScheduledOrders({ onSelectOrder, refreshToken = 0, searchQuery = "" }) 
               formatScheduledAtShort(order.scheduledAt) || "Scheduled";
             return {
             orderId: order.orderId || order._id,
-            mongoId: order._id,
+            mongoId: order._id || order.orderMongoId || null,
             status: order.status || order.orderStatus || "scheduled",
             customerName: order.userId?.name || "Customer",
             type: order.deliveryFleet === "standard" ? "Home Delivery" : "Express Delivery",

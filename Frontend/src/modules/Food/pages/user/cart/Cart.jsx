@@ -222,7 +222,7 @@ export default function Cart() {
   const hasFoodItems = cart.some((item) => (item?.orderType || "food") === "food")
   const isQuickCart = cart.length > 0 && cart.every((item) => (item?.orderType || "food") === "quick")
 
-  const { getDefaultAddress, getDefaultPaymentMethod, setDefaultAddress, addresses, paymentMethods, userProfile, vegMode } = useProfile()
+  const { getDefaultAddress, getDefaultPaymentMethod, setDefaultAddress, addresses, paymentMethods, userProfile, vegMode, activeAddress, activeAddressId, setActiveAddressId } = useProfile()
   const { createOrder } = useOrders()
   const { openLocationSelector } = useLocationSelector()
   const { location: currentLocation, loading: currentLocationLoading } = useUserLocation() // Get live location address
@@ -280,15 +280,7 @@ export default function Cart() {
   const [showOrderSuccess, setShowOrderSuccess] = useState(false)
   const [placedOrderId, setPlacedOrderId] = useState(null)
   const [placedOrderData, setPlacedOrderData] = useState(null)
-  const [selectedAddressId, setSelectedAddressId] = useState(null)
-  const [deliveryAddressMode, setDeliveryAddressMode] = useState(() => {
-    try {
-      if (typeof window === "undefined") return "saved"
-      return localStorage.getItem("deliveryAddressMode") || "saved"
-    } catch {
-      return "saved"
-    }
-  })
+
 
   useEffect(() => {
     const audio = new Audio(zoopSound)
@@ -422,68 +414,12 @@ export default function Cart() {
     return label || "Saved address"
   }
   const sanitizeRecipientPhone = (value) => String(value || "").replace(/[^\d+]/g, "").slice(0, 14)
-  const savedAddress = getDefaultAddress()
-  const selectedAddress = addresses.find((addr) => getAddressId(addr) && getAddressId(addr) === selectedAddressId)
-
-  const currentLocationAddress = useMemo(() => {
-    // `LocationSelectorOverlay` updates backend + localStorage, but Cart's live hook might lag.
-    // So we fall back to `localStorage.userLocation` when `currentLocation` doesn't have a usable payload yet.
-    let locFromStorage = null
-    try {
-      const storedRaw = localStorage.getItem("userLocation")
-      locFromStorage = storedRaw ? JSON.parse(storedRaw) : null
-    } catch {
-      locFromStorage = null
-    }
-
-    const loc = currentLocation?.latitude && currentLocation?.longitude ? currentLocation : locFromStorage
-    if (!loc?.latitude || !loc?.longitude) return null
-
-    const formattedAddress = loc?.formattedAddress || loc?.address || ""
-    if (!formattedAddress || formattedAddress === "Select location") return null
-
-    return {
-      // Backend deliveryAddressSchema expects label in ['Home','Office','Other'].
-      label: "Home",
-      formattedAddress,
-      address: formattedAddress,
-      street: loc?.street || loc?.address || loc?.area || "Current Location",
-      additionalDetails: loc?.area || "",
-      city: loc?.city || loc?.area || "Current City",
-      state: loc?.state || loc?.city || "Current State",
-      zipCode: loc?.postalCode || loc?.zipCode || "",
-      phone: userProfile?.phone || "",
-      location: {
-        type: "Point",
-        coordinates: [loc.longitude, loc.latitude], // [lng, lat]
-      },
-    }
-  }, [
-    currentLocation?.latitude,
-    currentLocation?.longitude,
-    currentLocation?.formattedAddress,
-    currentLocation?.address,
-    currentLocation?.street,
-    currentLocation?.area,
-    currentLocation?.city,
-    currentLocation?.state,
-    currentLocation?.postalCode,
-    currentLocation?.zipCode,
-    userProfile?.phone,
-    // Re-evaluate derived address when mode changes (overlay closes -> Cart rerenders).
-    deliveryAddressMode,
-  ])
-
-  const defaultAddress = useMemo(() => {
-    return deliveryAddressMode === "current"
-      ? currentLocationAddress || selectedAddress || savedAddress || null
-      : selectedAddress || savedAddress || currentLocationAddress || null
-  }, [deliveryAddressMode, currentLocationAddress, selectedAddress, savedAddress])
+  const defaultAddress = activeAddress
 
   const resolvedDeliveryAddressId = useMemo(() => {
-    if (deliveryAddressMode === "current") return undefined
+    if (activeAddress?.type === "current") return undefined
     return getAddressId(defaultAddress) || undefined
-  }, [deliveryAddressMode, defaultAddress])
+  }, [activeAddress, defaultAddress])
 
   const hasSavedAddress = Boolean(defaultAddress && formatFullAddress(defaultAddress))
   const recipientName = String(recipientDetails.name || "").trim() || userProfile?.name || "Your Name"
@@ -498,17 +434,7 @@ export default function Cart() {
   const { zoneId } = useZone(zoneLocation) // Prefer selected/saved address zone
   const defaultPayment = getDefaultPaymentMethod()
 
-  useEffect(() => {
-    // Sync delivery mode from overlay/localStorage changes.
-    // No dependency array: overlay open/close re-renders Cart via provider state update,
-    // even when GPS coords don't move enough to update `currentLocation`.
-    try {
-      const mode = localStorage.getItem("deliveryAddressMode") || "saved"
-      setDeliveryAddressMode((prev) => (prev === mode ? prev : mode))
-    } catch {
-      // ignore
-    }
-  })
+  // Removed legacy deliveryAddressMode effect
 
   useEffect(() => {
     if (typeof window === "undefined") return
@@ -580,18 +506,7 @@ export default function Cart() {
     }
   }, [note, showNoteInput])
 
-  useEffect(() => {
-    if (deliveryAddressMode === "current") {
-      setSelectedAddressId(null)
-    }
-  }, [deliveryAddressMode])
-
-  useEffect(() => {
-    const defaultId = getAddressId(savedAddress)
-    if (deliveryAddressMode !== "current" && !selectedAddressId && defaultId) {
-      setSelectedAddressId(defaultId)
-    }
-  }, [savedAddress, selectedAddressId, deliveryAddressMode])
+  // Cleaned up old selectedAddressId effects
 
   // Get restaurant ID from cart or restaurant data
   // Priority: restaurantData > cart[0].restaurantId
@@ -1125,19 +1040,16 @@ export default function Cart() {
       return undefined
     }
 
-    // Wait for restaurant resolve so restaurantId does not flip mid-request.
-    if (loadingRestaurant) {
-      return undefined
-    }
+      // Wait for restaurant resolve so restaurantId does not flip mid-request.
+      if (loadingRestaurant) {
+        return
+      }
 
-    if (suppressPricingRecalcRef.current) {
-      suppressPricingRecalcRef.current = false
-      return undefined
-    }
+      if (suppressPricingRecalcRef.current) {
+        suppressPricingRecalcRef.current = false
+        return
+      }
 
-    let cancelled = false
-    const timer = setTimeout(async () => {
-      if (cancelled) return
       try {
         if (!cancelled) setLoadingPricing(true)
         const result = await runSequencedFoodCalculate()
@@ -1175,7 +1087,7 @@ export default function Cart() {
       clearTimeout(timer)
       pricingRequestControllerRef.current?.abort?.()
     }
-  }, [foodPricingRequestKey, loadingRestaurant])
+  }, [cart, defaultAddress, appliedCoupon, couponCode, restaurantId, deliveryType, isScheduled, scheduledDate, scheduledTime, foodPricingRequestKey, loadingRestaurant])
 
   // Fetch wallet balance
   useEffect(() => {
@@ -1532,7 +1444,7 @@ export default function Cart() {
     try {
       const addressId = getAddressId(address)
       if (addressId) {
-        setSelectedAddressId(addressId)
+        setActiveAddressId(addressId)
         await setDefaultAddress(addressId)
       }
 
@@ -1578,11 +1490,7 @@ export default function Cart() {
           : `${address.street}, ${address.city}, ${address.state}${address.zipCode ? ` ${address.zipCode}` : ''}`
       }
       localStorage.setItem("userLocation", JSON.stringify(locationData))
-      // User selected a saved address from Cart; prefer saved mode.
-      try {
-        localStorage.setItem("deliveryAddressMode", "saved")
-        setDeliveryAddressMode("saved")
-      } catch { }
+      // User selected a saved address from Cart
 
       toast.success(`${address.label || "Saved"} address selected!`)
     } catch (error) {
@@ -2387,7 +2295,7 @@ export default function Cart() {
     return (
       <MixedSharedCart
         initialAddress={defaultAddress}
-        addressMode={deliveryAddressMode}
+        addressMode={activeAddress?.type === "current" ? "current" : "saved"}
       />
     )
   }
@@ -2396,7 +2304,7 @@ export default function Cart() {
     return (
       <QuickSharedCart
         initialAddress={defaultAddress}
-        addressMode={deliveryAddressMode}
+        addressMode={activeAddress?.type === "current" ? "current" : "saved"}
       />
     )
   }
@@ -3015,20 +2923,20 @@ export default function Cart() {
                         <p className="text-sm md:text-base text-gray-800 dark:text-gray-200">
                           Delivery at{" "}
                           <span className="font-semibold">
-                            {deliveryAddressMode === "current" ? "Current location" : "Location"}
+                            {activeAddress?.type === "current" ? "Current location" : "Location"}
                           </span>
                         </p>
-                        {deliveryAddressMode === "current" ? (
+                        {activeAddress?.type === "current" ? (
                           <div className="mt-1">
-                            {currentLocationLoading || !currentLocationAddress ? (
+                            {currentLocationLoading ? (
                               <p className="text-xs md:text-sm text-gray-500 dark:text-gray-400 animate-pulse">
                                 Finding your current address...
                               </p>
                             ) : (
                               <p className="text-xs md:text-sm text-gray-500 dark:text-gray-400 line-clamp-2">
-                                {formatFullAddress(currentLocationAddress) ||
-                                  currentLocationAddress?.formattedAddress ||
-                                  currentLocationAddress?.address ||
+                                {formatFullAddress(activeAddress) ||
+                                  activeAddress?.formattedAddress ||
+                                  activeAddress?.address ||
                                   "Add delivery address"}
                               </p>
                             )}
@@ -3077,7 +2985,7 @@ export default function Cart() {
                         <div className="mt-4 space-y-3">
                           {addresses.map((address) => {
                             const addressId = getAddressId(address)
-                            const isSelected = addressId && addressId === selectedAddressId
+                            const isSelected = addressId && addressId === activeAddressId
                             return (
                               <button
                                 key={addressId || `${address.label}-${address.street}-${address.city}`}

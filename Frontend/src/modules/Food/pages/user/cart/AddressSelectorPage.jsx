@@ -121,10 +121,13 @@ export default function AddressSelectorPage() {
     "/food/user"
   const goBack = useAppBackNavigation()
   const { location: geoLocation, loading, requestLocation, reverseGeocode } = useGeoLocation()
-  const { addresses = [], addAddress, updateAddress, setDefaultAddress, deleteAddress, userProfile } = useProfile()
+  const { addresses = [], addAddress, updateAddress, setDefaultAddress, deleteAddress, userProfile, setActiveAddressId } = useProfile()
+  const savedAddresses = useMemo(() => addresses.filter(a => a.type !== "current" && a.label !== "Current Location"), [addresses]);
+  const currentLocation = useMemo(() => addresses.find(a => a.type === "current" || a.label === "Current Location"), [addresses]);
   const [addressToDelete, setAddressToDelete] = useState(null)
   const [isDeleting, setIsDeleting] = useState(false)
   const [showAddressForm, setShowAddressForm] = useState(false)
+  const [editAddressId, setEditAddressId] = useState(null)
   const [mapPosition, setMapPosition] = useState([22.7196, 75.8577]) // Default Indore coordinates [lat, lng]
   const [addressFormData, setAddressFormData] = useState({
     street: "",
@@ -449,9 +452,41 @@ export default function AddressSelectorPage() {
         setMapPosition(newPos)
         setCurrentAddress(loc.formattedAddress || loc.address || "")
         
-        // Persist
+        // Persist local
         persistSelectedLocation(loc)
         try { localStorage.setItem("deliveryAddressMode", "current") } catch {}
+        
+        // Save to Mongo
+        try {
+          const payload = {
+            street: resolveStreetFromGeocode(loc, loc.street || loc.address || "Current Location"),
+            additionalDetails: loc.area || "",
+            city: loc.city || loc.area || "Current City",
+            state: loc.state || loc.city || "Current State",
+            zipCode: loc.postalCode || loc.zipCode || "",
+            type: "current",
+            label: "Current Location",
+            address: loc.formattedAddress || loc.address || "Current Location",
+            location: {
+              type: "Point",
+              coordinates: [loc.longitude, loc.latitude]
+            }
+          }
+          const existingCurrent = addresses.find(a => a.type === "current")
+          let saved
+          if (existingCurrent) {
+            const existingId = existingCurrent._id || existingCurrent.id
+            if (existingId) saved = await updateAddress(existingId, payload)
+          } else {
+            saved = await addAddress(payload)
+          }
+          if (saved) {
+             const savedId = saved._id || saved.id
+             if (savedId) setActiveAddressId(savedId)
+          }
+        } catch (e) {
+          debugError("Failed to save current location to DB:", e)
+        }
         
         // Update map
         panMapTo(loc.latitude, loc.longitude, 17)
@@ -485,6 +520,7 @@ export default function AddressSelectorPage() {
   const handleSelectSavedAddress = async (address) => {
     const id = getAddressId(address)
     if (id) {
+      setActiveAddressId(id)
       await setDefaultAddress(id)
       persistSelectedLocation(buildLocationPayloadFromAddress(address))
       try { localStorage.setItem("deliveryAddressMode", "saved") } catch {}
@@ -514,6 +550,7 @@ export default function AddressSelectorPage() {
     setIsKeywordSearching(false)
     setSelectedPlaceId("")
     setSelectedFormattedAddress("")
+    setEditAddressId(null)
   }
 
   const scrollFieldIntoView = useCallback((fieldName) => {
@@ -674,10 +711,19 @@ export default function AddressSelectorPage() {
         latitude: mapPosition[0],
         longitude: mapPosition[1]
       }
-      const created = await addAddress(payload)
+      let created;
+      if (editAddressId) {
+        created = await updateAddress(editAddressId, payload)
+      } else {
+        created = await addAddress(payload)
+      }
+      
       if (created) {
-        const id = getAddressId(created)
-        if (id) await setDefaultAddress(id)
+        const id = getAddressId(created || payload)
+        if (id) {
+          setActiveAddressId(id)
+          await setDefaultAddress(id)
+        }
         persistSelectedLocation(buildLocationPayloadFromAddress(created || payload))
         try { localStorage.setItem("deliveryAddressMode", "saved") } catch {}
         toast.success("Address saved")
@@ -693,7 +739,8 @@ export default function AddressSelectorPage() {
         }, 500)
       }
     } catch (error) {
-      toast.error("Failed to save address")
+      console.error("Address form submit error:", error)
+      toast.error(error?.response?.data?.message || error?.message || "Failed to save address")
     } finally {
       setLoadingAddress(false)
     }
@@ -943,18 +990,28 @@ export default function AddressSelectorPage() {
 
       <div className="flex-1 overflow-y-auto pb-10">
         <div className="p-4 bg-gray-50 dark:bg-gray-900 border-b dark:border-gray-800">
+          <h2 className="text-sm font-bold uppercase tracking-wider text-gray-500 mb-4">Current Location</h2>
+          {currentLocation ? (
+            <button 
+              onClick={() => handleSelectSavedAddress(currentLocation)}
+              className="w-full flex items-center gap-4 p-4 bg-white dark:bg-[#1a1a1a] rounded-xl shadow-sm hover:shadow-md transition-all group mb-4"
+            >
+              <div className="h-10 w-10 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center">
+                <Navigation className="h-5 w-5 text-[#FF0000]" />
+              </div>
+              <div className="text-left flex-1">
+                <p className="font-bold text-[#FF0000]">Current Location</p>
+                <p className="text-xs text-gray-500 line-clamp-1">{currentLocation.address || currentAddress || "Unknown location"}</p>
+              </div>
+              <ChevronRight className="h-5 w-5 text-gray-400" />
+            </button>
+          ) : null}
           <button 
             onClick={handleUseCurrentLocation}
-            className="w-full flex items-center gap-4 p-4 bg-white dark:bg-[#1a1a1a] rounded-xl shadow-sm hover:shadow-md transition-all group"
+            className="w-full flex items-center justify-center gap-2 p-3 bg-red-50 dark:bg-red-900/10 text-red-600 dark:text-red-400 font-semibold rounded-xl border border-red-100 dark:border-red-900/30 hover:bg-red-100 dark:hover:bg-red-900/20 transition-colors"
           >
-            <div className="h-10 w-10 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center">
-              <Navigation className="h-5 w-5 text-[#FF0000]" />
-            </div>
-            <div className="text-left flex-1">
-              <p className="font-bold text-[#FF0000]">Use Current Location</p>
-              <p className="text-xs text-gray-500 line-clamp-1">{currentAddress || "Enable GPS for accuracy"}</p>
-            </div>
-            <ChevronRight className="h-5 w-5 text-gray-400" />
+            <Crosshair className="h-4 w-4" />
+            Refresh GPS Location
           </button>
         </div>
 
@@ -967,13 +1024,13 @@ export default function AddressSelectorPage() {
           </div>
 
           <div className="space-y-4">
-            {addresses.length === 0 ? (
+            {savedAddresses.length === 0 ? (
               <div className="text-center py-10 opacity-50">
                 <MapPin className="h-12 w-12 mx-auto mb-2 text-gray-400" />
                 <p>No addresses saved yet</p>
               </div>
             ) : (
-              addresses.map((addr, idx) => {
+              savedAddresses.map((addr, idx) => {
                 const Icon = getAddressIcon(addr)
                 const addrId = getAddressId(addr);
                 return (
@@ -990,21 +1047,48 @@ export default function AddressSelectorPage() {
                           <p className="font-bold text-gray-900 dark:text-white capitalize">{addr.label || "Address"}</p>
                         </div>
                         <p className="text-xs text-gray-500 line-clamp-2 leading-relaxed">
-                          {[addr.additionalDetails, addr.street, addr.city].filter(Boolean).join(", ")}
+                          {[addr.street, addr.additionalDetails, addr.city, addr.state, addr.zipCode].filter(Boolean).join(", ")}
                         </p>
                       </div>
                     </button>
                     {addrId && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setAddressToDelete(addrId);
-                        }}
-                        className="absolute right-4 top-1/2 -translate-y-1/2 p-2 text-red-500 hover:bg-red-100 dark:hover:bg-red-900/20 rounded-full transition-colors"
-                        title="Delete Address"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-2">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setAddressFormData({
+                              street: addr.street || "",
+                              city: addr.city || "",
+                              state: addr.state || "",
+                              zipCode: addr.zipCode || "",
+                              additionalDetails: addr.additionalDetails || "",
+                              label: addr.label || "Home",
+                              phone: addr.phone || "",
+                            })
+                            if (addr.location?.coordinates) {
+                              setMapPosition([addr.location.coordinates[1], addr.location.coordinates[0]])
+                            } else if (addr.latitude && addr.longitude) {
+                              setMapPosition([addr.latitude, addr.longitude])
+                            }
+                            setEditAddressId(addrId)
+                            setShowAddressForm(true)
+                          }}
+                          className="p-2 text-blue-500 hover:bg-blue-100 dark:hover:bg-blue-900/20 rounded-full transition-colors"
+                          title="Edit Address"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-pencil"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setAddressToDelete(addrId);
+                          }}
+                          className="p-2 text-red-500 hover:bg-red-100 dark:hover:bg-red-900/20 rounded-full transition-colors"
+                          title="Delete Address"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     )}
                   </div>
                 )

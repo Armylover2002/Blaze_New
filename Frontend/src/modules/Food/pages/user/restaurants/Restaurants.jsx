@@ -42,8 +42,16 @@ const pickRestaurantImage = (restaurant) => {
 }
 
 export default function Restaurants() {
-  const { addFavorite, removeFavorite, isFavorite } = useProfile()
-  const { location: userLocation } = useLocation()
+  const { addFavorite, removeFavorite, isFavorite, activeAddress } = useProfile()
+  
+  const userLocation = useMemo(() => {
+    if (!activeAddress) return null
+    return {
+      latitude: activeAddress.location?.coordinates?.[1],
+      longitude: activeAddress.location?.coordinates?.[0]
+    }
+  }, [activeAddress])
+
   const { zoneId } = useZone(userLocation)
   const [restaurants, setRestaurants] = useState([])
   const [loading, setLoading] = useState(true)
