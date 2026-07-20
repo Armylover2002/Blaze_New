@@ -1119,14 +1119,6 @@ export default function Cart() {
   // Calculate pricing once per meaningful cart/address/coupon/mode change.
   // Debounce coalesces StrictMode remount + cascading restaurantId/address settles.
   useEffect(() => {
-    let cancelled = false
-    const debounceMs = 300
-    const timerId = setTimeout(async () => {
-      // Don't calculate here if it's a mixed or quick cart - those components handle their own pricing
-      if (cart.length === 0 || !hasSavedAddress || (hasQuickItems && hasFoodItems) || isQuickCart) {
-        if (!cancelled) setPricing(null)
-        return
-      }
     if (!foodPricingRequestKey) {
       setPricing(null)
       setLoadingPricing(false)
@@ -1173,17 +1165,6 @@ export default function Cart() {
         }
         // Only clear if this is still the latest request failure path (non-stale throws)
         if (!cancelled) setPricing(null)
-      } finally {
-        if (!cancelled) setLoadingPricing(false)
-      }
-    }, debounceMs)
-
-    return () => {
-      cancelled = true
-      clearTimeout(timerId)
-    }
-  }, [cart, defaultAddress, appliedCoupon, couponCode, restaurantId, deliveryType, isScheduled, scheduledDate, scheduledTime])
-        setPricing(null)
       } finally {
         if (!cancelled) setLoadingPricing(false)
       }
