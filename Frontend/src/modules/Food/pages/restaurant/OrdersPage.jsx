@@ -67,7 +67,9 @@ export default function OrdersPage() {
   const showOrdersSkeleton = useDelayedLoading(loading, { delay: 120, minDuration: 360 })
 
   // Restaurant notifications hook
-  const { newOrder, clearNewOrder, isConnected } = useRestaurantNotifications()
+  const { newOrder, clearNewOrder, isConnected } = useRestaurantNotifications({
+    enableSound: false,
+  })
 
   const notificationOrder = newOrder
     ? {
