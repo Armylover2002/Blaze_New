@@ -1040,6 +1040,9 @@ export default function Cart() {
       return undefined
     }
 
+    let cancelled = false
+    const debounceMs = 200
+    const timer = setTimeout(async () => {
       // Wait for restaurant resolve so restaurantId does not flip mid-request.
       if (loadingRestaurant) {
         return
@@ -1080,7 +1083,7 @@ export default function Cart() {
       } finally {
         if (!cancelled) setLoadingPricing(false)
       }
-    }, 200)
+    }, debounceMs)
 
     return () => {
       cancelled = true
