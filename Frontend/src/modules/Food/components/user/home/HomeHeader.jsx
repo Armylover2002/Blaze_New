@@ -10,7 +10,9 @@ import {
   Bell,
   BellOff,
   X,
+  ShoppingCart,
 } from "lucide-react";
+import { useCart } from "@food/context/CartContext";
 import { cn } from "@/lib/utils";
 import { Switch } from "@food/components/ui/switch";
 import {
@@ -107,6 +109,8 @@ export default function HomeHeader({
   embedded = false,
 }) {
   const navigate = useNavigate();
+  const { cart } = useCart();
+  const cartItemCount = cart?.reduce((total, item) => total + (item.quantity || 1), 0) || 0;
   const [isListening, setIsListening] = useState(false);
   const routerLocation = useRouterLocation();
   const headerRef = useRef(null);
@@ -287,6 +291,26 @@ export default function HomeHeader({
 
           {!embedded && (
             <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+              <Link
+                to="/food/user/cart"
+                className={cn(
+                  "relative rounded-full p-1.5 transition-all hover:scale-105 active:scale-95 sm:p-2",
+                  isLightChrome
+                    ? "bg-gray-100 text-gray-700"
+                    : isDarkTheme
+                      ? "bg-white/20 text-white"
+                      : "bg-black/5 text-gray-800",
+                )}
+                aria-label="Open cart"
+              >
+                <ShoppingCart className="h-4 w-4 sm:h-5 sm:w-5" strokeWidth={2} />
+                {cartItemCount > 0 && (
+                  <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-[#FF0000] text-[10px] font-bold text-white">
+                    {cartItemCount > 9 ? "9+" : cartItemCount}
+                  </span>
+                )}
+              </Link>
+
               <Link
                 to={walletPath}
                 className={cn(

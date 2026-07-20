@@ -10,6 +10,14 @@ import { Button } from "@food/components/ui/button"
 import { useCart } from "@food/context/CartContext"
 import { useProfile } from "@food/context/ProfileContext"
 import { useOrders } from "@food/context/OrdersContext"
+import RestaurantItemDetailSheet from "@food/components/user/restaurant-details/sheets/RestaurantItemDetailSheet"
+import {
+  buildCartLineId,
+  getDefaultFoodVariant,
+  getFoodDisplayPrice,
+  getFoodVariants,
+  hasFoodVariants,
+} from "@food/utils/foodVariants"
 import QuickSharedCart from "@food/pages/user/cart/QuickSharedCart"
 import MixedSharedCart from "@food/pages/user/cart/MixedSharedCart"
 import { useLocation as useUserLocation } from "@food/hooks/useLocation"
@@ -227,6 +235,57 @@ export default function Cart() {
   const { openLocationSelector } = useLocationSelector()
   const { location: currentLocation, loading: currentLocationLoading } = useUserLocation() // Get live location address
 
+  const [showItemDetail, setShowItemDetail] = useState(false)
+  const [selectedProduct, setSelectedProduct] = useState(null)
+  const [selectedItemImageIndex, setSelectedItemImageIndex] = useState(0)
+  const [selectedVariantId, setSelectedVariantId] = useState("")
+
+  const getDishQuantity = (dish, preferredVariantId = "") => {
+    const variants = getFoodVariants(dish);
+    const variant = variants.find((v) => String(v.id) === String(preferredVariantId)) || variants[0];
+    const lineItemId = buildCartLineId(dish?.itemId || dish?._id || dish?.id || "", variant?.id || variant?._id || "");
+    const cartItem = cart.find((entry) => entry.id === lineItemId);
+    return cartItem?.quantity || 0;
+  };
+
+  const getVariantForDish = (dish, preferredVariantId = "") => {
+    const variants = getFoodVariants(dish);
+    if (variants.length === 0) return null;
+    return (
+      variants.find((variant) => String(variant.id) === String(preferredVariantId || "")) ||
+      variants[0]
+    );
+  };
+
+  const updateItemQuantityDetail = (dish, newQuantity, event = null, preferredVariant = null) => {
+    const resolvedVariant = preferredVariant || getDefaultFoodVariant(dish);
+    const lineItemId = buildCartLineId(dish?.itemId || dish?._id || dish?.id || "", resolvedVariant?.id || resolvedVariant?._id || "");
+    
+    if (newQuantity <= 0) {
+      updateQuantity(lineItemId, 0);
+      return;
+    }
+
+    const existingCartItem = cart.find((entry) => entry.id === lineItemId);
+    if (existingCartItem) {
+      updateQuantity(lineItemId, newQuantity);
+      return;
+    }
+
+    addToCart({
+      ...dish,
+      id: lineItemId,
+      lineItemId,
+      itemId: String(dish.itemId || dish._id || dish.id || ""),
+      variantId: resolvedVariant?.id || "",
+      variantName: resolvedVariant?.name || "",
+      variantPrice: resolvedVariant?.price ?? dish.price,
+      price: resolvedVariant?.price ?? dish.price,
+      otherPrice: resolvedVariant?.otherPrice ?? dish.otherPrice ?? 0,
+      quantity: newQuantity
+    });
+  };
+
   const [showCoupons, setShowCoupons] = useState(false)
   const [appliedCoupon, setAppliedCoupon] = useState(null)
   const [couponCode, setCouponCode] = useState("")
@@ -319,6 +378,28 @@ export default function Cart() {
   const [pricing, setPricing] = useState(null)
   const [loadingPricing, setLoadingPricing] = useState(false)
   const [roadDistanceKm, setRoadDistanceKm] = useState(null)
+  const [menuData, setMenuData] = useState(null)
+
+  useEffect(() => {
+    let isMounted = true
+    const fetchMenuData = async () => {
+      if (restaurantData && restaurantAPI?.getMenuByRestaurantId) {
+        try {
+          const restaurantIdToUse = restaurantData.restaurantId || restaurantData._id
+          if (!restaurantIdToUse) return
+          const res = await restaurantAPI.getMenuByRestaurantId(restaurantIdToUse)
+          if (isMounted && res) {
+            const parsedMenu = res.data?.data?.menu || res.data?.menu || res.data || res;
+            setMenuData(parsedMenu);
+          }
+        } catch (error) {
+          debugWarn("Failed to fetch menu data for cart items:", error)
+        }
+      }
+    }
+    fetchMenuData()
+    return () => { isMounted = false }
+  }, [restaurantData])
 
   // Addons state
   const [addons, setAddons] = useState([])
@@ -1119,14 +1200,6 @@ export default function Cart() {
   // Calculate pricing once per meaningful cart/address/coupon/mode change.
   // Debounce coalesces StrictMode remount + cascading restaurantId/address settles.
   useEffect(() => {
-    let cancelled = false
-    const debounceMs = 300
-    const timerId = setTimeout(async () => {
-      // Don't calculate here if it's a mixed or quick cart - those components handle their own pricing
-      if (cart.length === 0 || !hasSavedAddress || (hasQuickItems && hasFoodItems) || isQuickCart) {
-        if (!cancelled) setPricing(null)
-        return
-      }
     if (!foodPricingRequestKey) {
       setPricing(null)
       setLoadingPricing(false)
@@ -1176,25 +1249,14 @@ export default function Cart() {
       } finally {
         if (!cancelled) setLoadingPricing(false)
       }
-    }, debounceMs)
-
-    return () => {
-      cancelled = true
-      clearTimeout(timerId)
-    }
-  }, [cart, defaultAddress, appliedCoupon, couponCode, restaurantId, deliveryType, isScheduled, scheduledDate, scheduledTime])
-        setPricing(null)
-      } finally {
-        if (!cancelled) setLoadingPricing(false)
-      }
-    }, 200)
+    }, 300)
 
     return () => {
       cancelled = true
       clearTimeout(timer)
       pricingRequestControllerRef.current?.abort?.()
     }
-  }, [foodPricingRequestKey, loadingRestaurant])
+  }, [foodPricingRequestKey, loadingRestaurant, appliedCoupon, availableCoupons])
 
   // Fetch wallet balance
   useEffect(() => {
@@ -1325,9 +1387,7 @@ export default function Cart() {
   const quickDeliveryFee = Number(pricing?.quickDeliveryFee || 0) || 0
   const quickEtaLabel = formatQuickEtaWindow(pricing?.etaPromise || pricing?.quickDelivery?.etaPromise)
   const gates = pricing?.quickDelivery?.gates
-  const quickGatesOpen =
-    areQuickGatesOpen(pricing?.quickDelivery) ||
-    pricing?.quickDelivery?.eligible === true
+  const quickGatesOpen = pricing?.quickDelivery?.eligible === true
   // Hide option entirely when Instant + Schedule off and we know all three gates are closed.
   const showQuickOption =
     !isScheduled &&
@@ -2568,7 +2628,41 @@ export default function Cart() {
                           </span>
                           <button
                             className="px-2 md:px-3 py-1 text-[#FF0000] dark:text-[#FF0000] hover:bg-red-50 dark:hover:bg-[#FF0000]/10"
-                            onClick={() => updateQuantity(item.id, item.quantity + 1)}
+                            onClick={() => {
+                              let itemWithVariants = item;
+                              if (!hasFoodVariants(item) && item.variantId && menuData) {
+                                let foundItem = null;
+                                
+                                // Normalize menuData to array of sections/categories
+                                const sectionsToSearch = Array.isArray(menuData) 
+                                  ? menuData 
+                                  : menuData.sections 
+                                    ? menuData.sections 
+                                    : menuData.data?.menu?.sections 
+                                      ? menuData.data.menu.sections 
+                                      : [];
+
+                                for (const category of sectionsToSearch) {
+                                  if (category.items) {
+                                    foundItem = category.items.find(i => String(i.id) === String(item.itemId) || String(i._id) === String(item.itemId));
+                                    if (foundItem) break;
+                                  }
+                                }
+                                
+                                if (foundItem && hasFoodVariants(foundItem)) {
+                                  itemWithVariants = { ...item, variants: foundItem.variants, variations: foundItem.variations };
+                                }
+                              }
+
+                              if (hasFoodVariants(itemWithVariants) || itemWithVariants.variantId) {
+                                setSelectedProduct(itemWithVariants)
+                                setSelectedVariantId(itemWithVariants.variantId || getDefaultFoodVariant(itemWithVariants)?.id || "")
+                                setSelectedItemImageIndex(0)
+                                setShowItemDetail(true)
+                              } else {
+                                updateQuantity(item.id, item.quantity + 1)
+                              }
+                            }}
                           >
                             <Plus className="h-3 w-3 md:h-4 md:w-4" />
                           </button>
@@ -2770,64 +2864,97 @@ export default function Cart() {
                     <div className="flex gap-3 md:gap-4 overflow-x-auto pb-2 -mx-4 md:-mx-6 px-4 md:px-6 scrollbar-hide">
                       {addons
                         .filter(addon => !vegMode || addon.foodType === 'Veg' || addon.foodType !== 'Non-Veg')
-                        .map((addon) => (
-                        <div key={addon.id} className="flex-shrink-0 w-28 md:w-36">
-                          <div className="relative bg-gray-100 dark:bg-gray-800 rounded-lg md:rounded-xl overflow-hidden">
-                            <img
-                              src={addon.image || (addon.images && addon.images[0]) || "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=200&h=200&fit=crop"}
-                              alt={addon.name}
-                              className="w-full h-28 md:h-36 object-cover rounded-lg md:rounded-xl"
-                              onError={(e) => {
-                                e.target.onerror = null
-                                e.target.src = "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=200&h=200&fit=crop"
-                              }}
-                            />
-                            <div className="absolute top-1 md:top-2 left-1 md:left-2">
-                              <div className={`w-3.5 h-3.5 md:w-4 md:h-4 bg-white border flex items-center justify-center rounded ${addon.foodType === 'Non-Veg' ? 'border-red-600' : 'border-green-600'}`}>
-                                <div className={`w-1.5 h-1.5 md:w-2 md:h-2 rounded-full ${addon.foodType === 'Non-Veg' ? 'bg-red-600' : 'bg-green-600'}`} />
+                        .map((addon) => {
+                          const quantity = getDishQuantity(addon);
+                          return (
+                          <div key={addon.id} className="flex-shrink-0 w-28 md:w-36">
+                            <div className="relative bg-gray-100 dark:bg-gray-800 rounded-lg md:rounded-xl overflow-hidden">
+                              <img
+                                src={addon.image || (addon.images && addon.images[0]) || "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=200&h=200&fit=crop"}
+                                alt={addon.name}
+                                className="w-full h-28 md:h-36 object-cover rounded-lg md:rounded-xl"
+                                onError={(e) => {
+                                  e.target.onerror = null
+                                  e.target.src = "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=200&h=200&fit=crop"
+                                }}
+                              />
+                              <div className="absolute top-1 md:top-2 left-1 md:left-2">
+                                <div className={`w-3.5 h-3.5 md:w-4 md:h-4 bg-white border flex items-center justify-center rounded ${addon.foodType === 'Non-Veg' ? 'border-red-600' : 'border-green-600'}`}>
+                                  <div className={`w-1.5 h-1.5 md:w-2 md:h-2 rounded-full ${addon.foodType === 'Non-Veg' ? 'bg-red-600' : 'bg-green-600'}`} />
+                                </div>
                               </div>
+                              {quantity > 0 ? (
+                                <div className="absolute bottom-1 md:bottom-2 right-1 md:right-2 flex items-center bg-white border border-[#FF0000] rounded shadow-sm">
+                                  <button
+                                    onClick={() => {
+                                      const cartRestaurantId = cart[0]?.restaurantId || restaurantId;
+                                      const cartRestaurantName = cart[0]?.restaurant || restaurantName;
+                                      const addonWithInfo = {
+                                        ...addon,
+                                        restaurant: cartRestaurantName,
+                                        restaurantId: cartRestaurantId,
+                                        isVeg: addon.foodType !== 'Non-Veg'
+                                      };
+                                      updateItemQuantityDetail(addonWithInfo, quantity - 1);
+                                    }}
+                                    className="w-6 h-6 md:w-7 md:h-7 flex items-center justify-center hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors rounded-l"
+                                  >
+                                    <Minus className="h-3.5 w-3.5 md:h-4 md:w-4 text-[#FF0000]" />
+                                  </button>
+                                  <span className="w-5 text-center text-xs md:text-sm font-semibold text-[#FF0000]">
+                                    {quantity}
+                                  </span>
+                                  <button
+                                    onClick={() => {
+                                      const cartRestaurantId = cart[0]?.restaurantId || restaurantId;
+                                      const cartRestaurantName = cart[0]?.restaurant || restaurantName;
+                                      const addonWithInfo = {
+                                        ...addon,
+                                        restaurant: cartRestaurantName,
+                                        restaurantId: cartRestaurantId,
+                                        isVeg: addon.foodType !== 'Non-Veg'
+                                      };
+                                      updateItemQuantityDetail(addonWithInfo, quantity + 1);
+                                    }}
+                                    className="w-6 h-6 md:w-7 md:h-7 flex items-center justify-center hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors rounded-r"
+                                  >
+                                    <Plus className="h-3.5 w-3.5 md:h-4 md:w-4 text-[#FF0000]" />
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  onClick={() => {
+                                    const cartRestaurantId = cart[0]?.restaurantId || restaurantId;
+                                    const cartRestaurantName = cart[0]?.restaurant || restaurantName;
+                                    
+                                    if (!cartRestaurantId || !cartRestaurantName) {
+                                      toast.error('Restaurant information is missing. Please refresh the page.');
+                                      return;
+                                    }
+                                    
+                                    const addonWithInfo = {
+                                      ...addon,
+                                      restaurant: cartRestaurantName,
+                                      restaurantId: cartRestaurantId,
+                                      isVeg: addon.foodType !== 'Non-Veg'
+                                    };
+                                    
+                                    updateItemQuantityDetail(addonWithInfo, 1);
+                                  }}
+                                  className="absolute bottom-1 md:bottom-2 right-1 md:right-2 w-6 h-6 md:w-7 md:h-7 bg-white border border-[#FF0000] rounded flex items-center justify-center shadow-sm hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                                >
+                                  <Plus className="h-3.5 w-3.5 md:h-4 md:w-4 text-[#FF0000]" />
+                                </button>
+                              )}
                             </div>
-                            <button
-                              onClick={() => {
-                                // Use restaurant info from existing cart items to ensure format consistency
-                                const cartRestaurantId = cart[0]?.restaurantId || restaurantId;
-                                const cartRestaurantName = cart[0]?.restaurant || restaurantName;
-
-                                if (!cartRestaurantId || !cartRestaurantName) {
-                                  debugError('? Cannot add addon: Missing restaurant information', {
-                                    cartRestaurantId,
-                                    cartRestaurantName,
-                                    restaurantId,
-                                    restaurantName,
-                                    cartItem: cart[0]
-                                  });
-                                  toast.error('Restaurant information is missing. Please refresh the page.');
-                                  return;
-                                }
-
-                                addToCart({
-                                  id: addon.id,
-                                  name: addon.name,
-                                  price: addon.price,
-                                  image: addon.image || (addon.images && addon.images[0]) || "",
-                                  description: addon.description || "",
-                                  isVeg: addon.foodType !== 'Non-Veg',
-                                  restaurant: cartRestaurantName,
-                                  restaurantId: cartRestaurantId
-                                });
-                              }}
-                              className="absolute bottom-1 md:bottom-2 right-1 md:right-2 w-6 h-6 md:w-7 md:h-7 bg-white border border-[#FF0000] rounded flex items-center justify-center shadow-sm hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
-                            >
-                              <Plus className="h-3.5 w-3.5 md:h-4 md:w-4 text-[#FF0000]" />
-                            </button>
+                            <p className="text-xs md:text-sm font-medium text-gray-800 dark:text-gray-200 mt-1.5 md:mt-2 line-clamp-2 leading-tight">{addon.name}</p>
+                            {addon.description && (
+                              <p className="text-xs md:text-sm text-gray-500 dark:text-gray-400 mt-0.5 line-clamp-1">{addon.description}</p>
+                            )}
+                            <p className="text-xs md:text-sm text-gray-800 dark:text-gray-200 font-semibold mt-0.5">{RUPEE_SYMBOL}{addon.price}</p>
                           </div>
-                          <p className="text-xs md:text-sm font-medium text-gray-800 dark:text-gray-200 mt-1.5 md:mt-2 line-clamp-2 leading-tight">{addon.name}</p>
-                          {addon.description && (
-                            <p className="text-xs md:text-sm text-gray-500 dark:text-gray-400 mt-0.5 line-clamp-1">{addon.description}</p>
-                          )}
-                          <p className="text-xs md:text-sm text-gray-800 dark:text-gray-200 font-semibold mt-0.5">{RUPEE_SYMBOL}{addon.price}</p>
-                        </div>
-                      ))}
+                          )
+                        })}
                     </div>
                   )}
                 </div>
@@ -2959,23 +3086,33 @@ export default function Cart() {
                         setDeliveryType("quick")
                         if (isScheduled) setIsScheduled(false)
                       }}
-                      className={`flex items-start gap-3 p-3 cursor-pointer rounded-xl transition-all ${
+                      className={`flex items-start gap-3 p-3 rounded-xl transition-all ${
                         deliveryType === "quick" ? "bg-gray-50 dark:bg-gray-800/50" : "bg-transparent"
-                      } ${!quickGatesOpen && deliveryType !== "quick" ? "opacity-60" : ""}`}
+                      } ${!quickGatesOpen && deliveryType !== "quick" ? "opacity-70 cursor-not-allowed" : "cursor-pointer"}`}
                     >
                       <div className="mt-1">
                         <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${
                           deliveryType === "quick" ? "border-[#118A42]" : "border-gray-300 dark:border-gray-600"
-                        }`}>
+                        } ${!quickGatesOpen && deliveryType !== "quick" ? "bg-gray-100 dark:bg-gray-800" : ""}`}>
                           {deliveryType === "quick" && <div className="w-2.5 h-2.5 bg-[#118A42] rounded-full" />}
                         </div>
                       </div>
                       <div className="flex-1 flex flex-col">
                         <div className="flex items-center justify-between w-full">
-                          <span className={`text-[15px] font-semibold ${deliveryType === "quick" ? "text-gray-900 dark:text-white" : "text-gray-600 dark:text-gray-400"}`}>
+                          <span className={`text-[15px] font-semibold ${
+                            !quickGatesOpen && deliveryType !== "quick" 
+                              ? "text-gray-600 dark:text-gray-400" 
+                              : deliveryType === "quick" 
+                                ? "text-gray-900 dark:text-white" 
+                                : "text-gray-600 dark:text-gray-400"
+                          }`}>
                             Quick Delivery
                           </span>
-                          <span className="text-[15px] font-medium text-gray-700 dark:text-gray-300">
+                          <span className={`text-[15px] font-medium ${
+                            !quickGatesOpen && deliveryType !== "quick" 
+                              ? "text-gray-500 dark:text-gray-500" 
+                              : "text-gray-700 dark:text-gray-300"
+                          }`}>
                             {quickDeliveryFee > 0
                               ? `+${formatQuickCharge(quickDeliveryFee)}`
                               : pricing?.quickDelivery?.charge
@@ -2983,10 +3120,16 @@ export default function Cart() {
                                 : "Server priced"}
                           </span>
                         </div>
-                        <span className="text-xs text-gray-400 mt-0.5">
-                          {quickEtaLabel
-                            ? `Promise ${quickEtaLabel}`
-                            : "Faster delivery when restaurant & zone enable Quick"}
+                        <span className={`text-xs mt-0.5 ${
+                          !quickGatesOpen && deliveryType !== "quick" 
+                            ? "text-red-500 font-medium" 
+                            : "text-gray-400"
+                        }`}>
+                          {!quickGatesOpen && deliveryType !== "quick"
+                            ? (pricing?.quickDelivery?.reason ? mapQuickDeliveryReason(pricing.quickDelivery.reason) : "Unavailable at your location")
+                            : (quickEtaLabel
+                                ? `Promise ${quickEtaLabel}`
+                                : "Faster delivery when restaurant & zone enable Quick")}
                         </span>
                       </div>
                     </div>
@@ -3887,6 +4030,26 @@ export default function Cart() {
           </AnimatePresence>,
           document.body
         )}
+      <RestaurantItemDetailSheet
+        open={showItemDetail}
+        onClose={() => {
+          setShowItemDetail(false);
+          setSelectedProduct(null);
+        }}
+        selectedItem={selectedProduct}
+        selectedItemImageIndex={selectedItemImageIndex}
+        setSelectedItemImageIndex={setSelectedItemImageIndex}
+        selectedVariantId={selectedVariantId}
+        setSelectedVariantId={setSelectedVariantId}
+        restaurant={{ id: restaurantId, name: restaurantName }}
+        shouldShowGrayscale={false}
+        isRecommendedItem={() => false}
+        showBookmark={false}
+        showShare={false}
+        getDishQuantity={getDishQuantity}
+        updateItemQuantity={updateItemQuantityDetail}
+        getVariantForDish={getVariantForDish}
+      />
     </div>
   )
 }      

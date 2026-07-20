@@ -1,5 +1,5 @@
 import { Link, useLocation } from "react-router-dom"
-import { Tag, User, Truck } from "lucide-react"
+import { Tag, User, Truck, ShoppingBag, Home } from "lucide-react"
 import { isModuleAuthenticated } from "@food/utils/auth"
 
 export default function BottomNavigation() {
@@ -18,14 +18,17 @@ export default function BottomNavigation() {
     pathname.startsWith("/food/profile") ||
     pathname.startsWith("/food/user/profile") ||
     isSharedFoodProfile
+  const isOrders = pathname.startsWith("/food/user/orders")
   const isDelivery =
     !isUnder250 &&
     !isProfile &&
+    !isOrders &&
     (pathname === "/food" ||
       pathname === "/food/" ||
       pathname === "/food/user" ||
       (pathname.startsWith("/food/user") &&
         !pathname.includes("/under-250") &&
+        !pathname.includes("/orders") &&
         !pathname.includes("/profile")))
 
   return (
@@ -38,7 +41,7 @@ export default function BottomNavigation() {
         className="relative bg-white dark:bg-[#1a1a1a] border-t border-gray-200 dark:border-gray-800 shadow-lg"
       >
       <div className="flex items-center justify-around h-auto px-2 sm:px-4">
-        {/* Delivery Tab */}
+        {/* Home Tab */}
         <Link
           to="/food/user"
           className={`flex flex-1 flex-col items-center gap-1.5 px-2 sm:px-3 py-2 transition-all duration-200 relative ${isDelivery
@@ -46,9 +49,9 @@ export default function BottomNavigation() {
               : "text-gray-600 dark:text-gray-400"
             }`}
         >
-          < Truck className={`h-5 w-5 ${isDelivery ? "text-primary-orange dark:text-primary-orange fill-primary-orange dark:fill-primary-orange" : "text-gray-600 dark:text-gray-400"}`} strokeWidth={2} />
+          <Home className={`h-5 w-5 ${isDelivery ? "text-primary-orange dark:text-primary-orange fill-primary-orange dark:fill-primary-orange" : "text-gray-600 dark:text-gray-400"}`} strokeWidth={2} />
           <span className={`text-xs sm:text-sm font-medium ${isDelivery ? "text-primary-orange dark:text-primary-orange font-semibold" : "text-gray-600 dark:text-gray-400"}`}>
-            Delivery
+            Home
           </span>
           {isDelivery && (
             <div className="absolute top-0 left-0 right-0 h-0.5 bg-primary-orange dark:bg-primary-orange rounded-b-full" />
@@ -71,6 +74,27 @@ export default function BottomNavigation() {
             Under 250
           </span>
           {isUnder250 && (
+            <div className="absolute top-0 left-0 right-0 h-0.5 bg-primary-orange dark:bg-primary-orange rounded-b-full" />
+          )}
+        </Link>
+
+        {/* Divider */}
+        <div className="h-8 w-px bg-gray-300 dark:bg-gray-700" />
+
+        {/* Orders Tab */}
+        <Link
+          to={isUserAuthenticated ? "/food/user/orders" : "/user/auth/login"}
+          state={!isUserAuthenticated ? { redirectTo: "/food/user/orders" } : undefined}
+          className={`flex flex-1 flex-col items-center gap-1.5 px-2 sm:px-3 py-2 transition-all duration-200 relative ${isOrders
+              ? "text-primary-orange dark:text-primary-orange"
+              : "text-gray-600 dark:text-gray-400"
+            }`}
+        >
+          <ShoppingBag className={`h-5 w-5 ${isOrders ? "text-primary-orange dark:text-primary-orange fill-primary-orange dark:fill-primary-orange" : "text-gray-600 dark:text-gray-400"}`} strokeWidth={2} />
+          <span className={`text-xs sm:text-sm font-medium ${isOrders ? "text-primary-orange dark:text-primary-orange font-semibold" : "text-gray-600 dark:text-gray-400"}`}>
+            Orders
+          </span>
+          {isOrders && (
             <div className="absolute top-0 left-0 right-0 h-0.5 bg-primary-orange dark:bg-primary-orange rounded-b-full" />
           )}
         </Link>

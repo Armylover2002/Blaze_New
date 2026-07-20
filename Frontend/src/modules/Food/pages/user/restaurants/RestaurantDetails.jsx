@@ -132,7 +132,7 @@ function RestaurantDetailsContent() {
   const dishCardRefs = useRef({})
 
   const getLineItemIdForDish = (item, variant = null) =>
-    buildCartLineId(item?.id || item?._id || "", variant?.id || variant?._id || "")
+    buildCartLineId(item?.itemId || item?._id || item?.id || "", variant?.id || variant?._id || "")
 
   const getVariantForDish = (item, preferredVariantId = "") => {
     const variants = getFoodVariants(item)
@@ -1037,6 +1037,7 @@ function RestaurantDetailsContent() {
 
     // Prepare cart item with all required properties
     const cartItem = {
+      ...item,
       id: lineItemId,
       lineItemId,
       itemId: item.id,
@@ -1144,7 +1145,7 @@ function RestaurantDetailsContent() {
 
   const handleDishIncrease = (item, quantity, event) => {
     if (shouldShowGrayscale) return
-    if (hasFoodVariants(item) && quantity === 0) {
+    if (hasFoodVariants(item)) {
       setSelectedItem(item)
       setSelectedItemImageIndex(0)
       setShowItemDetail(true)
