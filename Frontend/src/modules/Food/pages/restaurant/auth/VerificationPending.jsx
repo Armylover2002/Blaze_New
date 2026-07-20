@@ -29,7 +29,7 @@ import {
   isRestaurantApproved,
   isRestaurantInitialPendingApproval,
 } from "@food/utils/restaurantApproval"
-import { getAppLogo, loadBusinessSettings } from "@common/utils/businessSettings"
+import { getAppLogo, subscribeBusinessSettings } from "@common/utils/businessSettings"
 import { toast } from "sonner"
 
 const POLL_INTERVAL_MS = 20000
@@ -133,11 +133,15 @@ export default function VerificationPending() {
   )
 
   useEffect(() => {
-    loadBusinessSettings().then(() => {
+    const apply = () => {
       const logo = getAppLogo("restaurant")
       if (logo) setLogoUrl(logo)
-    })
+    }
+    apply()
+    return subscribeBusinessSettings(apply)
+  }, [])
 
+  useEffect(() => {
     const cachedUser = getCurrentUser("restaurant")
     if (cachedUser?.restaurantName || cachedUser?.name) {
       setRestaurantName(cachedUser.restaurantName || cachedUser.name)

@@ -9,7 +9,7 @@ import { Card, CardContent } from "@food/components/ui/card"
 import api from "@food/api"
 import { API_ENDPOINTS } from "@food/api/config"
 import { useCompanyName } from "@food/hooks/useCompanyName"
-import { getCachedSettings, loadBusinessSettings, getAppLogo } from "@common/utils/businessSettings"
+import { getAppLogo, subscribeBusinessSettings } from "@common/utils/businessSettings"
 
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
@@ -51,34 +51,13 @@ export default function About() {
 
   useEffect(() => {
     fetchAboutData()
-    
-    const loadLogo = async () => {
-      try {
-        const cachedLogo = getAppLogo('user')
-        if (cachedLogo) {
-          setLogoUrl(cachedLogo)
-        }
-        
-        const settings = await loadBusinessSettings()
-        if (settings) {
-          const userLogo = getAppLogo('user')
-          if (userLogo) setLogoUrl(userLogo)
-        }
-      } catch (error) {
-        debugError('Error loading logo:', error)
-      }
-    }
-    loadLogo()
 
-    // Listen for business settings updates
-    const handleSettingsUpdate = () => {
-      const userLogo = getAppLogo('user')
-      if (userLogo) {
-        setLogoUrl(userLogo)
-      }
+    const apply = () => {
+      const userLogo = getAppLogo("user")
+      if (userLogo) setLogoUrl(userLogo)
     }
-    window.addEventListener('businessSettingsUpdated', handleSettingsUpdate)
-    return () => window.removeEventListener('businessSettingsUpdated', handleSettingsUpdate)
+    apply()
+    return subscribeBusinessSettings(apply)
   }, [])
 
   const fetchAboutData = async () => {

@@ -6,7 +6,7 @@ import { Input } from "@food/components/ui/input"
 import { Label } from "@food/components/ui/label"
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@food/components/ui/card"
 import loginBg from "@food/assets/loginbanner.png"
-import { loadBusinessSettings, getRestaurantLoginBanner } from "@common/utils/businessSettings"
+import { getRestaurantLoginBanner, subscribeBusinessSettings } from "@common/utils/businessSettings"
 import { restaurantAPI } from "@food/api"
 
 export default function RestaurantForgotPassword() {
@@ -18,23 +18,7 @@ export default function RestaurantForgotPassword() {
   })
 
   useEffect(() => {
-    const fetchSettings = async () => {
-      try {
-        await loadBusinessSettings()
-        const banner = getRestaurantLoginBanner()
-        if (banner && banner.url && banner.active) {
-          setBannerUrl(banner.url)
-        } else {
-          setBannerUrl(loginBg)
-        }
-      } catch (error) {
-        console.warn("Failed to load business settings:", error)
-      }
-    }
-    fetchSettings()
-
-    const handleSettingsUpdate = async () => {
-      await loadBusinessSettings()
+    const apply = () => {
       const banner = getRestaurantLoginBanner()
       if (banner && banner.url && banner.active) {
         setBannerUrl(banner.url)
@@ -42,8 +26,8 @@ export default function RestaurantForgotPassword() {
         setBannerUrl(loginBg)
       }
     }
-    window.addEventListener('businessSettingsUpdated', handleSettingsUpdate)
-    return () => window.removeEventListener('businessSettingsUpdated', handleSettingsUpdate)
+    apply()
+    return subscribeBusinessSettings(apply)
   }, [])
   const [email, setEmail] = useState("")
   const [otp, setOtp] = useState(["", "", "", "", "", ""])

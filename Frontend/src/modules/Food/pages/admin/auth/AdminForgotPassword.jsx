@@ -15,7 +15,7 @@ import { Mail, ArrowLeft, Shield } from "lucide-react"
 
 import { adminAPI } from "@food/api"
 import { useCompanyName } from "@food/hooks/useCompanyName"
-import { loadBusinessSettings, getCachedSettings, getAppLogo } from "@common/utils/businessSettings"
+import { getCachedSettings, getAppLogo, subscribeBusinessSettings } from "@common/utils/businessSettings"
 
 export default function AdminForgotPassword() {
   const companyName = useCompanyName()
@@ -34,37 +34,15 @@ export default function AdminForgotPassword() {
   const [displayCompanyName, setDisplayCompanyName] = useState(() => getCachedSettings()?.companyName || null)
   const inputRefs = useRef(Array(6).fill(null).map(() => null))
 
-  // Fetch business settings logo on mount
+  // Apply business settings logo from cache
   useEffect(() => {
-    const fetchLogo = async () => {
-      try {
-        const settings = await loadBusinessSettings()
-        const adminLogo = getAppLogo('admin')
-        if (adminLogo) {
-          setLogoUrl(adminLogo)
-        }
-        if (settings?.companyName) {
-          setDisplayCompanyName(settings.companyName)
-        }
-      } catch (error) {
-        // Silently fail
-      }
-    }
-    fetchLogo()
-
-    // Listen for business settings updates
-    const handleSettingsUpdate = async () => {
-      const settings = await loadBusinessSettings();
+    const apply = (settings) => {
       const adminLogo = getAppLogo('admin')
-      if (adminLogo) {
-        setLogoUrl(adminLogo)
-      }
-      if (settings?.companyName) {
-        setDisplayCompanyName(settings.companyName);
-      }
-    };
-    window.addEventListener('businessSettingsUpdated', handleSettingsUpdate);
-    return () => window.removeEventListener('businessSettingsUpdated', handleSettingsUpdate);
+      if (adminLogo) setLogoUrl(adminLogo)
+      if (settings?.companyName) setDisplayCompanyName(settings.companyName)
+    }
+    apply(getCachedSettings())
+    return subscribeBusinessSettings(apply)
   }, [])
 
   const handleEmailSubmit = async (e) => {

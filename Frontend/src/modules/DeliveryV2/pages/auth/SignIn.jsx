@@ -11,10 +11,10 @@ import { deliveryAPI } from "@food/api"
 import { clearModuleAuth } from "@food/utils/auth"
 import { useCompanyName } from "@food/hooks/useCompanyName"
 import {
-  loadBusinessSettings,
   getCachedSettings,
+  subscribeBusinessSettings,
   getAppFavicon,
-  updateBrowserFavicon,
+  updateFavicon,
   getAppLogo,
 } from "@common/utils/businessSettings"
 const debugLog = (...args) => { }
@@ -66,10 +66,13 @@ export default function DeliverySignIn() {
   }, [])
 
   useEffect(() => {
-    const applyDeliveryBranding = () => {
-      const deliveryFavicon = getAppFavicon("delivery")
+    const applyDeliveryBranding = (settings) => {
+      const deliveryFavicon =
+        getAppFavicon("delivery") ||
+        settings?.deliveryFavicon?.url ||
+        settings?.favicon?.url
       if (deliveryFavicon) {
-        updateBrowserFavicon(deliveryFavicon)
+        updateFavicon(deliveryFavicon)
       }
       const deliveryLogo = getAppLogo("delivery")
       if (deliveryLogo) {
@@ -77,32 +80,11 @@ export default function DeliverySignIn() {
       }
     }
 
-    const cached = getCachedSettings()
-    if (cached) {
+    if (getCachedSettings()) {
       applyDeliveryBranding()
-    } else {
-      loadBusinessSettings().then(() => {
-        applyDeliveryBranding()
-      })
     }
 
-    const handleSettingsUpdate = (event) => {
-      const settings = event?.detail
-      if (!settings) return
-      const favicon = settings.deliveryFavicon?.url || settings.favicon?.url || ""
-      if (favicon) {
-        updateBrowserFavicon(favicon)
-      }
-      const deliveryLogo = getAppLogo("delivery")
-      if (deliveryLogo) {
-        setLogoUrl(deliveryLogo)
-      }
-    }
-
-    window.addEventListener("businessSettingsUpdated", handleSettingsUpdate)
-    return () => {
-      window.removeEventListener("businessSettingsUpdated", handleSettingsUpdate)
-    }
+    return subscribeBusinessSettings((settings) => applyDeliveryBranding(settings))
   }, [])
   const [error, setError] = useState("")
   const [isSending, setIsSending] = useState(false)

@@ -6,7 +6,7 @@ import { toast } from "sonner"
 import { authAPI, userAPI } from "@food/api"
 import { isModuleAuthenticated, setAuthData, clearModuleAuth } from "@food/utils/auth"
 import { markLocationPromptAfterLogin } from "@food/utils/locationStorage"
-import { loadBusinessSettings, getCachedSettings, getAppLogo, getCompanyName, setAppType } from "@common/utils/businessSettings"
+import { getCachedSettings, getAppLogo, getCompanyName, setAppType, subscribeBusinessSettings } from "@common/utils/businessSettings"
 
 export default function UnifiedOTPFastLogin() {
   const RESEND_COOLDOWN_SECONDS = 60
@@ -39,18 +39,14 @@ export default function UnifiedOTPFastLogin() {
   const navigate = useNavigate()
 
   useEffect(() => {
-    const fetchSettings = async () => {
-      try {
-        setAppType('user')
-        const settings = await loadBusinessSettings()
-        if (settings) {
-          setLogoUrl(getAppLogo('user'))
-          setCompanyName(getCompanyName())
-          setSocialLinks(settings.socialLinks || {})
-        }
-      } catch (error) {}
+    setAppType('user')
+    const apply = () => {
+      setLogoUrl(getAppLogo('user'))
+      setCompanyName(getCompanyName())
+      setSocialLinks(getCachedSettings()?.socialLinks || {})
     }
-    fetchSettings()
+    apply()
+    return subscribeBusinessSettings(apply)
   }, [])
   const searchParams = new URLSearchParams(location.search)
   const referralCode = searchParams.get("ref") || ""

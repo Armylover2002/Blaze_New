@@ -1,29 +1,30 @@
 /**
  * Business Settings Utility
- * Handles loading and updating business settings (favicon, title, logo)
+ * Centralized load/cache for public global settings (favicon, title, logos).
+ * Fetches at most once per browser session unless forceRefresh is requested.
  */
 
 import apiClient from "@/services/api/axios";
 import { API_ENDPOINTS } from "@/services/api/config";
-import { searchAPI } from "@/services/api";
 
 const SETTINGS_KEY = 'global_business_settings';
-const SETTINGS_FETCH_TTL_MS = 60 * 1000; // 1 minute soft TTL; updatedAt + polling catch changes sooner
-const SETTINGS_POLL_INTERVAL_MS = 45 * 1000; // Poll for cross-client updates while tab is visible
-let currentAppType = 'user'; // Default to user app
-let lastSettingsFetchAt = 0;
-let settingsPollTimer = null;
+let currentAppType = 'user';
+let hasFetchedThisSession = false;
+let inFlightSettingsPromise = null;
 
 const getSettingsUpdatedAt = (settings) => {
   if (!settings?.updatedAt) return '';
   return String(settings.updatedAt);
 };
 
-const applySettingsToCache = (settings, { notify = false } = {}) => {
+const applySettingsToCache = (settings, { notify = false, markFetched = true } = {}) => {
   if (!settings) return;
 
   cachedSettings = settings;
-  lastSettingsFetchAt = Date.now();
+  if (markFetched) {
+    hasFetchedThisSession = true;
+  }
+
   try {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
   } catch (e) {}
@@ -39,6 +40,9 @@ const applySettingsToCache = (settings, { notify = false } = {}) => {
   }
 };
 
+/**
+ * Cross-tab sync only. No focus/visibility/poll refetch — settings are session-cached.
+ */
 const initSettingsSyncListeners = () => {
   if (typeof window === 'undefined') return;
 
@@ -50,28 +54,9 @@ const initSettingsSyncListeners = () => {
       const currentUpdatedAt = getSettingsUpdatedAt(cachedSettings);
       const incomingUpdatedAt = getSettingsUpdatedAt(settings);
       if (incomingUpdatedAt && incomingUpdatedAt === currentUpdatedAt) return;
-      applySettingsToCache(settings, { notify: true });
+      applySettingsToCache(settings, { notify: true, markFetched: true });
     } catch (e) {}
   });
-
-  const refreshIfVisible = () => {
-    if (document.visibilityState === 'visible') {
-      refreshBusinessSettingsIfStale().catch(() => {});
-    }
-  };
-
-  document.addEventListener('visibilitychange', refreshIfVisible);
-  window.addEventListener('focus', refreshIfVisible);
-
-  if (settingsPollTimer) {
-    clearInterval(settingsPollTimer);
-  }
-
-  settingsPollTimer = setInterval(() => {
-    if (document.visibilityState === 'visible') {
-      refreshBusinessSettingsIfStale().catch(() => {});
-    }
-  }, SETTINGS_POLL_INTERVAL_MS);
 };
 
 /**
@@ -86,13 +71,12 @@ const detectAppType = () => {
   return 'user';
 };
 
-// Initialize app type
 if (typeof window !== 'undefined') {
   currentAppType = detectAppType();
 }
 
 /**
- * Set current app type manually
+ * Set current app type manually (updates favicon from cache; does not fetch)
  */
 export const setAppType = (appType) => {
   currentAppType = appType;
@@ -102,41 +86,34 @@ export const setAppType = (appType) => {
   }
 };
 
-// Initialize from localStorage immediately so it's available for components on mount
 let cachedSettings = (() => {
   try {
     const saved = localStorage.getItem(SETTINGS_KEY);
-    const settings = saved ? JSON.parse(saved) : null;
-    return settings;
+    return saved ? JSON.parse(saved) : null;
   } catch (e) {
     return null;
   }
 })();
 
-/**
- * Update theme color in document root
- */
 export const updateThemeColor = (color) => {
   if (!color || typeof document === 'undefined') return;
   document.documentElement.style.setProperty('--primary-theme', color);
   document.documentElement.style.setProperty('--sidebar-theme', color);
 };
 
-// Apply cached settings immediately on module load if they exist
 if (cachedSettings) {
   setTimeout(() => {
     updateTitle(cachedSettings.companyName);
     updateThemeColor(cachedSettings.themeColor);
-    // Also apply favicon if we have it
     const favicon = getAppFavicon(currentAppType);
     if (favicon) updateFavicon(favicon);
   }, 0);
 }
 
-let inFlightSettingsPromise = null;
-
 /**
- * Load business settings from backend (public endpoint - no auth required)
+ * Load business settings from backend (public endpoint - no auth required).
+ * Session-cached: after the first successful fetch, returns memory cache
+ * unless options.forceRefresh is true. Concurrent callers share one Promise.
  */
 export const loadBusinessSettings = async (options = {}) => {
   const forceRefresh = options?.forceRefresh === true;
@@ -146,8 +123,7 @@ export const loadBusinessSettings = async (options = {}) => {
       return cachedSettings;
     }
 
-    const now = Date.now();
-    if (!forceRefresh && cachedSettings && now - lastSettingsFetchAt < SETTINGS_FETCH_TTL_MS) {
+    if (!forceRefresh && hasFetchedThisSession && cachedSettings) {
       return cachedSettings;
     }
 
@@ -160,39 +136,51 @@ export const loadBusinessSettings = async (options = {}) => {
       const settings = response?.data?.data || response?.data;
 
       if (settings) {
-        applySettingsToCache(settings);
+        // Notify so cache-only consumers (logos, banners) update after the single session fetch
+        applySettingsToCache(settings, { notify: true, markFetched: true });
         return settings;
       }
       return cachedSettings;
     })();
 
-    return await inFlightSettingsPromise;
+    try {
+      return await inFlightSettingsPromise;
+    } finally {
+      inFlightSettingsPromise = null;
+    }
   } catch (error) {
     return cachedSettings;
-  } finally {
-    inFlightSettingsPromise = null;
   }
 };
 
 /**
- * Update favicon in document
+ * Explicit refresh (admin update, manual refresh action).
+ * Prefer this over loadBusinessSettings({ forceRefresh: true }) for clarity.
  */
+export const refreshBusinessSettings = async () => {
+  return loadBusinessSettings({ forceRefresh: true });
+};
+
+/**
+ * @deprecated Use refreshBusinessSettings(). Kept for compatibility; no longer auto-polled.
+ */
+export const refreshBusinessSettingsIfStale = async () => {
+  return refreshBusinessSettings();
+};
+
 export const updateFavicon = (url) => {
   if (!url || typeof document === 'undefined') return;
-  
-  // Remove all existing favicon links to prevent conflicts
+
   const existingLinks = document.querySelectorAll("link[rel*='icon']");
   existingLinks.forEach(el => el.remove());
 
-  // Create new favicon link
   const link = document.createElement("link");
   link.rel = "icon";
   link.type = "image/x-icon";
   link.href = url;
   link.crossOrigin = "anonymous";
   document.head.appendChild(link);
-  
-  // Also update/create apple-touch-icon if needed
+
   let appleIcon = document.querySelector("link[rel='apple-touch-icon']");
   if (!appleIcon) {
     appleIcon = document.createElement("link");
@@ -202,9 +190,6 @@ export const updateFavicon = (url) => {
   appleIcon.href = url;
 };
 
-/**
- * Update page title
- */
 export const updateTitle = (companyName) => {
   if (companyName && typeof document !== 'undefined') {
     document.title = companyName;
@@ -212,39 +197,10 @@ export const updateTitle = (companyName) => {
 };
 
 /**
- * Set cached settings manually (useful after update)
+ * Set cached settings manually (useful after admin update)
  */
 export const setCachedSettings = (settings) => {
-  applySettingsToCache(settings, { notify: true });
-};
-
-/**
- * Refresh settings when another client/tab may have changed them.
- */
-export const refreshBusinessSettingsIfStale = async () => {
-  try {
-    const endpoint = API_ENDPOINTS.ADMIN.BUSINESS_SETTINGS_PUBLIC;
-    if (!endpoint || (typeof endpoint === 'string' && !endpoint.trim())) {
-      return cachedSettings;
-    }
-
-    const response = await apiClient.get(endpoint);
-    const settings = response?.data?.data || response?.data;
-    if (!settings) return cachedSettings;
-
-    const currentUpdatedAt = getSettingsUpdatedAt(cachedSettings);
-    const remoteUpdatedAt = getSettingsUpdatedAt(settings);
-
-    if (!cachedSettings || currentUpdatedAt !== remoteUpdatedAt) {
-      applySettingsToCache(settings, { notify: true });
-    } else {
-      lastSettingsFetchAt = Date.now();
-    }
-
-    return settings;
-  } catch (error) {
-    return cachedSettings;
-  }
+  applySettingsToCache(settings, { notify: true, markFetched: true });
 };
 
 /**
@@ -252,18 +208,23 @@ export const refreshBusinessSettingsIfStale = async () => {
  */
 export const clearCache = () => {
   cachedSettings = null;
-  lastSettingsFetchAt = 0;
+  hasFetchedThisSession = false;
   try {
     localStorage.removeItem(SETTINGS_KEY);
   } catch (e) {}
 };
 
 /**
- * Get cached settings
+ * Get cached settings (sync, no network)
  */
 export const getCachedSettings = () => {
   return cachedSettings;
 };
+
+/**
+ * Whether a network fetch already completed this page session
+ */
+export const hasSessionSettings = () => hasFetchedThisSession && !!cachedSettings;
 
 /**
  * Get app specific logo with fallback to common logo
@@ -271,8 +232,8 @@ export const getCachedSettings = () => {
 export const getAppLogo = (appType) => {
   const settings = getCachedSettings();
   if (!settings) return null;
-  
-  switch(appType) {
+
+  switch (appType) {
     case 'admin': return settings.adminLogo?.url;
     case 'user': return settings.userLogo?.url;
     case 'delivery': return settings.deliveryLogo?.url;
@@ -282,38 +243,26 @@ export const getAppLogo = (appType) => {
   }
 };
 
-/**
- * Get the login banner URL with fallback
- */
 export const getLoginBanner = () => {
   const settings = getCachedSettings();
   return settings?.loginBanner?.url || null;
 };
 
-/**
- * Get the seller login banner configurations
- */
 export const getSellerLoginBanner = () => {
   const settings = getCachedSettings();
   return settings?.sellerLoginBanner || { url: '', active: true };
 };
 
-/**
- * Get the restaurant login banner configurations
- */
 export const getRestaurantLoginBanner = () => {
   const settings = getCachedSettings();
   return settings?.restaurantLoginBanner || { url: '', active: true };
 };
 
-/**
- * Get app specific favicon with fallback to common favicon
- */
 export const getAppFavicon = (appType) => {
   const settings = getCachedSettings();
   if (!settings) return null;
-  
-  switch(appType) {
+
+  switch (appType) {
     case 'admin': return settings.adminFavicon?.url;
     case 'user': return settings.userFavicon?.url;
     case 'delivery': return settings.deliveryFavicon?.url;
@@ -323,9 +272,6 @@ export const getAppFavicon = (appType) => {
   }
 };
 
-/**
- * Update browser favicon
- */
 export const updateBrowserFavicon = (url) => {
   if (!url) return;
   const link = document.querySelector("link[rel~='icon']");
@@ -339,24 +285,29 @@ export const updateBrowserFavicon = (url) => {
   }
 };
 
-/**
- * Get company name from business settings with fallback
- */
 export const getCompanyName = () => {
   const settings = getCachedSettings();
   return settings?.companyName || "Appzeto";
 };
 
 /**
- * Get company name asynchronously (loads if not cached)
+ * Company name from cache (no network). Kept async for call-site compatibility.
  */
-export const getCompanyNameAsync = async () => {
-  try {
-    const settings = await loadBusinessSettings();
-    return settings?.companyName || "Appzeto";
-  } catch (error) {
-    return "Appzeto";
+export const getCompanyNameAsync = async () => getCompanyName();
+
+/**
+ * Subscribe to settings updates (cross-tab + admin setCachedSettings).
+ * Returns unsubscribe function.
+ */
+export const subscribeBusinessSettings = (callback) => {
+  if (typeof window === 'undefined' || typeof callback !== 'function') {
+    return () => {};
   }
+  const handler = (event) => {
+    callback(event?.detail || getCachedSettings());
+  };
+  window.addEventListener('businessSettingsUpdated', handler);
+  return () => window.removeEventListener('businessSettingsUpdated', handler);
 };
 
 initSettingsSyncListeners();

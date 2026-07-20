@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react"
 import { useNavigate } from "react-router-dom"
-import { loadBusinessSettings, getCachedSettings, getAppLogo } from "@common/utils/businessSettings"
+import { getCachedSettings, getAppLogo, subscribeBusinessSettings } from "@common/utils/businessSettings"
 import { Button } from "@food/components/ui/button"
 import {
   Card,
@@ -40,36 +40,15 @@ export default function AdminSignup() {
   const [companyName, setCompanyName] = useState(() => getCachedSettings()?.companyName || null)
   const inputRefs = useRef(Array(6).fill(null).map(() => null))
 
-  // Fetch business settings logo on mount
+  // Apply business settings logo from cache
   useEffect(() => {
-    const fetchLogo = async () => {
-      try {
-        const settings = await loadBusinessSettings()
-        const adminLogo = getAppLogo('admin')
-        if (adminLogo) {
-          setLogoUrl(adminLogo)
-        }
-        if (settings?.companyName) {
-          setCompanyName(settings.companyName)
-        }
-      } catch (error) {
-        // Silently fail and use default logo
-        debugWarn("Failed to load business settings logo:", error)
-      }
+    const apply = (settings) => {
+      const adminLogo = getAppLogo('admin')
+      if (adminLogo) setLogoUrl(adminLogo)
+      if (settings?.companyName) setCompanyName(settings.companyName)
     }
-    fetchLogo()
-
-    // Listen for business settings updates
-    const handleSettingsUpdate = async () => {
-      // Force reload settings from backend
-      const settings = await loadBusinessSettings();
-      const adminLogo = getAppLogo('admin');
-      if (adminLogo) {
-        setLogoUrl(adminLogo);
-      }
-    };
-    window.addEventListener('businessSettingsUpdated', handleSettingsUpdate);
-    return () => window.removeEventListener('businessSettingsUpdated', handleSettingsUpdate);
+    apply(getCachedSettings())
+    return subscribeBusinessSettings(apply)
   }, [])
 
   const handleFormSubmit = async (e) => {

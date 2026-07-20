@@ -15,7 +15,7 @@ import {
 } from "@food/components/ui/select"
 import loginBg from "@food/assets/loginbanner.png"
 import { useCompanyName } from "@food/hooks/useCompanyName"
-import { loadBusinessSettings, getAppLogo, getRestaurantLoginBanner } from "@common/utils/businessSettings"
+import { getAppLogo, getRestaurantLoginBanner, subscribeBusinessSettings } from "@common/utils/businessSettings"
 import RestaurantAuthFooter from "@food/components/restaurant/RestaurantAuthFooter"
 
 
@@ -32,31 +32,9 @@ export default function RestaurantSignup() {
   })
 
   useEffect(() => {
-    const fetchSettings = async () => {
-      try {
-        await loadBusinessSettings()
-        const logo = getAppLogo('restaurant')
-        if (logo) {
-          setLogoUrl(logo)
-        }
-        const banner = getRestaurantLoginBanner()
-        if (banner && banner.url && banner.active) {
-          setBannerUrl(banner.url)
-        } else {
-          setBannerUrl(loginBg)
-        }
-      } catch (error) {
-        console.warn("Failed to load business settings:", error)
-      }
-    }
-    fetchSettings()
-
-    const handleSettingsUpdate = async () => {
-      await loadBusinessSettings()
+    const apply = () => {
       const logo = getAppLogo('restaurant')
-      if (logo) {
-        setLogoUrl(logo)
-      }
+      if (logo) setLogoUrl(logo)
       const banner = getRestaurantLoginBanner()
       if (banner && banner.url && banner.active) {
         setBannerUrl(banner.url)
@@ -64,8 +42,8 @@ export default function RestaurantSignup() {
         setBannerUrl(loginBg)
       }
     }
-    window.addEventListener('businessSettingsUpdated', handleSettingsUpdate)
-    return () => window.removeEventListener('businessSettingsUpdated', handleSettingsUpdate)
+    apply()
+    return subscribeBusinessSettings(apply)
   }, [])
   const [formData, setFormData] = useState({
     phone: "",

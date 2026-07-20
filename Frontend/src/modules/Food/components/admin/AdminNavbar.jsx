@@ -43,12 +43,7 @@ import {
 
 import { adminAPI } from "@food/api";
 import { clearModuleAuth } from "@food/utils/auth";
-import { 
-  loadBusinessSettings, 
-  getCachedSettings, 
-  getCompanyName,
-  getAppLogo 
-} from "@common/utils/businessSettings";
+import { useAppBranding } from "@common/hooks/useBusinessSettingsCache";
 import useAdminNotifications from "@food/hooks/useAdminNotifications";
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
@@ -64,46 +59,9 @@ export default function AdminNavbar({ onMenuClick }) {
   const [recentSearches, setRecentSearches] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
   const [adminData, setAdminData] = useState(null);
-  const [logoUrl, setLogoUrl] = useState(() => getAppLogo('admin'));
-  const [companyName, setCompanyName] = useState(() => getCompanyName());
+  const { logoUrl, companyName } = useAppBranding("admin");
   const searchInputRef = useRef(null);
   const { items: adminNotifications } = useAdminNotifications();
-
-  // Load business settings
-  useEffect(() => {
-    const loadSettings = async () => {
-      try {
-        const cached = getCachedSettings();
-        if (cached) {
-          const adminLogo = getAppLogo('admin');
-          if (adminLogo) setLogoUrl(adminLogo);
-          setCompanyName(getCompanyName());
-        } else {
-          const settings = await loadBusinessSettings();
-          if (settings) {
-            const adminLogo = getAppLogo('admin');
-            if (adminLogo) setLogoUrl(adminLogo);
-            setCompanyName(getCompanyName());
-          }
-        }
-      } catch (error) {
-        debugError('Error loading settings:', error);
-      }
-    };
-    loadSettings();
-
-    // Listen for business settings updates
-    const handleSettingsUpdate = (e) => {
-      const settings = e.detail || getCachedSettings();
-      if (settings) {
-        const adminLogo = getAppLogo('admin');
-        if (adminLogo) setLogoUrl(adminLogo);
-        setCompanyName(getCompanyName());
-      }
-    };
-    window.addEventListener('businessSettingsUpdated', handleSettingsUpdate);
-    return () => window.removeEventListener('businessSettingsUpdated', handleSettingsUpdate);
-  }, []);
 
   // Load recent searches from localStorage
   useEffect(() => {

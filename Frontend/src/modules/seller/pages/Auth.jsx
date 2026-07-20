@@ -12,7 +12,7 @@ import { sellerApi } from "../services/sellerApi";
 import {
   getAppLogo,
   getSellerLoginBanner,
-  loadBusinessSettings,
+  subscribeBusinessSettings,
 } from "@common/utils/businessSettings"
 import loginBg from "@food/assets/loginbanner.png";
 
@@ -67,31 +67,9 @@ export default function SellerAuth() {
   }, [settings])
 
   useEffect(() => {
-    const fetchSettings = async () => {
-      try {
-        await loadBusinessSettings()
-        const logo = getAppLogo('seller')
-        if (logo) {
-          setLogoUrl(logo)
-        }
-        const banner = getSellerLoginBanner()
-        if (banner && banner.url && banner.active) {
-          setBannerUrl(banner.url)
-        } else {
-          setBannerUrl(loginBg)
-        }
-      } catch (error) {
-        console.warn("Failed to load business settings:", error)
-      }
-    }
-    fetchSettings()
-
-    const handleSettingsUpdate = async () => {
-      await loadBusinessSettings()
+    const apply = () => {
       const logo = getAppLogo('seller')
-      if (logo) {
-        setLogoUrl(logo)
-      }
+      if (logo) setLogoUrl(logo)
       const banner = getSellerLoginBanner()
       if (banner && banner.url && banner.active) {
         setBannerUrl(banner.url)
@@ -99,8 +77,8 @@ export default function SellerAuth() {
         setBannerUrl(loginBg)
       }
     }
-    window.addEventListener('businessSettingsUpdated', handleSettingsUpdate)
-    return () => window.removeEventListener('businessSettingsUpdated', handleSettingsUpdate)
+    apply()
+    return subscribeBusinessSettings(apply)
   }, [])
 
 

@@ -5,13 +5,13 @@ import { useNavigate } from "react-router-dom";
 import { HelpCircle, ArrowRight, Phone, Ambulance, AlertTriangle, Shield, ShieldCheck, User } from "lucide-react";
 import { toast } from "sonner";
 import { deliveryAPI } from "@food/api";
-import { 
-  loadBusinessSettings, 
-  getCachedSettings, 
+import {
+  getCachedSettings,
+  subscribeBusinessSettings,
   getCompanyName,
   getAppLogo,
   getAppFavicon,
-  updateBrowserFavicon 
+  updateFavicon,
 } from "@common/utils/businessSettings";
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
@@ -69,46 +69,22 @@ export default function FeedNavbar({ className = "" }) {
   const [companyName, setCompanyName] = useState(() => getCompanyName())
   const navigate = useNavigate();
 
-  // Load logo for branding
+  // Apply branding from cache; subscribe if not yet available
   useEffect(() => {
-    const loadLogo = async () => {
-      try {
-        const cached = getCachedSettings()
-        if (cached) {
-          const deliveryLogo = getAppLogo('delivery')
-          if (deliveryLogo) setLogoUrl(deliveryLogo)
-          const deliveryFav = getAppFavicon('delivery')
-          if (deliveryFav) updateBrowserFavicon(deliveryFav)
-          const name = getCompanyName()
-          if (name) setCompanyName(name)
-        } else {
-          const settings = await loadBusinessSettings()
-          if (settings) {
-            const deliveryLogo = getAppLogo('delivery')
-            if (deliveryLogo) setLogoUrl(deliveryLogo)
-            const deliveryFav = getAppFavicon('delivery')
-            if (deliveryFav) updateBrowserFavicon(deliveryFav)
-            const name = getCompanyName()
-            if (name) setCompanyName(name)
-          }
-        }
-      } catch (error) {
-        console.error('Error loading logo:', error)
-      }
+    const applyBranding = (settings) => {
+      const deliveryLogo = getAppLogo('delivery') || settings?.deliveryLogo?.url || settings?.logo?.url
+      if (deliveryLogo) setLogoUrl(deliveryLogo)
+      const deliveryFav = getAppFavicon('delivery') || settings?.deliveryFavicon?.url || settings?.favicon?.url
+      if (deliveryFav) updateFavicon(deliveryFav)
+      const name = settings?.companyName || getCompanyName()
+      if (name) setCompanyName(name)
     }
-    loadLogo()
 
-    const handleUpdate = (e) => {
-      const settings = e.detail;
-      const deliveryLogo = settings.deliveryLogo?.url || settings.logo?.url;
-      const deliveryFav = settings.deliveryFavicon?.url || settings.favicon?.url;
-      if (deliveryLogo) setLogoUrl(deliveryLogo);
-      if (deliveryFav) updateBrowserFavicon(deliveryFav);
-      if (settings.companyName) setCompanyName(settings.companyName);
-    };
+    if (getCachedSettings()) {
+      applyBranding()
+    }
 
-    window.addEventListener('businessSettingsUpdated', handleUpdate)
-    return () => window.removeEventListener('businessSettingsUpdated', handleUpdate)
+    return subscribeBusinessSettings((settings) => applyBranding(settings))
   }, [])
 
   const normalizePhoneForDial = (value) => String(value || "").replace(/[^\d]/g, "");

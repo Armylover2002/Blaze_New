@@ -1,6 +1,6 @@
 import { useLocation } from "react-router-dom"
 import { useEffect, useState } from "react"
-import { loadBusinessSettings, setAppType } from "@common/utils/businessSettings"
+import { setAppType } from "@common/utils/businessSettings"
 import BottomNavigation from "./BottomNavigation"
 import { getUnreadDeliveryNotificationCount } from "@food/utils/deliveryNotifications"
 import { deliveryAPI } from "@food/api"
@@ -22,9 +22,7 @@ export default function DeliveryLayout({
   useDeliveryPartnerHydration()
 
   useEffect(() => {
-    // Initialize delivery app settings and favicon
     setAppType('delivery')
-    loadBusinessSettings()
 
     let cancelled = false
     deliveryAPI

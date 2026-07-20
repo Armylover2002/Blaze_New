@@ -13,15 +13,13 @@ import { motion } from "framer-motion"
 import { useAuth } from "@core/context/AuthContext"
 import { cn } from "@/lib/utils"
 import {
-    loadBusinessSettings,
     getCachedSettings,
     getCompanyName,
     getAppLogo,
     getAppFavicon,
     updateBrowserFavicon,
+    subscribeBusinessSettings,
 } from "@common/utils/businessSettings"
-
-const debugError = (...args) => {}
 
 const NAV_TABS = [
     { id: "delivery", label: "Delivery", shortLabel: "Delivery", to: "/food/user", match: "delivery" },
@@ -95,41 +93,16 @@ export default function DesktopNavbar({ showLogo = true }) {
     const isTransparentNav = isBannerRoute && !hasScrolledPastBanner
 
     useEffect(() => {
-        const loadLogo = async () => {
-            try {
-                const cached = getCachedSettings()
-                if (cached) {
-                    const userLogo = getAppLogo("user")
-                    if (userLogo) setLogoUrl(userLogo)
-                    const userFav = getAppFavicon("user")
-                    if (userFav) updateBrowserFavicon(userFav)
-                    if (cached.companyName) setCompanyName(cached.companyName)
-                } else {
-                    const settings = await loadBusinessSettings()
-                    if (settings) {
-                        const userLogo = getAppLogo("user")
-                        if (userLogo) setLogoUrl(userLogo)
-                        const userFav = getAppFavicon("user")
-                        if (userFav) updateBrowserFavicon(userFav)
-                        if (settings.companyName) setCompanyName(settings.companyName)
-                    }
-                }
-            } catch (error) {
-                debugError("Error loading logo:", error)
-            }
-        }
-        loadLogo()
-
-        const handleSettingsUpdate = (e) => {
-            const settings = e.detail || getCachedSettings()
-            const userLogo = settings?.userLogo?.url || settings?.logo?.url
-            const userFav = settings?.userFavicon?.url || settings?.favicon?.url
+        const apply = (settings) => {
+            const userLogo = getAppLogo("user")
             if (userLogo) setLogoUrl(userLogo)
+            const userFav = getAppFavicon("user")
             if (userFav) updateBrowserFavicon(userFav)
             if (settings?.companyName) setCompanyName(settings.companyName)
+            else setCompanyName(getCompanyName())
         }
-        window.addEventListener("businessSettingsUpdated", handleSettingsUpdate)
-        return () => window.removeEventListener("businessSettingsUpdated", handleSettingsUpdate)
+        apply(getCachedSettings())
+        return subscribeBusinessSettings(apply)
     }, [])
 
     useEffect(() => {

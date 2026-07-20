@@ -1,5 +1,4 @@
 import { Link } from "react-router-dom"
-import { useState, useEffect } from "react"
 import { MapPin, ShoppingCart, Trophy } from "lucide-react"
 import { Button } from "@food/components/ui/button"
 import { Avatar, AvatarFallback } from "@food/components/ui/avatar"
@@ -12,15 +11,7 @@ import {
 import { useLocation } from "@food/hooks/useLocation"
 import { useCart } from "@food/context/CartContext"
 import { useLocationSelector } from "./UserLayout"
-import { 
-  loadBusinessSettings, 
-  getCachedSettings, 
-  getCompanyName,
-  getAppLogo 
-} from "@common/utils/businessSettings"
-const debugLog = (...args) => {}
-const debugWarn = (...args) => {}
-const debugError = (...args) => {}
+import { useAppBranding } from "@common/hooks/useBusinessSettingsCache"
 
 
 export default function Navbar() {
@@ -28,45 +19,7 @@ export default function Navbar() {
   const { getCartCount } = useCart()
   const { openLocationSelector } = useLocationSelector()
   const cartCount = getCartCount()
-  const [logoUrl, setLogoUrl] = useState(() => getAppLogo('user'))
-  const [companyName, setCompanyName] = useState(() => getCompanyName())
-
-  // Load business settings logo
-  useEffect(() => {
-    const loadSettings = async () => {
-      try {
-        const cached = getCachedSettings()
-        if (cached) {
-          const userLogo = getAppLogo('user')
-          if (userLogo) setLogoUrl(userLogo)
-          if (cached.companyName) setCompanyName(cached.companyName)
-        } else {
-          const settings = await loadBusinessSettings()
-          if (settings) {
-            const userLogo = getAppLogo('user')
-            if (userLogo) setLogoUrl(userLogo)
-            if (settings.companyName) setCompanyName(settings.companyName)
-          }
-        }
-      } catch (error) {
-        debugError('Error loading business settings:', error)
-      }
-    }
-    loadSettings()
-
-    // Listen for business settings updates
-    const handleSettingsUpdate = (e) => {
-      const settings = e.detail || getCachedSettings();
-      const userLogo = getAppLogo('user');
-      if (userLogo) setLogoUrl(userLogo);
-      if (settings?.companyName) setCompanyName(settings.companyName);
-    };
-    window.addEventListener('businessSettingsUpdated', handleSettingsUpdate)
-
-    return () => {
-      window.removeEventListener('businessSettingsUpdated', handleSettingsUpdate)
-    }
-  }, [])
+  const { logoUrl, companyName } = useAppBranding("user")
 
   // Show area if available, otherwise show city
   const areaName = location?.area && location?.area !== location?.city ? location.area : null

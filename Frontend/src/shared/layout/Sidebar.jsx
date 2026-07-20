@@ -1,16 +1,14 @@
 import React, { useState, useEffect } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { useAuth } from "@/core/context/AuthContext";
-import { useSettings } from "@/core/context/SettingsContext";
 import { cn } from "@/lib/utils";
 import { HiChevronDown } from "react-icons/hi2";
 import {
-  loadBusinessSettings,
-  getCachedSettings,
   getAppLogo,
   getAppFavicon,
   getCompanyName,
-  updateBrowserFavicon
+  updateBrowserFavicon,
+  subscribeBusinessSettings,
 } from "@/modules/common/utils/businessSettings";
 import { motion, AnimatePresence } from "framer-motion";
 import { X } from "lucide-react";
@@ -231,7 +229,6 @@ const SidebarItem = ({
 };
 
 const SidebarContent = ({ items, title, onClose, openMenu, handleToggle, hoveredIdx, setHoveredIdx }) => {
-  const { settings } = useSettings();
   const location = useLocation();
   const isAdminPanel = location.pathname.startsWith("/admin");
   const isSellerPanel = location.pathname.startsWith("/seller");
@@ -242,39 +239,14 @@ const SidebarContent = ({ items, title, onClose, openMenu, handleToggle, hovered
   const [companyName, setCompanyName] = useState(() => getCompanyName());
 
   useEffect(() => {
-    const loadSettings = async () => {
-      try {
-        const cached = getCachedSettings();
-        if (cached) {
-          setLogoUrl(getAppLogo(appType));
-          setCompanyName(getCompanyName());
-          const appFav = getAppFavicon(appType);
-          if (appFav) updateBrowserFavicon(appFav);
-        } else {
-          const fresh = await loadBusinessSettings();
-          if (fresh) {
-            setLogoUrl(getAppLogo(appType));
-            setCompanyName(getCompanyName());
-            const appFav = getAppFavicon(appType);
-            if (appFav) updateBrowserFavicon(appFav);
-          }
-        }
-      } catch (err) {
-        console.error("Error loading sidebar settings:", err);
-      }
-    };
-    loadSettings();
-
-    const handleUpdate = (e) => {
-      const settings = e.detail;
+    const apply = () => {
       setLogoUrl(getAppLogo(appType));
-      if (settings?.companyName) setCompanyName(settings.companyName);
+      setCompanyName(getCompanyName());
       const appFav = getAppFavicon(appType);
       if (appFav) updateBrowserFavicon(appFav);
     };
-
-    window.addEventListener('businessSettingsUpdated', handleUpdate);
-    return () => window.removeEventListener('businessSettingsUpdated', handleUpdate);
+    apply();
+    return subscribeBusinessSettings(apply);
   }, [appType]);
 
   return (

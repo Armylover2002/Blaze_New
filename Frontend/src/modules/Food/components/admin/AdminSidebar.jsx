@@ -71,11 +71,11 @@ import { cn } from "@food/utils/utils"
 import { Input } from "@food/components/ui/input"
 import {
   getCachedSettings,
-  loadBusinessSettings,
   getCompanyName,
   getAppLogo,
   getAppFavicon,
-  updateBrowserFavicon
+  updateBrowserFavicon,
+  subscribeBusinessSettings,
 } from "@common/utils/businessSettings"
 import { adminAPI } from "@food/api"
 import { getCurrentUser } from "@food/utils/auth"
@@ -206,80 +206,25 @@ export default function AdminSidebar({ isOpen = false, onClose, onCollapseChange
   const [logoUrl, setLogoUrl] = useState(() => getAppLogo('admin'))
   const [companyName, setCompanyName] = useState(() => getCompanyName())
 
-  // Load business settings logo
+  // Apply business settings from cache (logo, favicon, modules)
   useEffect(() => {
-    const loadLogo = async () => {
-      try {
-        // First check cache
-        let cached = getCachedSettings()
-        if (cached) {
-          const adminLogo = getAppLogo('admin')
-          if (adminLogo) {
-            setLogoUrl(adminLogo)
-          }
-          const adminFav = getAppFavicon('admin')
-          if (adminFav) {
-            updateBrowserFavicon(adminFav)
-          }
-          if (cached.companyName) {
-            setCompanyName(cached.companyName)
-          }
-        }
-
-        // Always try to load fresh data to ensure we have the latest
-        const settings = await loadBusinessSettings()
-        if (settings) {
-          const adminLogo = getAppLogo('admin')
-          if (adminLogo) {
-            setLogoUrl(adminLogo)
-          }
-          const adminFav = getAppFavicon('admin')
-          if (adminFav) {
-            updateBrowserFavicon(adminFav)
-          }
-          if (settings.companyName) {
-            setCompanyName(settings.companyName)
-          }
-        }
-      } catch (error) {
-        debugError('Error loading logo:', error)
+    const apply = (settings) => {
+      const adminLogo = getAppLogo('admin')
+      if (adminLogo) setLogoUrl(adminLogo)
+      const adminFav = getAppFavicon('admin')
+      if (adminFav) updateBrowserFavicon(adminFav)
+      if (settings?.companyName) {
+        setCompanyName(settings.companyName)
+      } else {
+        setCompanyName(getCompanyName())
+      }
+      if (settings?.modules) {
+        setEnabledModules(normalizeEnabledModules(settings.modules))
       }
     }
 
-    // Load immediately
-    loadLogo()
-
-    // Also try after a small delay to ensure DOM is ready
-    const timeoutId = setTimeout(() => {
-      loadLogo()
-    }, 100)
-
-    // Listen for business settings updates
-    const handleUpdate = (e) => {
-      const settings = e?.detail || getCachedSettings()
-      if (settings) {
-        const adminLogo = getAppLogo('admin')
-        if (adminLogo) {
-          setLogoUrl(adminLogo)
-        }
-        const adminFav = getAppFavicon('admin')
-        if (adminFav) {
-          updateBrowserFavicon(adminFav)
-        }
-        if (settings.companyName) {
-          setCompanyName(settings.companyName)
-        }
-        if (settings.modules) {
-          setEnabledModules(normalizeEnabledModules(settings.modules));
-        }
-      }
-    }
-    window.addEventListener('businessSettingsUpdated', handleUpdate)
-
-    return () => {
-      clearTimeout(timeoutId)
-      window.removeEventListener('businessSettingsUpdated', handleUpdate)
-    }
+    apply(getCachedSettings())
+    return subscribeBusinessSettings(apply)
   }, [])
 
   // Get initial states from consolidated admin_sidebar_state
