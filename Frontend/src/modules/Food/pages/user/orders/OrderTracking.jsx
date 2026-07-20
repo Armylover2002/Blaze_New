@@ -43,6 +43,10 @@ import { isFoodQuickOrder, formatQuickEtaWindow } from "@food/utils/quickDeliver
 import { orderAPI, restaurantAPI } from "@food/api"
 import { useCompanyName } from "@food/hooks/useCompanyName"
 import { useUserNotifications } from "@food/hooks/useUserNotifications"
+import {
+  getLifecycleDisplay,
+  lifecycleStageToTrackingUi,
+} from "@food/utils/orderLifecycleDisplay"
 import { customerApi } from "../../../../quickCommerce/user/services/customerApi"
 import DeliveryOtpDisplay from "../../../../quickCommerce/user/components/DeliveryOtpDisplay"
 import ReturnTrackingPanel, { ReturnItemsCta } from "../../../../quickCommerce/user/components/return/ReturnTrackingPanel"
@@ -472,6 +476,13 @@ function mapBackendOrderStatusToUi(raw) {
 
 function mapOrderToTrackingUiStatus(orderLike) {
   if (!orderLike) return "placed";
+
+  // Phase 1 SSOT: stage from orderLifecycle; UI key for layout only.
+  const life = getLifecycleDisplay(orderLike, { audience: "user" });
+  if (life) {
+    return lifecycleStageToTrackingUi(life.stage);
+  }
+
   const statusRaw = orderLike.status || orderLike.orderStatus;
   const phase = orderLike.deliveryState?.currentPhase;
   if (isFoodOrderCancelledStatus(statusRaw)) return "cancelled";
@@ -888,6 +899,15 @@ export default function OrderTracking() {
   // Build status config dynamically only when relevant values change
   const currentStatus = useMemo(() => {
     const template = STATUS_CONFIG_TEMPLATE[orderStatus] || STATUS_CONFIG_TEMPLATE.placed;
+    const life = getLifecycleDisplay(order, { audience: "user" });
+    if (life) {
+      return {
+        ...template,
+        title: life.title || template.title,
+        subtitle: life.subtitle || template.subtitle,
+      };
+    }
+
     const arriveBy =
       isFoodQuick && quickPromiseLabel
         ? `Quick promise ${quickPromiseLabel}`
@@ -906,7 +926,7 @@ export default function OrderTracking() {
       case 'delivered': return { ...template, subtitle: isQuickOrder ? "Enjoy your purchase!" : (order?.sla?.breached && Number(order?.sla?.compensationAmount) > 0 ? `Delivered · SLA credit ₹${Math.round(Number(order.sla.compensationAmount))}` : "Enjoy your meal!") };
       default: return template;
     }
-  }, [orderStatus, isQuickOrder, isFoodQuick, quickPromiseLabel, estimatedTime, order?.sla]);
+  }, [orderStatus, isQuickOrder, isFoodQuick, quickPromiseLabel, estimatedTime, order?.sla, order]);
 
   const isDeliveredOrder = useMemo(() => (
     orderStatus === "delivered" || order?.status === "delivered" || Boolean(order?.deliveredAt)

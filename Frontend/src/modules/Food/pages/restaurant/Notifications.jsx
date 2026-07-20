@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom"
 import { ArrowLeft, Bell, RefreshCw, X } from "lucide-react"
 import { restaurantAPI } from "@food/api"
 import useNotificationInbox from "@food/hooks/useNotificationInbox"
+import { getLifecycleDisplay } from "@food/utils/orderLifecycleDisplay"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -10,7 +11,13 @@ const debugError = (...args) => {}
 
 const DISMISSED_KEY = "restaurant_dismissed_notifications"
 
-const getStatusLabel = (status = "") => {
+const getStatusLabel = (status = "", orderLike = null) => {
+  const life = getLifecycleDisplay(
+    orderLike || { orderStatus: status, status },
+    { audience: "restaurant" },
+  );
+  if (life) return life.subtitle || life.title;
+
   const normalized = String(status).toLowerCase()
   if (normalized === "confirmed") return "New order received"
   if (normalized === "preparing") return "Order is preparing"
@@ -76,7 +83,7 @@ export default function Notifications() {
         return {
           id,
           orderId: order.orderId || "N/A",
-          message: getStatusLabel(order.orderStatus || order.status),
+          message: getStatusLabel(order.orderStatus || order.status, order),
           timeValue: timestamp ? new Date(timestamp).getTime() : 0,
           time: timestamp
             ? new Date(timestamp).toLocaleString("en-IN", {

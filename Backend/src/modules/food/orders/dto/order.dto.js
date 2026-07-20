@@ -761,6 +761,7 @@ export const USER_ORDER_LIST_SELECT = [
   "ratings.deliveryPartner.rating",
   "ratings.deliveryPartner.comment",
   "dispatch.deliveryPartnerId",
+  "dispatch.status",
   "deliveryState.status",
   "deliveryState.currentPhase",
   "deliveryState.deliveredAt",
@@ -966,6 +967,13 @@ export function toUserOrderListDto(orderLike) {
       : undefined,
     total: pricing?.total ?? o.total,
   };
+
+  const dispatchSlim = slimDispatch(o.dispatch);
+  if (dispatchSlim) {
+    dto.dispatch = {
+      status: dispatchSlim.status,
+    };
+  }
 
   if (ratings) dto.ratings = ratings;
   if (etaPromise) dto.etaPromise = etaPromise;
