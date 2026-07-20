@@ -96,6 +96,8 @@ export default function AddZone() {
   const mapClickListenerRef = useRef(null)
   const drawPointsRef = useRef([])
   const isDrawingRef = useRef(false)
+  // Draw the loaded zone polygon once per edit session — not on every coordinates.length change
+  const initialPolygonDrawnRef = useRef(false)
   
   const [googleMapsApiKey, setGoogleMapsApiKey] = useState("")
   const [mapLoading, setMapLoading] = useState(true)
@@ -171,23 +173,43 @@ export default function AddZone() {
     }
   }, [mapLoading])
 
-  // Draw existing polygon when in edit mode and coordinates are loaded
+  // Reset one-time draw flag when navigating to a different zone
   useEffect(() => {
-    if (isEditMode && coordinates.length >= 3 && mapInstanceRef.current && window.google && !mapLoading) {
-      debugLog("Drawing existing polygon in edit mode, coordinates:", coordinates.length)
-      setTimeout(() => {
-        if (mapInstanceRef.current && window.google) {
-          // Ensure drawing mode is off when editing existing polygon
-          isDrawingRef.current = false
-          setIsDrawing(false)
-          if (mapInstanceRef.current) {
-            mapInstanceRef.current.setOptions({ draggableCursor: null })
-          }
-          drawExistingPolygon(window.google, mapInstanceRef.current, coordinates)
-        }
-      }, 500)
+    initialPolygonDrawnRef.current = false
+  }, [id])
+
+  // Draw existing polygon once when edit data + map are ready.
+  // Must NOT re-run when the user is drawing or when vertex count changes during edits —
+  // that previously forced-close the polygon at 3 points (coordinates.length >= 3).
+  useEffect(() => {
+    if (
+      !isEditMode ||
+      initialPolygonDrawnRef.current ||
+      isDrawingRef.current ||
+      coordinates.length < MIN_POINTS ||
+      !mapInstanceRef.current ||
+      !window.google ||
+      mapLoading
+    ) {
+      return
     }
-  }, [isEditMode, coordinates.length, mapLoading])
+
+    debugLog("Drawing existing polygon in edit mode, coordinates:", coordinates.length)
+    const coordsSnapshot = coordinates
+    const timer = setTimeout(() => {
+      if (
+        !mapInstanceRef.current ||
+        !window.google ||
+        isDrawingRef.current ||
+        initialPolygonDrawnRef.current
+      ) {
+        return
+      }
+      initialPolygonDrawnRef.current = true
+      drawExistingPolygon(window.google, mapInstanceRef.current, coordsSnapshot)
+    }, 500)
+    return () => clearTimeout(timer)
+  }, [isEditMode, coordinates, mapLoading])
 
 
   const fetchExistingZones = async () => {
@@ -315,12 +337,20 @@ export default function AddZone() {
       drawExistingZonesOnMap(google, map)
     }
 
-    // If in edit mode and coordinates are already loaded, draw the polygon
-    if (isEditMode && coordinates.length >= 3) {
+    // If in edit mode and coordinates are already loaded, draw once (effect may also handle this)
+    if (isEditMode && coordinates.length >= MIN_POINTS && !initialPolygonDrawnRef.current) {
+      const coordsSnapshot = coordinates
       setTimeout(() => {
-        if (mapInstanceRef.current && window.google) {
-          drawExistingPolygon(window.google, mapInstanceRef.current, coordinates)
+        if (
+          !mapInstanceRef.current ||
+          !window.google ||
+          isDrawingRef.current ||
+          initialPolygonDrawnRef.current
+        ) {
+          return
         }
+        initialPolygonDrawnRef.current = true
+        drawExistingPolygon(window.google, mapInstanceRef.current, coordsSnapshot)
       }, 500) // Small delay to ensure map is fully loaded
     }
   }
@@ -461,6 +491,7 @@ export default function AddZone() {
     }));
     setCoordinates(coords);
     drawEditablePolygon(google, map, coords); // creates editable polygon + path listeners, NO markers
+    initialPolygonDrawnRef.current = true;
     return true;
   };
 
