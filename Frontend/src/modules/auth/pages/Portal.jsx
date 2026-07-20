@@ -75,40 +75,38 @@ export default function SuperAppPortal() {
   const [logoUrl, setLogoUrl] = React.useState(null)
 
   React.useEffect(() => {
-    const loadSettings = async () => {
+    let cancelled = false
+    let unsubscribe = () => {}
+    const init = async () => {
       try {
-        const { getCachedSettings, loadBusinessSettings, getCompanyName, getAppLogo, setAppType } = await import("@common/utils/businessSettings")
+        const {
+          getCachedSettings,
+          getCompanyName,
+          getAppLogo,
+          setAppType,
+          subscribeBusinessSettings,
+        } = await import("@common/utils/businessSettings")
+        if (cancelled) return
         setAppType('user')
-        let settings = getCachedSettings()
-        if (!settings) {
-          settings = await loadBusinessSettings()
-        }
-        if (settings) {
-          if (settings.modules) {
+        const apply = () => {
+          const settings = getCachedSettings()
+          if (settings?.modules) {
             setEnabledModules(settings.modules)
           }
           setCompanyName(getCompanyName())
           setLogoUrl(getAppLogo('user'))
         }
+        apply()
+        unsubscribe = subscribeBusinessSettings(apply)
       } catch (err) {
         console.error("Failed to load settings in Portal:", err)
       }
     }
-    loadSettings()
-
-    // Listen for business settings updates
-    const handleSettingsUpdate = (e) => {
-      const settings = e.detail;
-      if (settings) {
-        if (settings.modules) setEnabledModules(settings.modules);
-        import("@common/utils/businessSettings").then(({ getCompanyName, getAppLogo }) => {
-          setCompanyName(getCompanyName());
-          setLogoUrl(getAppLogo('user'));
-        });
-      }
-    };
-    window.addEventListener('businessSettingsUpdated', handleSettingsUpdate);
-    return () => window.removeEventListener('businessSettingsUpdated', handleSettingsUpdate);
+    init()
+    return () => {
+      cancelled = true
+      unsubscribe()
+    }
   }, [])
 
   const filteredServices = useMemo(() => {

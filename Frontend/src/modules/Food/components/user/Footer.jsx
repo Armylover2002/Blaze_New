@@ -1,47 +1,11 @@
 import { Link } from "react-router-dom"
 import { Facebook, Twitter, Instagram, Mail, Phone, MapPin, Heart } from "lucide-react"
-import { useState, useEffect } from "react"
-import { getCachedSettings, loadBusinessSettings } from "@common/utils/businessSettings"
-import { useCompanyName } from "@food/hooks/useCompanyName"
+import { useAppBranding } from "@common/hooks/useBusinessSettingsCache"
 
 
 export default function Footer() {
-  const companyName = useCompanyName()
+  const { logoUrl, companyName } = useAppBranding("user")
   const currentYear = new Date().getFullYear()
-  const [logoUrl, setLogoUrl] = useState(undefined)
-
-  // Load business settings logo
-  useEffect(() => {
-    const loadLogo = async () => {
-      try {
-        const cached = getCachedSettings()
-        if (cached?.logo?.url) {
-          setLogoUrl(cached.logo.url)
-        } else {
-          const settings = await loadBusinessSettings()
-          if (settings?.logo?.url) {
-            setLogoUrl(settings.logo.url)
-          }
-        }
-      } catch (error) {
-        // Silently fail, use default logo
-      }
-    }
-    loadLogo()
-
-    // Listen for business settings updates
-    const handleSettingsUpdate = () => {
-      const cached = getCachedSettings()
-      if (cached?.logo?.url) {
-        setLogoUrl(cached.logo.url)
-      }
-    }
-    window.addEventListener('businessSettingsUpdated', handleSettingsUpdate)
-
-    return () => {
-      window.removeEventListener('businessSettingsUpdated', handleSettingsUpdate)
-    }
-  }, [])
 
   const footerLinks = {
     company: [

@@ -102,23 +102,27 @@ export const SettingsProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  const applyMergedSettings = useCallback((raw) => {
+    const merged = {
+      ...DEFAULT_SETTINGS,
+      ...normalizeGlobalSettings(raw || {}),
+    };
+    setSettings(merged);
+    applyThemeVariables(merged);
+    return merged;
+  }, []);
+
   const fetchSettings = useCallback(async ({ forceRefresh = false } = {}) => {
     try {
       setLoading(true);
       setError(null);
       const cached = getCachedSettings();
       if (cached && !forceRefresh) {
-        const merged = { ...DEFAULT_SETTINGS, ...normalizeGlobalSettings(cached) };
-        setSettings(merged);
-        applyThemeVariables(merged);
+        applyMergedSettings(cached);
       }
+      // Single session-cached fetch via centralized store (deduped in-flight)
       const data = await loadBusinessSettings({ forceRefresh });
-      const merged = {
-        ...DEFAULT_SETTINGS,
-        ...normalizeGlobalSettings(data || {}),
-      };
-      setSettings(merged);
-      applyThemeVariables(merged);
+      applyMergedSettings(data || cached || {});
     } catch (err) {
       console.error("Failed to fetch settings", err);
       setError(
@@ -126,12 +130,11 @@ export const SettingsProvider = ({ children }) => {
         err.message ||
         "Failed to load settings",
       );
-      setSettings(DEFAULT_SETTINGS);
-      applyThemeVariables(DEFAULT_SETTINGS);
+      applyMergedSettings(getCachedSettings() || DEFAULT_SETTINGS);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [applyMergedSettings]);
 
   useEffect(() => {
     fetchSettings();

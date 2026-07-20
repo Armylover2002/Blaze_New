@@ -1,17 +1,12 @@
 import { Link } from "react-router-dom"
-import { useState, useEffect, useRef, useMemo } from "react"
+import { useEffect, useRef, useMemo } from "react"
 import { ChevronDown, ShoppingCart, Wallet, MapPin } from "lucide-react"
 import { Button } from "@food/components/ui/button"
 import { useLocation } from "@food/hooks/useLocation"
 import { useCart } from "@food/context/CartContext"
 import { useLocationSelector } from "./UserLayout"
 import { FaLocationDot } from "react-icons/fa6"
-import { 
-  loadBusinessSettings, 
-  getCachedSettings, 
-  getCompanyName,
-  getAppLogo 
-} from "@common/utils/businessSettings"
+import { useAppBranding } from "@common/hooks/useBusinessSettingsCache"
 
 
 export default function PageNavbar({
@@ -25,8 +20,7 @@ export default function PageNavbar({
   const { getCartCount } = useCart()
   const { openLocationSelector } = useLocationSelector()
   const cartCount = getCartCount()
-  const [logoUrl, setLogoUrl] = useState(() => getAppLogo('user'))
-  const [companyName, setCompanyName] = useState(() => getCompanyName())
+  const { logoUrl, companyName } = useAppBranding("user")
   const autoLocationAttemptedRef = useRef(false)
   const requestLocationRef = useRef(requestLocation)
   const enableLocationDebugLogs = false
@@ -110,41 +104,6 @@ export default function PageNavbar({
       autoLocationAttemptedRef.current = false
     }
   }, [location])
-
-  // Load business settings logo
-  useEffect(() => {
-    const loadSettings = async () => {
-      try {
-        const cached = getCachedSettings()
-        if (cached) {
-          const userLogo = getAppLogo('user')
-          if (userLogo) setLogoUrl(userLogo)
-          if (cached.companyName) setCompanyName(cached.companyName)
-        } else {
-          const settings = await loadBusinessSettings()
-          if (settings) {
-            const userLogo = getAppLogo('user')
-            if (userLogo) setLogoUrl(userLogo)
-            if (settings.companyName) setCompanyName(settings.companyName)
-          }
-        }
-      } catch (error) {
-        console.error('Error loading business settings:', error)
-      }
-    }
-    loadSettings()
-    
-    // Listen for updates
-    const handleUpdate = (e) => {
-      const settings = e.detail;
-      const userLogo = settings.userLogo?.url || settings.logo?.url;
-      if (userLogo) setLogoUrl(userLogo);
-      if (settings.companyName) setCompanyName(settings.companyName);
-    };
-    
-    window.addEventListener('businessSettingsUpdated', handleUpdate);
-    return () => window.removeEventListener('businessSettingsUpdated', handleUpdate);
-  }, [])
 
   // Function to extract location parts for display
   // Main location: First 2 parts only (e.g., "Mama Loca, G-2")

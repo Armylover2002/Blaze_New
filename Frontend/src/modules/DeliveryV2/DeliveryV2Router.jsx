@@ -4,10 +4,10 @@ import ProtectedRoute from './components/ProtectedRoute';
 import { AuthPageGuard } from '@core/guards/RouteGuard';
 import Loader from "@food/components/Loader";
 import {
-  loadBusinessSettings,
-  getCachedSettings,
+  subscribeBusinessSettings,
   getAppFavicon,
-  updateBrowserFavicon,
+  setAppType,
+  updateFavicon,
 } from "@common/utils/businessSettings";
 
 // Auth Pages (Lazy loaded)
@@ -46,18 +46,17 @@ const DeliveryV2Router = () => {
   const location = useLocation();
 
   useEffect(() => {
+    setAppType("delivery");
+
     const applyDeliveryFavicon = () => {
       const deliveryFavicon = getAppFavicon("delivery");
       if (deliveryFavicon) {
-        updateBrowserFavicon(deliveryFavicon);
+        updateFavicon(deliveryFavicon);
       }
     };
 
-    if (getCachedSettings()) {
-      applyDeliveryFavicon();
-    } else {
-      loadBusinessSettings().then(() => applyDeliveryFavicon());
-    }
+    applyDeliveryFavicon();
+    return subscribeBusinessSettings(() => applyDeliveryFavicon());
   }, []);
 
   return (

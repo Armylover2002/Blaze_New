@@ -3,12 +3,11 @@ import { useNavigate } from "react-router-dom"
 import { Search, Menu, ChevronRight, MapPin, X, Bell, RefreshCw } from "lucide-react"
 import { restaurantAPI } from "@food/api"
 import {
-  loadBusinessSettings,
-  getCachedSettings,
   getCompanyName,
   getAppLogo,
   getAppFavicon,
-  updateBrowserFavicon
+  updateBrowserFavicon,
+  subscribeBusinessSettings,
 } from "@common/utils/businessSettings"
 import useNotificationInbox from "@food/hooks/useNotificationInbox"
 
@@ -42,45 +41,17 @@ export default function RestaurantNavbar({
   const [logoUrl, setLogoUrl] = useState(() => getAppLogo('restaurant'))
   const { unreadCount } = useNotificationInbox("restaurant", { limit: 20, pollMs: 5 * 60 * 1000 })
 
-  // Load business settings for branding
+  // Branding from shared business-settings cache (no network fetch)
   useEffect(() => {
-    const loadSettings = async () => {
-      try {
-        const cached = getCachedSettings()
-        if (cached) {
-          const restLogo = getAppLogo('restaurant')
-          if (restLogo) setLogoUrl(restLogo)
-          const restFav = getAppFavicon('restaurant')
-          if (restFav) updateBrowserFavicon(restFav)
-          if (cached.companyName) setCompanyName(cached.companyName)
-        } else {
-          const settings = await loadBusinessSettings()
-          if (settings) {
-            const restLogo = getAppLogo('restaurant')
-            if (restLogo) setLogoUrl(restLogo)
-            const restFav = getAppFavicon('restaurant')
-            if (restFav) updateBrowserFavicon(restFav)
-            if (settings.companyName) setCompanyName(settings.companyName)
-          }
-        }
-      } catch (error) {
-        console.error('Error loading business settings:', error)
-      }
+    const apply = () => {
+      const restLogo = getAppLogo('restaurant')
+      if (restLogo) setLogoUrl(restLogo)
+      const restFav = getAppFavicon('restaurant')
+      if (restFav) updateBrowserFavicon(restFav)
+      setCompanyName(getCompanyName())
     }
-    loadSettings()
-
-    const handleSettingsUpdate = (e) => {
-      const settings = e.detail || getCachedSettings()
-      if (settings) {
-        const restLogo = settings.restaurantLogo?.url || settings.logo?.url
-        const restFav = settings.restaurantFavicon?.url || settings.favicon?.url
-        if (restLogo) setLogoUrl(restLogo)
-        if (restFav) updateBrowserFavicon(restFav)
-        if (settings.companyName) setCompanyName(settings.companyName)
-      }
-    }
-    window.addEventListener('businessSettingsUpdated', handleSettingsUpdate)
-    return () => window.removeEventListener('businessSettingsUpdated', handleSettingsUpdate)
+    apply()
+    return subscribeBusinessSettings(apply)
   }, [])
 
   // Fetch restaurant data on mount

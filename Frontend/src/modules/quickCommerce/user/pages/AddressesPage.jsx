@@ -10,6 +10,12 @@ import { toast } from "sonner";
 import { customerApi } from "../services/customerApi";
 import { useLocation } from "../context/LocationContext";
 import { loadGoogleMaps } from "@/core/services/googleMapsLoader";
+import { useDebouncedMapGeocode } from "@core/hooks/useDebouncedMapGeocode";
+import {
+  DEFAULT_MAP_GEOCODE_DEBOUNCE_MS,
+  DEFAULT_MAP_GEOCODE_MIN_DISTANCE_M,
+  distanceMeters,
+} from "@core/utils/mapGeocode";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const DEFAULT_LAT = 22.711140989838025;
@@ -30,24 +36,8 @@ const EMPTY_FORM = {
 // Enable Maps if API Key is available
 const MAPS_ENABLED = !!import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
 
-// Calculate distance between two coordinates using Haversine formula
-function calculateDistance(lat1, lon1, lat2, lon2) {
-    const R = 6371e3; // Earth's radius in meters
-    const lat1Rad = (lat1 * Math.PI) / 180;
-    const lat2Rad = (lat2 * Math.PI) / 180;
-    const deltaLat = ((lat2 - lat1) * Math.PI) / 180;
-    const deltaLon = ((lon2 - lon1) * Math.PI) / 180;
-
-    const a =
-        Math.sin(deltaLat / 2) * Math.sin(deltaLat / 2) +
-        Math.cos(lat1Rad) *
-            Math.cos(lat2Rad) *
-            Math.sin(deltaLon / 2) *
-            Math.sin(deltaLon / 2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
-    return R * c; // Distance in meters
-}
+const calculateDistance = (lat1, lon1, lat2, lon2) =>
+    distanceMeters({ lat: lat1, lng: lon1 }, { lat: lat2, lng: lon2 });
 
 const capitalize = (str = "") => str.charAt(0).toUpperCase() + str.slice(1);
 
@@ -204,6 +194,7 @@ const AddressesPage = () => {
     const [baseMapHeight, setBaseMapHeight] = useState(320);
     const formBodyRef = useRef(null);
     const manualFieldRefs = useRef({});
+    const skipMapIdleRef = useRef(false);
 
     // Delete dialog
     const [isDeleteOpen, setIsDeleteOpen] = useState(false);
@@ -274,6 +265,33 @@ const AddressesPage = () => {
         return () => clearTimeout(t);
     }, [addressAutocompleteValue, showAddressForm]);
 
+    const handleMapMoveEnd = useCallback(async (lat, lng, { signal } = {}) => {
+        const coordKey = `${lat.toFixed(5)},${lng.toFixed(5)}`;
+        if (manualFieldRefs.current._lastCoords === coordKey) return;
+        manualFieldRefs.current._lastCoords = coordKey;
+
+        const parsed = await reverseGeocode(lat, lng);
+        if (!parsed || signal?.aborted) return;
+
+        const friendlyAddress = parsed.address || parsed.formattedAddress || "";
+        setCurrentAddress(friendlyAddress);
+        setAddForm((prev) => ({
+            ...prev,
+            address: parsed.street || parsed.area || prev.address || friendlyAddress,
+            city: parsed.city || prev.city || "",
+            state: parsed.state || prev.state || "",
+            pincode: parsed.postalCode || prev.pincode || "",
+        }));
+    }, []);
+
+    const { bindMap, detachMap, setLastGeocoded } = useDebouncedMapGeocode({
+        debounceMs: DEFAULT_MAP_GEOCODE_DEBOUNCE_MS,
+        minDistanceM: DEFAULT_MAP_GEOCODE_MIN_DISTANCE_M,
+        skipRef: skipMapIdleRef,
+        onGeocode: handleMapMoveEnd,
+        onCenterChange: (lat, lng) => setMapPosition([lat, lng]),
+    });
+
     // Google Maps Initializer
     useEffect(() => {
         if (!MAPS_ENABLED || mapUnavailable || !showAddressForm || !mapContainerRef.current) return;
@@ -303,27 +321,8 @@ const AddressesPage = () => {
                     ],
                 });
                 googleMapRef.current = map;
-
-                let idleTimeout = null;
-                let lastLat = initialPos.lat;
-                let lastLng = initialPos.lng;
-
-                map.addListener("idle", () => {
-                    clearTimeout(idleTimeout);
-                    idleTimeout = setTimeout(() => {
-                        const center = map.getCenter();
-                        const lat = center.lat();
-                        const lng = center.lng();
-
-                        const dist = Math.sqrt(Math.pow(lat - lastLat, 2) + Math.pow(lng - lastLng, 2));
-                        if (dist > 0.00005) {
-                            lastLat = lat;
-                            lastLng = lng;
-                            setMapPosition([lat, lng]);
-                            handleMapMoveEnd(lat, lng);
-                        }
-                    }, 500);
-                });
+                setLastGeocoded(initialPos);
+                bindMap(map);
 
                 setMapLoading(false);
             } catch (err) {
@@ -334,27 +333,9 @@ const AddressesPage = () => {
         initializeGoogleMap();
         return () => {
             isMounted = false;
+            detachMap();
         };
-    }, [showAddressForm, mapUnavailable]);
-
-    const handleMapMoveEnd = async (lat, lng) => {
-        const coordKey = `${lat.toFixed(5)},${lng.toFixed(5)}`;
-        if (manualFieldRefs.current._lastCoords === coordKey) return;
-        manualFieldRefs.current._lastCoords = coordKey;
-
-        const parsed = await reverseGeocode(lat, lng);
-        if (parsed) {
-            const friendlyAddress = parsed.address || parsed.formattedAddress || "";
-            setCurrentAddress(friendlyAddress);
-            setAddForm((prev) => ({
-                ...prev,
-                address: parsed.street || parsed.area || prev.address || friendlyAddress,
-                city: parsed.city || prev.city || "",
-                state: parsed.state || prev.state || "",
-                pincode: parsed.postalCode || prev.pincode || "",
-            }));
-        }
-    };
+    }, [showAddressForm, mapUnavailable, bindMap, detachMap, setLastGeocoded]);
 
     const handleUseCurrentLocation = async () => {
         try {

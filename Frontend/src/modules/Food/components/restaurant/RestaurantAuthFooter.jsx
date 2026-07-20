@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from "react"
+import { useMemo } from "react"
 import { useNavigate } from "react-router-dom"
 import { Facebook, Instagram, Linkedin, Twitter, Youtube } from "lucide-react"
-import { getCachedSettings, loadBusinessSettings } from "@common/utils/businessSettings"
+import { useBusinessSettingsCache } from "@common/hooks/useBusinessSettingsCache"
 
 const LEGAL_LINKS = [
   { label: "Terms & Conditions", path: "/food/restaurant/terms" },
@@ -23,32 +23,7 @@ export default function RestaurantAuthFooter({
   variant = "light",
 }) {
   const navigate = useNavigate()
-  const [settings, setSettings] = useState(() => getCachedSettings())
-
-  useEffect(() => {
-    const syncSettings = async () => {
-      const cached = getCachedSettings()
-      if (cached) {
-        setSettings(cached)
-      }
-      const latest = await loadBusinessSettings()
-      if (latest) {
-        setSettings(latest)
-      }
-    }
-
-    syncSettings()
-
-    const handleSettingsUpdate = (event) => {
-      const next = event?.detail || getCachedSettings()
-      if (next) {
-        setSettings(next)
-      }
-    }
-
-    window.addEventListener("businessSettingsUpdated", handleSettingsUpdate)
-    return () => window.removeEventListener("businessSettingsUpdated", handleSettingsUpdate)
-  }, [])
+  const settings = useBusinessSettingsCache()
 
   const socialLinks = useMemo(() => {
     const links = settings?.socialLinks || {}

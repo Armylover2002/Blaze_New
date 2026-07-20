@@ -1,4 +1,4 @@
-import { getCachedSettings, loadBusinessSettings } from "@common/utils/businessSettings"
+import { getCachedSettings } from "@common/utils/businessSettings"
 
 const debugError = (...args) => console.error(...args)
 
@@ -101,9 +101,9 @@ export const generateOrderInvoice = async (order) => {
       ? `${order.date}, ${order.time}`
       : (order.date || new Date().toLocaleDateString())
 
-    const settings = getCachedSettings() || await loadBusinessSettings()
+    const settings = getCachedSettings()
     const companyName = settings?.companyName || "Blaze"
-    const logoUrl = settings?.logo?.url || undefined
+    const logoUrl = settings?.userLogo?.url || settings?.logo?.url || undefined
     const logoDataUrl = await imageUrlToDataUrl(logoUrl)
 
     const items = Array.isArray(order.items) ? order.items : []

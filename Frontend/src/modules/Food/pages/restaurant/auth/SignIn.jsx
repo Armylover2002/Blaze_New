@@ -9,7 +9,7 @@ import { Label } from "@food/components/ui/label"
 import { Checkbox } from "@food/components/ui/checkbox"
 import loginBg from "@food/assets/loginbanner.png"
 import { useCompanyName } from "@food/hooks/useCompanyName"
-import { loadBusinessSettings, getAppLogo } from "@common/utils/businessSettings"
+import { getAppLogo, subscribeBusinessSettings } from "@common/utils/businessSettings"
 
 
 export default function RestaurantSignIn() {
@@ -17,28 +17,12 @@ export default function RestaurantSignIn() {
   const [logoUrl, setLogoUrl] = useState(() => getAppLogo('restaurant'))
 
   useEffect(() => {
-    const fetchLogo = async () => {
-      try {
-        await loadBusinessSettings()
-        const logo = getAppLogo('restaurant')
-        if (logo) {
-          setLogoUrl(logo)
-        }
-      } catch (error) {
-        console.warn("Failed to load business settings logo:", error)
-      }
-    }
-    fetchLogo()
-
-    const handleSettingsUpdate = async () => {
-      await loadBusinessSettings()
+    const apply = () => {
       const logo = getAppLogo('restaurant')
-      if (logo) {
-        setLogoUrl(logo)
-      }
+      if (logo) setLogoUrl(logo)
     }
-    window.addEventListener('businessSettingsUpdated', handleSettingsUpdate)
-    return () => window.removeEventListener('businessSettingsUpdated', handleSettingsUpdate)
+    apply()
+    return subscribeBusinessSettings(apply)
   }, [])
   const [email, setEmail] = useState(() => {
     if (typeof window !== "undefined") {

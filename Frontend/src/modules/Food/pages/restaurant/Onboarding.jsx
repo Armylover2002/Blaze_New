@@ -18,7 +18,7 @@ import {
   ONBOARDING_DAY_ACTIVE,
   ONBOARDING_DAY_INACTIVE,
 } from "@food/components/restaurant/onboardingStyles"
-import { loadBusinessSettings, getAppLogo, getRestaurantLoginBanner } from "@common/utils/businessSettings"
+import { getAppLogo, getRestaurantLoginBanner, subscribeBusinessSettings } from "@common/utils/businessSettings"
 import loginBg from "@food/assets/loginbanner.png"
 import { Popover, PopoverContent, PopoverTrigger } from "@food/components/ui/popover"
 import { Calendar } from "@food/components/ui/calendar"
@@ -462,25 +462,7 @@ export default function RestaurantOnboarding() {
   })
 
   useEffect(() => {
-    const fetchSettings = async () => {
-      try {
-        await loadBusinessSettings()
-        const logo = getAppLogo("restaurant")
-        if (logo) setLogoUrl(logo)
-        const banner = getRestaurantLoginBanner()
-        if (banner?.url && banner?.active) {
-          setBannerUrl(banner.url)
-        } else {
-          setBannerUrl(loginBg)
-        }
-      } catch (err) {
-        debugWarn("Failed to load business settings:", err)
-      }
-    }
-    fetchSettings()
-
-    const handleSettingsUpdate = async () => {
-      await loadBusinessSettings()
+    const apply = () => {
       const logo = getAppLogo("restaurant")
       if (logo) setLogoUrl(logo)
       const banner = getRestaurantLoginBanner()
@@ -490,8 +472,8 @@ export default function RestaurantOnboarding() {
         setBannerUrl(loginBg)
       }
     }
-    window.addEventListener("businessSettingsUpdated", handleSettingsUpdate)
-    return () => window.removeEventListener("businessSettingsUpdated", handleSettingsUpdate)
+    apply()
+    return subscribeBusinessSettings(apply)
   }, [])
 
   useEffect(() => {

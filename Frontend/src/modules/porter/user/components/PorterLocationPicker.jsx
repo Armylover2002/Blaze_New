@@ -2,14 +2,15 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { ChevronLeft, Loader2, Navigation, Search, MapPin, X } from "lucide-react";
 import { loadGoogleMaps } from "@core/services/googleMapsLoader";
+import { useDebouncedMapGeocode } from "@core/hooks/useDebouncedMapGeocode";
 import { PrimaryButton } from "./ui";
 import { CenterPin } from "./PorterMapMarker";
 import porterUserApi from "../services/userApi";
 import {
   hasCoordinates,
-  hasMovedSignificantly,
   normalizeLocation,
   REVERSE_GEOCODE_DEBOUNCE_MS,
+  MIN_GEOCODE_DISTANCE_M,
 } from "../utils/location";
 
 const DEFAULT_CENTER = { lat: 20.5937, lng: 78.9629 };
@@ -35,12 +36,7 @@ export default function PorterLocationPicker({
   const mapRef = useRef(null);
   const searchInputRef = useRef(null);
   const autocompleteRef = useRef(null);
-  const idleListenerRef = useRef(null);
-  const reverseAbortRef = useRef(null);
-  const lastGeocodedRef = useRef(null);
-  const userDraggedRef = useRef(false);
   const initialGeocodeDoneRef = useRef(false);
-  const debounceRef = useRef(null);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -49,46 +45,14 @@ export default function PorterLocationPicker({
   const [fetchingLocation, setFetchingLocation] = useState(false);
   const [selected, setSelected] = useState(null);
 
-  const cancelPendingGeocode = useCallback(() => {
-    if (debounceRef.current) {
-      clearTimeout(debounceRef.current);
-      debounceRef.current = null;
-    }
-    if (reverseAbortRef.current) {
-      reverseAbortRef.current.abort();
-      reverseAbortRef.current = null;
-    }
-  }, []);
-
-  const cancelPendingGeocodeRef = useRef(cancelPendingGeocode);
-  cancelPendingGeocodeRef.current = cancelPendingGeocode;
-
-  const reverseGeocodeCenter = useCallback(async (force = false) => {
-    if (!mapRef.current) return;
-    const center = mapRef.current.getCenter();
-    if (!center) return;
-
-    const lat = center.lat();
-    const lng = center.lng();
-    const next = { lat, lng };
-
-    if (!force && lastGeocodedRef.current && !hasMovedSignificantly(lastGeocodedRef.current, next)) {
-      return;
-    }
-
-    cancelPendingGeocode();
-    const controller = new AbortController();
-    reverseAbortRef.current = controller;
-
+  const reverseGeocodeCenter = useCallback(async (lat, lng, { signal } = {}) => {
     setResolving(true);
     try {
-      const data = await porterUserApi.reverseGeocode(lat, lng, { signal: controller.signal });
-      if (controller.signal.aborted) return;
-      lastGeocodedRef.current = next;
+      const data = await porterUserApi.reverseGeocode(lat, lng, { signal });
+      if (signal?.aborted) return;
       setSelected(normalizeLocation({ ...data, lat, lng }));
     } catch (err) {
-      if (controller.signal.aborted || err?.code === "ERR_CANCELED") return;
-      lastGeocodedRef.current = next;
+      if (signal?.aborted || err?.code === "ERR_CANCELED") return;
       setSelected({
         title: "Selected Location",
         address: `${lat.toFixed(5)}, ${lng.toFixed(5)}`,
@@ -96,26 +60,25 @@ export default function PorterLocationPicker({
         lng,
       });
     } finally {
-      if (reverseAbortRef.current === controller) {
-        reverseAbortRef.current = null;
+      if (!signal?.aborted) {
         setResolving(false);
       }
     }
-  }, [cancelPendingGeocode]);
+  }, []);
 
-  const scheduleReverseGeocode = useCallback(() => {
-    cancelPendingGeocode();
-    debounceRef.current = setTimeout(() => {
-      debounceRef.current = null;
-      reverseGeocodeCenter();
-    }, REVERSE_GEOCODE_DEBOUNCE_MS);
-  }, [cancelPendingGeocode, reverseGeocodeCenter]);
-
-  const scheduleReverseGeocodeRef = useRef(scheduleReverseGeocode);
-  scheduleReverseGeocodeRef.current = scheduleReverseGeocode;
-
-  const reverseGeocodeCenterRef = useRef(reverseGeocodeCenter);
-  reverseGeocodeCenterRef.current = reverseGeocodeCenter;
+  const {
+    bindMap,
+    detachMap,
+    cancelPending,
+    forceGeocode,
+    setLastGeocoded,
+  } = useDebouncedMapGeocode({
+    debounceMs: REVERSE_GEOCODE_DEBOUNCE_MS,
+    minDistanceM: MIN_GEOCODE_DISTANCE_M,
+    requireUserInteraction: true,
+    onGeocode: reverseGeocodeCenter,
+    onInteractingChange: setMoving,
+  });
 
   useEffect(() => {
     if (!isOpen) return undefined;
@@ -125,9 +88,7 @@ export default function PorterLocationPicker({
     setError("");
     setSelected(null);
     setMoving(false);
-    userDraggedRef.current = false;
     initialGeocodeDoneRef.current = false;
-    lastGeocodedRef.current = null;
 
     const initMap = async () => {
       const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
@@ -157,19 +118,7 @@ export default function PorterLocationPicker({
           keyboardShortcuts: false,
         });
         mapRef.current = map;
-
-        map.addListener("dragstart", () => {
-          userDraggedRef.current = true;
-          setMoving(true);
-          cancelPendingGeocodeRef.current();
-        });
-
-        idleListenerRef.current = map.addListener("idle", () => {
-          setMoving(false);
-          if (!userDraggedRef.current) return;
-          userDraggedRef.current = false;
-          scheduleReverseGeocodeRef.current();
-        });
+        bindMap(map);
 
         if (searchInputRef.current && window.google.maps.places) {
           const autocomplete = new window.google.maps.places.Autocomplete(searchInputRef.current, {
@@ -183,11 +132,10 @@ export default function PorterLocationPicker({
               lat: place.geometry.location.lat(),
               lng: place.geometry.location.lng(),
             };
-            cancelPendingGeocodeRef.current();
-            userDraggedRef.current = false;
+            cancelPending();
             map.panTo(position);
             map.setZoom(17);
-            lastGeocodedRef.current = position;
+            setLastGeocoded(position);
             setSelected(normalizeLocation({
               title: place.name,
               address: place.formatted_address,
@@ -203,12 +151,12 @@ export default function PorterLocationPicker({
 
         if (toPosition(initialLocation) && initialLocation.address) {
           const pos = toPosition(initialLocation);
-          lastGeocodedRef.current = pos;
+          setLastGeocoded(pos);
           initialGeocodeDoneRef.current = true;
           setSelected(normalizeLocation(initialLocation));
         } else if (!initialGeocodeDoneRef.current) {
           initialGeocodeDoneRef.current = true;
-          reverseGeocodeCenterRef.current(true);
+          forceGeocode(initialPosition.lat, initialPosition.lng);
         }
       } catch (err) {
         console.error("[PorterLocationPicker] init failed:", err);
@@ -221,15 +169,12 @@ export default function PorterLocationPicker({
 
     return () => {
       cancelled = true;
-      cancelPendingGeocodeRef.current();
-      if (idleListenerRef.current) {
-        window.google?.maps?.event?.removeListener(idleListenerRef.current);
-        idleListenerRef.current = null;
-      }
+      cancelPending();
+      detachMap();
       autocompleteRef.current = null;
       mapRef.current = null;
     };
-  }, [isOpen]);
+  }, [isOpen, bindMap, detachMap, cancelPending, forceGeocode, setLastGeocoded]);
 
   const handleCurrentLocation = () => {
     if (!navigator.geolocation || !mapRef.current) return;
@@ -237,11 +182,10 @@ export default function PorterLocationPicker({
     navigator.geolocation.getCurrentPosition(
       (position) => {
         const next = { lat: position.coords.latitude, lng: position.coords.longitude };
-        cancelPendingGeocode();
-        userDraggedRef.current = false;
+        cancelPending();
         mapRef.current.panTo(next);
         mapRef.current.setZoom(17);
-        reverseGeocodeCenter(true);
+        forceGeocode(next.lat, next.lng);
         setFetchingLocation(false);
       },
       () => {

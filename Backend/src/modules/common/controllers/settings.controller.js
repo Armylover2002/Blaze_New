@@ -13,9 +13,44 @@ import { getCache, setCache, deleteCache } from '../../../utils/cacheManager.js'
 import { clearGlobalBrandingCache } from '../services/globalBranding.service.js';
 import { clearGlobalPaymentSettingsCache } from '../services/globalPaymentSettings.service.js';
 
-const SETTINGS_CACHE_KEY = 'global_settings_public';
+const SETTINGS_CACHE_KEY = 'global_settings_public_v2';
 const SETTINGS_CACHE_TTL_MS = 60 * 1000; // 1 minute server-side safety TTL
-const SETTINGS_REDIS_KEY = 'common:global_settings:public';
+const SETTINGS_REDIS_KEY = 'common:global_settings:public:v2';
+
+/** Fields required by public clients (branding, modules, payments, contact for footers). */
+const PUBLIC_SETTINGS_PROJECTION = {
+    companyName: 1,
+    email: 1,
+    phone: 1,
+    address: 1,
+    themeColor: 1,
+    codEnabled: 1,
+    onlineEnabled: 1,
+    socialLinks: 1,
+    modules: 1,
+    adminLogo: 1,
+    adminFavicon: 1,
+    userLogo: 1,
+    userFavicon: 1,
+    deliveryLogo: 1,
+    deliveryFavicon: 1,
+    restaurantLogo: 1,
+    restaurantFavicon: 1,
+    sellerLogo: 1,
+    sellerFavicon: 1,
+    loginBanner: 1,
+    sellerLoginBanner: 1,
+    restaurantLoginBanner: 1,
+    updatedAt: 1,
+};
+
+const PUBLIC_MEDIA_KEYS = [
+    'adminLogo', 'adminFavicon', 'userLogo', 'userFavicon',
+    'deliveryLogo', 'deliveryFavicon', 'restaurantLogo', 'restaurantFavicon',
+    'sellerLogo', 'sellerFavicon', 'loginBanner',
+];
+
+const PUBLIC_BANNER_KEYS = ['sellerLoginBanner', 'restaurantLoginBanner'];
 
 const getRedisCache = async (key) => {
     if (!config.redisEnabled) return null;
@@ -59,32 +94,90 @@ const warmGlobalSettingsCache = async (payload) => {
     } catch {}
 };
 
-const buildSettingsPayload = (settings) => {
-    const rawSettings = settings.toObject ? settings.toObject() : settings;
-    
-    // Strip dead Mongo fields
-    delete rawSettings._id;
-    delete rawSettings.__v;
-    delete rawSettings.createdAt;
-
-    // Strip sensitive Cloudinary IDs
-    const imageKeys = ['adminLogo', 'adminFavicon', 'userLogo', 'userFavicon', 'deliveryLogo', 'deliveryFavicon', 'restaurantLogo', 'restaurantFavicon', 'sellerLogo', 'sellerFavicon', 'loginBanner', 'sellerLoginBanner', 'restaurantLoginBanner'];
-    imageKeys.forEach(k => {
-        if (rawSettings[k]) delete rawSettings[k].publicId;
-    });
-
+const normalizeModules = (modules) => {
     const allowedModules = Object.keys(GlobalSettings.schema.paths)
         .filter(p => p.startsWith('modules.'))
         .map(p => p.replace('modules.', ''));
     const cleanedModules = {};
-
     allowedModules.forEach(mod => {
-        cleanedModules[mod] = (rawSettings.modules && rawSettings.modules[mod] !== undefined)
-            ? !!rawSettings.modules[mod]
+        cleanedModules[mod] = (modules && modules[mod] !== undefined)
+            ? !!modules[mod]
             : true;
     });
-    rawSettings.modules = cleanedModules;
+    return cleanedModules;
+};
+
+const slimMedia = (media) => {
+    if (!media || typeof media !== 'object') return { url: '' };
+    return { url: String(media.url || '').trim() };
+};
+
+const slimBanner = (banner) => {
+    if (!banner || typeof banner !== 'object') return { url: '', active: true };
+    return {
+        url: String(banner.url || '').trim(),
+        active: banner.active !== false,
+    };
+};
+
+/** Full payload for authenticated admin GET/update responses. */
+const buildSettingsPayload = (settings) => {
+    const rawSettings = settings.toObject ? settings.toObject() : { ...settings };
+
+    delete rawSettings._id;
+    delete rawSettings.__v;
+    delete rawSettings.createdAt;
+
+    const imageKeys = [
+        ...PUBLIC_MEDIA_KEYS,
+        ...PUBLIC_BANNER_KEYS,
+    ];
+    imageKeys.forEach(k => {
+        if (rawSettings[k]) delete rawSettings[k].publicId;
+    });
+
+    rawSettings.modules = normalizeModules(rawSettings.modules);
     return rawSettings;
+};
+
+/**
+ * Lightweight public payload — only fields consumed by frontend panels.
+ * Keeps flat logo/banner keys for backward compatibility with existing clients.
+ * Omits state/pincode/region and Cloudinary publicIds.
+ */
+const buildPublicSettingsPayload = (settings) => {
+    const raw = settings.toObject ? settings.toObject() : { ...settings };
+
+    const payload = {
+        companyName: raw.companyName || 'Appzeto',
+        themeColor: raw.themeColor || '#0a0a0a',
+        email: raw.email || '',
+        phone: {
+            countryCode: raw.phone?.countryCode || '+91',
+            number: raw.phone?.number || '',
+        },
+        address: raw.address || '',
+        modules: normalizeModules(raw.modules),
+        socialLinks: {
+            facebook: raw.socialLinks?.facebook || '',
+            instagram: raw.socialLinks?.instagram || '',
+            twitter: raw.socialLinks?.twitter || '',
+            linkedin: raw.socialLinks?.linkedin || '',
+            youtube: raw.socialLinks?.youtube || '',
+        },
+        codEnabled: raw.codEnabled !== false,
+        onlineEnabled: raw.onlineEnabled !== false,
+        updatedAt: raw.updatedAt || null,
+    };
+
+    PUBLIC_MEDIA_KEYS.forEach((key) => {
+        payload[key] = slimMedia(raw[key]);
+    });
+    PUBLIC_BANNER_KEYS.forEach((key) => {
+        payload[key] = slimBanner(raw[key]);
+    });
+
+    return payload;
 };
 
 export async function getGlobalSettings(req, res, next) {
@@ -99,29 +192,40 @@ export async function getGlobalSettings(req, res, next) {
                 cached = getCache(SETTINGS_CACHE_KEY);
             }
             if (cached) {
-                res.set('Cache-Control', 'no-cache, must-revalidate');
+                res.set('Cache-Control', 'public, max-age=60, must-revalidate');
                 return sendResponse(res, 200, 'Global settings fetched successfully', cached);
             }
+
+            let settings = await GlobalSettings.findOne()
+                .select(PUBLIC_SETTINGS_PROJECTION)
+                .lean();
+
+            if (!settings) {
+                const created = await GlobalSettings.create({
+                    companyName: 'Appzeto',
+                    email: 'admin@appzeto.com',
+                });
+                settings = created.toObject ? created.toObject() : created;
+            }
+
+            const payload = buildPublicSettingsPayload(settings);
+            setCache(SETTINGS_CACHE_KEY, payload, SETTINGS_CACHE_TTL_MS);
+            try {
+                await setRedisCache(SETTINGS_REDIS_KEY, payload, SETTINGS_CACHE_TTL_MS);
+            } catch {}
+            res.set('Cache-Control', 'public, max-age=60, must-revalidate');
+            return sendResponse(res, 200, 'Global settings fetched successfully', payload);
         }
 
         let settings = await GlobalSettings.findOne();
         if (!settings) {
             settings = await GlobalSettings.create({
                 companyName: 'Appzeto',
-                email: 'admin@appzeto.com'
+                email: 'admin@appzeto.com',
             });
         }
 
         const payload = buildSettingsPayload(settings);
-
-        if (isPublicRoute) {
-            setCache(SETTINGS_CACHE_KEY, payload, SETTINGS_CACHE_TTL_MS);
-            try {
-                await setRedisCache(SETTINGS_REDIS_KEY, payload, SETTINGS_CACHE_TTL_MS);
-            } catch {}
-            res.set('Cache-Control', 'no-cache, must-revalidate');
-        }
-
         return sendResponse(res, 200, 'Global settings fetched successfully', payload);
     } catch (error) {
         next(error);
@@ -309,8 +413,9 @@ export async function updateGlobalSettings(req, res, next) {
 
         await settings.save();
         const payload = buildSettingsPayload(settings);
+        const publicPayload = buildPublicSettingsPayload(settings);
         await clearGlobalSettingsCache();
-        await warmGlobalSettingsCache(payload);
+        await warmGlobalSettingsCache(publicPayload);
         return sendResponse(res, 200, 'Global settings updated successfully', payload);
     } catch (error) {
         await cleanupUploadedFiles(req.files);

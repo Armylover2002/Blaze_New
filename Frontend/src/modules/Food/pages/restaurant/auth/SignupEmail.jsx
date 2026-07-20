@@ -9,7 +9,7 @@ import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@food
 import loginBg from "@food/assets/loginbanner.png"
 import { restaurantAPI } from "@food/api"
 import { useCompanyName } from "@food/hooks/useCompanyName"
-import { loadBusinessSettings, getAppLogo, getRestaurantLoginBanner } from "@common/utils/businessSettings"
+import { getAppLogo, getRestaurantLoginBanner, subscribeBusinessSettings } from "@common/utils/businessSettings"
 
 
 export default function RestaurantSignupEmail() {
@@ -22,31 +22,9 @@ export default function RestaurantSignupEmail() {
   })
 
   useEffect(() => {
-    const fetchSettings = async () => {
-      try {
-        await loadBusinessSettings()
-        const logo = getAppLogo('restaurant')
-        if (logo) {
-          setLogoUrl(logo)
-        }
-        const banner = getRestaurantLoginBanner()
-        if (banner && banner.url && banner.active) {
-          setBannerUrl(banner.url)
-        } else {
-          setBannerUrl(loginBg)
-        }
-      } catch (error) {
-        console.warn("Failed to load business settings:", error)
-      }
-    }
-    fetchSettings()
-
-    const handleSettingsUpdate = async () => {
-      await loadBusinessSettings()
+    const apply = () => {
       const logo = getAppLogo('restaurant')
-      if (logo) {
-        setLogoUrl(logo)
-      }
+      if (logo) setLogoUrl(logo)
       const banner = getRestaurantLoginBanner()
       if (banner && banner.url && banner.active) {
         setBannerUrl(banner.url)
@@ -54,8 +32,8 @@ export default function RestaurantSignupEmail() {
         setBannerUrl(loginBg)
       }
     }
-    window.addEventListener('businessSettingsUpdated', handleSettingsUpdate)
-    return () => window.removeEventListener('businessSettingsUpdated', handleSettingsUpdate)
+    apply()
+    return subscribeBusinessSettings(apply)
   }, [])
   const [step, setStep] = useState(1) // 1: signup form, 2: OTP verification
 

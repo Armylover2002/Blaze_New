@@ -1,6 +1,6 @@
 import { Suspense, lazy, useEffect } from "react"
 import { Routes, Route, Navigate } from "react-router-dom"
-import { loadBusinessSettings, setAppType } from "@common/utils/businessSettings"
+import { setAppType } from "@common/utils/businessSettings"
 import ProtectedRoute from "@food/components/ProtectedRoute"
 import { AuthPageGuard } from "@core/guards/RouteGuard"
 import Loader from "@food/components/Loader"
@@ -76,7 +76,6 @@ const VerificationPending = lazy(() => import("@food/pages/restaurant/auth/Verif
 export default function RestaurantRouter() {
   useEffect(() => {
     setAppType('restaurant')
-    loadBusinessSettings()
   }, [])
 
   useEffect(() => {

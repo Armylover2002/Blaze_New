@@ -4,39 +4,26 @@ import { ArrowRight, Utensils, Truck, Store, Globe, Heart, Shield, Clock } from 
 import { motion } from "framer-motion"
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@food/components/ui/card"
 import { Button } from "@food/components/ui/button"
-import { getCachedSettings, loadBusinessSettings } from "@common/utils/businessSettings"
+import {
+  getCachedSettings,
+  getAppLogo,
+  subscribeBusinessSettings,
+} from "@common/utils/businessSettings"
 
 
 export default function Home() {
   const navigate = useNavigate()
-  const [logoUrl, setLogoUrl] = useState(() => getCachedSettings()?.logo?.url || null)
+  const [logoUrl, setLogoUrl] = useState(() => getAppLogo("user") || getCachedSettings()?.logo?.url || null)
   const [companyName, setCompanyName] = useState(() => getCachedSettings()?.companyName || "Appzeto Food")
 
   useEffect(() => {
-    const loadLogo = async () => {
-      const cached = getCachedSettings()
-      if (cached) {
-        if (cached.logo?.url) setLogoUrl(cached.logo.url)
-        if (cached.companyName) setCompanyName(cached.companyName)
-      } else {
-        const settings = await loadBusinessSettings()
-        if (settings) {
-          if (settings.logo?.url) setLogoUrl(settings.logo.url)
-          if (settings.companyName) setCompanyName(settings.companyName)
-        }
-      }
+    const apply = (settings) => {
+      const userLogo = getAppLogo("user") || settings?.logo?.url
+      if (userLogo) setLogoUrl(userLogo)
+      if (settings?.companyName) setCompanyName(settings.companyName)
     }
-    loadLogo()
-
-    const handleSettingsUpdate = () => {
-      const cached = getCachedSettings()
-      if (cached) {
-        if (cached.logo?.url) setLogoUrl(cached.logo.url)
-        if (cached.companyName) setCompanyName(cached.companyName)
-      }
-    }
-    window.addEventListener('businessSettingsUpdated', handleSettingsUpdate)
-    return () => window.removeEventListener('businessSettingsUpdated', handleSettingsUpdate)
+    apply(getCachedSettings())
+    return subscribeBusinessSettings(apply)
   }, [])
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
