@@ -177,7 +177,7 @@ export function toOrderListItemDto(orderLike, { role = "USER" } = {}) {
     null;
 
   const base = {
-    _id: o._id,
+    _id: idStr(o._id) || o._id,
     orderMongoId: o.orderMongoId || mongoId,
     orderId: o.orderId || mongoId,
     orderType: o.orderType || "food",
@@ -310,6 +310,16 @@ export function toOrderDetailDto(orderLike, { role = "USER" } = {}) {
   const o = asPlain(orderLike);
   return {
     ...list,
+    statusHistory: Array.isArray(o.statusHistory)
+      ? o.statusHistory.map((entry) => ({
+          at: entry?.at,
+          from: entry?.from,
+          to: entry?.to,
+          byRole: entry?.byRole,
+          byId: entry?.byId,
+          note: entry?.note,
+        }))
+      : [],
     pickupPoints: o.pickupPoints,
     deliveryState: o.deliveryState,
     deliveryVerification: o.deliveryVerification
@@ -366,19 +376,28 @@ export function toOrderStatusSocketDto(orderLike, extras = {}) {
 export const ORDER_LIST_PROJECTION =
   "-statusHistory -__v -deliveryOtp -dispatch.offeredTo -dispatch.huntLog -dispatch.attempts -payment.razorpay.signature";
 
+/** Detail must include statusHistory (admin / restaurant timeline). */
 export const ORDER_DETAIL_PROJECTION =
-  "-statusHistory -__v -dispatch.offeredTo -dispatch.huntLog -dispatch.attempts -payment.razorpay.signature";
+  "-__v -dispatch.offeredTo -dispatch.huntLog -dispatch.attempts -payment.razorpay.signature";
 
 /**
  * Drop null/undefined keys (and empty nested objects after slim).
  * Keeps 0 / false / "" — those are meaningful for list UIs.
+ * Preserves ObjectId / Date / non-plain objects (do not walk their internals).
  */
 function omitNullish(value) {
   if (value === null || value === undefined) return undefined;
   if (Array.isArray(value)) {
     return value.map((entry) => omitNullish(entry));
   }
-  if (typeof value !== "object" || value instanceof Date) {
+  if (typeof value !== "object") {
+    return value;
+  }
+  if (value instanceof Date) {
+    return value;
+  }
+  // ObjectId, Buffer, etc. — stringify-friendly identity fields must stay intact.
+  if (value.constructor && value.constructor !== Object) {
     return value;
   }
   const out = {};
@@ -390,6 +409,7 @@ function omitNullish(value) {
       typeof next === "object" &&
       !Array.isArray(next) &&
       !(next instanceof Date) &&
+      (!next.constructor || next.constructor === Object) &&
       Object.keys(next).length === 0
     ) {
       continue;
@@ -607,7 +627,7 @@ export function toRestaurantOrderListDto(orderLike) {
       : undefined;
 
   return omitNullish({
-    _id: o._id,
+    _id: idStr(o._id) || o._id,
     orderMongoId: o.orderMongoId || mongoId,
     orderId: o.orderId || o.order_id || mongoId,
     orderStatus,

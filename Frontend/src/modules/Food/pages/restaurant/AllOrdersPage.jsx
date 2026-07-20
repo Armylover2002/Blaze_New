@@ -237,7 +237,7 @@ export default function AllOrdersPage() {
     if (allVeg && items.length > 0) tags.push('VEG ONLY')
     
     return {
-      id: order.orderId || order._id?.toString() || '',
+      id: order.orderId || order.orderMongoId || order._id?.toString() || '',
       status,
       date,
       time,
@@ -258,7 +258,7 @@ export default function AllOrdersPage() {
       tags: tags.length > 0 ? tags : undefined,
       createdAt: order.createdAt,
       scheduledAt: order.scheduledAt || null,
-      mongoId: order._id?.toString()
+      mongoId: order._id?.toString?.() || order.orderMongoId || null
     }
   }, [restaurantData])
 
@@ -644,10 +644,11 @@ export default function AllOrdersPage() {
             <motion.div
               key={order.id}
               onClick={() => {
+                const detailId = order.mongoId || order.id
                 if (window.innerWidth >= 1024) {
-                  setSelectedOrderId(order.id)
+                  setSelectedOrderId(detailId)
                 } else {
-                  navigate(`/restaurant/orders/${order.id}`)
+                  navigate(`/restaurant/orders/${detailId}`)
                 }
               }}
               layout

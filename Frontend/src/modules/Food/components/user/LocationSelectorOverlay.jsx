@@ -74,7 +74,7 @@ const syncSelectedLocation = (locationData) => {
 
 export default function LocationSelectorOverlay({ isOpen, onClose }) {
   const { location, loading, requestLocation } = useGeoLocation()
-  const { addresses = [], addAddress, updateAddress, setDefaultAddress, userProfile } = useProfile()
+  const { addresses = [], addAddress, updateAddress, setDefaultAddress, userProfile, setActiveAddressId } = useProfile()
   const [showAddressForm, setShowAddressForm] = useState(false)
   const [mapPosition, setMapPosition] = useState([22.7196, 75.8577]) // Default Indore coordinates [lat, lng]
   const [addressFormData, setAddressFormData] = useState({
@@ -969,7 +969,34 @@ export default function LocationSelectorOverlay({ isOpen, onClose }) {
       // Store selection mode so Cart can prefer this current location for delivery address.
       try {
         localStorage.setItem("deliveryAddressMode", "current");
-      } catch {}
+        const payload = {
+          street: locationData.street || locationData.area || locationData.address || "Current Location",
+          additionalDetails: locationData.area || "",
+          city: locationData.city || locationData.area || "Current City",
+          state: locationData.state || locationData.city || "Current State",
+          zipCode: locationData.postalCode || locationData.zipCode || "",
+          type: "current",
+          label: "Current Location",
+          location: {
+            type: "Point",
+            coordinates: [locationData.longitude, locationData.latitude]
+          }
+        }
+        const existingCurrent = addresses.find(a => a.type === "current")
+        let saved
+        if (existingCurrent) {
+          const existingId = existingCurrent._id || existingCurrent.id
+          if (existingId) saved = await updateAddress(existingId, payload)
+        } else {
+          saved = await addAddress(payload)
+        }
+        if (saved) {
+           const savedId = saved._id || saved.id
+           if (savedId) setActiveAddressId(savedId)
+        }
+      } catch (e) {
+         debugError("Error saving current location to Mongo", e)
+      }
       syncSelectedLocation({
         ...locationData,
         address:
@@ -2278,7 +2305,8 @@ export default function LocationSelectorOverlay({ isOpen, onClose }) {
 
       const selectedAddressId = getAddressId(address)
       if (selectedAddressId) {
-        setDefaultAddress(selectedAddressId)
+        setActiveAddressId(selectedAddressId)
+        await setDefaultAddress(selectedAddressId)
       }
       // User picked a saved address; Cart should prefer saved address over current location.
       try {
@@ -2657,7 +2685,7 @@ export default function LocationSelectorOverlay({ isOpen, onClose }) {
           </div>
 
           {/* Saved Addresses Section */}
-          {addresses.length > 0 && (
+          {addresses.filter(a => a.type !== "current" && a.label !== "Current Location").length > 0 && (
             <div
               className="mt-2"
               style={{ animation: 'slideDown 0.3s ease-out 0.2s both' }}
@@ -2669,6 +2697,7 @@ export default function LocationSelectorOverlay({ isOpen, onClose }) {
               </div>
               <div className="bg-white dark:bg-[#1a1a1a]">
                 {addresses
+                  .filter(a => a.type !== "current" && a.label !== "Current Location")
                   .filter((address, index, self) => {
                     // Filter out duplicate addresses with same label - keep only first occurrence
                     const firstIndex = self.findIndex(addr => addr.label === address.label)

@@ -14,12 +14,13 @@ const debugError = (...args) => {}
 
 
 const ProfileContext = createContext(null)
-const USER_SESSION_PREFERENCE_KEYS = ["userVegMode", "food-under-250-filters"]
+const USER_SESSION_PREFERENCE_KEYS = ["userVegMode", "food-under-250-filters", "activeAddressId", "deliveryAddressMode"]
 
 export function ProfileProvider({ children }) {
   const getAddressId = (address) => address?.id || address?._id || null
   const normalizeAddressLabel = (label) => {
     const normalized = String(label || "").trim().toLowerCase()
+    if (normalized === "current location") return "Current Location"
     if (normalized === "home") return "Home"
     if (normalized === "office" || normalized === "work") return "Office"
     return "Other"
@@ -160,6 +161,38 @@ export function ProfileProvider({ children }) {
       localStorage.setItem("userVegMode", vegMode.toString())
     }
   }, [vegMode, isAuthenticated])
+
+  // Single Source of Truth for Selected Address
+  const [activeAddressId, setActiveAddressIdState] = useState(() => {
+    if (!hasUserSession) return null
+    return localStorage.getItem("activeAddressId") || null
+  })
+
+  const setActiveAddressId = useCallback((id) => {
+    if (id) {
+      localStorage.setItem("activeAddressId", id)
+    } else {
+      localStorage.removeItem("activeAddressId")
+    }
+    setActiveAddressIdState(id)
+  }, [])
+
+  const activeAddress = useMemo(() => {
+    if (activeAddressId) {
+      const match = addresses.find(a => String(getAddressId(a)) === String(activeAddressId))
+      if (match) return match
+    }
+
+    // Fallback: If legacy deliveryAddressMode was "current", use the current location document from MongoDB
+    const legacyMode = localStorage.getItem("deliveryAddressMode")
+    if (legacyMode === "current") {
+      const curr = addresses.find(a => a.type === "current")
+      if (curr) return curr
+    }
+
+    // Default to default address or first available saved address
+    return addresses.find((addr) => addr.isDefault) || addresses.find(a => a.type !== "current") || addresses[0] || null
+  }, [addresses, activeAddressId])
 
   // Fetch user profile and addresses from API on mount and when authentication changes
   useEffect(() => {
@@ -517,6 +550,9 @@ export function ProfileProvider({ children }) {
       setDefaultPaymentMethod,
       getDefaultPaymentMethod,
       getPaymentMethodById,
+      activeAddressId,
+      setActiveAddressId,
+      activeAddress,
       addFavorite,
       removeFavorite,
       isFavorite,
@@ -549,6 +585,9 @@ export function ProfileProvider({ children }) {
       setDefaultPaymentMethod,
       getDefaultPaymentMethod,
       getPaymentMethodById,
+      activeAddressId,
+      setActiveAddressId,
+      activeAddress,
       addFavorite,
       removeFavorite,
       isFavorite,
@@ -582,6 +621,9 @@ export function useProfile() {
       setDefaultAddress: () => debugWarn("ProfileProvider not available"),
       getDefaultAddress: () => null,
       getAddressById: () => null,
+      activeAddressId: null,
+      setActiveAddressId: () => debugWarn("ProfileProvider not available"),
+      activeAddress: null,
       addPaymentMethod: () => debugWarn("ProfileProvider not available"),
       updatePaymentMethod: () => debugWarn("ProfileProvider not available"),
       deletePaymentMethod: () => debugWarn("ProfileProvider not available"),

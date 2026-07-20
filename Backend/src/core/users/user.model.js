@@ -4,9 +4,14 @@ const userAddressSchema = new mongoose.Schema(
     {
         label: {
             type: String,
-            enum: ['Home', 'Office', 'Other'],
+            enum: ['Home', 'Office', 'Other', 'Current Location'],
             default: 'Home',
             index: true
+        },
+        type: {
+            type: String,
+            enum: ['saved', 'current'],
+            default: 'saved'
         },
         // Full human-readable / reverse-geocoded address (formatted string).
         address: {

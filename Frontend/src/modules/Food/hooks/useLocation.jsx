@@ -1120,6 +1120,12 @@ function useLocationInternal() {
             try {
               const { latitude, longitude, accuracy } = pos.coords
               const timestamp = pos.timestamp || Date.now()
+              const age = Date.now() - timestamp
+
+              if (forceFresh && age > 30000) {
+                debugWarn(`? Stale GPS location detected (age: ${age}ms), rejecting...`)
+                return reject({ code: 3, message: "Stale location" })
+              }
 
               debugLog(`? Got location${isRetry ? ' (lower accuracy)' : ' (high accuracy)'}:`, {
                 latitude,
@@ -1341,7 +1347,7 @@ function useLocationInternal() {
               getPositionWithRetry({
                 enableHighAccuracy: false,
                 timeout: 5000,  // 5 seconds for lower accuracy (network-based is faster)
-                maximumAge: 300000 // Allow 5 minute old cached location for instant response
+                maximumAge: forceFresh ? 0 : 300000 // If forceFresh, force fresh network location too
               }, 1).then(resolve).catch(reject)
               return
             }
@@ -1354,6 +1360,12 @@ function useLocationInternal() {
             }
             // Try multiple fallback strategies
             try {
+              if (forceFresh) {
+                // User explicitly requested a fresh GPS location.
+                // Do NOT fallback to old DB or cached locations!
+                throw new Error("Could not get fresh GPS location. Please check your device settings.");
+              }
+
               // Strategy 1: Use DB location if available
               let fallback = dbLocation
               if (!fallback) {
