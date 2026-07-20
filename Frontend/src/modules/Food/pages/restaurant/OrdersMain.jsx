@@ -814,6 +814,385 @@ function AllOrders({
   );
 }
 
+const IncomingOrderCard = memo(function IncomingOrderCard({
+    order,
+    orderKey,
+  
+    rejectTarget,
+    showRejectPopup,
+    setShowRejectPopup,
+    setRejectTarget,
+    setRejectReason,
+    requestOrdersRefresh,
+    isMuted,
+    toggleMute,
+    handlePrint,
+    handleRejectClick,
+}) {
+    const orderIdForApi =
+      order?.orderMongoId || order?.orderId || order?._id || order?.id;
+
+    const orderIdForTimer = orderIdForApi;
+    const rejectTargetKey = rejectTarget
+      ? useIncomingOrderQueueStore.getState().getOrderKey(rejectTarget)
+      : null;
+    const isRejectModalOpenForThisOrder =
+      showRejectPopup && rejectTargetKey === orderKey;
+
+    const [isDetailsExpanded, setIsDetailsExpanded] = useState(true);
+    const [prepTime, setPrepTime] = useState(11);
+    const [countdown, setCountdown] = useState(() =>
+      getInitialCountdown(orderIdForTimer),
+    );
+    const [isAcceptingOrder, setIsAcceptingOrder] = useState(false);
+    const autoRejectInFlightRef = useRef(false);
+
+    const visibleItems = getRestaurantVisibleItems(order?.items);
+    const primaryItem = visibleItems[0] || null;
+
+    useEffect(() => {
+      if (countdown <= 0) return;
+      if (isAcceptingOrder) return;
+
+      const timer = setInterval(() => {
+        setCountdown((prev) => (prev > 0 ? prev - 1 : 0));
+      }, 1000);
+
+      return () => clearInterval(timer);
+    }, [countdown, isAcceptingOrder, isRejectModalOpenForThisOrder]);
+
+    useEffect(() => {
+      if (countdown > 0) return;
+      if (!orderIdForApi) return;
+      if (autoRejectInFlightRef.current) return;
+      if (isAcceptingOrder) return;
+      if (rejectInFlightRef.current) return;
+
+      autoRejectInFlightRef.current = true;
+
+      (async () => {
+        // Stop ringtone immediately for this specific timed-out order.
+        stopRinging(order);
+
+        try {
+          await restaurantAPI.rejectOrder(
+            orderIdForApi,
+            "Restaurant not accept",
+          );
+          toast.info("Order auto-rejected due to timeout");
+          clearOrderTimer(orderIdForTimer);
+          requestOrdersRefresh();
+        } catch (error) {
+          debugError("Error auto-rejecting order:", error);
+        } finally {
+          // Remove only this specific order from the queue.
+          removeIncomingOrder(order);
+
+          // If the reject modal is open for this order, close it.
+          if (showRejectPopup && rejectTargetKey === orderKey) {
+            setShowRejectPopup(false);
+            setRejectTarget(null);
+            setRejectReason("");
+          }
+        }
+      })();
+    }, [
+      countdown,
+      orderIdForApi,
+      orderIdForTimer,
+      orderKey,
+      isAcceptingOrder,
+      isRejectModalOpenForThisOrder,
+      rejectTargetKey,
+      showRejectPopup,
+    ]);
+
+    const handleAcceptIncoming = async () => {
+      if (isAcceptingOrder) return;
+      if (isRejectModalOpenForThisOrder) return;
+      if (!orderIdForApi) return;
+
+      setIsAcceptingOrder(true);
+
+      // Stop ringtone immediately for this accepted order.
+      stopRinging(order);
+
+      // Ensure this order can't re-trigger fallback selection.
+      markOrderAsShown(order);
+
+      try {
+        await restaurantAPI.acceptOrder(orderIdForApi, prepTime);
+        toast.success("Order accepted successfully");
+        requestOrdersRefresh();
+
+        clearOrderTimer(orderIdForApi);
+        removeIncomingOrder(order);
+      } catch (error) {
+        debugError("? Error accepting order:", error);
+        const errorMessage =
+          error.response?.data?.message ||
+          error.message ||
+          "Failed to accept order. Please try again.";
+
+        if (error.response?.status === 400) {
+          toast.error(errorMessage);
+        } else if (error.response?.status === 404) {
+          toast.error(
+            "Order not found. It may have been cancelled or already processed.",
+          );
+        } else {
+          toast.error(errorMessage);
+        }
+        setIsAcceptingOrder(false);
+      }
+    };
+
+    return (
+      <motion.div
+        className="shrink-0 w-[min(92vw,400px)] sm:w-[400px] max-h-[70vh] snap-center bg-white rounded-[2rem] sm:rounded-[2.5rem] shadow-[0_-20px_60px_rgba(0,0,0,0.5)] overflow-hidden flex flex-col"
+        initial={{ opacity: 0, x: 24 }}
+        animate={{ opacity: 1, x: 0 }}
+        exit={{ opacity: 0, x: 24 }}
+        transition={{ type: "spring", damping: 25, stiffness: 200 }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header Ribbon */}
+        <div className="bg-[#FF0000] px-5 py-4 flex justify-between items-center text-white border-b border-red-600/20">
+          <div>
+            <p className="text-white/90 text-[10px] font-bold uppercase tracking-widest mb-0.5">
+              Incoming Order
+            </p>
+            <h3 className="text-xl font-bold text-white tracking-tight">
+              {order?.orderId || order?.orderMongoId || "#Order"}
+            </h3>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => handlePrint(order)}
+              className="p-2 hover:bg-white/20 active:scale-95 rounded-full transition-all"
+              aria-label="Print"
+            >
+              <Printer className="w-5 h-5 text-white" />
+            </button>
+            <button
+              onClick={toggleMute}
+              className="p-2 hover:bg-white/20 active:scale-95 rounded-full transition-all"
+              aria-label={isMuted ? "Unmute" : "Mute"}
+            >
+              {isMuted ? (
+                <VolumeX className="w-5 h-5 text-white" />
+              ) : (
+                <Volume2 className="w-5 h-5 text-white" />
+              )}
+            </button>
+          </div>
+        </div>
+
+        {/* Content */}
+        <div className="px-4 pt-4 pb-3 flex-1 overflow-y-auto min-h-0 bg-gray-50 space-y-3">
+          {/* Scheduled Indicator */}
+          {order?.scheduledAt && (
+            <div className="bg-green-50 border border-green-200 rounded-xl p-3 flex items-center gap-3 shadow-sm">
+              <div className="w-8 h-8 rounded-full bg-green-100 flex items-center justify-center shrink-0">
+                <Calendar className="w-4 h-4 text-green-600" />
+              </div>
+              <div>
+                <p className="text-[10px] font-bold text-[#FF0000] uppercase tracking-wider">
+                  Scheduled Order
+                </p>
+                <p className="text-sm font-bold text-[#FF0000]">
+                  For {formatScheduledAtShort(order.scheduledAt) || "Scheduled time"}
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Customer info & Details */}
+          <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+            <div className="p-3 border-b border-gray-100 flex justify-between items-center">
+              <div>
+                <h4 className="text-base font-bold text-gray-900 tracking-tight">
+                  {primaryItem?.name || "New Order"}
+                </h4>
+                <p className="text-[11px] text-gray-500 mt-0.5">
+                  {order?.createdAt
+                    ? new Date(order.createdAt).toLocaleString("en-GB", {
+                        day: "numeric",
+                        month: "short",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })
+                    : "Just now"}
+                </p>
+              </div>
+              <div className="text-right">
+                <span className="block text-xs font-medium text-gray-500">
+                  {visibleItems.length || 0} item
+                  {visibleItems.length !== 1 ? "s" : ""}
+                </span>
+              </div>
+            </div>
+
+            <button
+              onClick={() => setIsDetailsExpanded(!isDetailsExpanded)}
+              className="w-full flex items-center justify-center py-2 bg-gray-50/50 hover:bg-gray-50 transition-colors"
+            >
+              <span className="text-xs font-semibold text-gray-600 mr-1">
+                {isDetailsExpanded ? "Hide Details" : "View Details"}
+              </span>
+              {isDetailsExpanded ? (
+                <ChevronUp className="w-3.5 h-3.5 text-gray-500" />
+              ) : (
+                <ChevronDown className="w-3.5 h-3.5 text-gray-500" />
+              )}
+            </button>
+
+            <AnimatePresence>
+              {isDetailsExpanded && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: "auto", opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.2 }}
+                  className="overflow-hidden bg-gray-50/30"
+                >
+                  <div className="px-3 py-3 space-y-2 border-t border-gray-100">
+                    {visibleItems.length > 0 ? (
+                      visibleItems.map((item, index) => (
+                        <div key={index} className="flex items-start gap-2">
+                          <div
+                            className={`w-2.5 h-2.5 rounded-full mt-1 shrink-0 ${
+                              item.isVeg ? "bg-green-500" : "bg-red-500"
+                            }`}
+                          />
+                          <div className="flex-1">
+                            <div className="flex items-start justify-between">
+                              <p className="text-xs font-semibold text-gray-900 leading-snug">
+                                {item.quantity} × {item.name}
+                              </p>
+                              <p className="text-xs font-bold text-gray-900 ml-2 shrink-0">
+                                ₹{item.price * item.quantity}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-xs text-gray-500 text-center">No items</p>
+                    )}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
+          {/* Order Summary & Settings Card */}
+          <div className="bg-white rounded-xl border border-gray-100 shadow-sm">
+            {/* Cutlery preference & Payment */}
+            <div className="flex items-center justify-between p-3 border-b border-gray-100">
+              <div className="flex items-center gap-2">
+                <Utensils
+                  className={`w-4 h-4 ${
+                    order?.sendCutlery === false
+                      ? "text-red-500"
+                      : "text-gray-400"
+                  }`}
+                />
+                <span
+                  className={`text-[11px] font-bold uppercase tracking-wider ${
+                    order?.sendCutlery === false
+                      ? "text-red-600"
+                      : "text-gray-600"
+                  }`}
+                >
+                  {order?.sendCutlery === false ? "No Cutlery" : "Send Cutlery"}
+                </span>
+              </div>
+              {(() => {
+                const raw =
+                  order?.paymentMethod || order?.payment?.method;
+                const m = raw != null ? String(raw).toLowerCase().trim() : "";
+                const isCod = m === "cash" || m === "cod";
+                return (
+                  <span
+                    className={`px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded border ${
+                      isCod
+                        ? "bg-amber-50 text-amber-600 border-amber-200"
+                        : "bg-green-50 text-green-600 border-green-200"
+                    }`}
+                  >
+                    {isCod ? "COD" : "Paid"}
+                  </span>
+                );
+              })()}
+            </div>
+
+            {/* Prep Time Row */}
+            <div className="flex items-center justify-between p-3 border-b border-gray-100">
+              <div className="flex items-center gap-2">
+                <Clock className="w-4 h-4 text-gray-400" />
+                <span className="text-sm font-semibold text-gray-700">Prep Time</span>
+              </div>
+              <div className="flex items-center gap-2 bg-gray-50 p-1 rounded-lg border border-gray-100">
+                <button
+                  onClick={() => setPrepTime(Math.max(1, prepTime - 1))}
+                  className="w-7 h-7 flex items-center justify-center bg-white hover:bg-gray-100 rounded shadow-sm transition-colors active:scale-95"
+                  disabled={isAcceptingOrder}
+                >
+                  <Minus className="w-3.5 h-3.5 text-gray-700" />
+                </button>
+                <span className="text-sm font-bold text-gray-900 w-8 text-center">
+                  {prepTime}m
+                </span>
+                <button
+                  onClick={() => setPrepTime(prepTime + 1)}
+                  className="w-7 h-7 flex items-center justify-center bg-white hover:bg-gray-100 rounded shadow-sm transition-colors active:scale-95"
+                  disabled={isAcceptingOrder}
+                >
+                  <Plus className="w-3.5 h-3.5 text-gray-700" />
+                </button>
+              </div>
+            </div>
+
+            {/* Total bill */}
+            <div className="flex items-center justify-between p-3 bg-gray-50/50 rounded-b-xl">
+              <span className="text-sm font-bold text-gray-900">Total Bill</span>
+              <span className="text-lg font-black text-gray-900">
+                ₹{getPopupOrderTotal(order)}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div className="p-4 border-t border-gray-100 bg-white">
+          <div className="space-y-3">
+            <ActionSlider
+              label={
+                isAcceptingOrder
+                  ? "Accepting..."
+                  : `Slide to accept (${formatTime(countdown)})`
+              }
+              lockedLabel="Accepting..."
+              onConfirm={handleAcceptIncoming}
+              disabled={isAcceptingOrder || isRejectModalOpenForThisOrder}
+              color="bg-[#FF0000]"
+              successLabel="Accepted ✓"
+              timeProgress={(countdown / 240) * 100}
+            />
+
+            <button
+              onClick={() => handleRejectClick(order)}
+              disabled={isAcceptingOrder || isRejectModalOpenForThisOrder}
+              className="w-full py-3 bg-white border border-[#FF0000]/20 text-[#FF0000] rounded-xl font-bold text-sm hover:bg-red-50 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Reject Order
+            </button>
+          </div>
+        </div>
+      </motion.div>
+    );
+  });
+
 export default function OrdersMain() {
   const navigate = useNavigate();
   const [activeFilter, setActiveFilter] = useState("all");
@@ -1644,375 +2023,7 @@ case "cancelled":
     }
   };
 
-  const IncomingOrderCard = memo(function IncomingOrderCard({
-    order,
-    orderKey,
-  }) {
-    const orderIdForApi =
-      order?.orderMongoId || order?.orderId || order?._id || order?.id;
-
-    const orderIdForTimer = orderIdForApi;
-    const rejectTargetKey = rejectTarget
-      ? useIncomingOrderQueueStore.getState().getOrderKey(rejectTarget)
-      : null;
-    const isRejectModalOpenForThisOrder =
-      showRejectPopup && rejectTargetKey === orderKey;
-
-    const [isDetailsExpanded, setIsDetailsExpanded] = useState(true);
-    const [prepTime, setPrepTime] = useState(11);
-    const [countdown, setCountdown] = useState(() =>
-      getInitialCountdown(orderIdForTimer),
-    );
-    const [isAcceptingOrder, setIsAcceptingOrder] = useState(false);
-    const autoRejectInFlightRef = useRef(false);
-
-    const visibleItems = getRestaurantVisibleItems(order?.items);
-    const primaryItem = visibleItems[0] || null;
-
-    useEffect(() => {
-      if (countdown <= 0) return;
-      if (isAcceptingOrder) return;
-
-      const timer = setInterval(() => {
-        setCountdown((prev) => (prev > 0 ? prev - 1 : 0));
-      }, 1000);
-
-      return () => clearInterval(timer);
-    }, [countdown, isAcceptingOrder, isRejectModalOpenForThisOrder]);
-
-    useEffect(() => {
-      if (countdown > 0) return;
-      if (!orderIdForApi) return;
-      if (autoRejectInFlightRef.current) return;
-      if (isAcceptingOrder) return;
-      if (rejectInFlightRef.current) return;
-
-      autoRejectInFlightRef.current = true;
-
-      (async () => {
-        // Stop ringtone immediately for this specific timed-out order.
-        stopRinging(order);
-
-        try {
-          await restaurantAPI.rejectOrder(
-            orderIdForApi,
-            "Restaurant not accept",
-          );
-          toast.info("Order auto-rejected due to timeout");
-          clearOrderTimer(orderIdForTimer);
-          requestOrdersRefresh();
-        } catch (error) {
-          debugError("Error auto-rejecting order:", error);
-        } finally {
-          // Remove only this specific order from the queue.
-          removeIncomingOrder(order);
-
-          // If the reject modal is open for this order, close it.
-          if (showRejectPopup && rejectTargetKey === orderKey) {
-            setShowRejectPopup(false);
-            setRejectTarget(null);
-            setRejectReason("");
-          }
-        }
-      })();
-    }, [
-      countdown,
-      orderIdForApi,
-      orderIdForTimer,
-      orderKey,
-      isAcceptingOrder,
-      isRejectModalOpenForThisOrder,
-      rejectTargetKey,
-      showRejectPopup,
-    ]);
-
-    const handleAcceptIncoming = async () => {
-      if (isAcceptingOrder) return;
-      if (isRejectModalOpenForThisOrder) return;
-      if (!orderIdForApi) return;
-
-      setIsAcceptingOrder(true);
-
-      // Stop ringtone immediately for this accepted order.
-      stopRinging(order);
-
-      // Ensure this order can't re-trigger fallback selection.
-      markOrderAsShown(order);
-
-      try {
-        await restaurantAPI.acceptOrder(orderIdForApi, prepTime);
-        toast.success("Order accepted successfully");
-        requestOrdersRefresh();
-
-        clearOrderTimer(orderIdForApi);
-        removeIncomingOrder(order);
-      } catch (error) {
-        debugError("? Error accepting order:", error);
-        const errorMessage =
-          error.response?.data?.message ||
-          error.message ||
-          "Failed to accept order. Please try again.";
-
-        if (error.response?.status === 400) {
-          toast.error(errorMessage);
-        } else if (error.response?.status === 404) {
-          toast.error(
-            "Order not found. It may have been cancelled or already processed.",
-          );
-        } else {
-          toast.error(errorMessage);
-        }
-        setIsAcceptingOrder(false);
-      }
-    };
-
     return (
-      <motion.div
-        className="shrink-0 w-[min(92vw,400px)] sm:w-[400px] max-h-[70vh] snap-center bg-white rounded-[2rem] sm:rounded-[2.5rem] shadow-[0_-20px_60px_rgba(0,0,0,0.5)] overflow-hidden flex flex-col"
-        initial={{ opacity: 0, x: 24 }}
-        animate={{ opacity: 1, x: 0 }}
-        exit={{ opacity: 0, x: 24 }}
-        transition={{ type: "spring", damping: 25, stiffness: 200 }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header Ribbon */}
-        <div className="bg-[#FF0000] px-5 py-4 flex justify-between items-center text-white border-b border-red-600/20">
-          <div>
-            <p className="text-white/90 text-[10px] font-bold uppercase tracking-widest mb-0.5">
-              Incoming Order
-            </p>
-            <h3 className="text-xl font-bold text-white tracking-tight">
-              {order?.orderId || order?.orderMongoId || "#Order"}
-            </h3>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => handlePrint(order)}
-              className="p-2 hover:bg-white/20 active:scale-95 rounded-full transition-all"
-              aria-label="Print"
-            >
-              <Printer className="w-5 h-5 text-white" />
-            </button>
-            <button
-              onClick={toggleMute}
-              className="p-2 hover:bg-white/20 active:scale-95 rounded-full transition-all"
-              aria-label={isMuted ? "Unmute" : "Mute"}
-            >
-              {isMuted ? (
-                <VolumeX className="w-5 h-5 text-white" />
-              ) : (
-                <Volume2 className="w-5 h-5 text-white" />
-              )}
-            </button>
-          </div>
-        </div>
-
-        {/* Content */}
-        <div className="px-4 pt-4 pb-3 flex-1 overflow-y-auto min-h-0 bg-gray-50 space-y-3">
-          {/* Scheduled Indicator */}
-          {order?.scheduledAt && (
-            <div className="bg-green-50 border border-green-200 rounded-xl p-3 flex items-center gap-3 shadow-sm">
-              <div className="w-8 h-8 rounded-full bg-green-100 flex items-center justify-center shrink-0">
-                <Calendar className="w-4 h-4 text-green-600" />
-              </div>
-              <div>
-                <p className="text-[10px] font-bold text-[#FF0000] uppercase tracking-wider">
-                  Scheduled Order
-                </p>
-                <p className="text-sm font-bold text-[#FF0000]">
-                  For {formatScheduledAtShort(order.scheduledAt) || "Scheduled time"}
-                </p>
-              </div>
-            </div>
-          )}
-
-          {/* Customer info & Details */}
-          <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-            <div className="p-3 border-b border-gray-100 flex justify-between items-center">
-              <div>
-                <h4 className="text-base font-bold text-gray-900 tracking-tight">
-                  {primaryItem?.name || "New Order"}
-                </h4>
-                <p className="text-[11px] text-gray-500 mt-0.5">
-                  {order?.createdAt
-                    ? new Date(order.createdAt).toLocaleString("en-GB", {
-                        day: "numeric",
-                        month: "short",
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })
-                    : "Just now"}
-                </p>
-              </div>
-              <div className="text-right">
-                <span className="block text-xs font-medium text-gray-500">
-                  {visibleItems.length || 0} item
-                  {visibleItems.length !== 1 ? "s" : ""}
-                </span>
-              </div>
-            </div>
-
-            <button
-              onClick={() => setIsDetailsExpanded(!isDetailsExpanded)}
-              className="w-full flex items-center justify-center py-2 bg-gray-50/50 hover:bg-gray-50 transition-colors"
-            >
-              <span className="text-xs font-semibold text-gray-600 mr-1">
-                {isDetailsExpanded ? "Hide Details" : "View Details"}
-              </span>
-              {isDetailsExpanded ? (
-                <ChevronUp className="w-3.5 h-3.5 text-gray-500" />
-              ) : (
-                <ChevronDown className="w-3.5 h-3.5 text-gray-500" />
-              )}
-            </button>
-
-            <AnimatePresence>
-              {isDetailsExpanded && (
-                <motion.div
-                  initial={{ height: 0, opacity: 0 }}
-                  animate={{ height: "auto", opacity: 1 }}
-                  exit={{ height: 0, opacity: 0 }}
-                  transition={{ duration: 0.2 }}
-                  className="overflow-hidden bg-gray-50/30"
-                >
-                  <div className="px-3 py-3 space-y-2 border-t border-gray-100">
-                    {visibleItems.length > 0 ? (
-                      visibleItems.map((item, index) => (
-                        <div key={index} className="flex items-start gap-2">
-                          <div
-                            className={`w-2.5 h-2.5 rounded-full mt-1 shrink-0 ${
-                              item.isVeg ? "bg-green-500" : "bg-red-500"
-                            }`}
-                          />
-                          <div className="flex-1">
-                            <div className="flex items-start justify-between">
-                              <p className="text-xs font-semibold text-gray-900 leading-snug">
-                                {item.quantity} × {item.name}
-                              </p>
-                              <p className="text-xs font-bold text-gray-900 ml-2 shrink-0">
-                                ₹{item.price * item.quantity}
-                              </p>
-                            </div>
-                          </div>
-                        </div>
-                      ))
-                    ) : (
-                      <p className="text-xs text-gray-500 text-center">No items</p>
-                    )}
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-
-          {/* Order Summary & Settings Card */}
-          <div className="bg-white rounded-xl border border-gray-100 shadow-sm">
-            {/* Cutlery preference & Payment */}
-            <div className="flex items-center justify-between p-3 border-b border-gray-100">
-              <div className="flex items-center gap-2">
-                <Utensils
-                  className={`w-4 h-4 ${
-                    order?.sendCutlery === false
-                      ? "text-red-500"
-                      : "text-gray-400"
-                  }`}
-                />
-                <span
-                  className={`text-[11px] font-bold uppercase tracking-wider ${
-                    order?.sendCutlery === false
-                      ? "text-red-600"
-                      : "text-gray-600"
-                  }`}
-                >
-                  {order?.sendCutlery === false ? "No Cutlery" : "Send Cutlery"}
-                </span>
-              </div>
-              {(() => {
-                const raw =
-                  order?.paymentMethod || order?.payment?.method;
-                const m = raw != null ? String(raw).toLowerCase().trim() : "";
-                const isCod = m === "cash" || m === "cod";
-                return (
-                  <span
-                    className={`px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded border ${
-                      isCod
-                        ? "bg-amber-50 text-amber-600 border-amber-200"
-                        : "bg-green-50 text-green-600 border-green-200"
-                    }`}
-                  >
-                    {isCod ? "COD" : "Paid"}
-                  </span>
-                );
-              })()}
-            </div>
-
-            {/* Prep Time Row */}
-            <div className="flex items-center justify-between p-3 border-b border-gray-100">
-              <div className="flex items-center gap-2">
-                <Clock className="w-4 h-4 text-gray-400" />
-                <span className="text-sm font-semibold text-gray-700">Prep Time</span>
-              </div>
-              <div className="flex items-center gap-2 bg-gray-50 p-1 rounded-lg border border-gray-100">
-                <button
-                  onClick={() => setPrepTime(Math.max(1, prepTime - 1))}
-                  className="w-7 h-7 flex items-center justify-center bg-white hover:bg-gray-100 rounded shadow-sm transition-colors active:scale-95"
-                  disabled={isAcceptingOrder}
-                >
-                  <Minus className="w-3.5 h-3.5 text-gray-700" />
-                </button>
-                <span className="text-sm font-bold text-gray-900 w-8 text-center">
-                  {prepTime}m
-                </span>
-                <button
-                  onClick={() => setPrepTime(prepTime + 1)}
-                  className="w-7 h-7 flex items-center justify-center bg-white hover:bg-gray-100 rounded shadow-sm transition-colors active:scale-95"
-                  disabled={isAcceptingOrder}
-                >
-                  <Plus className="w-3.5 h-3.5 text-gray-700" />
-                </button>
-              </div>
-            </div>
-
-            {/* Total bill */}
-            <div className="flex items-center justify-between p-3 bg-gray-50/50 rounded-b-xl">
-              <span className="text-sm font-bold text-gray-900">Total Bill</span>
-              <span className="text-lg font-black text-gray-900">
-                ₹{getPopupOrderTotal(order)}
-              </span>
-            </div>
-          </div>
-        </div>
-
-        <div className="p-4 border-t border-gray-100 bg-white">
-          <div className="space-y-3">
-            <ActionSlider
-              label={
-                isAcceptingOrder
-                  ? "Accepting..."
-                  : `Slide to accept (${formatTime(countdown)})`
-              }
-              lockedLabel="Accepting..."
-              onConfirm={handleAcceptIncoming}
-              disabled={isAcceptingOrder || isRejectModalOpenForThisOrder}
-              color="bg-[#FF0000]"
-              successLabel="Accepted ✓"
-              timeProgress={(countdown / 240) * 100}
-            />
-
-            <button
-              onClick={() => handleRejectClick(order)}
-              disabled={isAcceptingOrder || isRejectModalOpenForThisOrder}
-              className="w-full py-3 bg-white border border-[#FF0000]/20 text-[#FF0000] rounded-xl font-bold text-sm hover:bg-red-50 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              Reject Order
-            </button>
-          </div>
-        </div>
-      </motion.div>
-    );
-  });
-
-  return (
     <div className="flex-1 flex flex-col h-full bg-gray-100 md:bg-slate-50 md:overflow-hidden overflow-x-hidden">
       {/* Restaurant Navbar - Sticky at top (Mobile only) */}
       <div className="sticky top-0 z-50 bg-white md:hidden">
@@ -2365,6 +2376,20 @@ case "cancelled":
                     key={entry.key}
                     order={entry.order}
                     orderKey={entry.key}
+                    rejectTarget={rejectTarget}
+                    showRejectPopup={showRejectPopup}
+                    setShowRejectPopup={setShowRejectPopup}
+                    setRejectTarget={setRejectTarget}
+                    setRejectReason={setRejectReason}
+                    requestOrdersRefresh={requestOrdersRefresh}
+                    isMuted={isMuted}
+                    toggleMute={toggleMute}
+                    handlePrint={handlePrint}
+                    handleRejectClick={handleRejectClick}
+                    getInitialCountdown={getInitialCountdown}
+                    clearOrderTimer={clearOrderTimer}
+                    markOrderAsShown={markOrderAsShown}
+                    getPopupOrderTotal={getPopupOrderTotal}
                   />
                 ))}
               </div>

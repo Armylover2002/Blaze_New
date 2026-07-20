@@ -238,7 +238,20 @@ export default function Cart() {
   const [showItemDetail, setShowItemDetail] = useState(false)
   const [selectedProduct, setSelectedProduct] = useState(null)
   const [selectedItemImageIndex, setSelectedItemImageIndex] = useState(0)
-  const [selectedVariantId, setSelectedVariantId] = useState("")
+  const [selectedVariantId, setSelectedVariantId] = useState(null)
+
+  // Network status
+  const [isOffline, setIsOffline] = useState(!navigator.onLine)
+  useEffect(() => {
+    const handleOnline = () => setIsOffline(false)
+    const handleOffline = () => setIsOffline(true)
+    window.addEventListener('online', handleOnline)
+    window.addEventListener('offline', handleOffline)
+    return () => {
+      window.removeEventListener('online', handleOnline)
+      window.removeEventListener('offline', handleOffline)
+    }
+  }, [])
 
   const getDishQuantity = (dish, preferredVariantId = "") => {
     const variants = getFoodVariants(dish);
@@ -541,11 +554,16 @@ export default function Cart() {
     }
   }, [])
 
+  const hasInitializedFromProfileRef = useRef(false)
   useEffect(() => {
-    setRecipientDetails((prev) => ({
-      name: prev.name || userProfile?.name || "",
-      phone: prev.phone || userProfile?.phone || "",
-    }))
+    if (hasInitializedFromProfileRef.current) return
+    if (userProfile?.name || userProfile?.phone) {
+      setRecipientDetails((prev) => ({
+        name: prev.name || userProfile.name || "",
+        phone: prev.phone || userProfile.phone || "",
+      }))
+      hasInitializedFromProfileRef.current = true
+    }
   }, [userProfile?.name, userProfile?.phone])
 
   useEffect(() => {
@@ -1164,15 +1182,13 @@ export default function Cart() {
       } finally {
         if (!cancelled) setLoadingPricing(false)
       }
-    }, 300)
-  }, debounceMs)
+    }, debounceMs)
 
-  return () => {
-    cancelled = true
-    clearTimeout(timer)
-    pricingRequestControllerRef.current?.abort?.()
-  }
-}, [foodPricingRequestKey, loadingRestaurant, appliedCoupon, availableCoupons])
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+      pricingRequestControllerRef.current?.abort?.()
+    }
   }, [cart, defaultAddress, appliedCoupon, couponCode, restaurantId, deliveryType, isScheduled, scheduledDate, scheduledTime, foodPricingRequestKey, loadingRestaurant])
 
 // Fetch wallet balance
@@ -2481,6 +2497,13 @@ return (
 
     {/* Scrollable Content Area */}
     <div className="flex-1 overflow-y-auto overflow-x-hidden pb-28 md:pb-32">
+      {/* Offline Banner */}
+      {isOffline && (
+        <div className="bg-red-500 text-white px-4 py-2 text-center text-sm font-medium z-50 animate-fadeIn">
+          You are currently offline. Please check your internet connection.
+        </div>
+      )}
+
       {/* Savings Banner */}
       {otherPlatformSavings > 0 && (
         <div className="bg-red-100 dark:bg-red-900/20 px-4 md:px-6 py-2 md:py-3 flex-shrink-0 border-b border-red-200 dark:border-red-800/30">
@@ -2501,7 +2524,36 @@ return (
             <div className="bg-white dark:bg-[#1a1a1a] px-4 md:px-6 py-4 md:py-5 rounded-2xl md:rounded-3xl shadow-sm border border-slate-100 dark:border-gray-800">
               <div className="space-y-3 md:space-y-4">
                 {cart.map((item) => (
-                  <div key={item.id} className="flex min-w-0 items-start gap-2 md:gap-4">
+                  <div 
+                    key={item.id} 
+                    className="flex min-w-0 items-start gap-2 md:gap-4 cursor-pointer"
+                    onClick={() => {
+                      let itemWithVariants = item;
+                      if (!hasFoodVariants(item) && item.variantId && menuData) {
+                        let foundItem = null;
+                        const sectionsToSearch = Array.isArray(menuData)
+                          ? menuData
+                          : menuData.sections
+                            ? menuData.sections
+                            : menuData.data?.menu?.sections
+                              ? menuData.data.menu.sections
+                              : [];
+                        for (const category of sectionsToSearch) {
+                          if (category.items) {
+                            foundItem = category.items.find(i => String(i.id) === String(item.itemId) || String(i._id) === String(item.itemId));
+                            if (foundItem) break;
+                          }
+                        }
+                        if (foundItem && hasFoodVariants(foundItem)) {
+                          itemWithVariants = { ...item, variants: foundItem.variants, variations: foundItem.variations };
+                        }
+                      }
+                      setSelectedProduct(itemWithVariants)
+                      setSelectedVariantId(itemWithVariants.variantId || getDefaultFoodVariant(itemWithVariants)?.id || "")
+                      setSelectedItemImageIndex(0)
+                      setShowItemDetail(true)
+                    }}
+                  >
                     {/* Veg/Non-veg indicator */}
                     <div className={`w-4 h-4 md:w-5 md:h-5 border-2 ${item.isVeg !== false ? 'border-green-600' : 'border-red-600'} flex items-center justify-center mt-1 flex-shrink-0`}>
                       <div className={`w-2 h-2 md:w-2.5 md:h-2.5 rounded-full ${item.isVeg !== false ? 'bg-green-600' : 'bg-red-600'}`} />
@@ -2512,22 +2564,12 @@ return (
                       {item.variantName ? (
                         <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{item.variantName}</p>
                       ) : null}
-                      {Number(item.otherPrice || 0) > Number(item.price || 0) ? (
-                        <div className="mt-1 flex items-center gap-2 flex-wrap">
-                          <span className="text-xs font-semibold text-gray-900 dark:text-gray-100">
-                            {RUPEE_SYMBOL}{Number(item.price || 0).toFixed(0)}
-                          </span>
-                          <span className="text-[11px] text-gray-400 line-through">
-                            {RUPEE_SYMBOL}{Number(item.otherPrice || 0).toFixed(0)}
-                          </span>
-                          <span className="text-[10px] font-bold text-[#FF0000] dark:text-red-400">
-                            Save {RUPEE_SYMBOL}{Math.max(0, Number(item.otherPrice || 0) - Number(item.price || 0)).toFixed(0)}
-                          </span>
-                        </div>
-                      ) : null}
                     </div>
 
-                    <div className="flex shrink-0 items-center gap-2 md:gap-4">
+                    <div 
+                      className="flex shrink-0 items-center gap-2 md:gap-4"
+                      onClick={(e) => e.stopPropagation()}
+                    >
                       {/* Quantity controls */}
                       <div className="flex items-center border border-[#FF0000] dark:border-[#FF0000]/50 rounded">
                         <button
