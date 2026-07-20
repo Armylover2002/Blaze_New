@@ -22,7 +22,7 @@ export function getOrderSocket(getToken) {
     return null;
   }
 
-  if (!socket || !socket.connected) {
+  if (!socket) {
     console.log('[orderSocket] Creating new Socket.IO connection to:', socketBaseUrl());
     socket = io(socketBaseUrl(), {
       auth: { token },
@@ -44,6 +44,10 @@ export function getOrderSocket(getToken) {
     });
   } else {
     console.log('[orderSocket] Reusing existing socket connection, ID:', socket.id);
+    if (!socket.connected) {
+      socket.auth = { token };
+      socket.connect();
+    }
   }
   
   return socket;

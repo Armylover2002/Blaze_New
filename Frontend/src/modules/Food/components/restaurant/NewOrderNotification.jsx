@@ -11,6 +11,18 @@ export default function NewOrderNotification({ order, onClose, onViewOrder }) {
 
   if (!order) return null;
 
+  const restaurantBill = (() => {
+    if (order.pricing?.restaurantBill != null) return Number(order.pricing.restaurantBill) || 0;
+    if (order.restaurantBill != null) return Number(order.restaurantBill) || 0;
+    const subtotal = Number(order.pricing?.subtotal ?? order.pricing?.itemSubtotal) || 0;
+    const taxes = Number(order.pricing?.tax ?? order.pricing?.taxes) || 0;
+    const packagingFee = Number(order.pricing?.packagingFee) || 0;
+    const discount = Number(order.pricing?.discount) || 0;
+    const computed = Math.max(0, subtotal + taxes + packagingFee - discount);
+    if (computed > 0) return computed;
+    return Number(order.total) || 0;
+  })();
+
   const handleViewOrder = () => {
     if (onViewOrder) {
       onViewOrder(order);
@@ -59,7 +71,7 @@ export default function NewOrderNotification({ order, onClose, onViewOrder }) {
                   <span className="text-gray-600 font-medium">Total Amount</span>
                 </div>
                 <span className="text-2xl font-bold text-green-600">
-                  ₹{order.total?.toFixed(2) || '0.00'}
+                  ₹{restaurantBill.toFixed(2)}
                 </span>
               </div>
 

@@ -46,7 +46,8 @@ export default function Notifications() {
   const fetchNotifications = async () => {
     try {
       setLoading(true)
-      const response = await restaurantAPI.getOrders({ page: 1, limit: 30 })
+      // Canonical dashboard list (page=1, limit=50) — shares restaurantAPI.getOrders cache with OrdersMain.
+      const response = await restaurantAPI.getOrders()
       const rows = response?.data?.data?.orders || response?.data?.data?.data?.orders || []
       setOrders(rows)
     } catch (error) {

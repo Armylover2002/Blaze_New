@@ -4,6 +4,7 @@ import { API_BASE_URL } from '@food/api/config';
 import { restaurantAPI } from '@food/api';
 import alertSound from '@food/assets/audio/alert.mp3';
 import { dispatchNotificationInboxRefresh } from '@food/hooks/useNotificationInbox';
+import { showActorBrowserNotification } from '@food/utils/actorBrowserNotification';
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -144,30 +145,17 @@ export const useRestaurantNotifications = () => {
     const notificationOptions = buildRestaurantOrderNotification(orderData);
 
     try {
-      if ('serviceWorker' in navigator) {
-        const registration = await navigator.serviceWorker.getRegistration();
-        if (registration) {
-          await registration.showNotification(notificationOptions.title, {
-            body: notificationOptions.body,
-            tag: notificationOptions.tag,
-            renotify: true,
-            requireInteraction: true,
-            silent: false,
-            vibrate: [200, 100, 200, 100, 300],
-            icon: '/favicon.ico',
-            data: notificationOptions.data,
-          });
-          return;
-        }
-      }
-
-      new Notification(notificationOptions.title, {
+      // Never call registration.showNotification from the page — OS notifs are
+      // origin-global and would appear while the User tab is focused.
+      await showActorBrowserNotification({
+        audience: 'restaurant',
+        title: notificationOptions.title,
         body: notificationOptions.body,
         tag: notificationOptions.tag,
-        requireInteraction: true,
-        silent: false,
-        icon: '/favicon.ico',
-        data: notificationOptions.data,
+        data: {
+          ...notificationOptions.data,
+          audience: 'restaurant',
+        },
       });
     } catch (error) {
       debugWarn('Error showing background restaurant notification:', error);
@@ -241,15 +229,18 @@ export const useRestaurantNotifications = () => {
   useEffect(() => {
     if (!restaurantId) return;
 
-    const ALERT_POLL_MS = 8000;
+    const ALERT_POLL_MS_DISCONNECTED = 15000;
     let isCancelled = false;
     let initialPollDone = false;
 
     const pollOrders = async () => {
       if (isCancelled) return;
+      // Skip REST alert poll while socket is live — sockets + OrdersMain cover new orders.
+      if (socketRef.current?.connected) return;
 
       try {
-        const response = await restaurantAPI.getOrders({ page: 1, limit: 30 });
+        // Same canonical dashboard query as OrdersMain/popup (limit=50) so caches share one Mongo read.
+        const response = await restaurantAPI.getOrders();
         const rows =
           response?.data?.data?.orders ||
           response?.data?.data?.data?.orders ||
@@ -280,7 +271,7 @@ export const useRestaurantNotifications = () => {
       initialPollDone = true;
       pollOrders();
     }
-    const intervalId = setInterval(pollOrders, ALERT_POLL_MS);
+    const intervalId = setInterval(pollOrders, ALERT_POLL_MS_DISCONNECTED);
 
     return () => {
       isCancelled = true;
@@ -509,7 +500,7 @@ export const useRestaurantNotifications = () => {
       forceNew: false,
       autoConnect: true,
       auth: {
-        token: localStorage.getItem('restaurant_accessToken') || localStorage.getItem('accessToken')
+        token: localStorage.getItem('restaurant_accessToken') || ''
       }
     });
 
@@ -605,28 +596,44 @@ export const useRestaurantNotifications = () => {
       handleIncomingOrderAlert(orderData);
     });
 
-    // Listen for sound notification event
+    // Listen for sound notification event (restaurant audience only)
     socketRef.current.on('play_notification_sound', (data) => {
+      if (data?.audience && data.audience !== 'restaurant') return;
       debugLog('?? Sound notification:', data);
       const normalizedData = {
         orderId: data?.orderId || data?.order_id,
         orderMongoId: data?.orderMongoId || data?.order_mongo_id,
         ...data
       };
-      // Force immediate buzz for notification events, even if dedupe would skip.
-      activeOrderRef.current = normalizedData || { id: Date.now() };
-      playNotificationSound(normalizedData);
-      startAlertLoop();
-      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
-        showBackgroundOrderNotification(normalizedData);
-      }
+      // Single playback path — handleIncomingOrderAlert owns sound + loop.
       handleIncomingOrderAlert(normalizedData);
     });
 
     // Listen for order status updates
     socketRef.current.on('order_status_update', (data) => {
       debugLog('?? Order status update:', data);
-      // You can handle status updates here if needed
+      const updatedIds = [
+        String(data?.orderId || '').trim(),
+        String(data?.orderMongoId || '').trim(),
+      ].filter(Boolean);
+      const activeIds = [
+        String(activeOrderRef.current?.orderId || '').trim(),
+        String(activeOrderRef.current?.orderMongoId || '').trim(),
+        String(activeOrderRef.current?.id || '').trim(),
+        String(newOrder?.orderId || '').trim(),
+        String(newOrder?.orderMongoId || '').trim(),
+      ].filter(Boolean);
+
+      const matchesActiveOrder = updatedIds.some((id) => activeIds.includes(id));
+      if (!matchesActiveOrder) return;
+
+      const status = String(data?.orderStatus || data?.status || '').trim().toLowerCase();
+      // Stop ring when restaurant accepts/rejects or order leaves waiting states.
+      if (status && !['pending', 'placed', 'created'].includes(status)) {
+        stopAlertLoop();
+        activeOrderRef.current = null;
+        setNewOrder(null);
+      }
     });
 
     socketRef.current.on('order_deleted', (data) => {

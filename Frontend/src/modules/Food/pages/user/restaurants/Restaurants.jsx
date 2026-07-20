@@ -55,11 +55,12 @@ export default function Restaurants() {
     const fetchRestaurants = async () => {
       try {
         setLoading(true)
-        const params = { limit: 300, _ts: Date.now() }
+        const params = { limit: 300 }
         if (zoneId) {
           params.zoneId = zoneId
         }
-        const response = await restaurantAPI.getRestaurants(params, { noCache: true })
+        // Use client TTL cache — list rarely needs forced bust on every mount.
+        const response = await restaurantAPI.getRestaurants(params)
         const list =
           response?.data?.data?.restaurants ||
           response?.data?.restaurants ||

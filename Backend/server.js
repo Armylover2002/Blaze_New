@@ -5,7 +5,7 @@ import { validateConfig } from './src/config/validateEnv.js';
 import { connectDB, disconnectDB } from './src/config/db.js';
 import { connectRedis, closeRedis } from './src/config/redis.js';
 import { initSocket } from './src/config/socket.js';
-import { initializeQueues, closeBullMQConnection } from './src/queues/index.js';
+import { initializeQueues, closeBullMQConnection, initSubscriptionSchedules, initOrderSchedules } from './src/queues/index.js';
 import { expireExpiredOffers } from './src/modules/food/admin/services/admin.service.js';
 import { syncExpiredFssaiNotifications } from './src/modules/food/restaurant/services/fssaiExpiry.service.js';
 import { bulkUpdateCouponStatuses } from './src/modules/porter/services/coupon-lifecycle.service.js';
@@ -107,6 +107,8 @@ const startServer = async () => {
         if (config.bullmqEnabled && config.redisEnabled) {
             try {
                 initializeQueues();
+                await initSubscriptionSchedules(); // Also ensure subscription schedule is called
+                await initOrderSchedules();
             } catch (err) {
                 logger.error(`BullMQ initialization error (server continues): ${err.message}`);
             }

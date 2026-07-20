@@ -18,6 +18,7 @@ import { DateRangeCalendar } from "@food/components/ui/date-range-calendar"
 import { restaurantAPI } from "@food/api"
 import { useRestaurantNotifications } from "@food/hooks/useRestaurantNotifications"
 import OrderDetails from "@food/pages/restaurant/OrderDetails"
+import { getCancellationDisplayLabel } from "@food/utils/cancellationDisplay"
 import { parseValidDate } from "@food/utils/scheduleTime"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
@@ -217,12 +218,13 @@ export default function AllOrdersPage() {
     let reason = null
     if (status === 'REJECTED' && order.rejectionReason) {
       reason = `Rejected by Restaurant: ${order.rejectionReason}`
-    } else if (status === 'CANCELLED' && order.cancellationReason) {
-      reason = `Cancelled by ${order.cancelledBy === 'customer' ? 'customer' : 'restaurant'}: ${order.cancellationReason}`
+    } else if (status === 'CANCELLED' || String(order.orderStatus || '').includes('cancel')) {
+      reason = getCancellationDisplayLabel(order) ||
+        (order.cancellationReason
+          ? `Cancelled: ${order.cancellationReason}`
+          : 'Cancelled')
     } else if (status === 'REJECTED') {
       reason = 'Rejected by Restaurant'
-    } else if (status === 'CANCELLED') {
-      reason = 'Cancelled by customer'
     }
     
     // Determine tags based on order properties
@@ -243,7 +245,15 @@ export default function AllOrdersPage() {
       address,
       customer: customerName,
       items,
-      totalPrice: order.pricing?.total ?? order.payment?.amountDue ?? order.payment?.amount ?? order.totalAmount ?? order.total ?? order.amount ?? 0,
+      totalPrice: (() => {
+        const itemSum = items.reduce((sum, item) => sum + (Number(item.price) || 0) * (Number(item.quantity) || 0), 0);
+        const subtotal = itemSum > 0 ? itemSum : (Number(order.pricing?.itemSubtotal) || Number(order.pricing?.subtotal) || 0);
+        const taxes = Number(order.pricing?.tax) || Number(order.pricing?.taxes) || Number(order.tax) || 0;
+        const packagingFee = Number(order.pricing?.packagingFee) || Number(order.packagingFee) || 0;
+        const discount = Number(order.pricing?.discount) || Number(order.discount) || 0;
+        const calcTotal = Math.max(0, subtotal + taxes + packagingFee - discount);
+        return calcTotal > 0 ? calcTotal : (order.payment?.amountDue ?? order.payment?.amount ?? order.totalAmount ?? order.total ?? order.amount ?? 0);
+      })(),
       reason,
       tags: tags.length > 0 ? tags : undefined,
       createdAt: order.createdAt,

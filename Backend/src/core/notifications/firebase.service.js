@@ -145,15 +145,28 @@ const buildMessagePayload = (payload = {}, token) => {
         title: sanitizeString(payload.title || payload.notification?.title || 'New notification'),
         body: sanitizeString(payload.body || payload.notification?.body || '')
     };
-    const data = normalizeDataMap(payload.data || {});
+    const rawData = { ...(payload.data || {}) };
+    const audience = sanitizeString(rawData.audience).toLowerCase();
+    // Restaurant/delivery/seller alerts must NOT use FCM auto-display on web.
+    // Chrome shows webpush/top-level notification globally (visible while User tab is focused).
+    // SW + page code filter by audience and show only on the matching role tab.
+    const isActorScopedWebAlert = ['restaurant', 'delivery', 'seller'].includes(audience);
+    const omitWebAutoDisplay = Boolean(payload.dataOnly) || isActorScopedWebAlert;
+
+    // Ensure SW/page can render title/body from data when notification block is omitted for web.
+    if (omitWebAutoDisplay) {
+        if (!rawData.title) rawData.title = notification.title;
+        if (!rawData.body) rawData.body = notification.body;
+    }
+
+    const data = normalizeDataMap(rawData);
     const image =
         sanitizeString(payload.icon || payload.notification?.image || payload.notification?.icon || data.image || data.imageUrl);
 
-    // If payload.dataOnly is true, we omit the 'notification' block.
-    // This prevents FCM from auto-displaying while allowing app code to show a 'Local Notification'.
     const message = { token };
 
-    if (!payload.dataOnly) {
+    // Top-level notification triggers Chrome OS auto-display. Skip for actor-scoped web alerts.
+    if (!omitWebAutoDisplay) {
         message.notification = notification;
         if (image) {
             message.notification.image = image;
@@ -167,25 +180,36 @@ const buildMessagePayload = (payload = {}, token) => {
     message.android = {
         priority: 'high',
         notification: {
+            title: notification.title,
+            body: notification.body,
             channel_id: 'default',
             sound: 'default',
             default_vibrate_timings: true,
             default_light_settings: true,
             click_action: 'FLUTTER_NOTIFICATION_CLICK',
-            actions: [] 
+            actions: []
         }
     };
+    if (image) {
+        message.android.notification.image = image;
+    }
 
     message.webpush = {
         headers: {
             Urgency: 'high'
         },
-        notification: {
+        fcmOptions: {
+            link: sanitizeString(data.link || data.targetUrl || '/')
+        }
+    };
+    // Never attach webpush.notification for actor-scoped alerts — SW owns display + audience filter.
+    if (!omitWebAutoDisplay) {
+        message.webpush.notification = {
             title: notification.title,
             body: notification.body,
             icon: image || payload.icon || '/favicon.ico'
-        }
-    };
+        };
+    }
 
     return message;
 };

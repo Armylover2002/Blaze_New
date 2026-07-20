@@ -163,15 +163,18 @@ export default function OrdersPage() {
 
     fetchOrders()
 
-    // Set up interval to refresh orders every 10 seconds (fallback if Socket.IO fails)
+    // Socket-first: REST poll only when disconnected.
+    if (isConnected) {
+      return undefined
+    }
     const refreshInterval = setInterval(() => {
       fetchOrders()
-    }, 10000)
+    }, 45000)
 
     return () => {
       clearInterval(refreshInterval)
     }
-  }, [])
+  }, [isConnected])
 
   // Refresh orders when new order notification is received
   useEffect(() => {

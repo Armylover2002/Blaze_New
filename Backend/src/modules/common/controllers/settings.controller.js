@@ -61,6 +61,18 @@ const warmGlobalSettingsCache = async (payload) => {
 
 const buildSettingsPayload = (settings) => {
     const rawSettings = settings.toObject ? settings.toObject() : settings;
+    
+    // Strip dead Mongo fields
+    delete rawSettings._id;
+    delete rawSettings.__v;
+    delete rawSettings.createdAt;
+
+    // Strip sensitive Cloudinary IDs
+    const imageKeys = ['adminLogo', 'adminFavicon', 'userLogo', 'userFavicon', 'deliveryLogo', 'deliveryFavicon', 'restaurantLogo', 'restaurantFavicon', 'sellerLogo', 'sellerFavicon', 'loginBanner', 'sellerLoginBanner', 'restaurantLoginBanner'];
+    imageKeys.forEach(k => {
+        if (rawSettings[k]) delete rawSettings[k].publicId;
+    });
+
     const allowedModules = Object.keys(GlobalSettings.schema.paths)
         .filter(p => p.startsWith('modules.'))
         .map(p => p.replace('modules.', ''));

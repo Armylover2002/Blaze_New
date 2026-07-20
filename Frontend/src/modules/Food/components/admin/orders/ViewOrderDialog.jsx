@@ -7,6 +7,7 @@ import {
   DialogDescription,
 } from "@food/components/ui/dialog"
 import { formatScheduledAt, parseValidDate } from "@food/utils/scheduleTime"
+import { getCancellationDisplayLabel } from "@food/utils/cancellationDisplay"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -33,7 +34,7 @@ const formatOrderTimestamp = (value) => {
   return formatHistoryTimestamp(value) || "—"
 }
 
-const getBackendStatusLabel = (raw) => {
+const getBackendStatusLabel = (raw, meta = {}) => {
   const s = String(raw || "").toLowerCase().trim()
   if (!s) return "—"
   if (s === "created" || s === "placed") return "Pending"
@@ -42,9 +43,17 @@ const getBackendStatusLabel = (raw) => {
   if (s === "preparing" || s === "ready_for_pickup") return "Processing"
   if (s === "picked_up") return "Food On The Way"
   if (s === "delivered") return "Delivered"
-  if (s === "cancelled_by_restaurant") return "Cancelled by Restaurant"
-  if (s === "cancelled_by_user") return "Cancelled by User"
-  if (s === "cancelled_by_admin" || s === "cancelled_by_system") return "Canceled"
+  if (s.includes("cancel")) {
+    return (
+      getCancellationDisplayLabel({
+        orderStatus: raw,
+        cancellationReason: meta.note || meta.cancellationReason || "",
+        cancelledBy: meta.byRole
+          ? String(meta.byRole).toLowerCase().replace("restaurant", "restaurant").replace("user", "user")
+          : undefined,
+      }) || "Cancelled"
+    )
+  }
   return raw
 }
 
@@ -63,7 +72,7 @@ const normalizeStatusHistory = (statusHistory) => {
         to,
         byRole: entry.byRole || entry.role || "",
         note: entry.note || entry.reason || "",
-        label: getBackendStatusLabel(to),
+        label: getBackendStatusLabel(to, entry),
         timeLabel: formatHistoryTimestamp(at),
       }
     })
@@ -83,7 +92,7 @@ const getStatusColor = (orderStatus) => {
     "Accepted": "bg-green-100 text-green-700",
     "Processing": "bg-red-100 text-red-700",
     "Food On The Way": "bg-yellow-100 text-yellow-700",
-    "Canceled": "bg-rose-100 text-rose-700",
+    "Cancelled": "bg-rose-100 text-rose-700",
     "Cancelled by Restaurant": "bg-red-100 text-red-700",
     "Cancelled by User": "bg-red-100 text-red-700",
     "Payment Failed": "bg-red-100 text-red-700",

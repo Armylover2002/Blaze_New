@@ -37,43 +37,19 @@ import {
 import { toast } from "sonner";
 import BottomNavOrders from "@food/components/restaurant/BottomNavOrders";
 import RestaurantNavbar from "@food/components/restaurant/RestaurantNavbar";
+import OrderDetails from "./OrderDetails";
 import notificationSound from "@food/assets/audio/alert.mp3";
 import { restaurantAPI } from "@food/api";
+import { getCancellationDisplayLabel } from "@food/utils/cancellationDisplay";
 
-/** Coalesce concurrent getOrders + short TTL so tab/popup polls don't stampede. */
-let restaurantOrdersFetchInFlight = null;
-let restaurantOrdersFetchCache = { at: 0, response: null };
-const RESTAURANT_ORDERS_CACHE_TTL_MS = 2500;
-
+/** Dashboard list: one source of truth via restaurantAPI.getOrders (limit=50, 2.5s TTL). */
 function invalidateRestaurantOrdersCache() {
-  restaurantOrdersFetchCache = { at: 0, response: null };
+  restaurantAPI.getOrders.invalidate?.();
 }
 
 async function fetchRestaurantOrdersShared({ force = false } = {}) {
-  const now = Date.now();
-  if (
-    !force &&
-    restaurantOrdersFetchCache.response &&
-    now - restaurantOrdersFetchCache.at < RESTAURANT_ORDERS_CACHE_TTL_MS
-  ) {
-    return restaurantOrdersFetchCache.response;
-  }
-  if (!force && restaurantOrdersFetchInFlight) {
-    return restaurantOrdersFetchInFlight;
-  }
-  const request = restaurantAPI
-    .getOrders()
-    .then((response) => {
-      restaurantOrdersFetchCache = { at: Date.now(), response };
-      return response;
-    })
-    .finally(() => {
-      if (restaurantOrdersFetchInFlight === request) {
-        restaurantOrdersFetchInFlight = null;
-      }
-    });
-  restaurantOrdersFetchInFlight = request;
-  return request;
+  if (force) invalidateRestaurantOrdersCache();
+  return restaurantAPI.getOrders();
 }
 import {
   formatScheduledAtShort,
@@ -531,11 +507,7 @@ function CancelledOrders({ onSelectOrder, refreshToken = 0, searchQuery = "" }) 
               : "N/A";
 
             const cancelledByText =
-              order.cancelledBy === "user"
-                ? "Cancelled by User"
-                : order.cancelledBy === "restaurant"
-                  ? "Cancelled by Restaurant"
-                  : "Cancelled";
+              getCancellationDisplayLabel(order) || "Cancelled";
 
             return (
               <div
@@ -646,6 +618,7 @@ function AllOrders({
   onCancel,
   searchQuery = "",
   refreshToken = 0,
+  socketConnected = false,
 }) {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -700,8 +673,10 @@ function AllOrders({
     };
 
     fetchOrders();
-    // Single active-list poll; shared cache coalesces with popup fallback.
-    intervalId = setInterval(fetchOrders, 15000);
+    // Socket-first: REST poll only when restaurant socket is down.
+    if (!socketConnected) {
+      intervalId = setInterval(fetchOrders, 45000);
+    }
     countdownIntervalId = setInterval(() => {
       if (isMounted) {
         setCurrentTime(new Date());
@@ -713,7 +688,7 @@ function AllOrders({
       if (intervalId) clearInterval(intervalId);
       if (countdownIntervalId) clearInterval(countdownIntervalId);
     };
-  }, [refreshToken]);
+  }, [refreshToken, socketConnected]);
 
   const handleMarkReady = async ({ orderId, mongoId }) => {
     const orderKey = mongoId || orderId;
@@ -940,36 +915,35 @@ export default function OrdersMain() {
   const getPopupOrderTotal = (orderLike) => {
     if (!orderLike) return 0;
 
-    const rawItems = Array.isArray(orderLike.items) ? orderLike.items : [];
-    const visibleItems = getRestaurantVisibleItems(rawItems);
-    const hasFilteredMixedItems = visibleItems.length > 0 && visibleItems.length !== rawItems.length;
-
-    if (hasFilteredMixedItems) {
-      const visibleItemsTotal = visibleItems.reduce((sum, item) => {
-        const price = Number(item?.price || 0);
-        const qty = Number(item?.quantity || 0);
-        return sum + (Number.isFinite(price) ? price : 0) * (Number.isFinite(qty) ? qty : 0);
-      }, 0);
-
-      return Number.isFinite(visibleItemsTotal) ? visibleItemsTotal : 0;
+    // Restaurant-facing bill only (matches OrderDetails / AllOrders).
+    // Never prefer customer pricing.total (includes delivery + platform).
+    if (orderLike.pricing?.restaurantBill != null) {
+      return Number(orderLike.pricing.restaurantBill) || 0;
+    }
+    if (orderLike.restaurantBill != null) {
+      return Number(orderLike.restaurantBill) || 0;
     }
 
-    const directTotal = Number(orderLike.total);
-    if (Number.isFinite(directTotal) && directTotal > 0) return directTotal;
+    const rawItems = Array.isArray(orderLike.items) ? orderLike.items : [];
+    const visibleItems = getRestaurantVisibleItems(rawItems);
 
-    const pricingTotal = Number(orderLike.pricing?.total);
-    if (Number.isFinite(pricingTotal) && pricingTotal > 0) return pricingTotal;
+    const subtotal =
+      Number(orderLike.pricing?.subtotal ?? orderLike.pricing?.itemSubtotal) ||
+      visibleItems.reduce((sum, item) => {
+        const price = Number(item?.price || 0);
+        const qty = Number(item?.quantity || 0);
+        return (
+          sum +
+          (Number.isFinite(price) ? price : 0) *
+            (Number.isFinite(qty) ? qty : 0)
+        );
+      }, 0);
 
-    const amountDue = Number(orderLike.payment?.amountDue);
-    if (Number.isFinite(amountDue) && amountDue > 0) return amountDue;
+    const taxes = Number(orderLike.pricing?.tax ?? orderLike.pricing?.taxes) || 0;
+    const packagingFee = Number(orderLike.pricing?.packagingFee) || 0;
+    const discount = Number(orderLike.pricing?.discount) || 0;
 
-    const itemsTotal = visibleItems.reduce((sum, item) => {
-      const price = Number(item?.price || 0);
-      const qty = Number(item?.quantity || 0);
-      return sum + (Number.isFinite(price) ? price : 0) * (Number.isFinite(qty) ? qty : 0);
-    }, 0);
-
-    return Number.isFinite(itemsTotal) ? itemsTotal : 0;
+    return Math.max(0, subtotal + taxes + packagingFee - discount);
   };
 
   // Restaurant notifications hook for real-time orders
@@ -1247,7 +1221,9 @@ export default function OrdersMain() {
               restaurantId: orderToPopup.restaurantId,
               restaurantName: orderToPopup.restaurantName,
               items: getRestaurantVisibleItems(orderToPopup.items || []),
-              total: orderToPopup.pricing?.total || 0,
+              pricing: orderToPopup.pricing,
+              restaurantBill: orderToPopup.pricing?.restaurantBill,
+              total: getPopupOrderTotal(orderToPopup),
               customerAddress: orderToPopup.address,
               status: orderToPopup.status,
               createdAt: orderToPopup.createdAt,
@@ -1432,7 +1408,7 @@ export default function OrdersMain() {
     setIsRejectingOrder(true);
 
     try {
-      await restaurantAPI.rejectOrder(orderId, "Order timeout - No response from restaurant");
+      await restaurantAPI.rejectOrder(orderId, "Restaurant not accept");
       toast.info("Order auto-rejected due to timeout");
       clearOrderTimer(orderId);
       requestOrdersRefresh();
@@ -1768,6 +1744,7 @@ export default function OrdersMain() {
             onCancel={handleCancelClick}
             searchQuery={searchQuery}
             refreshToken={ordersRefreshToken}
+            socketConnected={isConnected}
           />
         );
       case "preparing":
@@ -2093,145 +2070,12 @@ case "cancelled":
         {/* Desktop Details Pane (Right Column) */}
         <div className="hidden md:flex flex-col bg-white rounded-2xl border border-gray-100/80 shadow-sm overflow-hidden w-[380px] lg:w-[420px] shrink-0 h-full">
             {selectedOrder ? (
-              <div className="flex-1 overflow-y-auto p-4 md:p-5 flex flex-col">
-                <div className="flex items-start justify-between gap-2 mb-3">
-                  <div>
-                    <p className="text-[13px] font-bold text-black">
-                      Order #{selectedOrder.orderId}
-                    </p>
-                    <p className="text-[11px] text-gray-500 mt-0.5">
-                      {selectedOrder.customerName}
-                    </p>
-                    <p className="text-[10px] text-gray-500 mt-0.5">
-                      {selectedOrder.type}
-                      {selectedOrder.tableOrToken
-                        ? ` • ${selectedOrder.tableOrToken}`
-                        : ""}
-                    </p>
-                  </div>
-                  <div className="flex flex-col items-end gap-1">
-                    <span
-                      className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-[11px] font-medium border ${selectedOrder.status === "Ready"
-                          ? "border-green-500 text-green-600"
-                          : "border-gray-800 text-gray-900"
-                        }`}>
-                      <span
-                        className={`h-1.5 w-1.5 rounded-full ${selectedOrder.status === "Ready"
-                            ? "bg-green-500"
-                            : "bg-gray-800"
-                          }`}
-                      />
-                      {selectedOrder.status}
-                    </span>
-                    <span className="text-[11px] text-gray-500">
-                      {selectedOrder.timePlaced}
-                    </span>
-                    {(String(selectedOrder.status).toLowerCase() === "preparing" ||
-                      String(selectedOrder.status).toLowerCase() === "ready") &&
-                      !selectedOrder.deliveryPartnerId && (
-                        <div className="mt-1">
-                          <ResendNotificationButton
-                            orderId={selectedOrder.orderId}
-                            mongoId={selectedOrder.mongoId}
-                            onSuccess={() => {}}
-                          />
-                        </div>
-                      )}
-                  </div>
-                </div>
-
-                <div className="border-t border-gray-100 my-3" />
-
-                <div className="mb-3">
-                  <p className="text-[11px] font-semibold text-gray-700 mb-1">Items</p>
-                  <p className="text-xs text-gray-800 leading-relaxed">
-                    {selectedOrder.itemsSummary}
-                  </p>
-                </div>
-
-                <div className="flex items-center justify-between text-xs text-gray-500 mb-4 bg-gray-50 p-3 rounded-xl border border-gray-100">
-                  {selectedOrder.status !== "ready" && selectedOrder.eta && (
-                    <span className="flex flex-col gap-1">
-                      <span className="text-[10px] uppercase font-bold text-gray-400">ETA</span>
-                      <span className="font-bold text-gray-900 text-sm">
-                        {selectedOrder.eta}
-                      </span>
-                    </span>
-                  )}
-                  {(() => {
-                    const raw = selectedOrder.paymentMethod;
-                    const normalized =
-                      raw != null ? String(raw).toLowerCase().trim() : "";
-                    const isCod = normalized === "cash" || normalized === "cod";
-                    return (
-                      <span className="flex flex-col gap-1 text-right">
-                        <span className="text-[10px] uppercase font-bold text-gray-400">Payment</span>
-                        <span
-                          className={`font-bold text-sm ${isCod ? "text-amber-600" : "text-gray-900"}`}>
-                          {isCod ? "Cash on Delivery" : "Paid online"}
-                        </span>
-                      </span>
-                    );
-                  })()}
-                </div>
-
-                {/* Delivery Partner Details in Desktop Pane */}
-                {selectedOrder.deliveryPartnerId && typeof selectedOrder.deliveryPartnerId === 'object' && (
-                  <div className="mb-2 pt-3 border-t border-gray-100 mt-auto">
-                    <p className="text-[11px] font-bold text-gray-700 mb-2">Delivery Partner details</p>
-                    <div className="bg-slate-50 border border-slate-100 rounded-2xl p-3 flex flex-col gap-2">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-[#FF0000]/10 rounded-full flex items-center justify-center shrink-0">
-                          <User className="w-5 h-5 text-[#FF0000]" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-bold text-gray-900 truncate">
-                            {selectedOrder.deliveryPartnerId.name}
-                          </p>
-                          {selectedOrder.deliveryPartnerId.rating > 0 && (
-                            <div className="flex items-center gap-1 mt-0.5">
-                              <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
-                              <span className="text-xs font-semibold text-gray-600">
-                                {selectedOrder.deliveryPartnerId.rating}
-                              </span>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="border-t border-gray-200/60 pt-2 flex flex-col gap-2">
-                        {selectedOrder.deliveryPartnerId.phone === "Hidden until photo upload" || !selectedOrder.deliveryPartnerId.phone ? (
-                          <div className="flex items-start gap-1.5 bg-amber-50 border border-amber-200/50 rounded-xl p-2.5">
-                            <Lock className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
-                            <div className="flex-1">
-                              <p className="text-[11px] font-bold text-amber-800">Phone Hidden</p>
-                              <p className="text-[10px] text-amber-700 leading-tight mt-0.5">
-                                Phone number will be shown once rider arrives at your shop and uploads photo.
-                              </p>
-                            </div>
-                          </div>
-                        ) : (
-                          <div className="flex items-center justify-between bg-green-50 border border-green-200/50 rounded-xl p-2.5">
-                            <div className="flex items-start gap-1.5">
-                              <Unlock className="w-3.5 h-3.5 text-green-600 shrink-0 mt-0.5" />
-                              <div>
-                                <p className="text-[11px] font-bold text-green-800">Phone Unlocked</p>
-                                <p className="text-xs font-bold text-gray-900 mt-0.5">{selectedOrder.deliveryPartnerId.phone}</p>
-                              </div>
-                            </div>
-                            <a
-                              href={`tel:${selectedOrder.deliveryPartnerId.phone}`}
-                              className="inline-flex items-center justify-center gap-1 px-2.5 py-1.5 bg-[#FF0000] text-white text-[11px] font-bold rounded-lg shadow-sm hover:bg-[#e04a02] transition-colors shrink-0"
-                            >
-                              <Phone className="w-3 h-3" />
-                              Call
-                            </a>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                )}
+              <div className="flex-1 overflow-hidden h-full">
+                <OrderDetails
+                  orderId={selectedOrder.mongoId || selectedOrder.orderId}
+                  isSidebar={true}
+                  onClose={() => setSelectedOrder(null)}
+                />
               </div>
             ) : (
               <div className="flex-1 flex flex-col items-center justify-center p-6 text-center h-full">
@@ -3207,7 +3051,8 @@ function PreparingOrders({
     };
 
     checkAndMarkReady();
-    const readyCheckInterval = setInterval(checkAndMarkReady, 2000);
+    // Prep countdown UI ticks at 1s; auto-mark only needs coarse checks.
+    const readyCheckInterval = setInterval(checkAndMarkReady, 10000);
 
     return () => {
       clearInterval(readyCheckInterval);

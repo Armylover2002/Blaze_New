@@ -18,6 +18,7 @@ import { OrdersDashboardSkeleton } from "@food/components/ui/loading-skeletons"
 import { useDelayedLoading } from "@food/hooks/useDelayedLoading"
 import alertSound from "@food/assets/audio/alert.mp3"
 import originalSound from "@food/assets/audio/original.mp3"
+import { getCancellationDisplayLabel } from "@food/utils/cancellationDisplay"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -324,7 +325,8 @@ export default function OrdersPage({ statusKey = "all" }) {
       if (!silent) setIsLoading(true)
       const params = {
         page: 1,
-        limit: 1000,
+        // Full load keeps a wide window; silent poll only needs recent rows for ring check.
+        limit: silent ? 50 : 200,
         status:
           statusKey === "all"
             ? undefined
@@ -369,20 +371,40 @@ export default function OrdersPage({ statusKey = "all" }) {
           }
         }
 
-        seenOrderIdsRef.current = nextOrderIds
+        if (silent) {
+          nextOrderIds.forEach((id) => seenOrderIdsRef.current.add(id))
+          setOrders((prev) => {
+            const byKey = new Map(
+              (Array.isArray(prev) ? prev : []).map((order) => [
+                String(order.id || order._id || order.orderId || ""),
+                order,
+              ]),
+            )
+            for (const order of nextOrders) {
+              const key = String(order.id || order._id || order.orderId || "")
+              if (key) byKey.set(key, order)
+            }
+            return Array.from(byKey.values())
+          })
+        } else {
+          seenOrderIdsRef.current = nextOrderIds
+          isFirstLoadRef.current = false
+          setOrders(nextOrders)
+        }
         isFirstLoadRef.current = false
-        setOrders(nextOrders)
       } else {
         debugError("Failed to fetch orders:", response.data)
-        if (!silent) toast.error("Failed to fetch orders")
-        setOrders([])
+        if (!silent) {
+          toast.error("Failed to fetch orders")
+          setOrders([])
+        }
       }
     } catch (error) {
       debugError("Error fetching orders:", error)
       if (!silent) {
         toast.error(error.response?.data?.message || "Failed to fetch orders")
+        setOrders([])
       }
-      setOrders([])
     } finally {
       if (!silent) setIsLoading(false)
     }
@@ -477,7 +499,7 @@ export default function OrdersPage({ statusKey = "all" }) {
       } else if (backendStatus === "delivered") {
         displayStatus = "Delivered"
       } else if (backendStatus === "cancelled_by_restaurant") {
-        displayStatus = "Cancelled by Restaurant"
+        displayStatus = getCancellationDisplayLabel(order) || "Cancelled by Restaurant"
       } else if (backendStatus === "cancelled_by_user") {
         displayStatus = "Cancelled by User"
       } else if (backendStatus === "cancelled_by_admin") {
@@ -615,9 +637,11 @@ export default function OrdersPage({ statusKey = "all" }) {
   useEffect(() => {
     if (statusKey !== "all") return undefined
 
+    // Prefer socket ring; poll only as safety net (and less often).
     const pollId = setInterval(() => {
+      if (socketRef.current?.connected) return
       fetchOrders({ silent: true, withRingCheck: true })
-    }, 5000)
+    }, 30000)
 
     return () => clearInterval(pollId)
   }, [statusKey, fetchOrders])
@@ -638,10 +662,22 @@ export default function OrdersPage({ statusKey = "all" }) {
       reconnectionDelay: 1000,
       reconnectionDelayMax: 5000,
       timeout: 20000,
+      auth: {
+        token:
+          localStorage.getItem("admin_accessToken") ||
+          localStorage.getItem("adminToken") ||
+          "",
+      },
     })
     socketRef.current = socket
 
     const handleIncomingRealtimeOrder = (payload = {}) => {
+      // Admin must never ring on restaurant/delivery sound events.
+      if (payload?.audience && payload.audience !== "admin") return
+      // Backend does not emit admin_new_order today; ignore untagged sound pings.
+      if (!payload?.audience && payload?.type && payload.type !== "admin_new_order") return
+      if (!payload?.audience && !payload?.orderId && !payload?.orderMongoId) return
+
       const orderId = payload?.orderId || payload?.orderMongoId || ""
       if (!orderId) {
         activeOrderAlertRef.current = payload || { orderId: "socket-new-order" }
@@ -679,11 +715,10 @@ export default function OrdersPage({ statusKey = "all" }) {
       socket.emit("join-admin-orders")
     })
     socket.on("admin_new_order", handleIncomingRealtimeOrder)
-    socket.on("play_notification_sound", handleIncomingRealtimeOrder)
+    // Do NOT listen to shared play_notification_sound — that event is restaurant/delivery scoped.
 
     return () => {
       socket.off("admin_new_order", handleIncomingRealtimeOrder)
-      socket.off("play_notification_sound", handleIncomingRealtimeOrder)
       socket.disconnect()
       socketRef.current = null
     }

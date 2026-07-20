@@ -24,6 +24,7 @@ import {
   X,
 } from "lucide-react"
 import ResendNotificationButton from "@food/components/restaurant/ResendNotificationButton"
+import { getCancellationDisplayLabel } from "@food/utils/cancellationDisplay"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -248,7 +249,34 @@ export default function OrderDetails({ orderId: propOrderId, isSidebar = false, 
             dispatchStatus: order.dispatch?.status || null,
             reason: order.cancellationReason || '',
             originalOrder: order,
-            timeline: [
+            timeline: order.statusHistory?.length > 0
+              ? order.statusHistory.map(entry => {
+                  const toStatus = String(entry.to || entry.status || entry.state || "");
+                  const backendLabel = toStatus === "created" || toStatus === "placed" ? "Pending" 
+                    : toStatus === "scheduled" ? "Scheduled"
+                    : toStatus === "confirmed" ? "Accepted"
+                    : toStatus === "preparing" || toStatus === "ready_for_pickup" ? "Processing"
+                    : toStatus === "picked_up" ? "Food On The Way"
+                    : toStatus === "delivered" ? "Delivered"
+                    : toStatus.includes("cancel")
+                      ? (getCancellationDisplayLabel({
+                          orderStatus: toStatus,
+                          cancellationReason: entry.note || order.cancellationReason,
+                          cancelledBy: order.cancelledBy,
+                        }) || "Cancelled")
+                    : entry.to;
+                  
+                  return {
+                    event: backendLabel,
+                    timestamp: entry.at ? new Date(entry.at).toLocaleString('en-GB') : '',
+                    status: toStatus.includes("cancel") || toStatus.includes("reject") ? 'rejected' : 'completed',
+                    byRole: entry.byRole || entry.role || "",
+                    note: entry.note || entry.reason || "",
+                    from: entry.from || "",
+                    to: entry.to || ""
+                  }
+                })
+              : [
               { event: 'Order placed', timestamp: new Date(order.createdAt).toLocaleString('en-GB'), status: 'completed' },
               ...(reached.confirmed ? [{ event: 'Order confirmed', timestamp: order.tracking?.confirmed?.timestamp ? new Date(order.tracking.confirmed.timestamp).toLocaleString('en-GB') : '', status: 'completed' }] : []),
               ...(reached.preparing ? [{ event: 'Preparing', timestamp: order.tracking?.preparing?.timestamp ? new Date(order.tracking.preparing.timestamp).toLocaleString('en-GB') : '', status: 'completed' }] : []),
@@ -639,52 +667,27 @@ export default function OrderDetails({ orderId: propOrderId, isSidebar = false, 
                 <span className="text-sm text-gray-900">{formatMoney(orderData.billing.packagingFee)}</span>
               </div>
             )}
-            {Number(orderData.billing.deliveryFee) > 0 && (
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-sm text-gray-600">Delivery fee</span>
-                <span className="text-sm text-gray-900">{formatMoney(orderData.billing.deliveryFee)}</span>
-              </div>
-            )}
-            {Number(orderData.billing.platformFee) > 0 && (
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-sm text-gray-600">Platform fee</span>
-                <span className="text-sm text-gray-900">{formatMoney(orderData.billing.platformFee)}</span>
-              </div>
-            )}
             {Number(orderData.billing.discount) > 0 && (
               <div className="flex items-center justify-between mb-3">
                 <span className="text-sm text-green-700">Discount</span>
                 <span className="text-sm text-green-700">{formatDiscount(orderData.billing.discount)}</span>
               </div>
             )}
-            {Number(orderData.billing.couponDiscount) > 0 && (
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-sm text-green-700">Coupon discount</span>
-                <span className="text-sm text-green-700">{formatDiscount(orderData.billing.couponDiscount)}</span>
-              </div>
-            )}
-            {Number(orderData.billing.referralDiscount) > 0 && (
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-sm text-green-700">Referral discount</span>
-                <span className="text-sm text-green-700">{formatDiscount(orderData.billing.referralDiscount)}</span>
-              </div>
-            )}
-            <div className="my-3"></div>
-            <div className="flex items-center justify-between">
+            <div className="my-3 border-t border-gray-100"></div>
+            <div className="flex items-center justify-between pt-2">
               <div className="flex items-center gap-2">
                 <span className="text-sm font-semibold text-gray-900">Total bill</span>
                 <span className="px-2 py-0.5 bg-gray-200 text-gray-700 text-xs font-medium rounded">
                   {orderData.billing.paymentStatus}
                 </span>
               </div>
-              <span className="text-sm font-semibold text-gray-900">{formatMoney(orderData.billing.total)}</span>
+              <span className="text-sm font-semibold text-gray-900">{formatMoney(
+                (Number(orderData.billing.itemSubtotal) || 0) + 
+                (Number(orderData.billing.taxes) || 0) + 
+                (Number(orderData.billing.packagingFee) || 0) - 
+                (Number(orderData.billing.discount) || 0)
+              )}</span>
             </div>
-            {Number(orderData.billing.paidAmount) > 0 && (
-              <div className="flex items-center justify-between mt-2">
-                <span className="text-sm text-gray-600">Amount paid</span>
-                <span className="text-sm font-medium text-gray-900">{formatMoney(orderData.billing.paidAmount)}</span>
-              </div>
-            )}
           </div>
         </div>
 
@@ -718,8 +721,24 @@ export default function OrderDetails({ orderId: propOrderId, isSidebar = false, 
                     
                     {/* Event Details */}
                     <div className="flex-1 pt-1">
-                      <p className="text-sm text-gray-900">{event.event}</p>
-                      <p className="text-xs text-gray-500 mt-0.5">{event.timestamp}</p>
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-gray-900">{event.event}</p>
+                          {(event.byRole || event.note) && (
+                            <p className="text-xs text-gray-500 mt-0.5">
+                              {event.byRole ? `${event.byRole}${event.note ? " • " : ""}` : ""}
+                              {event.note || ""}
+                            </p>
+                          )}
+                          {(event.from && event.to && event.from !== event.to) && (
+                            <p className="text-xs text-gray-500 mt-0.5">
+                              From <span className="font-medium text-gray-700">{event.from}</span>{" "}
+                              to <span className="font-medium text-gray-700">{event.to}</span>
+                            </p>
+                          )}
+                        </div>
+                        <p className="text-xs text-gray-500 whitespace-nowrap">{event.timestamp}</p>
+                      </div>
                     </div>
                   </div>
                 ))}

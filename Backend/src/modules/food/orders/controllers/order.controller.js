@@ -12,13 +12,90 @@ import {
     validateDispatchSettingsDto,
     validateOrderRatingsDto
 } from '../validators/order.validator.js';
+import {
+    toOrderMutationAck,
+    toOrderCreateDto,
+    toOrderListItemDto,
+    toOrderDetailDto,
+    toDeliveryTripDto,
+    toRestaurantOrderListDto,
+    toUserOrderListDto,
+} from '../dto/order.dto.js';
+
+function mapListResult(result, role) {
+    if (!result) return result;
+    const docs = Array.isArray(result.data)
+        ? result.data.map((doc) => toOrderListItemDto(doc, { role }))
+        : result.data;
+    const orders = Array.isArray(result.orders)
+        ? result.orders.map((doc) => toOrderListItemDto(doc, { role }))
+        : docs;
+    return {
+        ...result,
+        data: docs,
+        ...(result.orders ? { orders } : {}),
+    };
+}
+
+function mapRestaurantOrderListResult(result) {
+    if (!result) return result;
+    const docs = Array.isArray(result.data)
+        ? result.data.map((doc) => toRestaurantOrderListDto(doc))
+        : result.data;
+    return {
+        ...result,
+        data: docs,
+    };
+}
+
+function mapUserOrderListResult(result) {
+    if (!result) return result;
+    const docs = Array.isArray(result.data)
+        ? result.data.map((doc) => toUserOrderListDto(doc))
+        : result.data;
+    return {
+        ...result,
+        data: docs,
+    };
+}
 
 export async function calculateOrderController(req, res, next) {
     try {
         const userId = req.user?.userId;
         const dto = validateCalculateOrderDto(req.body);
         const result = await orderService.calculateOrder(userId, dto);
-        return sendResponse(res, 200, 'Pricing calculated', result);
+        // Strip internal-only fields from HTTP response (createOrder still uses full result in-process).
+        const { feeSettingsDoc, serviceZone, pricing, ...publicResult } = result || {};
+
+        // Optimize pricing payload to remove internal finance and dispatch rules
+        const {
+            userDeliveryFee,
+            restaurantDeliveryFee,
+            sponsoredDelivery,
+            sponsoredKm,
+            deliverySponsorType,
+            quickPlatformShare,
+            quickRiderBonus,
+            quickRiderShare,
+            quickRestaurantShare,
+            quickSharePcts,
+            quickFinanceVersion,
+            pickupPoints,
+            mixedOrderDistanceLimit,
+            mixedOrderAngleLimit,
+            sameDirection,
+            ...publicPricing
+        } = pricing || {};
+
+        const publicZone = serviceZone
+            ? { zoneId: serviceZone.zoneId, status: serviceZone.status }
+            : null;
+
+        return sendResponse(res, 200, 'Pricing calculated', {
+            ...publicResult,
+            pricing: publicPricing,
+            serviceZone: publicZone,
+        });
     } catch (err) {
         next(err);
     }
@@ -29,7 +106,10 @@ export async function createOrderController(req, res, next) {
         const userId = req.user?.userId;
         const dto = validateCreateOrderDto(req.body);
         const result = await orderService.createOrder(userId, dto);
-        return sendResponse(res, 201, 'Order placed successfully', result);
+        return sendResponse(res, 201, 'Order placed successfully', {
+            ...result,
+            order: toOrderCreateDto(result?.order),
+        });
     } catch (err) {
         next(err);
     }
@@ -40,7 +120,10 @@ export async function verifyPaymentController(req, res, next) {
         const userId = req.user?.userId;
         const dto = validateVerifyPaymentDto(req.body);
         const result = await orderService.verifyPayment(userId, dto);
-        return sendResponse(res, 200, 'Payment verified', result);
+        return sendResponse(res, 200, 'Payment verified', {
+            ...result,
+            order: toOrderCreateDto(result?.order),
+        });
     } catch (err) {
         next(err);
     }
@@ -50,7 +133,7 @@ export async function listOrdersUserController(req, res, next) {
     try {
         const userId = req.user?.userId;
         const result = await orderService.listOrdersUser(userId, req.query);
-        return sendResponse(res, 200, 'Orders retrieved', result);
+        return sendResponse(res, 200, 'Orders retrieved', mapUserOrderListResult(result));
     } catch (err) {
         next(err);
     }
@@ -61,7 +144,9 @@ export async function getOrderByIdUserController(req, res, next) {
         const userId = req.user?.userId;
         const orderId = req.params.orderId;
         const order = await orderService.getOrderById(orderId, { userId });
-        return sendResponse(res, 200, 'Order retrieved', { order });
+        return sendResponse(res, 200, 'Order retrieved', {
+            order: toOrderDetailDto(order, { role: 'USER' }),
+        });
     } catch (err) {
         next(err);
     }
@@ -96,7 +181,9 @@ export async function cancelOrderController(req, res, next) {
         const orderId = req.params.orderId;
         const dto = validateCancelOrderDto(req.body);
         const order = await orderService.cancelOrder(orderId, userId, dto.reason, dto.refundTo);
-        return sendResponse(res, 200, 'Order cancelled', { order });
+        return sendResponse(res, 200, 'Order cancelled', {
+            order: toOrderMutationAck(order),
+        });
     } catch (err) {
         next(err);
     }
@@ -108,7 +195,9 @@ export async function submitOrderRatingsController(req, res, next) {
         const orderId = req.params.orderId;
         const dto = validateOrderRatingsDto(req.body);
         const order = await orderService.submitOrderRatings(orderId, userId, dto);
-        return sendResponse(res, 200, 'Ratings submitted successfully', { order });
+        return sendResponse(res, 200, 'Ratings submitted successfully', {
+            order: toOrderMutationAck(order),
+        });
     } catch (err) {
         next(err);
     }
@@ -120,7 +209,9 @@ export async function updateOrderInstructionsController(req, res, next) {
         const orderId = req.params.orderId;
         const instructions = req.body.instructions;
         const order = await orderService.updateOrderInstructions(orderId, userId, instructions);
-        return sendResponse(res, 200, 'Instructions updated successfully', { order });
+        return sendResponse(res, 200, 'Instructions updated successfully', {
+            order: toOrderMutationAck(order),
+        });
     } catch (err) {
         next(err);
     }
@@ -150,7 +241,7 @@ export async function listOrdersRestaurantController(req, res, next) {
     try {
         const restaurantId = req.user?.userId;
         const result = await orderService.listOrdersRestaurant(restaurantId, req.query);
-        return sendResponse(res, 200, 'Orders retrieved', result);
+        return sendResponse(res, 200, 'Orders retrieved', mapRestaurantOrderListResult(result));
     } catch (err) {
         next(err);
     }
@@ -161,7 +252,9 @@ export async function getOrderByIdRestaurantController(req, res, next) {
         const restaurantId = req.user?.userId;
         const orderId = req.params.orderId;
         const order = await orderService.getOrderById(orderId, { restaurantId });
-        return sendResponse(res, 200, 'Order retrieved', { order });
+        return sendResponse(res, 200, 'Order retrieved', {
+            order: toOrderDetailDto(order, { role: 'RESTAURANT' }),
+        });
     } catch (err) {
         next(err);
     }
@@ -178,7 +271,9 @@ export async function updateOrderStatusRestaurantController(req, res, next) {
             dto.orderStatus,
             dto.reason || "",
         );
-        return sendResponse(res, 200, 'Order status updated', { order });
+        return sendResponse(res, 200, 'Order status updated', {
+            order: toOrderMutationAck(order),
+        });
     } catch (err) {
         next(err);
     }
@@ -188,7 +283,17 @@ export async function listOrdersAvailableDeliveryController(req, res, next) {
     try {
         const deliveryPartnerId = req.user?.userId;
         const result = await orderService.listOrdersAvailableDelivery(deliveryPartnerId, req.query);
-        return sendResponse(res, 200, 'Orders retrieved', result);
+        const data = Array.isArray(result?.data)
+            ? result.data.map((doc) => toDeliveryTripDto(doc))
+            : result?.data;
+        const orders = Array.isArray(result?.orders)
+            ? result.orders.map((doc) => toDeliveryTripDto(doc))
+            : data;
+        return sendResponse(res, 200, 'Orders retrieved', {
+            ...result,
+            data,
+            ...(result?.orders ? { orders } : {}),
+        });
     } catch (err) {
         next(err);
     }
@@ -199,7 +304,9 @@ export async function acceptOrderDeliveryController(req, res, next) {
         const deliveryPartnerId = req.user?.userId;
         const orderId = req.params.orderId;
         const order = await orderService.acceptOrderDelivery(orderId, deliveryPartnerId, req.body || {});
-        return sendResponse(res, 200, 'Order accepted', { order });
+        return sendResponse(res, 200, 'Order accepted', {
+            order: toDeliveryTripDto(order),
+        });
     } catch (err) {
         next(err);
     }
@@ -210,7 +317,9 @@ export async function rejectOrderDeliveryController(req, res, next) {
         const deliveryPartnerId = req.user?.userId;
         const orderId = req.params.orderId;
         const order = await orderService.rejectOrderDelivery(orderId, deliveryPartnerId, req.body || {});
-        return sendResponse(res, 200, 'Order rejected', { order });
+        return sendResponse(res, 200, 'Order rejected', {
+            order: toOrderMutationAck(order),
+        });
     } catch (err) {
         next(err);
     }
@@ -221,7 +330,9 @@ export async function confirmReachedPickupDeliveryController(req, res, next) {
         const deliveryPartnerId = req.user?.userId;
         const orderId = req.params.orderId;
         const order = await orderService.confirmReachedPickupDelivery(orderId, deliveryPartnerId);
-        return sendResponse(res, 200, 'Reached pickup confirmed', { order });
+        return sendResponse(res, 200, 'Reached pickup confirmed', {
+            order: toOrderMutationAck(order),
+        });
     } catch (err) {
         next(err);
     }
@@ -233,7 +344,9 @@ export async function confirmPickupDeliveryController(req, res, next) {
         const orderId = req.params.orderId;
         const { billImageUrl, ...rest } = req.body || {};
         const order = await orderService.confirmPickupDelivery(orderId, deliveryPartnerId, billImageUrl, rest);
-        return sendResponse(res, 200, 'Pickup confirmed', { order });
+        return sendResponse(res, 200, 'Pickup confirmed', {
+            order: toDeliveryTripDto(order),
+        });
     } catch (err) {
         next(err);
     }
@@ -244,7 +357,9 @@ export async function confirmReachedDropDeliveryController(req, res, next) {
         const deliveryPartnerId = req.user?.userId;
         const orderId = req.params.orderId;
         const order = await orderService.confirmReachedDropDelivery(orderId, deliveryPartnerId, req.body || {});
-        return sendResponse(res, 200, 'Reached drop confirmed', { order });
+        return sendResponse(res, 200, 'Reached drop confirmed', {
+            order: toOrderMutationAck(order),
+        });
     } catch (err) {
         next(err);
     }
@@ -256,7 +371,9 @@ export async function verifyDropOtpDeliveryController(req, res, next) {
         const orderId = req.params.orderId;
         const { otp } = req.body;
         const result = await orderService.verifyDropOtpDelivery(orderId, deliveryPartnerId, otp);
-        return sendResponse(res, 200, 'OTP verified', { order: result.order });
+        return sendResponse(res, 200, 'OTP verified', {
+            order: toDeliveryTripDto(result.order),
+        });
     } catch (err) {
         next(err);
     }
@@ -267,7 +384,9 @@ export async function completeDeliveryController(req, res, next) {
         const deliveryPartnerId = req.user?.userId;
         const orderId = req.params.orderId;
         const order = await orderService.completeDelivery(orderId, deliveryPartnerId, req.body || {});
-        return sendResponse(res, 200, 'Delivery completed', { order });
+        return sendResponse(res, 200, 'Delivery completed', {
+            order: toDeliveryTripDto(order),
+        });
     } catch (err) {
         next(err);
     }
@@ -279,7 +398,9 @@ export async function updateOrderStatusDeliveryController(req, res, next) {
         const orderId = req.params.orderId;
         const dto = validateOrderStatusDto(req.body);
         const order = await orderService.updateOrderStatusDelivery(orderId, deliveryPartnerId, dto.orderStatus);
-        return sendResponse(res, 200, 'Order status updated', { order });
+        return sendResponse(res, 200, 'Order status updated', {
+            order: toOrderMutationAck(order),
+        });
     } catch (err) {
         next(err);
     }
@@ -289,7 +410,9 @@ export async function getCurrentTripDeliveryController(req, res, next) {
     try {
         const deliveryPartnerId = req.user?.userId;
         const order = await orderService.getCurrentTripDelivery(deliveryPartnerId);
-        return sendResponse(res, 200, 'Current trip retrieved', { activeOrder: order });
+        return sendResponse(res, 200, 'Current trip retrieved', {
+            activeOrder: order ? toDeliveryTripDto(order) : null,
+        });
     } catch (err) {
         next(err);
     }
@@ -312,7 +435,9 @@ export async function getOrderByIdDeliveryController(req, res, next) {
         const deliveryPartnerId = req.user?.userId;
         const orderId = req.params.orderId;
         const order = await orderService.getOrderById(orderId, { deliveryPartnerId });
-        return sendResponse(res, 200, 'Order retrieved', { order });
+        return sendResponse(res, 200, 'Order retrieved', {
+            order: toDeliveryTripDto(order),
+        });
     } catch (err) {
         next(err);
     }
@@ -332,7 +457,7 @@ export async function getPaymentStatusController(req, res, next) {
 export async function listOrdersAdminController(req, res, next) {
     try {
         const result = await orderService.listOrdersAdmin(req.query);
-        return sendResponse(res, 200, 'Orders retrieved', result);
+        return sendResponse(res, 200, 'Orders retrieved', mapListResult(result, 'ADMIN'));
     } catch (err) {
         next(err);
     }
@@ -342,7 +467,9 @@ export async function getOrderByIdAdminController(req, res, next) {
     try {
         const orderId = req.params.orderId;
         const order = await orderService.getOrderById(orderId, { admin: true });
-        return sendResponse(res, 200, 'Order retrieved', { order });
+        return sendResponse(res, 200, 'Order retrieved', {
+            order: toOrderDetailDto(order, { role: 'ADMIN' }),
+        });
     } catch (err) {
         next(err);
     }
@@ -364,7 +491,9 @@ export async function updateOrderStatusAdminController(req, res, next) {
             dto.orderStatus,
             dto.reason || "",
         );
-        return sendResponse(res, 200, 'Order status updated', { order: updated });
+        return sendResponse(res, 200, 'Order status updated', {
+            order: toOrderMutationAck(updated),
+        });
     } catch (err) {
         next(err);
     }
@@ -376,7 +505,9 @@ export async function assignDeliveryPartnerController(req, res, next) {
         const orderId = req.params.orderId;
         const dto = validateAssignDeliveryDto(req.body);
         const order = await orderService.assignDeliveryPartnerAdmin(orderId, dto.deliveryPartnerId, adminId);
-        return sendResponse(res, 200, 'Delivery partner assigned', { order });
+        return sendResponse(res, 200, 'Delivery partner assigned', {
+            order: toOrderMutationAck(order),
+        });
     } catch (err) {
         next(err);
     }
@@ -403,4 +534,3 @@ export async function resendDeliveryNotificationRestaurantController(req, res, n
         next(err);
     }
 }
-
