@@ -547,11 +547,22 @@ export function CartProvider({ children }) {
         onClose={() => setPendingReplaceItem(null)}
         onConfirm={() => {
           if (pendingReplaceItem) {
-            clearCart();
-            // Wait for next tick so normalizedCart evaluates to empty in addToCart
-            setTimeout(() => {
-              addToCart(pendingReplaceItem.item, pendingReplaceItem.sourcePosition);
-            }, 0);
+            // Overwrite cart directly to avoid stale closures with addToCart
+            const newItem = { ...pendingReplaceItem.item, quantity: 1 };
+            setCart(normalizeCartData([newItem]));
+            
+            if (pendingReplaceItem.sourcePosition) {
+              setLastAddEvent({ 
+                product: { 
+                  id: newItem.id || newItem._id, 
+                  name: newItem.name, 
+                  imageUrl: newItem.image || newItem.imageUrl 
+                }, 
+                sourcePosition: pendingReplaceItem.sourcePosition 
+              });
+              setTimeout(() => setLastAddEvent(null), 1500);
+            }
+            
             setPendingReplaceItem(null);
           }
         }}
