@@ -16,6 +16,7 @@ import DesktopNavbar from "./DesktopNavbar"
 import QuickBottomNav from "@/modules/quickCommerce/user/components/layout/BottomNav"
 import PorterBottomNav from "@/modules/porter/user/components/layout/BottomNav"
 import { useUserNotifications } from "../../hooks/useUserNotifications"
+import { ActiveOrderManagerBridge } from "../../hooks/useActiveOrderManager"
 
 // Create SearchOverlay context with default value
 const SearchOverlayContext = createContext({
@@ -164,6 +165,7 @@ export default function UserLayout({ children }) {
       <CartProvider>
         <ProfileProvider>
           <OrdersProvider>
+              <ActiveOrderManagerBridge />
               <SearchOverlayProvider>
                 <LocationSelectorProvider>
                   <LocationProvider>

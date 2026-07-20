@@ -89,25 +89,12 @@ const RestaurantImageCarousel = React.memo(
 
     useEffect(() => {
       if (!renderSrc) return;
-      const imgEl = imageElementRef.current;
-      if (!imgEl) return;
 
       setShowShimmer(true);
       const shimmerTimeout = setTimeout(() => {
         setShowShimmer(false);
       }, 2500);
 
-      if (imgEl.complete) {
-        if (imgEl.naturalWidth > 0) {
-          setLoadedBySrc((prev) =>
-            prev[renderSrc] ? prev : { ...prev, [renderSrc]: true },
-          );
-          setLastGoodSrc(renderSrc);
-          setShowShimmer(false);
-        } else {
-          setAttemptedSrcs((prev) => ({ ...prev, [renderSrc]: true }));
-        }
-      }
       return () => clearTimeout(shimmerTimeout);
     }, [renderSrc]);
 

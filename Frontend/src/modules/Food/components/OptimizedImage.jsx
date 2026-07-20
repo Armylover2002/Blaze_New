@@ -128,6 +128,17 @@ const OptimizedImage = React.memo(({
     }
   }, [priority, isInView])
 
+  const actualImgRef = useRef(null)
+
+  useEffect(() => {
+    if (isInView && actualImgRef.current && actualImgRef.current.complete) {
+      if (actualImgRef.current.naturalWidth > 0 && !isLoaded) {
+        setIsLoaded(true)
+        if (onLoad) onLoad({ target: actualImgRef.current })
+      }
+    }
+  }, [isInView, resolvedSrc, srcSet])
+
   const handleLoad = (e) => {
     setIsLoaded(true)
     if (onLoad) onLoad(e)
@@ -192,6 +203,7 @@ const OptimizedImage = React.memo(({
 
           {/* Fallback to original format */}
           <motion.img
+            ref={actualImgRef}
             src={imageSrc}
             srcSet={srcSet}
             sizes={supportsOptimization(imageSrc) ? sizes : undefined}

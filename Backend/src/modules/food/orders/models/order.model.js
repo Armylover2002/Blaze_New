@@ -236,7 +236,8 @@ const deliveryStateSchema = new mongoose.Schema(
                 'completed',
                 'cancelled'
             ],
-            default: 'en_route_to_pickup'
+            // Instant orders start idle; en_route_to_pickup is set only after rider accept.
+            default: 'waiting_activation'
         },
         status: { type: String, default: '' },
         reachedPickupAt: { type: Date, default: null },
