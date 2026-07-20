@@ -157,7 +157,7 @@ export default function Category() {
     let cancelled = false
     setZonesLoading(true)
     adminAPI
-      .getZones({ limit: 1000 })
+      .getZones({ limit: 1000, view: "summary" })
       .then((res) => {
         const list =
           res?.data?.data?.zones ||

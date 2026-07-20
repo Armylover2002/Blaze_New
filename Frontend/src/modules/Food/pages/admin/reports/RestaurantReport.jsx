@@ -27,7 +27,7 @@ export default function RestaurantReport() {
   useEffect(() => {
     const fetchZones = async () => {
       try {
-        const response = await adminAPI.getZones({ limit: 1000 })
+        const response = await adminAPI.getZones({ limit: 1000, view: "summary" })
         if (response?.data?.success && response.data.data?.zones) {
           setZones(response.data.data.zones)
         }

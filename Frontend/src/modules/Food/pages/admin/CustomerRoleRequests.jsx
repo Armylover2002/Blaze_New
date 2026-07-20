@@ -27,7 +27,7 @@ export default function CustomerRoleRequests() {
       setLoading(true);
       const [reqsResponse, zonesResponse] = await Promise.all([
         adminAPI.getCustomerRoleRequests(),
-        adminAPI.getZones()
+        adminAPI.getZones({ view: "summary" })
       ]);
 
       const requestsList = reqsResponse?.data?.data || reqsResponse?.data || [];

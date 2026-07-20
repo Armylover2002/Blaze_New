@@ -58,7 +58,7 @@ export default function TransactionReport() {
     const fetchFilterData = async () => {
       try {
         // Fetch zones
-        const zonesResponse = await adminAPI.getZones({ limit: 1000 })
+        const zonesResponse = await adminAPI.getZones({ limit: 1000, view: "summary" })
         if (zonesResponse?.data?.success && zonesResponse.data.data?.zones) {
           setZones(zonesResponse.data.data.zones)
         }

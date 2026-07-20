@@ -219,7 +219,7 @@ export default function JoiningRequest() {
   useEffect(() => {
     const fetchZones = async () => {
       try {
-        const res = await adminAPI.getZones()
+        const res = await adminAPI.getZones({ view: "summary" })
         let list = []
         if (Array.isArray(res?.data?.data)) {
           list = res.data.data

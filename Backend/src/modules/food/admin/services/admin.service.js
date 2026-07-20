@@ -7238,12 +7238,28 @@ export async function updateDeliveryPartnerActiveStatus(id, isActive) {
 }
 
 // ----- Zones CRUD -----
+const ZONE_LIST_SUMMARY_FIELDS = {
+    _id: 1,
+    name: 1,
+    zoneName: 1,
+    country: 1,
+    serviceLocation: 1,
+    unit: 1,
+    isActive: 1,
+    quickDeliveryEnabled: 1,
+    zoneHubId: 1,
+    createdAt: 1,
+    updatedAt: 1,
+    coordinatesCount: { $size: { $ifNull: ['$coordinates', []] } },
+};
+
 export async function getZones(query) {
     const limit = Math.min(Math.max(parseInt(query.limit, 10) || 100, 1), 1000);
     const page = Math.max(parseInt(query.page, 10) || 1, 1);
     const skip = (page - 1) * limit;
     const isActive = query.isActive;
     const search = typeof query.search === 'string' ? query.search.trim() : '';
+    const view = query.view === 'summary' ? 'summary' : 'full';
 
     const filter = {};
     if (isActive !== undefined && isActive !== '') {
@@ -7258,15 +7274,36 @@ export async function getZones(query) {
         ];
     }
 
+    const countPromise = FoodZone.countDocuments(filter);
+
+    if (view === 'summary') {
+        const [zones, total] = await Promise.all([
+            FoodZone.aggregate([
+                { $match: filter },
+                { $sort: { createdAt: -1 } },
+                { $skip: skip },
+                { $limit: limit },
+                { $project: ZONE_LIST_SUMMARY_FIELDS },
+            ]),
+            countPromise,
+        ]);
+        return { zones, total, page, limit, view: 'summary' };
+    }
+
     const [zones, total] = await Promise.all([
-        FoodZone.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
-        FoodZone.countDocuments(filter)
+        FoodZone.find(filter)
+            .select('-geometry')
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(limit)
+            .lean(),
+        countPromise,
     ]);
     return { zones, total, page, limit };
 }
 
 export async function getZoneById(id) {
-    return FoodZone.findById(id).lean();
+    return FoodZone.findById(id).select('-geometry').lean();
 }
 
 export async function createZone(body) {

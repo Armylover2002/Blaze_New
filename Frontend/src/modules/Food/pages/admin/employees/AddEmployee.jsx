@@ -2,7 +2,7 @@ import { useState, useEffect } from "react"
 import { UserPlus, User, Eye, EyeOff, Upload, ChevronDown } from "lucide-react"
 import { toast } from "react-hot-toast"
 import { useNavigate, useParams, useLocation } from "react-router-dom"
-import axiosInstance from "@food/api"
+import apiClient, { adminAPI } from "@food/api"
 
 const NAME_REGEX = /^[A-Za-z][A-Za-z\s.'-]{0,49}$/
 const EMAIL_REGEX = /^[a-z0-9._%+-]+@gmail\.com$/
@@ -58,8 +58,8 @@ export default function AddEmployee() {
     const fetchData = async () => {
       try {
         const [rolesRes, zonesRes] = await Promise.all([
-          axiosInstance.get("/food/admin/roles"),
-          axiosInstance.get("/food/admin/zones")
+          apiClient.get("/food/admin/roles"),
+          adminAPI.getZones({ view: "summary" }),
         ])
         if (rolesRes.data.success) {
           setRoles(rolesRes.data.data || [])
@@ -197,11 +197,11 @@ export default function AddEmployee() {
 
       let res;
       if (isEditMode) {
-        res = await axiosInstance.patch(`/food/admin/employees/${id}`, data, {
+        res = await apiClient.patch(`/food/admin/employees/${id}`, data, {
           headers: { 'Content-Type': 'multipart/form-data' }
         })
       } else {
-        res = await axiosInstance.post("/food/admin/employees", data, {
+        res = await apiClient.post("/food/admin/employees", data, {
           headers: { 'Content-Type': 'multipart/form-data' }
         })
       }
