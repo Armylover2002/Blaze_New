@@ -2,6 +2,7 @@ import { toast } from "sonner";
 import { userAPI, restaurantAPI, deliveryAPI, adminAPI } from "@food/api";
 import { initializeApp, getApp, getApps } from "firebase/app";
 import fallbackNotificationSound from "@food/assets/audio/alert.mp3";
+import { showActorBrowserNotification } from "@food/utils/actorBrowserNotification";
 
 const pushNotificationSoundPath = "/zomato_sms.mp3";
 
@@ -38,7 +39,74 @@ function normalizeModuleFromPath(pathname = window.location.pathname) {
   if (pathname.includes("/restaurant") && !pathname.includes("/restaurants")) return "restaurant";
   if (pathname.includes("/delivery")) return "delivery";
   if (pathname.includes("/admin")) return "admin";
+  if (pathname.includes("/seller")) return "seller";
   return "user";
+}
+
+/**
+ * Decide whether this browser tab (module) should render/play a push.
+ * Prevents restaurant "New order received" from appearing on User/Admin/Delivery tabs.
+ */
+function shouldHandlePushForCurrentModule(payload = {}) {
+  const moduleName = normalizeModuleFromPath();
+  const data = isRecord(payload?.data) ? payload.data : {};
+  const audience = String(data.audience || "").toLowerCase();
+  const pushType = String(data.type || payload?.type || "").toLowerCase();
+  const title = String(
+    payload?.notification?.title || data.title || "",
+  ).toLowerCase();
+
+  if (audience) {
+    if (audience !== moduleName) return false;
+  } else {
+    // Infer audience from type when backend omitted it (legacy pushes).
+    if (pushType === "new_order" && moduleName !== "restaurant") return false;
+    if (
+      (pushType === "new_order_available" || pushType === "new_delivery") &&
+      moduleName !== "delivery"
+    ) {
+      return false;
+    }
+  }
+
+  // Hard safety: User/Admin never handle restaurant/delivery new-order UX
+  // (covers prefixed titles like "🏪 [Shop] New order received").
+  if (moduleName === "user" || moduleName === "admin") {
+    if (pushType === "new_order" || pushType === "new_order_available" || pushType === "new_delivery") {
+      return false;
+    }
+    if (
+      title.includes("new order received") ||
+      title.includes("new quick delivery") ||
+      title.includes("new order assigned") ||
+      title.includes("new return pickup") ||
+      title.includes("new food order") ||
+      title.includes("new parcel delivery") ||
+      title.includes("new restaurant order")
+    ) {
+      return false;
+    }
+    if (
+      title.includes("new delivery") ||
+      title.includes("delivery task") ||
+      title.includes("delivery order") ||
+      title.includes("pickup request nearby")
+    ) {
+      return false;
+    }
+    const body = String(
+      payload?.notification?.body || data.body || "",
+    ).toLowerCase();
+    if (
+      body.includes("pickup request nearby") ||
+      body.includes("waiting for review") ||
+      body.includes("seconds to accept")
+    ) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 function isRecord(value) {
@@ -236,6 +304,26 @@ async function triggerWebViewNativeNotification(payload = {}) {
 
 async function playPushSound(payload = {}) {
   try {
+    const moduleName = normalizeModuleFromPath();
+    if (moduleName === "admin" || moduleName === "user") {
+      pushDebugLog(PUSH_DEBUG_PREFIX, "Skipping push sound for admin/user modules");
+      return;
+    }
+
+    const pushType = String(payload?.data?.type || payload?.type || "").toLowerCase();
+    // Restaurant new-order push must not ring on delivery tab (and vice versa).
+    if (pushType === "new_order" && moduleName !== "restaurant") {
+      pushDebugLog(PUSH_DEBUG_PREFIX, "Skipping restaurant new_order push sound outside restaurant module");
+      return;
+    }
+    if (
+      (pushType === "new_order_available" || pushType === "new_delivery") &&
+      moduleName !== "delivery"
+    ) {
+      pushDebugLog(PUSH_DEBUG_PREFIX, "Skipping delivery push sound outside delivery module");
+      return;
+    }
+
     pushDebugLog(PUSH_DEBUG_PREFIX, "playPushSound called", {
       notificationKey: getNotificationKey(payload),
       pushSoundUnlocked,
@@ -551,6 +639,17 @@ function showForegroundNotification(payload = {}) {
     pushDebugWarn(PUSH_DEBUG_PREFIX, "Ignoring malformed foreground notification payload", { payload });
     return;
   }
+
+  if (!shouldHandlePushForCurrentModule(payload)) {
+    pushDebugLog(PUSH_DEBUG_PREFIX, "Ignoring push for current module", {
+      module: normalizeModuleFromPath(),
+      type: payload?.data?.type,
+      audience: payload?.data?.audience,
+      title: payload?.notification?.title || payload?.data?.title,
+    });
+    return;
+  }
+
   const notificationKey = getNotificationKey(payload);
   pushDebugLog(PUSH_DEBUG_PREFIX, "showForegroundNotification received", { notificationKey, payload });
   if (wasRecentlyHandled(notificationKey)) {
@@ -583,9 +682,31 @@ function showForegroundNotification(payload = {}) {
         image,
         notificationKey,
       });
-      // Use service worker to show native system notification to ensure it bypasses focus checks
-      if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.getRegistration().then(registration => {
+
+      const moduleName = normalizeModuleFromPath();
+      const audience = String(payload?.data?.audience || "").toLowerCase() || moduleName;
+      const isActorScoped =
+        audience === "restaurant" ||
+        audience === "delivery" ||
+        audience === "seller" ||
+        moduleName === "restaurant" ||
+        moduleName === "delivery" ||
+        moduleName === "seller";
+
+      if (isActorScoped) {
+        // SW suppresses when User/Admin tab is visible (cross-tab leak fix).
+        void showActorBrowserNotification({
+          audience: audience === "user" || audience === "admin" ? moduleName : audience,
+          title,
+          body,
+          tag: notificationKey || undefined,
+          data: {
+            ...(payload?.data || {}),
+            audience: audience === "user" || audience === "admin" ? moduleName : audience,
+          },
+        });
+      } else if ("serviceWorker" in navigator) {
+        navigator.serviceWorker.getRegistration().then((registration) => {
           if (registration) {
             registration.showNotification(title, {
               body,
@@ -594,7 +715,7 @@ function showForegroundNotification(payload = {}) {
               tag: notificationKey || undefined,
               data: payload?.data || {},
               requireInteraction: true,
-              vibrate: [200, 100, 200, 100, 300]
+              vibrate: [200, 100, 200, 100, 300],
             });
           } else {
             new Notification(title, {
@@ -602,7 +723,7 @@ function showForegroundNotification(payload = {}) {
               icon: "/favicon.ico",
               image,
               tag: notificationKey || undefined,
-              requireInteraction: true
+              requireInteraction: true,
             });
           }
         }).catch(() => {

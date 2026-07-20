@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from "react"
 import { useParams, useNavigate, useSearchParams } from "react-router-dom"
-import { restaurantAPI, orderAPI } from "@food/api"
+import { restaurantAPI } from "@food/api"
 import { API_BASE_URL } from "@food/api/config"
 import { toast } from "sonner"
 import { useLocation } from "@food/hooks/useLocation"
@@ -278,7 +278,8 @@ function RestaurantDetailsContent() {
 
               for (const searchParams of searchVariants) {
                 try {
-                  const searchResponse = await restaurantAPI.getRestaurants(searchParams, { noCache: true })
+                  // Use client TTL cache (60s) — rare fallback path; avoid noCache stampede
+                  const searchResponse = await restaurantAPI.getRestaurants(searchParams)
                   const restaurants = searchResponse?.data?.data?.restaurants || searchResponse?.data?.data || []
 
                   // Try to find by slug match or name match
@@ -592,36 +593,20 @@ function RestaurantDetailsContent() {
           fetchedRestaurantRef.current = true // Mark as fetched
           fetchedSlugRef.current = slug
 
-          // Load outlet timings from public endpoint (source of truth for daily opening slots)
-          try {
-            const outletRestaurantId = transformedRestaurant.mongoId || actualRestaurant?._id || apiRestaurant?._id
-            if (outletRestaurantId) {
-              const outletResponse = await restaurantAPI.getOutletTimingsByRestaurantId(outletRestaurantId, { noCache: true })
-              const outletTimingsData = outletResponse?.data?.data?.outletTimings || outletResponse?.data?.outletTimings
-              if (outletTimingsData) {
-                setRestaurant((prev) => ({ ...prev, outletTimings: outletTimingsData }))
-              }
-            }
-          } catch (outletError) {
-            debugWarn("Outlet timings fetch failed, falling back to delivery timings:", outletError?.message)
-          }
-
-          // Fetch menu and inventory for this restaurant
-          // If no restaurant ID, try to find matching restaurant by name
+          // Resolve menu restaurant id (search by name only if id missing)
           let restaurantIdForMenu = transformedRestaurant.id
 
           if (!restaurantIdForMenu) {
             debugWarn('? No restaurant ID available, searching for restaurant by name...')
             try {
               const searchVariants = zoneId
-                ? [{ limit: 100, zoneId: zoneId, _ts: Date.now() }, { limit: 100, _ts: Date.now() }]
-                : [{ limit: 100, _ts: Date.now() }]
+                ? [{ limit: 100, zoneId: zoneId }, { limit: 100 }]
+                : [{ limit: 100 }]
 
               for (const searchParams of searchVariants) {
-                const searchResponse = await restaurantAPI.getRestaurants(searchParams, { noCache: true })
+                const searchResponse = await restaurantAPI.getRestaurants(searchParams)
                 const restaurants = searchResponse?.data?.data?.restaurants || searchResponse?.data?.data || []
 
-                // Try to find by exact name match
                 const matchingRestaurant = restaurants.find(r =>
                   r.name?.toLowerCase().trim() === transformedRestaurant.name?.toLowerCase().trim()
                 )
@@ -629,8 +614,6 @@ function RestaurantDetailsContent() {
                 if (matchingRestaurant) {
                   restaurantIdForMenu = matchingRestaurant._id || matchingRestaurant.restaurantId || matchingRestaurant.id
                   debugLog('? Found matching restaurant by name, ID:', restaurantIdForMenu)
-
-                  // Update the restaurant ID in state
                   setRestaurant(prev => ({
                     ...prev,
                     id: restaurantIdForMenu,
@@ -638,10 +621,6 @@ function RestaurantDetailsContent() {
                   }))
                   break
                 }
-              }
-
-              if (!restaurantIdForMenu) {
-                debugWarn('? No matching restaurant found by name')
               }
             } catch (searchError) {
               debugError('? Error searching for restaurant:', searchError)
@@ -664,92 +643,43 @@ function RestaurantDetailsContent() {
             .map((value) => String(value).trim())
             .filter((value, index, arr) => arr.indexOf(value) === index)
 
+          const outletRestaurantId =
+            transformedRestaurant.mongoId || actualRestaurant?._id || apiRestaurant?._id
+
+          // Parallel: outlet timings + menu (was sequential). Use API TTL cache (no noCache).
+          // Previous-order history fan-out removed — result was never used (dead code).
+          // Inventory fetch removed — restaurantAPI.getInventoryByRestaurantId is not defined.
           setLoadingMenuItems(true)
-          if (normalizedLookupIds.length > 0) {
-            let hasPreviousOrderForRestaurant = false
-            if (isModuleAuthenticated('user')) {
-              try {
-                const normalize = (value) => (value ? String(value).trim().toLowerCase() : "")
-                const targetRestaurantName = normalize(transformedRestaurant.name)
-                const targetRestaurantIds = new Set(
-                  [
-                    ...normalizedLookupIds,
-                    transformedRestaurant.id,
-                    transformedRestaurant.restaurantId,
-                    apiRestaurant?.restaurantId,
-                    apiRestaurant?._id,
-                    actualRestaurant?.restaurantId,
-                    actualRestaurant?._id,
-                  ].map(normalize).filter(Boolean)
-                )
-
-                const FETCH_LIMIT = 100
-                const firstResponse = await orderAPI.getOrders({ limit: FETCH_LIMIT, page: 1 })
-                let allOrders = []
-                let totalPages = 1
-
-                if (firstResponse?.data?.success && firstResponse?.data?.data?.orders) {
-                  allOrders = firstResponse.data.data.orders || []
-                  totalPages = firstResponse.data.data?.pagination?.pages || 1
-                } else if (firstResponse?.data?.orders) {
-                  allOrders = firstResponse.data.orders || []
-                  totalPages = firstResponse.data?.pagination?.pages || 1
-                } else if (Array.isArray(firstResponse?.data?.data)) {
-                  allOrders = firstResponse.data.data || []
-                }
-
-                if (totalPages > 1) {
-                  const pagePromises = []
-                  for (let p = 2; p <= totalPages; p += 1) {
-                    pagePromises.push(orderAPI.getOrders({ limit: FETCH_LIMIT, page: p }))
-                  }
-
-                  const pageResponses = await Promise.all(pagePromises)
-                  const remainingOrders = pageResponses.flatMap((resp) => {
-                    if (resp?.data?.success && resp?.data?.data?.orders) return resp.data.data.orders || []
-                    if (resp?.data?.orders) return resp.data.orders || []
-                    if (Array.isArray(resp?.data?.data)) return resp.data.data || []
-                    return []
+          try {
+            const timingsPromise = outletRestaurantId
+              ? restaurantAPI
+                  .getOutletTimingsByRestaurantId(outletRestaurantId)
+                  .then((outletResponse) => {
+                    const outletTimingsData =
+                      outletResponse?.data?.data?.outletTimings ||
+                      outletResponse?.data?.outletTimings
+                    if (outletTimingsData) {
+                      setRestaurant((prev) => ({ ...prev, outletTimings: outletTimingsData }))
+                    }
                   })
-                  allOrders = [...allOrders, ...remainingOrders]
-                }
+                  .catch((outletError) => {
+                    debugWarn(
+                      "Outlet timings fetch failed, falling back to delivery timings:",
+                      outletError?.message,
+                    )
+                  })
+              : Promise.resolve()
 
-                hasPreviousOrderForRestaurant = allOrders.some((order) => {
-                  const orderRestaurantField = order?.restaurantId
-                  const candidateIds = [
-                    order?.restaurantId,
-                    orderRestaurantField?._id,
-                    orderRestaurantField?.id,
-                    orderRestaurantField?.restaurantId,
-                    order?.restaurant,
-                    order?.restaurant_id,
-                  ].map(normalize).filter(Boolean)
+            const menuPromise = (async () => {
+              if (normalizedLookupIds.length === 0) return
 
-                  if (candidateIds.some((id) => targetRestaurantIds.has(id))) {
-                    return true
-                  }
-
-                  const candidateNames = [
-                    order?.restaurantName,
-                    orderRestaurantField?.name,
-                    order?.restaurant?.name,
-                  ].map(normalize).filter(Boolean)
-
-                  return !!targetRestaurantName && candidateNames.includes(targetRestaurantName)
-                })
-              } catch (orderCheckError) {
-                debugWarn("Could not verify previous orders for recommendation section:", orderCheckError)
-              }
-            }
-
-            try {
               debugLog('? Fetching menu for restaurant ID:', restaurantIdForMenu)
               let menuResponse = null
               let resolvedMenuLookupId = null
               for (const lookupId of normalizedLookupIds) {
                 try {
                   debugLog('? Fetching menu for restaurant lookup ID:', lookupId)
-                  const response = await restaurantAPI.getMenuByRestaurantId(lookupId, { noCache: true })
+                  const response = await restaurantAPI.getMenuByRestaurantId(lookupId)
                   if (response?.data?.success) {
                     menuResponse = response
                     resolvedMenuLookupId = lookupId
@@ -819,27 +749,19 @@ function RestaurantDetailsContent() {
                   })),
                 }))
 
-                // Collect all recommended items from all sections
-                // Only include items that are both recommended (isRecommended === true) AND available (isAvailable !== false)
                 const recommendedItems = []
                 menuSections.forEach(section => {
-                  // Check direct items - only include if isRecommended is explicitly true (strict check) AND item is available
                   if (section.items && Array.isArray(section.items)) {
                     section.items.forEach(item => {
-                      // Strict check: isRecommended must be exactly boolean true
-                      // This will exclude: false, undefined, null, 0, "", and any other falsy values
                       if (isRecommendedItem(item) && item.isAvailable !== false) {
                         recommendedItems.push(item)
                       }
                     })
                   }
-                  // Check subsection items - only include if isRecommended is explicitly true (strict check) AND item is available
                   if (section.subsections && Array.isArray(section.subsections)) {
                     section.subsections.forEach(subsection => {
                       if (subsection.items && Array.isArray(subsection.items)) {
                         subsection.items.forEach(item => {
-                          // Strict check: isRecommended must be exactly boolean true
-                          // This will exclude: false, undefined, null, 0, "", and any other falsy values
                           if (isRecommendedItem(item) && item.isAvailable !== false) {
                             recommendedItems.push(item)
                           }
@@ -849,24 +771,6 @@ function RestaurantDetailsContent() {
                   }
                 })
 
-                // Debug log to verify recommended items and their isRecommended values
-                debugLog('Recommended items collected:', recommendedItems.map(item => ({
-                  name: item.name,
-                  isRecommended: item.isRecommended,
-                  isRecommendedType: typeof item.isRecommended,
-                  preparationTime: item.preparationTime
-                })))
-
-                // Debug log to check preparationTime in menu sections
-                debugLog('Menu sections with preparationTime:', menuSections.map(section => ({
-                  sectionName: section.name,
-                  items: section.items?.map(item => ({
-                    name: item.name,
-                    preparationTime: item.preparationTime
-                  })) || []
-                })))
-
-                // Dynamically inject the specifically searched dish at the very top if targetDishId is present
                 let searchedDishSection = null
                 if (targetDishId) {
                   const allItemsInMenu = []
@@ -902,7 +806,6 @@ function RestaurantDetailsContent() {
                   menuSections: finalMenuSections,
                 }))
 
-                // Set first 3 sections (Recommended, Starters, Main Course) as expanded by default
                 const defaultExpandedSections = new Set(
                   Array.from({ length: Math.min(3, finalMenuSections.length) }, (_, idx) => idx)
                 )
@@ -910,77 +813,16 @@ function RestaurantDetailsContent() {
 
                 debugLog('Fetched menu sections with recommended items:', finalMenuSections)
               }
-            } catch (menuError) {
+            })().catch((menuError) => {
               if (menuError.response && menuError.response.status === 404) {
                 debugLog('? Menu not found for this restaurant (might be a dining-only listing).')
               } else {
                 debugError('? Error fetching menu:', menuError)
               }
-            } finally {
-              setLoadingMenuItems(false)
-            }
+            })
 
-            try {
-              debugLog('? Fetching inventory for restaurant ID:', restaurantIdForMenu)
-              let inventoryResponse = null
-              let resolvedInventoryLookupId = null
-              for (const lookupId of normalizedLookupIds) {
-                try {
-                  debugLog('? Fetching inventory for restaurant lookup ID:', lookupId)
-                  const response = await restaurantAPI.getInventoryByRestaurantId(lookupId)
-                  if (response?.data?.success) {
-                    inventoryResponse = response
-                    resolvedInventoryLookupId = lookupId
-                    break
-                  }
-                } catch (lookupError) {
-                  if (lookupError?.response?.status !== 404) {
-                    throw lookupError
-                  }
-                }
-              }
-              if (!inventoryResponse) {
-                throw Object.assign(new Error('Inventory not found'), { response: { status: 404 } })
-              }
-              debugLog('? Inventory resolved using lookup ID:', resolvedInventoryLookupId)
-              if (inventoryResponse.data && inventoryResponse.data.success && inventoryResponse.data.data && inventoryResponse.data.data.inventory) {
-                const inventoryCategories = inventoryResponse.data.data.inventory.categories || []
-
-                // Normalize inventory categories to ensure proper structure
-                const normalizedInventory = inventoryCategories.map((category, index) => ({
-                  id: category.id || `category-${index}`,
-                  name: category.name || "Unnamed Category",
-                  description: category.description || "",
-                  itemCount: category.itemCount || (category.items?.length || 0),
-                  inStock: category.inStock !== undefined ? category.inStock : true,
-                  items: Array.isArray(category.items) ? category.items.map(item => ({
-                    id: String(item.id || Date.now() + Math.random()),
-                    name: item.name || "Unnamed Item",
-                    inStock: item.inStock !== undefined ? item.inStock : true,
-                    isVeg: item.isVeg !== undefined ? item.isVeg : true,
-                    stockQuantity: item.stockQuantity || "Unlimited",
-                    unit: item.unit || "piece",
-                    expiryDate: item.expiryDate || null,
-                    lastRestocked: item.lastRestocked || null,
-                  })) : [],
-                  order: category.order !== undefined ? category.order : index,
-                }))
-
-                setRestaurant(prev => ({
-                  ...prev,
-                  inventory: normalizedInventory,
-                }))
-                debugLog('? Fetched and normalized inventory categories:', normalizedInventory)
-              }
-            } catch (inventoryError) {
-              if (inventoryError.response && inventoryError.response.status === 404) {
-                debugLog('? Inventory not found for this restaurant (might be a dining-only listing).')
-              } else {
-                debugError('? Error fetching inventory:', inventoryError)
-              }
-            }
-          }
-          else {
+            await Promise.all([timingsPromise, menuPromise])
+          } finally {
             setLoadingMenuItems(false)
           }
         } else {
@@ -1038,7 +880,10 @@ function RestaurantDetailsContent() {
     }
 
     fetchRestaurant()
-  }, [slug, zoneId, restaurant, deliveryUserPoint?.lat, deliveryUserPoint?.lng])
+    // Intentionally omit `restaurant` from deps — including it re-ran this effect after
+    // setRestaurant and caused redundant work. Guard uses fetchedSlugRef instead.
+    // Distance updates when location changes are handled by the dedicated effect below.
+  }, [slug, zoneId, deliveryUserPoint?.lat, deliveryUserPoint?.lng])
 
   // Track previous values to prevent unnecessary recalculations
   const prevCoordsRef = useRef({ userLat: null, userLng: null, restaurantLat: null, restaurantLng: null })

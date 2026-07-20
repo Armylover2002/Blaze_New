@@ -517,10 +517,12 @@ const loadOnlinePartnersByIds = async (partnerIds = []) => {
 
 const emitDispatchOffer = (io, roomName, payload, soundMeta = {}) => {
   if (!io || !roomName) return;
-  logDispatchRoomEmit(io, roomName, payload, "new_order,new_order_available");
-  io.to(roomName).emit("new_order", payload);
+  // Single fat offer event + slim sound ping (FE listens to both new_order / new_order_available).
+  logDispatchRoomEmit(io, roomName, payload, "new_order_available");
   io.to(roomName).emit("new_order_available", payload);
   io.to(roomName).emit("play_notification_sound", {
+    audience: "delivery",
+    type: "new_order_available",
     orderId: soundMeta.orderId || payload.orderId,
     orderMongoId: soundMeta.orderMongoId || payload.orderMongoId,
     documentType: payload.documentType,
@@ -740,12 +742,15 @@ async function runDispatchHunt({
           title: payload.tripType === "return_pickup" ? "New return pickup!" : "New order assigned!",
           body: `You have ${Math.round(offerTimeoutMs / 1000)} seconds to accept ${alertLabel} ${payload.orderId || documentMongoId}.`,
           data: {
-            type: "new_order",
+            type: "new_order_available",
+            audience: "delivery",
             documentType,
             orderId: documentMongoId,
             tripType: payload.tripType || "forward",
             deliveryMode: payload.deliveryMode || "basic",
             isFoodQuickDelivery: payload.isFoodQuickDelivery === true,
+            link: "/food/delivery",
+            targetUrl: "/food/delivery",
           },
         },
       );

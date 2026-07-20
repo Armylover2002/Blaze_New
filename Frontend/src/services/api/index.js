@@ -1455,19 +1455,21 @@ export const restaurantAPI = {
     apiClient.patch(`/food/restaurant/foods/${String(id)}`, body ?? {}, {
       contextModule: "restaurant",
     }),
-  /** Orders (restaurant dashboard) */
+  /** Orders (restaurant dashboard) — single-flight + short TTL; one cache per query key. */
   getOrders: (() => {
-    // Single-flight de-dupe to avoid duplicate GETs in React StrictMode / double-mount.
     let inFlight = null;
     let inFlightKey = "";
     let cache = null;
     let cacheKey = "";
     let cacheAt = 0;
-    const CACHE_MS = 800;
+    // Coalesce OrdersMain tabs, popup fallback, and alert poll when they share params.
+    const CACHE_MS = 2500;
+    /** Canonical dashboard list size (tabs + popup + socket-fallback alerts). */
+    const DASHBOARD_DEFAULTS = { limit: 50, page: 1 };
 
-    const buildKey = (p = {}) => JSON.stringify({ limit: 50, page: 1, ...p });
+    const buildKey = (p = {}) => JSON.stringify({ ...DASHBOARD_DEFAULTS, ...p });
 
-    return (params = {}) => {
+    const getOrders = (params = {}) => {
       const key = buildKey(params);
       const now = Date.now();
 
@@ -1480,7 +1482,7 @@ export const restaurantAPI = {
       inFlightKey = key;
       inFlight = apiClient
         .get("/food/restaurant/orders", {
-          params: { limit: 50, page: 1, ...params },
+          params: { ...DASHBOARD_DEFAULTS, ...params },
           contextModule: "restaurant",
         })
         .then((res) => {
@@ -1531,6 +1533,14 @@ export const restaurantAPI = {
 
       return inFlight;
     };
+
+    getOrders.invalidate = () => {
+      cache = null;
+      cacheKey = "";
+      cacheAt = 0;
+    };
+
+    return getOrders;
   })(),
   updateOrderStatus: (orderId, body) => {
     const raw = body ?? {};
@@ -2921,47 +2931,88 @@ export const orderAPI = {
     apiClient.post("/food/orders/verify-payment", body ?? {}, {
       contextModule: "user",
     }),
-  getOrders: (params = {}) =>
-    apiClient
-      .get("/food/orders", {
-        params: { limit: 20, page: 1, ...params },
-        contextModule: "user",
-      })
-      .then((res) => {
-        const payload = res?.data?.data;
+  /** User order list — single-flight + short TTL per query key (Home card / StrictMode). */
+  getOrders: (() => {
+    let inFlight = null;
+    let inFlightKey = "";
+    let cache = null;
+    let cacheKey = "";
+    let cacheAt = 0;
+    const CACHE_MS = 2500;
+    const DEFAULTS = { limit: 20, page: 1 };
 
-        // Normalize backend paginated shape:
-        // { data: { data: [...], meta: { total, page, limit, totalPages } } }
-        // into UI-friendly:
-        // { data: { orders: [...], pagination: { total, page, limit, pages } } }
-        if (
-          payload &&
-          typeof payload === "object" &&
-          Array.isArray(payload.data) &&
-          payload.meta &&
-          typeof payload.meta === "object"
-        ) {
-          const meta = payload.meta;
-          return {
-            ...res,
-            data: {
-              ...res.data,
+    const buildKey = (p = {}) => JSON.stringify({ ...DEFAULTS, ...p });
+
+    const getOrders = (params = {}) => {
+      const key = buildKey(params);
+      const now = Date.now();
+
+      if (cache && cacheKey === key && now - cacheAt < CACHE_MS) {
+        return Promise.resolve(cache);
+      }
+      if (inFlight && inFlightKey === key) return inFlight;
+
+      inFlightKey = key;
+      inFlight = apiClient
+        .get("/food/orders", {
+          params: { ...DEFAULTS, ...params },
+          contextModule: "user",
+        })
+        .then((res) => {
+          const payload = res?.data?.data;
+
+          // Normalize backend paginated shape:
+          // { data: { data: [...], meta: { total, page, limit, totalPages } } }
+          // into UI-friendly:
+          // { data: { orders: [...], pagination: { total, page, limit, pages } } }
+          let normalized = res;
+          if (
+            payload &&
+            typeof payload === "object" &&
+            Array.isArray(payload.data) &&
+            payload.meta &&
+            typeof payload.meta === "object"
+          ) {
+            const meta = payload.meta;
+            normalized = {
+              ...res,
               data: {
-                ...payload,
-                orders: payload.data,
-                pagination: {
-                  total: Number(meta.total || 0),
-                  page: Number(meta.page || 1),
-                  limit: Number(meta.limit || params.limit || 20),
-                  pages: Number(meta.totalPages || 1),
+                ...res.data,
+                data: {
+                  ...payload,
+                  orders: payload.data,
+                  pagination: {
+                    total: Number(meta.total || 0),
+                    page: Number(meta.page || 1),
+                    limit: Number(meta.limit || params.limit || DEFAULTS.limit),
+                    pages: Number(meta.totalPages || 1),
+                  },
                 },
               },
-            },
-          };
-        }
+            };
+          }
 
-        return res;
-      }),
+          cache = normalized;
+          cacheKey = key;
+          cacheAt = Date.now();
+          return normalized;
+        })
+        .finally(() => {
+          inFlight = null;
+          inFlightKey = "";
+        });
+
+      return inFlight;
+    };
+
+    getOrders.invalidate = () => {
+      cache = null;
+      cacheKey = "";
+      cacheAt = 0;
+    };
+
+    return getOrders;
+  })(),
   getOrderDetails: (() => {
     const inFlight = new Map();
     const cache = new Map();

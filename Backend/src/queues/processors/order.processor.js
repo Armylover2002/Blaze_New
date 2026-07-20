@@ -40,6 +40,18 @@ export const processOrderJob = async (job) => {
         }
     }
 
+    // Handle Periodic Watchdog Recovery
+    if (action === 'WATCHDOG_AUTO_RECOVER') {
+        try {
+            const { recoverStuckOrders } = await import('../../modules/food/orders/services/order.service.js');
+            await recoverStuckOrders();
+            return { processed: true, action, jobId: job.id };
+        } catch (err) {
+            logger.error(`[BullMQ:order] WATCHDOG_AUTO_RECOVER failed: ${err.message}`);
+            throw err;
+        }
+    }
+
     // Handle Scheduled Order Activation (PRIMARY path — T−lead delayed job)
     if (action === 'NOTIFY_SCHEDULED_ORDER') {
         const { processScheduledOrderNotification } = await import('../../modules/food/orders/services/order.service.js');

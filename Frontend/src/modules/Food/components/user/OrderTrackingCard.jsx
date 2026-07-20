@@ -74,6 +74,7 @@ import {
   isOrderListCacheFresh,
   getOrderListCache,
   setOrderListCache,
+  invalidateOrderListCache,
 } from "@food/utils/orderListCache";
 
 const getOrderKey = (order) => order?.id || order?._id || order?.orderId || null;
@@ -223,7 +224,7 @@ function OrderTrackingCardInner({ hasBottomNav = true }) {
   useEffect(() => {
     if (!hasCustomerAuth) return;
     fetchOrders();
-    const interval = setInterval(fetchOrders, 30000);
+    const interval = setInterval(fetchOrders, 60000);
     return () => clearInterval(interval);
   }, [fetchOrders, hasCustomerAuth]);
 
@@ -311,6 +312,8 @@ function OrderTrackingCardInner({ hasBottomNav = true }) {
     };
 
     const handleOrderPlaced = () => {
+      orderAPI.getOrders.invalidate?.();
+      invalidateOrderListCache();
       fetchOrders();
     };
 

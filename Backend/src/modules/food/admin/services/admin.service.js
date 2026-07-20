@@ -450,7 +450,7 @@ export async function getRestaurants(query) {
     return { restaurants, total, page, limit };
 }
 
-const CANCELLED_ORDER_STATUSES = ['cancelled_by_user', 'cancelled_by_restaurant', 'cancelled_by_admin'];
+const CANCELLED_ORDER_STATUSES = ['cancelled_by_user', 'cancelled_by_restaurant', 'cancelled_by_admin', 'cancelled_by_system'];
 const PENDING_ORDER_STATUSES = ['placed', 'created'];
 const PROCESSING_ORDER_STATUSES = ['confirmed', 'preparing', 'ready_for_pickup', 'picked_up'];
 // Fallback commission rate applied to a delivered order's subtotal when the order

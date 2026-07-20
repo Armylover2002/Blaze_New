@@ -1243,14 +1243,14 @@ export default function OrderTracking() {
     return () => { isSubscribed = false; };
   }, [getOrderById, isQuickOrder, orderId, fetchOrderDetailsWithFallback, resolveOrderFromList, resolvedLookupId, prefetchedOrder]);
 
-  // Poll interval (separate so socket reconnect doesn't restart fetching logic)
+  // Poll interval — socket-first: REST only when disconnected.
   useEffect(() => {
     if (!orderId) return;
-    const pollInterval = (isSocketConnected || window.orderSocketConnected) ? 12000 : 5000;
+    if (isSocketConnected || window.orderSocketConnected) return undefined;
     const interval = setInterval(() => {
       if (terminalPollStopRef.current || document.hidden) return;
       pollRef.current?.(false);
-    }, pollInterval);
+    }, 20000);
     return () => clearInterval(interval);
   }, [orderId, isSocketConnected]);
 

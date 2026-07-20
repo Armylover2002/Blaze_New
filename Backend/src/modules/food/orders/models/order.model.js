@@ -458,6 +458,10 @@ const orderSchema = new mongoose.Schema(
             default: () => ({})
         },
         note: { type: String, default: '', trim: true },
+        /** Actor who cancelled: user | restaurant | admin | system */
+        cancelledBy: { type: String, default: null, trim: true },
+        /** Human-readable cancel reason (e.g. timeout "Restaurant not accept"). */
+        cancellationReason: { type: String, default: '', trim: true },
         sendCutlery: { type: Boolean, default: true },
         deliveryFleet: { type: String, default: 'standard', trim: true },
         scheduledAt: { type: Date, default: null },

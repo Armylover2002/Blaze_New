@@ -11,6 +11,15 @@ import { FoodZone } from '../../admin/models/zone.model.js';
 import { FoodFeeSettings } from '../../admin/models/feeSettings.model.js';
 import { ValidationError, ForbiddenError, NotFoundError } from '../../../../core/auth/errors.js';
 import { buildPaginationOptions, buildPaginatedResult } from '../../../../utils/helpers.js';
+import {
+  ORDER_LIST_PROJECTION,
+  ORDER_DETAIL_PROJECTION,
+  RESTAURANT_ORDER_LIST_SELECT,
+  USER_ORDER_LIST_SELECT,
+  toOrderStatusSocketDto,
+  toDeliveryTripDto,
+  toOrderDetailDto,
+} from '../dto/order.dto.js';
 import { FoodOffer } from '../../admin/models/offer.model.js';
 import { FoodOfferUsage } from '../../admin/models/offerUsage.model.js';
 import {
@@ -489,8 +498,24 @@ function isTerminalCancelStatus(status) {
   );
 }
 
-function applyCancellationTerminalState(order, { cancelledStatus, reason = "" } = {}) {
+function applyCancellationTerminalState(order, { cancelledStatus, reason = "", cancelledBy } = {}) {
   if (!order || typeof order !== "object") return;
+
+  const status = String(cancelledStatus || "").toLowerCase();
+  const by =
+    cancelledBy ||
+    (status === "cancelled_by_restaurant"
+      ? "restaurant"
+      : status === "cancelled_by_user"
+        ? "user"
+        : status === "cancelled_by_admin"
+          ? "admin"
+          : status === "cancelled_by_system"
+            ? "system"
+            : null);
+  if (by) order.cancelledBy = by;
+  const reasonText = String(reason || "").trim();
+  if (reasonText) order.cancellationReason = reasonText;
 
   // Dispatch: stop rider assignment and mark cancelled.
   if (!order.dispatch || typeof order.dispatch !== "object") order.dispatch = {};
@@ -1911,11 +1936,31 @@ function buildDeliverySocketPayload(orderDoc, restaurantDoc = null) {
     orderId: order?.orderId,
     orderType: order?.orderType || "food",
     status: orderDoc?.orderStatus || order?.orderStatus,
-    items: order?.items || [],
+    items: Array.isArray(order?.items)
+      ? order.items.map((item) => ({
+          name: item?.name,
+          quantity: item?.quantity,
+          price: item?.price,
+          type: item?.type,
+        }))
+      : [],
     pickupPoints,
-    pricing: order?.pricing,
+    pricing: order?.pricing
+      ? {
+          total: order.pricing.total,
+          deliveryFee: order.pricing.deliveryFee,
+          deliveryDistanceKm: order.pricing.deliveryDistanceKm,
+          driverEarning: order.pricing.driverEarning,
+        }
+      : undefined,
     total: order?.pricing?.total,
-    payment: order?.payment,
+    payment: order?.payment
+      ? {
+          method: order.payment.method,
+          status: order.payment.status,
+          amountDue: order.payment.amountDue,
+        }
+      : undefined,
     paymentMethod: order?.payment?.method,
     restaurantId:
       order?.restaurantId?._id?.toString?.() ||
@@ -1958,7 +2003,13 @@ function buildDeliverySocketPayload(orderDoc, restaurantDoc = null) {
     earnings: order?.riderEarning || order?.pricing?.deliveryFee || 0,
     deliveryFee: order?.pricing?.deliveryFee || 0,
     deliveryFleet: order?.deliveryFleet,
-    dispatch: order?.dispatch,
+    dispatch: order?.dispatch
+      ? {
+          status: order.dispatch.status,
+          deliveryPartnerId: order.dispatch.deliveryPartnerId,
+          offerTimeoutSec: order.dispatch.offerTimeoutSec,
+        }
+      : undefined,
     distanceKm: order?.distanceKm ?? order?.pricing?.deliveryDistanceKm ?? null,
     deliveryDistanceKm: order?.deliveryDistanceKm ?? order?.pricing?.deliveryDistanceKm ?? null,
     createdAt: order?.createdAt,
@@ -2040,6 +2091,72 @@ function canExposeOrderToRestaurant(orderLike) {
   return ["paid", "authorized", "captured", "settled"].includes(status);
 }
 
+function buildRestaurantNewOrderSocketPayload(orderDoc) {
+  const o = orderDoc?.toObject ? orderDoc.toObject() : orderDoc || {};
+  const mongoId = o._id?.toString?.() || String(o._id || "");
+  const addr = o.deliveryAddress || o.address || null;
+  const pricingSrc = o.pricing || {};
+  const foodItems = Array.isArray(o.items)
+    ? o.items.filter((item) => String(item?.type || "").toLowerCase() !== "quick")
+    : [];
+  const itemsSum = foodItems.reduce((sum, item) => {
+    const price = Number(item?.price || 0);
+    const qty = Number(item?.quantity || 0);
+    return sum + (Number.isFinite(price) ? price : 0) * (Number.isFinite(qty) ? qty : 0);
+  }, 0);
+  const subtotalRaw = Number(pricingSrc.subtotal ?? pricingSrc.itemSubtotal);
+  const subtotal =
+    Number.isFinite(subtotalRaw) && subtotalRaw >= 0 ? subtotalRaw : itemsSum;
+  const tax = Number(pricingSrc.tax ?? pricingSrc.taxes) || 0;
+  const packagingFee = Number(pricingSrc.packagingFee) || 0;
+  const discount = Number(pricingSrc.discount) || 0;
+  // Restaurant kitchen bill (matches OrderDetails / AllOrders) — excludes delivery & platform.
+  const restaurantBill = Math.max(0, subtotal + tax + packagingFee - discount);
+
+  return {
+    _id: o._id,
+    orderId: o.orderId,
+    orderMongoId: mongoId || undefined,
+    orderStatus: o.orderStatus,
+    status: o.orderStatus,
+    restaurantId: o.restaurantId,
+    items: Array.isArray(o.items)
+      ? o.items.map((item) => ({
+          name: item?.name,
+          quantity: item?.quantity,
+          price: item?.price,
+          type: item?.type,
+          variantName: item?.variantName,
+        }))
+      : [],
+    pricing: {
+      subtotal,
+      itemSubtotal: subtotal,
+      tax,
+      taxes: tax,
+      packagingFee,
+      discount,
+      restaurantBill,
+    },
+    restaurantBill,
+    total: restaurantBill,
+    payment: o.payment
+      ? { method: o.payment.method, status: o.payment.status }
+      : undefined,
+    paymentMethod: o.payment?.method,
+    deliveryAddress: addr,
+    customerAddress: addr,
+    address: addr,
+    note: o.note,
+    sendCutlery: o.sendCutlery,
+    scheduledAt: o.scheduledAt,
+    createdAt: o.createdAt,
+    estimatedDeliveryTime:
+      o.estimatedDeliveryTime || o.etaPromise?.minutes || 30,
+    deliveryMode: o.deliveryMode,
+  };
+}
+
 async function notifyRestaurantNewOrder(orderDoc) {
   try {
     if (!orderDoc || !canExposeOrderToRestaurant(orderDoc)) return;
@@ -2047,14 +2164,13 @@ async function notifyRestaurantNewOrder(orderDoc) {
 
     const io = getIO();
     if (io) {
-      const payload = {
-        ...orderDoc.toObject(),
-        orderMongoId: orderDoc._id?.toString?.() || undefined,
-      };
+      const payload = buildRestaurantNewOrderSocketPayload(orderDoc);
       io.to(rooms.restaurant(orderDoc.restaurantId)).emit("new_order", payload);
       io.to(rooms.restaurant(orderDoc.restaurantId)).emit(
         "play_notification_sound",
         {
+          audience: "restaurant",
+          type: "new_order",
           orderId: payload.orderId,
           orderMongoId: payload.orderMongoId,
         },
@@ -2068,9 +2184,11 @@ async function notifyRestaurantNewOrder(orderDoc) {
         body: `Order ${orderDoc.orderId} is waiting for review.`,
         data: {
           type: "new_order",
+          audience: "restaurant",
           orderId: orderDoc.orderId,
           orderMongoId: orderDoc._id?.toString?.() || "",
-          link: `/restaurant/orders/${orderDoc._id?.toString?.() || ""}`,
+          link: `/food/restaurant/orders/${orderDoc._id?.toString?.() || ""}`,
+          targetUrl: `/food/restaurant/orders/${orderDoc._id?.toString?.() || ""}`,
         },
       },
     );
@@ -2226,6 +2344,8 @@ async function notifySellerNewOrders(orderDoc, sellerOrders = []) {
         io.to(rooms.seller(sellerOrder.sellerId)).emit("new_order", payload);
         io.to(rooms.seller(sellerOrder.sellerId)).emit("order:new", payload);
         io.to(rooms.seller(sellerOrder.sellerId)).emit("play_notification_sound", {
+          audience: "seller",
+          type: "new_order",
           orderId: sellerOrder.orderId,
           sellerOrderId: sellerOrder._id?.toString?.() || "",
         });
@@ -2477,6 +2597,8 @@ async function notifySplitDispatchOffers(order, { restaurantDoc = null } = {}) {
           },
         });
         io.to(rooms.delivery(partnerId)).emit("play_notification_sound", {
+          audience: "delivery",
+          type: "new_order_available",
           orderId: legPayload.orderId,
           orderMongoId: legPayload.orderMongoId,
           legId: leg.legId,
@@ -2496,9 +2618,11 @@ async function notifySplitDispatchOffers(order, { restaurantDoc = null } = {}) {
       body: `Order ${order.orderId} has a nearby pickup leg available for delivery.`,
       data: {
         type: "new_order_available",
+        audience: "delivery",
         orderId: order.orderId,
         orderMongoId: order._id?.toString?.() || "",
-        link: "/delivery",
+        link: "/food/delivery",
+        targetUrl: "/food/delivery",
       },
     });
   }
@@ -4131,8 +4255,10 @@ export async function createOrder(userId, dto) {
   }
 
   const saved = order.toObject();
+  // Omit bulky history from create response — clients refetch detail when needed.
+  const { statusHistory, ...orderForClient } = saved;
   return {
-    order: saved,
+    order: orderForClient,
     razorpay: razorpayPayload,
     ...(quickFallbackApplied
       ? {
@@ -4238,12 +4364,12 @@ export async function listOrdersUser(userId, query) {
   const filter = { userId: new mongoose.Types.ObjectId(userId) };
   const [docs, total] = await Promise.all([
     FoodOrder.find(filter)
+      .select(USER_ORDER_LIST_SELECT)
       .populate(
         "restaurantId",
-        "restaurantName profileImage area city location rating totalRatings",
+        "restaurantName name profileImage area city slug",
       )
-      .populate("dispatch.deliveryPartnerId", "name phone rating totalRatings")
-      .populate("dispatchPlan.legs.deliveryPartnerId", "name phone rating totalRatings")
+      .populate("dispatch.deliveryPartnerId", "name phone")
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
@@ -4265,14 +4391,14 @@ export async function getOrderById(
   const identity = buildOrderIdentityFilter(orderId);
   if (!identity) throw new ValidationError("Order id required");
   const order = await FoodOrder.findOne(identity)
+    .select(`${ORDER_DETAIL_PROJECTION} +deliveryOtp`)
     .populate(
       "restaurantId",
-      "restaurantName profileImage area city location rating totalRatings",
+      "restaurantName profileImage area city location rating totalRatings phone slug",
     )
     .populate("dispatch.deliveryPartnerId", "name phone rating totalRatings")
     .populate("dispatchPlan.legs.deliveryPartnerId", "name phone rating totalRatings")
     .populate("userId", "name phone email")
-    .select("+deliveryOtp")
     .lean();
   if (!order) throw new NotFoundError("Order not found");
 
@@ -4804,6 +4930,7 @@ export async function submitOrderRatings(orderId, userId, dto) {
     restaurantRating: sellerRating,
     deliveryPartnerRating: hasDeliveryPartner ? dto.deliveryPartnerRating : null
   });
+  return order.toObject();
 }
 
 // ----- Restaurant -----
@@ -4818,16 +4945,17 @@ export async function listOrdersRestaurant(restaurantId, query) {
   };
   const [docs, total] = await Promise.all([
     FoodOrder.find(filter)
-      .populate("userId", "name phone email profileImage")
-      .populate("dispatch.deliveryPartnerId", "name phone rating totalRatings")
-      .populate("dispatchPlan.legs.deliveryPartnerId", "name phone rating totalRatings")
+      .select(RESTAURANT_ORDER_LIST_SELECT)
+      .populate("userId", "name phone profileImage")
+      .populate("dispatch.deliveryPartnerId", "name phone rating")
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
       .lean(),
     FoodOrder.countDocuments(filter),
   ]);
-  const sanitizedDocs = docs.map(doc => {
+  // Phone masking for restaurant role (partner phone hidden until photo rules allow).
+  const sanitizedDocs = docs.map((doc) => {
     const normalized = normalizeOrderForClient(doc);
     return sanitizeOrderForExternal(normalized, "RESTAURANT");
   });
@@ -4975,15 +5103,25 @@ export async function updateOrderStatusRestaurant(
     } else if (orderStatus === "ready_for_pickup" || orderStatus === "ready") {
       title = "Food is ready! 🛍️";
       body = "Your order is ready and waiting to be picked up.";
-    } else if (String(orderStatus).includes("cancel")) {
+    } else if (
+      String(orderStatus).includes("cancel") ||
+      String(order.orderStatus || "").includes("cancel")
+    ) {
       const isOnlinePaid =
         order.payment?.method === "razorpay" &&
         (order.payment?.status === "paid" ||
           order.payment?.status === "refunded");
       const refundDetail = isOnlinePaid ? ` Your refund of ₹${order.pricing.total} is being processed and will be credited to your original payment method within 5-7 working days.` : "";
-      
+      const reasonText = String(order.cancellationReason || reason || "").trim();
+      const isAcceptanceTimeout =
+        /restaurant not accept|did not respond|not accepted within/i.test(
+          reasonText,
+        );
+
       title = "Order Cancelled ❌";
-      body = `Unfortunately, your order has been cancelled by the restaurant.${refundDetail}`;
+      body = isAcceptanceTimeout
+        ? `The restaurant did not accept your order in time.${refundDetail}`
+        : `Unfortunately, your order has been cancelled by the restaurant.${refundDetail}`;
     }
 
     const notifyList = [
@@ -5069,6 +5207,8 @@ export async function updateOrderStatusRestaurant(
           );
           io.to(rooms.delivery(assignedId)).emit("new_order", payload);
           io.to(rooms.delivery(assignedId)).emit("play_notification_sound", {
+            audience: "delivery",
+            type: "new_order",
             orderId: payload.orderId,
             orderMongoId: payload.orderMongoId,
           });
@@ -5079,9 +5219,11 @@ export async function updateOrderStatusRestaurant(
               body: `Order ${payload.orderId} is assigned to you.`,
               data: {
                 type: "new_order",
+                audience: "delivery",
                 orderId: payload.orderId,
                 orderMongoId: payload.orderMongoId,
-                link: "/delivery",
+                link: "/food/delivery",
+                targetUrl: "/food/delivery",
               },
             },
           );
@@ -5120,15 +5262,19 @@ export async function updateOrderStatusRestaurant(
                 body: `Order ${payload.orderId} is available near ${restaurant?.restaurantName || "your area"}.`,
                 data: {
                   type: "new_order_available",
+                  audience: "delivery",
                   orderId: payload.orderId,
                   orderMongoId: payload.orderMongoId,
-                  link: "/delivery",
+                  link: "/food/delivery",
+                  targetUrl: "/food/delivery",
                 },
               },
             );
             // Also trigger a generic sound event for the first few partners.
             for (const p of partners.slice(0, 5)) {
               io.to(rooms.delivery(p.partnerId)).emit("play_notification_sound", {
+                audience: "delivery",
+                type: "new_order_available",
                 orderId: payload.orderId,
                 orderMongoId: payload.orderMongoId,
               });
@@ -5190,7 +5336,9 @@ export async function updateOrderStatusRestaurant(
       }
     }
 
-    return order.toObject();
+    const saved = order.toObject();
+    const { statusHistory, ...orderForClient } = saved;
+    return orderForClient;
 }
 
 export async function updateOrderStatusAdmin(orderId, adminId, orderStatus, reason = "") {
@@ -6165,13 +6313,16 @@ function emitOrderUpdate(order, deliveryPartnerId) {
     if (io) {
       const dv =
         order.deliveryVerification?.toObject?.() || order.deliveryVerification;
-      const payload = {
-        orderMongoId: order._id?.toString?.(),
-        orderId: order.orderId,
-        orderStatus: order.orderStatus,
-        deliveryState: order.deliveryState,
-        deliveryVerification: dv,
-      };
+      const payload = toOrderStatusSocketDto(order, {
+        deliveryVerification: dv
+          ? {
+              dropOtp: {
+                required: Boolean(dv?.dropOtp?.required),
+                verified: Boolean(dv?.dropOtp?.verified),
+              },
+            }
+          : undefined,
+      });
       io.to(rooms.delivery(deliveryPartnerId)).emit(
         "order_status_update",
         payload,
@@ -6648,6 +6799,7 @@ export async function listOrdersAdmin(query) {
 
   const [docs, total, statusSummary] = await Promise.all([
     FoodOrder.find(filter)
+      .select(ORDER_LIST_PROJECTION)
       .populate("userId", "name phone email")
       .populate("restaurantId", "restaurantName area city ownerPhone")
       .populate("dispatch.deliveryPartnerId", "name phone")
@@ -6870,7 +7022,8 @@ export async function resyncState(userId, role) {
     const roleUpper = String(role).toUpperCase();
     
     if (roleUpper === 'DELIVERY_PARTNER') {
-      activeOrder = await getCurrentTripDelivery(userId);
+      const trip = await getCurrentTripDelivery(userId);
+      activeOrder = trip ? toDeliveryTripDto(trip) : null;
     } else if (roleUpper === 'USER') {
       const order = await FoodOrder.findOne({
         userId: new mongoose.Types.ObjectId(userId),
@@ -6878,15 +7031,17 @@ export async function resyncState(userId, role) {
           $in: ["placed", "created", "confirmed", "preparing", "ready_for_pickup", "picked_up", "reached_pickup", "reached_drop"]
         }
       })
+      .select(`${ORDER_DETAIL_PROJECTION} +deliveryOtp`)
       .populate({ path: "restaurantId", select: "restaurantName name phone location addressLine1 area city state profileImage" })
       .sort({ createdAt: -1 })
       .lean();
 
       if (order) {
-        activeOrder = normalizeOrderForClient(order);
+        const normalized = normalizeOrderForClient(order);
         if (order.deliveryVerification?.dropOtp?.required && !order.deliveryVerification?.dropOtp?.verified) {
-          activeOrder.handoverOtp = order.deliveryOtp;
+          normalized.handoverOtp = order.deliveryOtp;
         }
+        activeOrder = toOrderDetailDto(normalized, { role: "USER" });
       }
     }
   } catch (err) {

@@ -11,7 +11,9 @@ import {
   requestRecovery,
   updateSyncPolicy,
   invalidateRecoveryCache,
+  applySocketActiveOrder,
 } from '@/modules/DeliveryV2/services/deliveryOrderSync';
+import { showActorBrowserNotification } from '@food/utils/actorBrowserNotification';
 
 /** StrictMode-safe shared socket: remount within same tick does not tear down. */
 let sharedDeliverySocket = null;
@@ -154,7 +156,7 @@ const resolveDeliveryPartnerIdFromClient = () => {
 
     const token =
       localStorage.getItem('delivery_accessToken') ||
-      localStorage.getItem('accessToken');
+      '';
     const payload = decodeJwtPayload(token);
     const tokenCandidate =
       payload?.userId ||
@@ -473,30 +475,18 @@ export const useDeliveryNotifications = () => {
     const notificationOptions = buildDeliveryOrderNotification(orderData);
 
     try {
-      if ('serviceWorker' in navigator) {
-        const registration = await navigator.serviceWorker.getRegistration();
-        if (registration) {
-          await registration.showNotification(notificationOptions.title, {
-            body: notificationOptions.body,
-            tag: notificationOptions.tag,
-            renotify: true,
-            requireInteraction: true,
-            silent: false,
-            vibrate: [200, 100, 200, 100, 300],
-            icon: '/favicon.ico',
-            data: notificationOptions.data,
-          });
-          return;
-        }
-      }
-
-      new Notification(notificationOptions.title, {
+      // Never call registration.showNotification from the page — that string
+      // ("Restaurant pickup request nearby") was appearing on the User /cart tab
+      // because OS notifications are origin-global. SW suppresses when User is visible.
+      await showActorBrowserNotification({
+        audience: 'delivery',
+        title: notificationOptions.title,
         body: notificationOptions.body,
         tag: notificationOptions.tag,
-        requireInteraction: true,
-        silent: false,
-        icon: '/favicon.ico',
-        data: notificationOptions.data,
+        data: {
+          ...notificationOptions.data,
+          audience: 'delivery',
+        },
       });
     } catch (error) {
       debugWarn('Error showing background delivery notification:', error);
@@ -623,7 +613,7 @@ export const useDeliveryNotifications = () => {
           socketId: socketRef.current?.id || null,
           socketConnected: Boolean(socketRef.current?.connected),
           socketAuthTokenPresent: Boolean(
-            localStorage.getItem('delivery_accessToken') || localStorage.getItem('accessToken')
+            localStorage.getItem('delivery_accessToken') || ''
           ),
         };
       },
@@ -873,7 +863,12 @@ export const useDeliveryNotifications = () => {
       return;
     }
 
-    const token = localStorage.getItem('delivery_accessToken') || localStorage.getItem('accessToken');
+    const token = localStorage.getItem('delivery_accessToken') || '';
+    if (!token) {
+      debugWarn('Delivery socket skipped: missing delivery_accessToken');
+      setIsConnected(false);
+      return;
+    }
     const tokenPreview = token ? `${String(token).slice(0, 12)}...` : null;
     // Snapshot vehicle id at connect time only — must not be an effect dependency.
     const vehicleIdAtConnect = useDeliveryStore.getState().activeVehicleId;
@@ -960,6 +955,20 @@ export const useDeliveryNotifications = () => {
 
     socket.on('resync_complete', (data) => {
       debugLog('Resync completed', data);
+    });
+
+    // Socket-first active trip restore (HTTP recovery remains fallback on disconnect).
+    socket.on('active_order', (orderData) => {
+      if (!orderData) return;
+      if (isPorterParcelTrip(orderData)) return;
+      debugLog('active_order received via resync', {
+        orderId: orderData?.orderId || orderData?.orderMongoId,
+      });
+      try {
+        applySocketActiveOrder(orderData, 'socket-resync');
+      } catch (err) {
+        debugWarn('applySocketActiveOrder failed', err);
+      }
     });
 
     socket.on('connect_error', (error) => {
@@ -1092,11 +1101,21 @@ export const useDeliveryNotifications = () => {
 
     socket.on('porter_order_status', (statusData) => {
       invalidateRecoveryCache('order-status');
-      setOrderStatusUpdate(enrichPorterDeliveryOrder({
+      const enriched = enrichPorterDeliveryOrder({
         ...statusData,
         documentType: 'porter_order',
         module: 'parcel',
-      }));
+      });
+
+      const activeKey = getOrderAlertKey(activeOrderRef.current || {});
+      const eventKey = getOrderAlertKey(enriched);
+      if (eventKey && eventKey === activeKey && enriched?.dispatch?.status === 'accepted') {
+        stopAlertLoopRef.current?.();
+        activeOrderRef.current = null;
+        setNewOrder(null);
+      }
+
+      setOrderStatusUpdate(enriched);
     });
 
     socket.on('porter_order_cancelled', (statusData) => {
@@ -1112,6 +1131,11 @@ export const useDeliveryNotifications = () => {
     });
 
     socket.on('play_notification_sound', (data) => {
+      if (data?.audience && data.audience !== 'delivery') {
+        debugLog('Ignoring non-delivery play_notification_sound', data?.audience);
+        return;
+      }
+
       const normalizedData = {
         orderId: data?.orderId || data?.order_id,
         orderMongoId: data?.orderMongoId || data?.order_mongo_id,
@@ -1123,9 +1147,16 @@ export const useDeliveryNotifications = () => {
         return;
       }
 
+      // Untagged legacy slim pings must still look like a delivery offer.
+      if (!normalizedData.audience && !isActionableDeliveryOffer(normalizedData)) {
+        debugLog('Ignoring untagged non-actionable play_notification_sound', normalizedData);
+        return;
+      }
+
       const activeAlertKey = getOrderAlertKey(activeOrderRef.current || {});
       const incomingAlertKey = getOrderAlertKey(normalizedData);
       const shouldAllowStandaloneSound =
+        Boolean(normalizedData.audience === 'delivery') ||
         isActionableDeliveryOffer(normalizedData) ||
         (incomingAlertKey && incomingAlertKey === activeAlertKey);
 
@@ -1232,7 +1263,7 @@ export const useDeliveryNotifications = () => {
     });
 
     const handleAuthChange = () => {
-      const newToken = localStorage.getItem('delivery_accessToken') || localStorage.getItem('accessToken');
+      const newToken = localStorage.getItem('delivery_accessToken') || '';
       if (socketRef.current && newToken) {
         debugLog('?? Auth changed, updating socket token');
         socketRef.current.auth.token = newToken;

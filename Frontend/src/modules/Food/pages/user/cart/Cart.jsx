@@ -912,15 +912,20 @@ export default function Cart() {
 
   // Fetch applicable coupons for cart (server-validated list)
   useEffect(() => {
+    let cancelled = false
+    const debounceMs = 400
+
     const fetchCouponsForCart = async () => {
       if (isQuickCart) {
-        setAvailableCoupons([])
-        setLoadingCoupons(false)
+        if (!cancelled) {
+          setAvailableCoupons([])
+          setLoadingCoupons(false)
+        }
         return
       }
 
       if (cart.length === 0 || !restaurantId) {
-        setAvailableCoupons([])
+        if (!cancelled) setAvailableCoupons([])
         return
       }
 
@@ -930,7 +935,7 @@ export default function Cart() {
       )
 
       debugLog(`[CART-COUPONS] Fetching applicable coupons for restaurant ${restaurantId}, subtotal ${cartSubtotal}`)
-      setLoadingCoupons(true)
+      if (!cancelled) setLoadingCoupons(true)
 
       try {
         const response = await restaurantAPI.getCouponsByItemIdPublic(
@@ -938,6 +943,8 @@ export default function Cart() {
           null,
           cartSubtotal,
         )
+
+        if (cancelled) return
 
         if (response?.data?.success && response?.data?.data?.coupons) {
           const coupons = response.data.data.coupons.map((coupon) => {
@@ -978,13 +985,17 @@ export default function Cart() {
         }
       } catch (error) {
         debugError("[CART-COUPONS] Error fetching coupons:", error)
-        setAvailableCoupons([])
+        if (!cancelled) setAvailableCoupons([])
       } finally {
-        setLoadingCoupons(false)
+        if (!cancelled) setLoadingCoupons(false)
       }
     }
 
-    fetchCouponsForCart()
+    const timerId = setTimeout(fetchCouponsForCart, debounceMs)
+    return () => {
+      cancelled = true
+      clearTimeout(timerId)
+    }
   }, [cart, restaurantId, isQuickCart])
 
   // Shared sequenced calculateOrder — main effect, coupons, place-order all share one pipeline.
@@ -1108,6 +1119,14 @@ export default function Cart() {
   // Calculate pricing once per meaningful cart/address/coupon/mode change.
   // Debounce coalesces StrictMode remount + cascading restaurantId/address settles.
   useEffect(() => {
+    let cancelled = false
+    const debounceMs = 300
+    const timerId = setTimeout(async () => {
+      // Don't calculate here if it's a mixed or quick cart - those components handle their own pricing
+      if (cart.length === 0 || !hasSavedAddress || (hasQuickItems && hasFoodItems) || isQuickCart) {
+        if (!cancelled) setPricing(null)
+        return
+      }
     if (!foodPricingRequestKey) {
       setPricing(null)
       setLoadingPricing(false)
@@ -1128,7 +1147,7 @@ export default function Cart() {
     const timer = setTimeout(async () => {
       if (cancelled) return
       try {
-        setLoadingPricing(true)
+        if (!cancelled) setLoadingPricing(true)
         const result = await runSequencedFoodCalculate()
         if (cancelled || result.stale) return
 
@@ -1152,6 +1171,18 @@ export default function Cart() {
         if (error.code !== "ERR_NETWORK" && error.response?.status !== 404) {
           debugError("Error calculating pricing:", error)
         }
+        // Only clear if this is still the latest request failure path (non-stale throws)
+        if (!cancelled) setPricing(null)
+      } finally {
+        if (!cancelled) setLoadingPricing(false)
+      }
+    }, debounceMs)
+
+    return () => {
+      cancelled = true
+      clearTimeout(timerId)
+    }
+  }, [cart, defaultAddress, appliedCoupon, couponCode, restaurantId, deliveryType, isScheduled, scheduledDate, scheduledTime])
         setPricing(null)
       } finally {
         if (!cancelled) setLoadingPricing(false)
@@ -1188,7 +1219,7 @@ export default function Cart() {
   useEffect(() => {
     const fetchOrderCount = async () => {
       try {
-        const response = await userAPI.getOrders({ page: 1, limit: 1 })
+        const response = await orderAPI.getOrders({ page: 1, limit: 1 })
         if (response?.data?.success) {
           const totalOrders = response?.data?.data?.pagination?.total || 0
           setUserOrderCount(totalOrders)
@@ -1202,13 +1233,14 @@ export default function Cart() {
     fetchOrderCount()
   }, [])
 
-  // Fetch public fee settings for display fallback when calculateOrder is unavailable
+  // One-shot fee settings fallback — live totals come from calculateOrder (no 30s poll)
   useEffect(() => {
+    let cancelled = false
     const fetchFeeSettings = async () => {
       try {
         const response = await adminAPI.getPublicFeeSettings()
         const settings = response?.data?.data?.feeSettings
-        if (response?.data?.success && settings) {
+        if (!cancelled && response?.data?.success && settings) {
           setFeeSettings({
             deliveryFee: Number(settings.deliveryFee ?? settings.baseDeliveryFee ?? 0),
             baseDeliveryFee: Number(
@@ -1227,17 +1259,9 @@ export default function Cart() {
       }
     }
 
-    const handleFocus = () => {
-      fetchFeeSettings()
-    }
-
     fetchFeeSettings()
-    window.addEventListener("focus", handleFocus)
-    const intervalId = setInterval(fetchFeeSettings, 30000)
-
     return () => {
-      window.removeEventListener("focus", handleFocus)
-      clearInterval(intervalId)
+      cancelled = true
     }
   }, [])
 

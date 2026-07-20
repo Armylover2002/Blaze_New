@@ -401,11 +401,38 @@ export function buildDeliverySocketPayload(orderDoc, restaurantDoc = null) {
     orderId: order?.orderId || order?.order_id || order?._id?.toString?.(),
     orderType: order?.orderType || "food",
     status: orderDoc?.orderStatus || order?.orderStatus,
-    items: order?.items || [],
+    items: Array.isArray(order?.items)
+      ? order.items.map((item) => ({
+          name: item?.name,
+          quantity: item?.quantity,
+          price: item?.price,
+          type: item?.type,
+        }))
+      : [],
     pickupPoints,
-    pricing: order?.pricing,
+    pricing: order?.pricing
+      ? {
+          total: order.pricing.total,
+          deliveryFee: order.pricing.deliveryFee,
+          deliveryDistanceKm: order.pricing.deliveryDistanceKm,
+          driverEarning: order.pricing.driverEarning,
+          quickRiderBonus: order.pricing.quickRiderBonus,
+          quickRiderShare: order.pricing.quickRiderShare,
+          quickRestaurantShare: order.pricing.quickRestaurantShare,
+          quickDeliveryFee: order.pricing.quickDeliveryFee,
+          quickPlatformShare: order.pricing.quickPlatformShare,
+          quickSharePcts: order.pricing.quickSharePcts,
+          quickFinanceVersion: order.pricing.quickFinanceVersion,
+        }
+      : undefined,
     total: order?.pricing?.total,
-    payment: order?.payment,
+    payment: order?.payment
+      ? {
+          method: order.payment.method,
+          status: order.payment.status,
+          amountDue: order.payment.amountDue,
+        }
+      : undefined,
     paymentMethod: order?.payment?.method,
     restaurantId:
       restaurant?._id?.toString?.() ||
@@ -436,7 +463,13 @@ export function buildDeliverySocketPayload(orderDoc, restaurantDoc = null) {
     earnings: order?.riderEarning || order?.pricing?.deliveryFee || 0,
     deliveryFee: order?.pricing?.deliveryFee || 0,
     deliveryFleet: order?.deliveryFleet,
-    dispatch: order?.dispatch,
+    dispatch: order?.dispatch
+      ? {
+          status: order.dispatch.status,
+          deliveryPartnerId: order.dispatch.deliveryPartnerId,
+          offerTimeoutSec: order.dispatch.offerTimeoutSec,
+        }
+      : undefined,
     distanceKm: order?.distanceKm ?? order?.pricing?.deliveryDistanceKm ?? null,
     deliveryDistanceKm: order?.deliveryDistanceKm ?? order?.pricing?.deliveryDistanceKm ?? null,
     createdAt: order?.createdAt,
@@ -503,6 +536,72 @@ export function canExposeOrderToRestaurant(orderLike) {
   return ["paid", "authorized", "captured", "settled"].includes(status);
 }
 
+function buildRestaurantNewOrderSocketPayload(orderDoc) {
+  const o = orderDoc?.toObject ? orderDoc.toObject() : orderDoc || {};
+  const mongoId = o._id?.toString?.() || String(o._id || "");
+  const addr = o.deliveryAddress || o.address || null;
+  const pricingSrc = o.pricing || {};
+  const foodItems = Array.isArray(o.items)
+    ? o.items.filter((item) => String(item?.type || "").toLowerCase() !== "quick")
+    : [];
+  const itemsSum = foodItems.reduce((sum, item) => {
+    const price = Number(item?.price || 0);
+    const qty = Number(item?.quantity || 0);
+    return sum + (Number.isFinite(price) ? price : 0) * (Number.isFinite(qty) ? qty : 0);
+  }, 0);
+  const subtotalRaw = Number(pricingSrc.subtotal ?? pricingSrc.itemSubtotal);
+  const subtotal =
+    Number.isFinite(subtotalRaw) && subtotalRaw >= 0 ? subtotalRaw : itemsSum;
+  const tax = Number(pricingSrc.tax ?? pricingSrc.taxes) || 0;
+  const packagingFee = Number(pricingSrc.packagingFee) || 0;
+  const discount = Number(pricingSrc.discount) || 0;
+  // Restaurant kitchen bill (matches OrderDetails / AllOrders) — excludes delivery & platform.
+  const restaurantBill = Math.max(0, subtotal + tax + packagingFee - discount);
+
+  return {
+    _id: o._id,
+    orderId: o.orderId || o.order_id || mongoId,
+    orderMongoId: mongoId || undefined,
+    orderStatus: o.orderStatus,
+    status: o.orderStatus,
+    restaurantId: o.restaurantId,
+    items: Array.isArray(o.items)
+      ? o.items.map((item) => ({
+          name: item?.name,
+          quantity: item?.quantity,
+          price: item?.price,
+          type: item?.type,
+          variantName: item?.variantName,
+        }))
+      : [],
+    pricing: {
+      subtotal,
+      itemSubtotal: subtotal,
+      tax,
+      taxes: tax,
+      packagingFee,
+      discount,
+      restaurantBill,
+    },
+    restaurantBill,
+    total: restaurantBill,
+    payment: o.payment
+      ? { method: o.payment.method, status: o.payment.status }
+      : undefined,
+    paymentMethod: o.payment?.method,
+    deliveryAddress: addr,
+    customerAddress: addr,
+    address: addr,
+    note: o.note,
+    sendCutlery: o.sendCutlery,
+    scheduledAt: o.scheduledAt,
+    createdAt: o.createdAt,
+    estimatedDeliveryTime:
+      o.estimatedDeliveryTime || o.etaPromise?.minutes || 30,
+    deliveryMode: o.deliveryMode,
+  };
+}
+
 export async function notifyRestaurantNewOrder(orderDoc) {
   try {
     if (!orderDoc || !canExposeOrderToRestaurant(orderDoc)) return;
@@ -510,15 +609,20 @@ export async function notifyRestaurantNewOrder(orderDoc) {
 
     const io = getIO();
     if (io) {
-      const payload = {
-        ...orderDoc.toObject(),
-        orderMongoId: orderDoc._id?.toString?.() || undefined,
-        orderId: orderDoc.order_id || orderDoc._id?.toString?.(),
-      };
+      const payload = buildRestaurantNewOrderSocketPayload(orderDoc);
       logger.info(
         `[RestaurantOrders] Emitting new_order to ${rooms.restaurant(orderDoc.restaurantId)} for order ${orderDoc._id?.toString?.() || ''}`,
       );
       io.to(rooms.restaurant(orderDoc.restaurantId)).emit("new_order", payload);
+      io.to(rooms.restaurant(orderDoc.restaurantId)).emit(
+        "play_notification_sound",
+        {
+          audience: "restaurant",
+          type: "new_order",
+          orderId: payload.orderId,
+          orderMongoId: payload.orderMongoId,
+        },
+      );
     }
 
     const isFoodQuick =
@@ -532,11 +636,13 @@ export async function notifyRestaurantNewOrder(orderDoc) {
           : `Order #${orderDoc.order_id || orderDoc._id} is waiting for review.`,
         data: {
           type: "new_order",
+          audience: "restaurant",
           orderId: orderDoc._id.toString(),
           orderMongoId: orderDoc._id?.toString?.() || "",
           deliveryMode: String(orderDoc.deliveryMode || "basic"),
           isFoodQuickDelivery: isFoodQuick,
-          link: `/restaurant/orders/${orderDoc._id?.toString?.() || ""}`,
+          link: `/food/restaurant/orders/${orderDoc._id?.toString?.() || ""}`,
+          targetUrl: `/food/restaurant/orders/${orderDoc._id?.toString?.() || ""}`,
         },
       },
     );

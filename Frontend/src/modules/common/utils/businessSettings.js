@@ -156,10 +156,7 @@ export const loadBusinessSettings = async (options = {}) => {
     }
 
     inFlightSettingsPromise = (async () => {
-      const response = await apiClient.get(endpoint, {
-        params: forceRefresh ? { _: Date.now() } : undefined,
-        headers: { 'Cache-Control': 'no-cache' },
-      });
+      const response = await apiClient.get(endpoint);
       const settings = response?.data?.data || response?.data;
 
       if (settings) {
@@ -231,10 +228,7 @@ export const refreshBusinessSettingsIfStale = async () => {
       return cachedSettings;
     }
 
-    const response = await apiClient.get(endpoint, {
-      params: { _: Date.now() },
-      headers: { 'Cache-Control': 'no-cache' },
-    });
+    const response = await apiClient.get(endpoint);
     const settings = response?.data?.data || response?.data;
     if (!settings) return cachedSettings;
 

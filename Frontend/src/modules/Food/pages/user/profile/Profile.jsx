@@ -772,7 +772,6 @@ export default function Profile() {
       localStorage.removeItem("user_authenticated");
       localStorage.removeItem("user_user");
       localStorage.removeItem("user");
-      localStorage.removeItem("cart");
       USER_SESSION_PREFERENCE_KEYS.forEach((key) => localStorage.removeItem(key));
 
       // Dispatch auth change event to notify other components
@@ -792,7 +791,6 @@ export default function Profile() {
       localStorage.removeItem("user_authenticated");
       localStorage.removeItem("user_user");
       localStorage.removeItem("user");
-      localStorage.removeItem("cart");
       USER_SESSION_PREFERENCE_KEYS.forEach((key) => localStorage.removeItem(key));
       window.dispatchEvent(new Event("userAuthChanged"));
 
@@ -817,7 +815,6 @@ export default function Profile() {
       localStorage.removeItem("user_authenticated");
       localStorage.removeItem("user_user");
       localStorage.removeItem("user");
-      localStorage.removeItem("cart");
       USER_SESSION_PREFERENCE_KEYS.forEach((key) => localStorage.removeItem(key));
       window.dispatchEvent(new Event("userAuthChanged"));
 

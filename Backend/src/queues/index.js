@@ -144,6 +144,32 @@ export const initSubscriptionSchedules = async () => {
 };
 
 /**
+ * Schedules the periodic watchdog for stuck orders.
+ */
+export const initOrderSchedules = async () => {
+    if (!config.bullmqEnabled) return;
+    const queue = getOrderQueue();
+    if (!queue) return;
+
+    try {
+        // Schedule every 30 minutes
+        await queue.add(
+            'watchdog_auto_recover',
+            { action: 'WATCHDOG_AUTO_RECOVER' },
+            {
+                repeat: { pattern: '*/30 * * * *' }, // Every 30 minutes
+                jobId: 'watchdog_auto_recover_periodic', // Unique ID to prevent duplicates
+                removeOnComplete: true,
+                removeOnFail: true
+            }
+        );
+        logger.info('Order Schedule: Periodic watchdog initialized');
+    } catch (err) {
+        logger.error(`Order Schedule Failed: ${err.message}`);
+    }
+};
+
+/**
  * Get job counts per queue for admin observability. Returns [] if BullMQ disabled.
  * @returns {Promise<Array<{ name: string, waiting: number, active: number, completed: number, failed: number }>>}
  */

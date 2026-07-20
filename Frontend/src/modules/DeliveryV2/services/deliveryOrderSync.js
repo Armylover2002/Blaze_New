@@ -10,8 +10,8 @@
 import { deliveryAPI } from '@food/api';
 import porterDriverApi from '@/modules/porter/driver/services/driverApi';
 
-const AVAILABLE_POLL_MS_SOCKET_UP = 45_000;
-const AVAILABLE_POLL_MS_SOCKET_DOWN = 30_000;
+const AVAILABLE_POLL_MS_SOCKET_UP = 60_000;
+const AVAILABLE_POLL_MS_SOCKET_DOWN = 45_000;
 const RECOVER_DEBOUNCE_MS = 2_500;
 const RECOVERY_TTL_MS = 15_000;
 
@@ -432,6 +432,25 @@ export function subscribeActiveTrip(listener) {
   return () => activeTripListeners.delete(listener);
 }
 
+/**
+ * Apply slim active-trip payload from socket resync (`active_order`).
+ * Avoids an immediate HTTP current-trip round-trip when reconnect restores state.
+ */
+export function applySocketActiveOrder(order, reason = 'socket-resync') {
+  if (!order) {
+    notifyActiveTrip({ type: 'idle', reason, foodCurrent: null, porterOrder: null });
+    return;
+  }
+  stopAvailablePoller();
+  notifyActiveTrip({
+    type: 'active',
+    reason,
+    foodCurrent: order,
+    porterOrder: null,
+    source: 'socket',
+  });
+}
+
 export function stopAllSync() {
   stopAvailablePoller();
   if (recoverTimer) {
@@ -468,6 +487,7 @@ const deliveryOrderSync = {
   fetchAvailableOffers,
   subscribeAvailableOffers,
   subscribeActiveTrip,
+  applySocketActiveOrder,
   stopAllSync,
   invalidateRecoveryCache,
   getSyncPolicy,

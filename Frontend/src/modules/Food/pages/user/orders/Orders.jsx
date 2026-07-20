@@ -11,6 +11,10 @@ import {
   parseValidDate,
 } from "@food/utils/scheduleTime"
 import { isFoodQuickOrder, formatQuickEtaWindow } from "@food/utils/quickDelivery"
+import {
+  getCancellationDisplayLabel,
+  isRestaurantAcceptanceTimeout,
+} from "@food/utils/cancellationDisplay"
 const debugLog = (...args) => { }
 const debugWarn = (...args) => { }
 const debugError = (...args) => { }
@@ -204,30 +208,34 @@ export default function Orders() {
   useEffect(() => {
     const FETCH_LIMIT = 100
 
-    const fetchAllOrders = async () => {
+    const extractOrdersPage = (response) => {
+      let pageOrders = []
+      let totalPages = 1
+
+      if (response?.data?.success && response?.data?.data?.orders) {
+        pageOrders = response.data.data.orders || []
+        totalPages = response.data.data?.pagination?.pages || 1
+      } else if (response?.data?.orders) {
+        pageOrders = response.data.orders || []
+        totalPages = response.data?.pagination?.pages || 1
+      } else if (
+        response?.data?.data &&
+        Array.isArray(response.data.data)
+      ) {
+        pageOrders = response.data.data || []
+      }
+
+      return { pageOrders, totalPages }
+    }
+
+    const fetchOrdersPages = async ({ firstPageOnly = false } = {}) => {
       const firstResponse = await orderAPI.getOrders({
         limit: FETCH_LIMIT,
         page: 1,
       })
+      const { pageOrders: firstPageOrders, totalPages } = extractOrdersPage(firstResponse)
 
-      // Check multiple possible response structures
-      let firstPageOrders = []
-      let totalPages = 1
-
-      if (firstResponse?.data?.success && firstResponse?.data?.data?.orders) {
-        firstPageOrders = firstResponse.data.data.orders || []
-        totalPages = firstResponse.data.data?.pagination?.pages || 1
-      } else if (firstResponse?.data?.orders) {
-        firstPageOrders = firstResponse.data.orders || []
-        totalPages = firstResponse.data?.pagination?.pages || 1
-      } else if (
-        firstResponse?.data?.data &&
-        Array.isArray(firstResponse.data.data)
-      ) {
-        firstPageOrders = firstResponse.data.data || []
-      }
-
-      if (totalPages <= 1) {
+      if (firstPageOnly || totalPages <= 1) {
         return firstPageOrders
       }
 
@@ -238,150 +246,134 @@ export default function Orders() {
 
       const pageResponses = await Promise.all(pagePromises)
       const remainingOrders = pageResponses.flatMap((resp) => {
-        if (resp?.data?.success && resp?.data?.data?.orders) {
-          return resp.data.data.orders || []
-        }
-        if (resp?.data?.orders) {
-          return resp.data.orders || []
-        }
-        if (resp?.data?.data && Array.isArray(resp.data.data)) {
-          return resp.data.data || []
-        }
-        return []
+        return extractOrdersPage(resp).pageOrders
       })
 
       return [...firstPageOrders, ...remainingOrders]
     }
 
-    const fetchOrders = async () => {
+    const transformOrders = (rawOrdersData) => {
+      const ordersData = rawOrdersData.filter(order => {
+        const type = order.orderType || order.module || 'food'
+        const orderId = String(order.orderId || order.id || order._id || '')
+        return type !== 'quick' && !orderId.startsWith('QC')
+      })
+
+      const transformedOrders = ordersData.map(order => {
+        const createdAt = order.createdAt ? new Date(order.createdAt) : new Date()
+        const backendStatus = order.orderStatus || order.status
+        const isCancelled =
+          backendStatus === 'cancelled' ||
+          backendStatus === 'cancelled_by_user' ||
+          backendStatus === 'cancelled_by_restaurant' ||
+          backendStatus === 'cancelled_by_admin'
+        const cancellationReason = order.cancellationReason || ''
+        const isRestaurantCancelled = isCancelled && (
+          order.cancelledBy === 'restaurant' ||
+          backendStatus === 'cancelled_by_restaurant' ||
+          isRestaurantAcceptanceTimeout(order) ||
+          /rejected by restaurant|restaurant rejected|restaurant cancelled|restaurant is too busy|item not available|outside delivery area|kitchen closing|technical issue|order not accepted within time limit|restaurant did not respond/i.test(cancellationReason)
+        )
+        const isUserCancelled = isCancelled && (order.cancelledBy === 'user' || backendStatus === 'cancelled_by_user')
+        const cancellationLabel = isCancelled
+          ? getCancellationDisplayLabel(order) || 'Cancelled'
+          : null
+        const originalStatus = backendStatus
+        const restaurantRating = order.ratings?.restaurant?.rating || null
+        const deliveryPartnerRating = order.ratings?.deliveryPartner?.rating || null
+
+        return {
+          id: order._id?.toString() || order.orderId || `ORD-${order._id}`,
+          mongoId: order._id,
+          orderId: order.orderId || order._id?.toString(),
+          status: isRestaurantCancelled ? 'restaurant_cancelled' : getOrderStatus({ ...order, status: backendStatus }),
+          originalStatus,
+          cancellationLabel,
+          createdAt: createdAt.toISOString(),
+          scheduledAt: order.scheduledAt || null,
+          activatedAt: order.activatedAt || null,
+          address: order.address || order.deliveryAddress || {},
+          items: (order.items || []).map(item => ({
+            itemId: item.itemId || item._id || item.id,
+            name: item.name || item.foodName || 'Item',
+            variantName: item.variantName || '',
+            quantity: item.quantity || 1,
+            price: item.price || 0,
+            image: item.image || null,
+            description: item.description || null,
+            isVeg: item.isVeg !== undefined ? item.isVeg : (item.category === 'veg' || item.type === 'veg'),
+            _id: item._id || item.id,
+            id: item.id || item._id
+          })),
+          total: order.pricing?.total || order.total || 0,
+          subtotal: order.pricing?.subtotal || 0,
+          deliveryFee: order.pricing?.deliveryFee || 0,
+          tax: order.pricing?.tax || 0,
+          pricing: order.pricing || {},
+          payment: order.payment || {},
+          paymentMethod: order.payment?.method || order.paymentMethod,
+          restaurant: order.restaurantId?.restaurantName || order.restaurantId?.name || order.restaurantName || 'Restaurant',
+          restaurantId: order.restaurantId?._id || order.restaurantId,
+          restaurantSlug: order.restaurantId?.slug || null,
+          restaurantImage: order.restaurantId?.profileImage?.url || order.restaurantId?.profileImage || null,
+          restaurantLocation: order.restaurantId?.location?.area || order.restaurantId?.location?.city || order.address?.city || order.deliveryAddress?.city || '',
+          restaurantRating,
+          deliveryPartnerRating,
+          ratings: order.ratings || {},
+          rating: restaurantRating || null,
+          review: order.review || null,
+          tracking: order.tracking || {},
+          cancellationReason: cancellationReason,
+          isRestaurantCancelled: isRestaurantCancelled,
+          isUserCancelled: isUserCancelled,
+          cancelledBy: order.cancelledBy,
+          eta: order.eta || { min: order.estimatedDeliveryTime || 30, max: order.estimatedDeliveryTime || 30 },
+          etaPromise: order.etaPromise || null,
+          deliveryMode: order.deliveryMode || "basic",
+          sla: order.sla || null,
+          estimatedDeliveryTime: order.estimatedDeliveryTime || 30,
+          preparationTime: order.preparationTime || 0,
+          deliveredAt: order.deliveredAt || null,
+          deliveryPartnerId: order.deliveryPartnerId?._id || order.deliveryPartnerId || null,
+          deliveryPartnerName: order.deliveryPartnerId?.name || order.deliveryPartnerName || null,
+          deliveryPartnerPhone: order.deliveryPartnerId?.phone || order.deliveryPartnerPhone || null,
+          note: order.note || null
+        }
+      })
+
+      transformedOrders.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+      return transformedOrders
+    }
+
+    const fetchOrders = async ({ silent = false, firstPageOnly = false } = {}) => {
       try {
-        setLoading(true)
-        const rawOrdersData = await fetchAllOrders()
+        if (!silent) setLoading(true)
+        const rawOrdersData = await fetchOrdersPages({ firstPageOnly })
+        const transformedOrders = transformOrders(rawOrdersData)
 
-        // Filter to keep only food orders in this module
-        const ordersData = rawOrdersData.filter(order => {
-          const type = order.orderType || order.module || 'food'
-          const orderId = String(order.orderId || order.id || order._id || '')
-          // Exclude quick commerce orders (type 'quick' or prefix 'QC')
-          return type !== 'quick' && !orderId.startsWith('QC')
-        })
-
-        if (ordersData.length > 0) {
-          debugLog('?? Raw orders from API:', ordersData.slice(0, 3).map(o => ({
-            id: o.orderId || o._id,
-            status: o.orderStatus || o.status,
-            restaurantRating: o.ratings?.restaurant?.rating || null,
-            deliveryPartnerRating: o.ratings?.deliveryPartner?.rating || null,
-            deliveredAt: o.deliveredAt,
-            restaurant: o.restaurantId?.restaurantName || o.restaurantId?.name || o.restaurantName
-          })))
-
-          // Transform API orders to match UI structure
-          const transformedOrders = ordersData.map(order => {
-            const createdAt = order.createdAt ? new Date(order.createdAt) : new Date()
-
-            // Check if cancelled by restaurant or user
-            const backendStatus = order.orderStatus || order.status
-            const isCancelled =
-              backendStatus === 'cancelled' ||
-              backendStatus === 'cancelled_by_user' ||
-              backendStatus === 'cancelled_by_restaurant' ||
-              backendStatus === 'cancelled_by_admin'
-            const cancellationReason = order.cancellationReason || ''
-            // Check cancelledBy field first, then fallback to cancellation reason pattern
-            const isRestaurantCancelled = isCancelled && (
-              order.cancelledBy === 'restaurant' ||
-              /rejected by restaurant|restaurant rejected|restaurant cancelled|restaurant is too busy|item not available|outside delivery area|kitchen closing|technical issue|order not accepted within time limit|restaurant did not respond/i.test(cancellationReason)
-            )
-            const isUserCancelled = isCancelled && order.cancelledBy === 'user'
-
-            // Get original status from backend before transformation
-            const originalStatus = backendStatus
-            const restaurantRating = order.ratings?.restaurant?.rating || null
-            const deliveryPartnerRating = order.ratings?.deliveryPartner?.rating || null
-
-            return {
-              id: order._id?.toString() || order.orderId || `ORD-${order._id}`,
-              mongoId: order._id,
-              orderId: order.orderId || order._id?.toString(), // Keep orderId for display
-              status: isRestaurantCancelled ? 'restaurant_cancelled' : getOrderStatus({ ...order, status: backendStatus }),
-              originalStatus: originalStatus, // Keep original status for reference
-              createdAt: createdAt.toISOString(),
-              scheduledAt: order.scheduledAt || null,
-              activatedAt: order.activatedAt || null,
-              address: order.address || order.deliveryAddress || {},
-              items: (order.items || []).map(item => ({
-                itemId: item.itemId || item._id || item.id,
-                name: item.name || item.foodName || 'Item',
-                variantName: item.variantName || '',
-                quantity: item.quantity || 1,
-                price: item.price || 0,
-                image: item.image || null,
-                description: item.description || null,
-                isVeg: item.isVeg !== undefined ? item.isVeg : (item.category === 'veg' || item.type === 'veg'),
-                _id: item._id || item.id,
-                id: item.id || item._id
-              })),
-              total: order.pricing?.total || order.total || 0,
-              subtotal: order.pricing?.subtotal || 0,
-              deliveryFee: order.pricing?.deliveryFee || 0,
-              tax: order.pricing?.tax || 0,
-              pricing: order.pricing || {}, // Keep full pricing object for discounts, coupons
-              payment: order.payment || {},
-              paymentMethod: order.payment?.method || order.paymentMethod,
-              restaurant: order.restaurantId?.restaurantName || order.restaurantId?.name || order.restaurantName || 'Restaurant',
-              restaurantId: order.restaurantId?._id || order.restaurantId,
-              restaurantSlug: order.restaurantId?.slug || null,
-              restaurantImage: order.restaurantId?.profileImage?.url || order.restaurantId?.profileImage || null,
-              restaurantLocation: order.restaurantId?.location?.area || order.restaurantId?.location?.city || order.address?.city || order.deliveryAddress?.city || '',
-              restaurantRating,
-              deliveryPartnerRating,
-              ratings: order.ratings || {},
-              rating: restaurantRating || null,
-              review: order.review || null,
-              tracking: order.tracking || {},
-              cancellationReason: cancellationReason,
-              isRestaurantCancelled: isRestaurantCancelled,
-              isUserCancelled: isUserCancelled,
-              cancelledBy: order.cancelledBy,
-              eta: order.eta || { min: order.estimatedDeliveryTime || 30, max: order.estimatedDeliveryTime || 30 },
-              etaPromise: order.etaPromise || null,
-              deliveryMode: order.deliveryMode || "basic",
-              sla: order.sla || null,
-              estimatedDeliveryTime: order.estimatedDeliveryTime || 30,
-              preparationTime: order.preparationTime || 0,
-              deliveredAt: order.deliveredAt || null,
-              deliveryPartnerId: order.deliveryPartnerId?._id || order.deliveryPartnerId || null,
-              deliveryPartnerName: order.deliveryPartnerId?.name || order.deliveryPartnerName || null,
-              deliveryPartnerPhone: order.deliveryPartnerId?.phone || order.deliveryPartnerPhone || null,
-              note: order.note || null
-            }
-          })
-
-          // Sort by date (newest first)
-          transformedOrders.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
-
-          debugLog('? Orders fetched and transformed:', {
-            total: transformedOrders.length,
-            delivered: transformedOrders.filter(o => o.status === 'delivered' || o.originalStatus === 'delivered').length,
-            withRating: transformedOrders.filter(o => o.restaurantRating && (!o.deliveryPartnerId || o.deliveryPartnerRating)).length,
-            sample: transformedOrders.slice(0, 2).map(o => ({
-              id: o.id,
-              status: o.status,
-              originalStatus: o.originalStatus,
-              restaurantRating: o.restaurantRating,
-              deliveryPartnerRating: o.deliveryPartnerRating,
-              deliveredAt: o.deliveredAt
-            }))
-          })
-
-          setOrders(transformedOrders)
-        } else {
-          debugLog('?? No orders data in response')
+        if (transformedOrders.length > 0) {
+          if (firstPageOnly) {
+            // Poll: refresh recent page only; keep older rows already loaded.
+            setOrders((prev) => {
+              const byKey = new Map(
+                (prev || []).map((o) => [String(o.mongoId || o.id || o.orderId), o]),
+              )
+              for (const order of transformedOrders) {
+                byKey.set(String(order.mongoId || order.id || order.orderId), order)
+              }
+              return Array.from(byKey.values()).sort(
+                (a, b) => new Date(b.createdAt) - new Date(a.createdAt),
+              )
+            })
+          } else {
+            setOrders(transformedOrders)
+          }
+        } else if (!firstPageOnly) {
           setOrders([])
         }
       } catch (error) {
         debugError('Error fetching user orders:', error)
+        if (silent) return
         let errorMessage = 'Failed to load orders'
         if (error?.response?.status === 401) {
           errorMessage = 'Please login to view your orders'
@@ -391,19 +383,47 @@ export default function Orders() {
         toast.error(errorMessage)
         setOrders([])
       } finally {
-        setLoading(false)
+        if (!silent) setLoading(false)
       }
     }
 
     fetchOrders()
 
-    // Poll for order updates every 20 seconds to detect delivered orders
-    // This ensures rating popup shows quickly when order is delivered
     const pollInterval = setInterval(() => {
-      fetchOrders()
-    }, 20000) // Poll every 20 seconds
+      if (window.orderSocketConnected) return
+      fetchOrders({ silent: true, firstPageOnly: true })
+    }, 60000)
 
-    return () => clearInterval(pollInterval)
+    const onStatus = (event) => {
+      const detail = event?.detail || {}
+      const status = detail.orderStatus || detail.status
+      if (!status) return
+      const ids = [detail.orderMongoId, detail.orderId].filter(Boolean).map(String)
+      if (!ids.length) return
+      setOrders((prev) =>
+        (prev || []).map((order) => {
+          const keys = [order.mongoId, order.id, order.orderId].filter(Boolean).map(String)
+          if (!keys.some((k) => ids.includes(k))) return order
+          return {
+            ...order,
+            originalStatus: status,
+            status: String(status).includes("cancel")
+              ? order.isRestaurantCancelled
+                ? "restaurant_cancelled"
+                : status
+              : status,
+            deliveredAt:
+              status === "delivered" ? order.deliveredAt || new Date().toISOString() : order.deliveredAt,
+          }
+        }),
+      )
+    }
+    window.addEventListener("orderStatusNotification", onStatus)
+
+    return () => {
+      clearInterval(pollInterval)
+      window.removeEventListener("orderStatusNotification", onStatus)
+    }
   }, [])
 
   // Format date helper
@@ -1006,7 +1026,9 @@ Order again from this restaurant in the ${companyName} app.`
                       <p className="text-xs font-medium text-green-600 mt-1">Delivered</p>
                     )}
                     {isRestaurantCancelled && (
-                      <p className="text-xs font-medium text-red-500 mt-1">Restaurant Cancelled</p>
+                      <p className="text-xs font-medium text-red-500 mt-1">
+                        {order.cancellationLabel || getCancellationDisplayLabel(order) || "Restaurant Cancelled"}
+                      </p>
                     )}
                     {isUserCancelled && (
                       <p className="text-xs font-medium text-gray-500 mt-1">Cancelled by you</p>
@@ -1063,7 +1085,9 @@ Order again from this restaurant in the ${companyName} app.`
                         <div className="bg-red-100 p-1 rounded-full">
                           <AlertCircle className="w-4 h-4 text-red-500" />
                         </div>
-                        <span className="text-xs font-semibold text-red-500">Restaurant Cancelled</span>
+                        <span className="text-xs font-semibold text-red-500">
+                          {order.cancellationLabel || getCancellationDisplayLabel(order) || "Restaurant Cancelled"}
+                        </span>
                       </div>
                       <p className="text-xs text-gray-600 dark:text-gray-300 ml-7">Refund will be processed in 24-48 hours</p>
                     </div>

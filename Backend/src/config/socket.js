@@ -406,8 +406,8 @@ export const initSocket = async (server) => {
             }
         });
 
-        // 🆕 Resync State on Reconnect
-        socket.on('resync', async () => {
+        // Resync State on Reconnect — supports optional ACK callback from client.
+        socket.on('resync', async (ack) => {
           try {
             if (role === 'DELIVERY_PARTNER') {
               logDeliverySocket('Resync requested', {
@@ -442,7 +442,15 @@ export const initSocket = async (server) => {
                 });
               }
             }
-            socket.emit('resync_complete', { timestamp: Date.now() });
+            const completePayload = {
+              ok: true,
+              timestamp: Date.now(),
+              hasActiveOrder: Boolean(state.activeOrder),
+            };
+            socket.emit('resync_complete', completePayload);
+            if (typeof ack === 'function') {
+              ack(completePayload);
+            }
             if (role === 'DELIVERY_PARTNER') {
               logDeliverySocket('Resync complete', {
                 socketId: socket.id,
@@ -452,6 +460,9 @@ export const initSocket = async (server) => {
             }
           } catch (err) {
             logger.error(`Resync failed for ${role}:${userId} — ${err.message}`);
+            if (typeof ack === 'function') {
+              ack({ ok: false, error: err.message });
+            }
           }
         });
     });
