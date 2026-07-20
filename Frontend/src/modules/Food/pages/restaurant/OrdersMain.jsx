@@ -814,6 +814,62 @@ function AllOrders({
   );
 }
 
+// Timer persistence helpers
+const getInitialCountdown = (orderId) => {
+  if (!orderId) return 240;
+  const storageKey = `order_timer_${orderId}`;
+  const startTime = localStorage.getItem(storageKey);
+
+  if (startTime) {
+    const elapsed = Math.floor((Date.now() - parseInt(startTime)) / 1000);
+    const remaining = 240 - elapsed;
+    return remaining > 0 ? remaining : 0;
+  } else {
+    localStorage.setItem(storageKey, Date.now().toString());
+    return 240;
+  }
+};
+
+const getPopupOrderTotal = (orderLike) => {
+  if (!orderLike) return 0;
+
+  // Restaurant-facing bill only (matches OrderDetails / AllOrders).
+  // Never prefer customer pricing.total (includes delivery + platform).
+  if (orderLike.pricing?.restaurantBill != null) {
+    return Number(orderLike.pricing.restaurantBill) || 0;
+  }
+  if (orderLike.restaurantBill != null) {
+    return Number(orderLike.restaurantBill) || 0;
+  }
+
+  const rawItems = Array.isArray(orderLike.items) ? orderLike.items : [];
+  const visibleItems = getRestaurantVisibleItems(rawItems);
+
+  const subtotal =
+    Number(orderLike.pricing?.subtotal ?? orderLike.pricing?.itemSubtotal) ||
+    visibleItems.reduce((sum, item) => {
+      const price = Number(item?.price || 0);
+      const qty = Number(item?.quantity || 0);
+      return (
+        sum +
+        (Number.isFinite(price) ? price : 0) * (Number.isFinite(qty) ? qty : 0)
+      );
+    }, 0);
+
+  const taxes = Number(orderLike.pricing?.tax ?? orderLike.pricing?.taxes) || 0;
+  const packagingFee = Number(orderLike.pricing?.packagingFee) || 0;
+  const discount = Number(orderLike.pricing?.discount) || 0;
+
+  return Math.max(0, subtotal + taxes + packagingFee - discount);
+};
+
+// Format countdown time
+const formatTime = (seconds) => {
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+};
+
 const IncomingOrderCard = memo(function IncomingOrderCard({
     order,
     orderKey,
@@ -828,6 +884,11 @@ const IncomingOrderCard = memo(function IncomingOrderCard({
     toggleMute,
     handlePrint,
     handleRejectClick,
+    rejectInFlightRef,
+    clearOrderTimer,
+    markOrderAsShown,
+    removeIncomingOrder,
+    stopRinging,
 }) {
     const orderIdForApi =
       order?.orderMongoId || order?.orderId || order?._id || order?.id;
@@ -1239,20 +1300,7 @@ export default function OrdersMain() {
   const newOrderRef = useRef(null);
 
   // Timer persistence helpers
-  const getInitialCountdown = (orderId) => {
-    if (!orderId) return 240;
-    const storageKey = `order_timer_${orderId}`;
-    const startTime = localStorage.getItem(storageKey);
 
-    if (startTime) {
-      const elapsed = Math.floor((Date.now() - parseInt(startTime)) / 1000);
-      const remaining = 240 - elapsed;
-      return remaining > 0 ? remaining : 0;
-    } else {
-      localStorage.setItem(storageKey, Date.now().toString());
-      return 240;
-    }
-  };
 
   const clearOrderTimer = (orderId) => {
     if (orderId) {
@@ -1284,40 +1332,6 @@ export default function OrdersMain() {
       .filter(Boolean);
 
     return keys.some((k) => shownOrdersRef.current.has(k));
-  };
-
-  const getPopupOrderTotal = (orderLike) => {
-    if (!orderLike) return 0;
-
-    // Restaurant-facing bill only (matches OrderDetails / AllOrders).
-    // Never prefer customer pricing.total (includes delivery + platform).
-    if (orderLike.pricing?.restaurantBill != null) {
-      return Number(orderLike.pricing.restaurantBill) || 0;
-    }
-    if (orderLike.restaurantBill != null) {
-      return Number(orderLike.restaurantBill) || 0;
-    }
-
-    const rawItems = Array.isArray(orderLike.items) ? orderLike.items : [];
-    const visibleItems = getRestaurantVisibleItems(rawItems);
-
-    const subtotal =
-      Number(orderLike.pricing?.subtotal ?? orderLike.pricing?.itemSubtotal) ||
-      visibleItems.reduce((sum, item) => {
-        const price = Number(item?.price || 0);
-        const qty = Number(item?.quantity || 0);
-        return (
-          sum +
-          (Number.isFinite(price) ? price : 0) *
-            (Number.isFinite(qty) ? qty : 0)
-        );
-      }, 0);
-
-    const taxes = Number(orderLike.pricing?.tax ?? orderLike.pricing?.taxes) || 0;
-    const packagingFee = Number(orderLike.pricing?.packagingFee) || 0;
-    const discount = Number(orderLike.pricing?.discount) || 0;
-
-    return Math.max(0, subtotal + taxes + packagingFee - discount);
   };
 
   // Restaurant notifications hook for real-time orders
@@ -1704,13 +1718,6 @@ export default function OrdersMain() {
       .play()
       .catch((err) => debugLog("Audio replay failed:", err));
   }, [ringPulseCounter, shouldPlayRingtone]);
-
-  // Format countdown time
-  const formatTime = (seconds) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
-  };
 
   const handleRejectClick = (order) => {
     if (!order) return;
@@ -2390,6 +2397,9 @@ case "cancelled":
                     clearOrderTimer={clearOrderTimer}
                     markOrderAsShown={markOrderAsShown}
                     getPopupOrderTotal={getPopupOrderTotal}
+                    rejectInFlightRef={rejectInFlightRef}
+                    removeIncomingOrder={removeIncomingOrder}
+                    stopRinging={stopRinging}
                   />
                 ))}
               </div>
