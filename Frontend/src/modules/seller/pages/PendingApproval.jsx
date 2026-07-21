@@ -25,7 +25,7 @@ export default function SellerPendingApproval() {
     }
 
     try {
-      const response = await sellerApi.getProfile();
+      const response = await sellerApi.getProfile({ forceRefresh: silent });
       const data = response?.data?.result || {};
       setProfile(data);
 

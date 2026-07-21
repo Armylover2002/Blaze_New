@@ -1,4 +1,5 @@
 import axiosInstance from "@core/api/axios";
+import { getWithDedupe } from "@core/api/dedupe";
 
 const normalizeResponse = (response) => {
   const payload =
@@ -61,8 +62,16 @@ export const sellerApi = {
   getStats: (range = "daily") =>
     call(axiosInstance.get("/seller/stats", { params: { range } })),
 
-  getOrders: (params = {}) =>
-    call(axiosInstance.get("/seller/orders", { params })),
+  // In-flight + short TTL coalesce StrictMode/remount duplicate GETs.
+  // Pass { forceRefresh: true } after mutations or intentional polls.
+  getOrders: (params = {}, options = {}) =>
+    call(
+      getWithDedupe("/seller/orders", params, {
+        contextModule: "seller",
+        ttl: 2500,
+        ...options,
+      }),
+    ),
 
   updateOrderStatus: (orderId, data = {}) =>
     call(
@@ -74,7 +83,14 @@ export const sellerApi = {
 
   getEarnings: () => call(axiosInstance.get("/seller/earnings")),
 
-  getProfile: () => call(axiosInstance.get("/seller/profile")),
+  getProfile: (options = {}) =>
+    call(
+      getWithDedupe("/seller/profile", {}, {
+        contextModule: "seller",
+        ttl: 5000,
+        ...options,
+      }),
+    ),
 
   getQuickZonesPublic: () => call(axiosInstance.get("/quick-commerce/zones/public")),
 
