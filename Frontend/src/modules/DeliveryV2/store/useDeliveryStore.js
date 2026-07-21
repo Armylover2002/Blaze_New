@@ -19,6 +19,10 @@ export const useDeliveryStore = create(
       activeOrder: null,
       tripStatus: 'IDLE',
 
+      mapContext: {
+        visibleZones: [],
+      },
+
       settings: {
         pickupRangeLimit: 500,
         deliveryRangeLimit: 500,
@@ -46,6 +50,10 @@ export const useDeliveryStore = create(
       }),
 
       setOnline: (online) => set({ isOnline: Boolean(online) }),
+
+      setMapContext: (context) => set((state) => ({
+        mapContext: { ...state.mapContext, ...context },
+      })),
 
       setDriverVehicles: (vehicles) => set({
         driverVehicles: Array.isArray(vehicles) ? vehicles : [],

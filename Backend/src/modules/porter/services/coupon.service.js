@@ -276,7 +276,7 @@ export async function listCoupons(query = {}) {
     const filter = applyListFilters({ ...baseFilter }, parsed, query);
     const sort = buildSort(parsed.sortBy, parsed.sortOrder);
 
-    const [docs, total] = await Promise.all([
+    const [docs, total, summaryAgg] = await Promise.all([
         PorterCoupon.find(filter)
             .select(COUPON_LIST_PROJECTION)
             .sort(sort)
@@ -284,10 +284,34 @@ export async function listCoupons(query = {}) {
             .limit(parsed.limit)
             .lean(),
         PorterCoupon.countDocuments(filter),
+        PorterCoupon.aggregate([
+            { $match: baseFilter },
+            {
+                $group: {
+                    _id: null,
+                    total: { $sum: 1 },
+                    active: { $sum: { $cond: [{ $eq: ['$status', 'active'] }, 1, 0] } },
+                    scheduled: { $sum: { $cond: [{ $eq: ['$status', 'scheduled'] }, 1, 0] } },
+                    expired: { $sum: { $cond: [{ $eq: ['$status', 'expired'] }, 1, 0] } },
+                    inactive: { $sum: { $cond: [{ $eq: ['$status', 'inactive'] }, 1, 0] } },
+                    totalRedemption: { $sum: { $ifNull: ['$usedCount', 0] } },
+                    totalDiscountGiven: { $sum: { $ifNull: ['$totalDiscountGiven', 0] } },
+                    campaignRevenue: { $sum: { $ifNull: ['$campaignRevenue', 0] } },
+                },
+            },
+        ])
     ]);
 
     const records = await mapCouponsWithRelations(docs);
-    return toPorterPagination({ docs: records, total, page: parsed.page, limit: parsed.limit });
+    const summary = summaryAgg[0] || {
+        total: 0, active: 0, scheduled: 0, expired: 0, inactive: 0,
+        totalRedemption: 0, totalDiscountGiven: 0, campaignRevenue: 0
+    };
+    delete summary._id;
+
+    const result = toPorterPagination({ docs: records, total, page: parsed.page, limit: parsed.limit });
+    result.summary = summary;
+    return result;
 }
 
 export async function getCouponById(id) {

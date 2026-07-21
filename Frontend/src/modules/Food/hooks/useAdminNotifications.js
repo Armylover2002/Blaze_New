@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { adminAPI, supportAPI } from "@food/api";
+import { useAdminBadgeStore } from "@food/store/adminBadgeStore";
 import { API_BASE_URL } from "@food/api/config";
 import io from "socket.io-client";
 import { getCurrentUser } from "@food/utils/auth";
@@ -346,13 +347,15 @@ export default function useAdminNotifications(options = {}) {
   }, [loadNotifications]);
 
   useEffect(() => {
+    if (options?.autoload === false) return;
     const timer = window.setInterval(() => {
       loadNotifications();
     }, 60 * 1000);
     return () => window.clearInterval(timer);
-  }, [loadNotifications]);
+  }, [loadNotifications, options?.autoload]);
 
   useEffect(() => {
+    if (options?.autoload === false) return;
     const token = localStorage.getItem("admin_accessToken") || localStorage.getItem("accessToken");
     const socketOrigin = resolveSocketOrigin(API_BASE_URL);
     if (!token || !socketOrigin) return undefined;
@@ -365,12 +368,13 @@ export default function useAdminNotifications(options = {}) {
 
     socket.on("admin_notification", () => {
       loadNotifications();
+      useAdminBadgeStore.getState().fetchBadges(true);
     });
 
     return () => {
       socket.disconnect();
     };
-  }, [loadNotifications]);
+  }, [loadNotifications, options?.autoload]);
 
   const dismissOne = useCallback((id) => {
     if (!id) return;

@@ -541,7 +541,7 @@ export async function listPorterOrdersAdmin(query = {}) {
         if (!filter.status) filter.status = PORTER_ORDER_STATUS.SCHEDULED;
     }
 
-    const [docs, total] = await Promise.all([
+    const [docs, total, statusGroups] = await Promise.all([
         PorterOrder.find(filter)
             .sort({ createdAt: -1 })
             .skip(parsed.skip)
@@ -550,9 +550,21 @@ export async function listPorterOrdersAdmin(query = {}) {
             .populate('dispatch.deliveryPartnerId', PORTER_DRIVER_POPULATE_SELECT)
             .lean(),
         PorterOrder.countDocuments(filter),
+        PorterOrder.aggregate([
+            { $match: { ...baseFilter } },
+            { $group: { _id: '$status', count: { $sum: 1 } } }
+        ])
     ]);
 
-    return toPorterPagination({ docs, total, page: parsed.page, limit: parsed.limit });
+    const tabCounts = { all: 0 };
+    statusGroups.forEach(g => {
+        tabCounts[g._id] = g.count;
+        tabCounts.all += g.count;
+    });
+
+    const result = toPorterPagination({ docs, total, page: parsed.page, limit: parsed.limit });
+    result.tabCounts = tabCounts;
+    return result;
 }
 
 export async function verifyPorterPayment(userId, dto) {

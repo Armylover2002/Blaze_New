@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 import { FoodDeliveryCashDeposit } from '../models/foodDeliveryCashDeposit.model.js';
-import { registerDeliveryPartner, updateDeliveryPartnerProfile, updateDeliveryPartnerBankDetails, listSupportTicketsByPartner, createSupportTicket, getSupportTicketByIdAndPartner, updateDeliveryPartnerDetails, updateDeliveryPartnerProfilePhotoBase64, updateDeliveryAvailability, getDeliveryPartnerWallet, getDeliveryPartnerEarnings, getDeliveryPartnerTripHistory, getDeliveryPocketDetails, getActiveEarningAddonsForPartner, deleteDeliveryPartnerAccount, getDeliveryPartnerVehicles, setDeliveryPartnerActiveVehicle, validateUniqueDocuments, resolveDocumentValidationExcludePartnerId, getSignupVehicleCatalog } from '../services/delivery.service.js';
+import { registerDeliveryPartner, updateDeliveryPartnerProfile, updateDeliveryPartnerBankDetails, listSupportTicketsByPartner, createSupportTicket, getSupportTicketByIdAndPartner, updateDeliveryPartnerDetails, updateDeliveryPartnerProfilePhotoBase64, updateDeliveryAvailability, getDeliveryPartnerWallet, getDeliveryPartnerEarnings, getDeliveryPartnerTripHistory, getDeliveryPocketDetails, getActiveEarningAddonsForPartner, deleteDeliveryPartnerAccount, getDeliveryPartnerVehicles, setDeliveryPartnerActiveVehicle, getDriverMapContext, validateUniqueDocuments, resolveDocumentValidationExcludePartnerId, getSignupVehicleCatalog } from '../services/delivery.service.js';
 import { createDeliveryCashDepositOrder, getDeliveryPartnerWalletEnhanced, requestDeliveryWithdrawal, verifyDeliveryCashDepositPayment, submitDeliveryManualDeposit } from '../services/deliveryFinance.service.js';
 import { getDeliveryCashLimitSettings, getDeliveryEmergencyHelp } from '../../admin/services/admin.service.js';
 import { DeliveryBonusTransaction } from '../../admin/models/deliveryBonusTransaction.model.js';
@@ -214,6 +214,16 @@ export const setDeliveryPartnerActiveVehicleController = async (req, res, next) 
         const vehicleId = req.body?.vehicleId;
         const data = await setDeliveryPartnerActiveVehicle(userId, vehicleId);
         return sendResponse(res, 200, 'Active vehicle updated', data);
+    } catch (error) {
+        next(error);
+    }
+};
+
+export const getDriverMapContextController = async (req, res, next) => {
+    try {
+        const userId = req.user?.userId;
+        const data = await getDriverMapContext(userId);
+        return sendResponse(res, 200, 'Map context fetched successfully', data);
     } catch (error) {
         next(error);
     }

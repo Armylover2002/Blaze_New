@@ -803,11 +803,51 @@ export const setDeliveryPartnerActiveVehicle = async (userId, vehicleId) => {
     partner.activeVehicleId = match.id;
     await partner.save();
 
+    const mapContext = await getDriverMapContext(userId);
+
     return {
         activeVehicleId: partner.activeVehicleId,
         vehicle: match,
         vehicles: payload.vehicles,
         driverVehicles: payload.vehicles,
+        ...mapContext,
+    };
+};
+
+export const getDriverMapContext = async (userId) => {
+    const partner = await FoodDeliveryPartner.findById(userId).lean();
+    if (!partner) throw new ValidationError('Delivery partner not found');
+
+    let supportedServices = ['food'];
+    let activeVehicleId = partner.activeVehicleId ? String(partner.activeVehicleId) : null;
+    let activeVehicle = null;
+
+    if (partner.driverVehicles && partner.driverVehicles.length > 0) {
+        activeVehicle = activeVehicleId
+            ? partner.driverVehicles.find(v => String(v._id) === activeVehicleId || String(v.id) === activeVehicleId)
+            : partner.driverVehicles.find(v => v.isDefault) || partner.driverVehicles[0];
+
+        if (activeVehicle) {
+            activeVehicleId = activeVehicle.id || String(activeVehicle._id);
+            if (Array.isArray(activeVehicle.supportedServices) && activeVehicle.supportedServices.length > 0) {
+                supportedServices = activeVehicle.supportedServices;
+            }
+            activeVehicle = {
+                id: activeVehicleId,
+                vehicleName: activeVehicle.vehicleName || activeVehicle.model || '',
+                supportedServices
+            };
+        }
+    }
+
+    const { resolveActiveZones } = await import('../../../../core/zones/zone-resolution.service.js');
+    const visibleZones = await resolveActiveZones(supportedServices);
+
+    return {
+        activeVehicleId,
+        activeVehicle,
+        supportedServices,
+        visibleZones,
     };
 };
 

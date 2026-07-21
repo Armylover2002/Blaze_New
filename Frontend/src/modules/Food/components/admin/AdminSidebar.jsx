@@ -81,6 +81,7 @@ import { adminAPI } from "@food/api"
 import { getCurrentUser } from "@food/utils/auth"
 import { useAuth } from "@core/context/AuthContext"
 import { extractAdminPermissions, extractAdminRoleId, fetchAdminRolePermissions, getFirstAccessibleAdminPath, hasAnyRootAccess } from "@food/utils/adminPermissions"
+import { useAdminBadgeStore } from "@food/store/adminBadgeStore"
 
 const debugLog = (...args) => { }
 const debugWarn = (...args) => { }
@@ -163,26 +164,13 @@ export default function AdminSidebar({ isOpen = false, onClose, onCollapseChange
   const location = useLocation()
   const navigate = useNavigate()
   const [searchQuery, setSearchQuery] = useState("")
-  const [badges, setBadges] = useState({})
   const [enabledModules, setEnabledModules] = useState(() =>
     normalizeEnabledModules(getCachedSettings()?.modules)
   );
+  const badges = useAdminBadgeStore((state) => state.badges);
+  const fetchBadges = useAdminBadgeStore((state) => state.fetchBadges);
 
-  useEffect(() => {
-    const fetchBadges = async () => {
-      try {
-        const res = await adminAPI.getSidebarBadges()
-        if (res?.data?.success) {
-          setBadges(res.data.counts || {})
-        }
-      } catch (error) {
-        debugError("Error fetching sidebar badges:", error)
-      }
-    }
-    fetchBadges()
-    const timer = setInterval(fetchBadges, 60000)
-    return () => clearInterval(timer)
-  }, [])
+
 
   const getBadgeCount = (label = "", path = "") => {
     const l = label.toLowerCase()
