@@ -496,6 +496,20 @@ const slugify = (value) =>
 const createSellerSku = () =>
   `SKU-${Date.now().toString(36).slice(-6).toUpperCase()}`;
 
+const serializeSellerAuthSession = (seller) => ({
+  _id: seller._id,
+  name: seller.name,
+  shopName: seller.shopName,
+  phone: seller.phoneLast10 || seller.phone || "",
+  email: seller.email || "",
+  approved: seller.approved !== false,
+  approvalStatus:
+    seller.approvalStatus ||
+    (seller.approved === false ? "pending" : "approved"),
+  onboardingSubmitted: seller.onboardingSubmitted === true,
+  approvalNotes: seller.approvalNotes || "",
+});
+
 const serializeSellerProfile = (seller) => ({
   _id: seller._id,
   name: seller.name,
@@ -1126,7 +1140,7 @@ export const verifySellerOtpController = async (req, res) => {
     return sendResponse(res, 200, "Seller login successful", {
       accessToken,
       refreshToken,
-      seller: serializeSellerProfile(seller),
+      seller: serializeSellerAuthSession(seller),
     });
   } catch (error) {
     return sendError(res, 400, error.message || "OTP verification failed");
