@@ -5,6 +5,7 @@ const categoriesSeed = [
   {
     name: 'Fruits & Vegetables',
     slug: 'fruits-vegetables',
+    type: 'header',
     image: 'https://cdn.grofers.com/cdn-cgi/image/f=auto,fit=scale-down,q=70,metadata=none,w=270/layout_item/2022-09/44889.png',
     accentColor: '#66bb6a',
     sortOrder: 1,
@@ -12,6 +13,7 @@ const categoriesSeed = [
   {
     name: 'Dairy, Bread & Eggs',
     slug: 'dairy-bread-eggs',
+    type: 'header',
     image: 'https://cdn.grofers.com/cdn-cgi/image/f=auto,fit=scale-down,q=70,metadata=none,w=270/layout_item/2022-09/44910.png',
     accentColor: '#f7ca4d',
     sortOrder: 2,
@@ -19,6 +21,7 @@ const categoriesSeed = [
   {
     name: 'Cold Drinks & Juices',
     slug: 'cold-drinks-juices',
+    type: 'header',
     image: 'https://cdn.grofers.com/cdn-cgi/image/f=auto,fit=scale-down,q=70,metadata=none,w=270/layout_item/2023-01/44907.png',
     accentColor: '#80deea',
     sortOrder: 3,
@@ -26,6 +29,7 @@ const categoriesSeed = [
   {
     name: 'Snacks & Munchies',
     slug: 'snacks-munchies',
+    type: 'header',
     image: 'https://cdn.grofers.com/cdn-cgi/image/f=auto,fit=scale-down,q=70,metadata=none,w=270/layout_item/2023-01/44908.png',
     accentColor: '#ffcc80',
     sortOrder: 4,
@@ -33,6 +37,7 @@ const categoriesSeed = [
   {
     name: 'Bakery & Biscuits',
     slug: 'bakery-biscuits',
+    type: 'header',
     image: 'https://cdn.grofers.com/cdn-cgi/image/f=auto,fit=scale-down,q=70,metadata=none,w=270/layout_item/2022-09/44901.png',
     accentColor: '#bcaaa4',
     sortOrder: 5,
@@ -40,6 +45,7 @@ const categoriesSeed = [
   {
     name: 'Instant & Frozen Food',
     slug: 'instant-frozen-food',
+    type: 'header',
     image: 'https://cdn.grofers.com/cdn-cgi/image/f=auto,fit=scale-down,q=70,metadata=none,w=270/layout_item/2022-09/44917.png',
     accentColor: '#a5d6a7',
     sortOrder: 6,
