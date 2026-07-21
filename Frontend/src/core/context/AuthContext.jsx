@@ -1,5 +1,4 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import axiosInstance from '@core/api/axios';
 import { getWithDedupe } from '@core/api/dedupe';
 import { isTokenExpired } from '@core/utils/token';
 import { useAuthStore } from '../auth/auth.store';
@@ -149,15 +148,13 @@ export const AuthProvider = ({ children }) => {
             if (token) {
                 setIsLoading(true);
                 try {
-                    // Use deduplicated fetch to avoid multiple simultaneous profile calls
-                    const requestConfig = { ttl: 5000, contextModule: currentRole };
-                    if (token) {
-                        requestConfig.headers = { Authorization: `Bearer ${token}` };
-                    }
+                    // Use deduplicated fetch to avoid multiple simultaneous profile calls.
+                    // Auth is attached by the axios interceptor — do not pass headers here
+                    // or the dedupe cache key won't match sellerApi.getProfile().
                     const response = await getWithDedupe(
                         getProfileEndpoint(currentRole),
                         {},
-                        requestConfig
+                        { ttl: 5000, contextModule: currentRole }
                     );
                     const payload = extractProfilePayload(response);
                     setUser(payload);
@@ -235,10 +232,14 @@ export const AuthProvider = ({ children }) => {
         else window.location.href = '/user/auth/login';
     };
 
-    const refreshUser = async () => {
+    const refreshUser = async ({ forceRefresh = false } = {}) => {
         if (token) {
             try {
-                const response = await axiosInstance.get(getProfileEndpoint(currentRole));
+                const response = await getWithDedupe(
+                    getProfileEndpoint(currentRole),
+                    {},
+                    { ttl: 5000, contextModule: currentRole, forceRefresh }
+                );
                 const payload = extractProfilePayload(response);
                 setUser(payload);
                 useAuthStore.getState().setAuth(payload, token, currentRole);
