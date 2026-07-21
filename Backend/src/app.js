@@ -45,9 +45,8 @@ app.use(helmet({
 // ✅ CORS — main domain + saari vercel preview URLs + Render
 app.use(cors({
     origin: [
-        'https://www.blazeapp.in',
-        'http://localhost:5173',
-        'http://localhost:3000',
+        "https://www.blazeapp.in",
+            "https://blazeapp.in"
     ],
     credentials: true
 }));
