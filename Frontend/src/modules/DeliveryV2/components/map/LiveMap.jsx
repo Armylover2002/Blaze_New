@@ -9,7 +9,7 @@ import {
   OverlayView
 } from '@react-google-maps/api';
 import { useDeliveryStore } from '@/modules/DeliveryV2/store/useDeliveryStore';
-import { zoneAPI } from '@food/api';
+import { deliveryAPI } from '@food/api';
 import {
   buildVisibleRouteFromRiderPosition,
   getRouteHeading,
@@ -58,7 +58,7 @@ export const LiveMap = ({
   simulationProgress = 0,
   simulationLocked = false,
 }) => {
-  const { riderLocation, activeOrder, tripStatus } = useDeliveryStore();
+  const { riderLocation, activeOrder, tripStatus, mapContext, setMapContext } = useDeliveryStore();
   const onPathReceivedRef = useRef(onPathReceived);
   const onPolylineReceivedRef = useRef(onPolylineReceived);
 
@@ -195,17 +195,23 @@ export const LiveMap = ({
   useEffect(() => {
     (async () => {
       try {
-        const response = await zoneAPI.getPublicZones();
-        if (response?.data?.success && response.data.data?.zones) {
-          const formattedZones = response.data.data.zones.map(zone => ({
-            ...zone,
-            paths: (zone.coordinates || []).map(coord => ({ lat: coord.latitude, lng: coord.longitude }))
-          })).filter(z => z.paths.length >= 3);
-          setZones(formattedZones);
+        const response = await deliveryAPI.getMapContext();
+        if (response?.data?.success && response.data.data?.visibleZones) {
+          setMapContext({ visibleZones: response.data.data.visibleZones });
         }
       } catch (err) {}
     })();
-  }, []);
+  }, [setMapContext]);
+
+  useEffect(() => {
+    if (mapContext?.visibleZones) {
+      const formattedZones = mapContext.visibleZones.map(zone => ({
+        ...zone,
+        paths: (zone.coordinates || []).map(coord => ({ lat: coord.latitude, lng: coord.longitude }))
+      })).filter(z => z.paths.length >= 3);
+      setZones(formattedZones);
+    }
+  }, [mapContext?.visibleZones]);
 
   const restaurantMarkerUrl = useMemo(() => {
     if (!activeOrder) return 'https://cdn-icons-png.flaticon.com/512/3170/3170733.png';
@@ -387,7 +393,7 @@ export const LiveMap = ({
         )}
 
         {zones.map((zone) => (
-          <Polygon key={zone._id} paths={zone.paths} options={{ fillColor: "#22c55e", fillOpacity: 0.1, strokeColor: "#22c55e", strokeOpacity: 0.4, strokeWeight: 2, zIndex: 1 }} />
+          <Polygon key={zone.id || zone._id} paths={zone.paths} options={{ fillColor: "#22c55e", fillOpacity: 0.1, strokeColor: "#22c55e", strokeOpacity: 0.4, strokeWeight: 2, zIndex: 1 }} />
         ))}
       </GoogleMap>
     </div>

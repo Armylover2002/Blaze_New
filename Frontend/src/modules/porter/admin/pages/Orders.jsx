@@ -13,7 +13,21 @@ import Button from "@/shared/components/ui/Button";
 import Input from "@/shared/components/ui/Input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { filterBySearch, sortItems, paginateItems, formatCurrency, formatDateTime } from "../utils/porterTableHelpers";
+import { PAGINATION_CONFIG } from "@/shared/constants/pagination";
 import porterAdminApi from "../services/adminApi";
+
+const CLIENT_ONLY_SCHEDULE_FILTERS = new Set(["upcoming", "missed", "completed", "cancelled"]);
+
+const mapScheduleFilterForApi = (scheduleFilter) => {
+  if (scheduleFilter === "today" || scheduleFilter === "pending_schedule") return scheduleFilter;
+  return undefined;
+};
+
+const resolveStatusParam = (activeTab, statusFilter) => {
+  if (activeTab !== "all") return activeTab;
+  if (statusFilter !== "all") return statusFilter;
+  return undefined;
+};
 
 const mapApiOrder = (o) => ({
   id: String(o._id || o.id),
@@ -152,8 +166,11 @@ const Orders = () => {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [scheduleFilter, setScheduleFilter] = useState("all");
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  const [page, setPage] = useState(PAGINATION_CONFIG.defaultPage);
+  const [pageSize, setPageSize] = useState(PAGINATION_CONFIG.allowedPageSizeOptions[0]);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const [tabCounts, setTabCounts] = useState({ all: 0 });
   const [detailOpen, setDetailOpen] = useState(false);
   const [assignOpen, setAssignOpen] = useState(false);
   const [selected, setSelected] = useState(null);
@@ -166,17 +183,33 @@ const Orders = () => {
   const [cancelNote, setCancelNote] = useState("");
   const socketRef = useRef(null);
 
+
   const loadOrders = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await porterAdminApi.getOrders({ limit: 200 });
+      const data = await porterAdminApi.getOrders({
+        page,
+        limit: pageSize,
+        status: resolveStatusParam(activeTab, statusFilter),
+        search: search.trim() || undefined,
+        scheduleFilter: mapScheduleFilterForApi(scheduleFilter),
+      });
       setOrders((data.records || []).map(mapApiOrder));
+      setTotal(data.total || 0);
+      setTotalPages(data.pages || 1);
+      if (data.tabCounts) setTabCounts(data.tabCounts);
     } catch {
       setOrders([]);
+      setTotal(0);
+      setTotalPages(1);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [page, pageSize, search, activeTab, statusFilter, scheduleFilter]);
+
+  const refreshOrders = useCallback(async () => {
+    await loadOrders();
+  }, [loadOrders]);
 
   useEffect(() => { loadOrders(); }, [loadOrders]);
 
@@ -195,12 +228,12 @@ const Orders = () => {
       auth: { token },
     });
     socketRef.current = socket;
-    socket.on("porter_admin_order_update", () => loadOrders());
+    socket.on("porter_admin_order_update", () => { refreshOrders(); });
     return () => {
       socket.disconnect();
       socketRef.current = null;
     };
-  }, [loadOrders]);
+  }, [refreshOrders]);
 
   const loadAssignableDrivers = useCallback(async (orderId) => {
     if (!orderId) return;
@@ -222,22 +255,24 @@ const Orders = () => {
     return [...map.entries()].map(([id, name]) => ({ id, name }));
   }, [orders]);
 
-  const tabCounts = useMemo(() => {
-    const counts = { all: orders.length };
-    for (const o of orders) counts[o.deliveryStatus] = (counts[o.deliveryStatus] || 0) + 1;
-    return counts;
-  }, [orders]);
+  const clientOnlyFiltersActive = useMemo(
+    () =>
+      vehicleFilter !== "all"
+      || driverFilter !== "all"
+      || Boolean(dateFrom)
+      || Boolean(dateTo)
+      || CLIENT_ONLY_SCHEDULE_FILTERS.has(scheduleFilter),
+    [vehicleFilter, driverFilter, dateFrom, dateTo, scheduleFilter]
+  );
 
   const filtered = useMemo(() => {
     let rows = filterBySearch(orders, search, ["id", "customer", "pickup", "drop", "driverName", "goodsType"]);
-    if (activeTab !== "all") rows = rows.filter((r) => r.deliveryStatus === activeTab);
-    if (statusFilter !== "all") rows = rows.filter((r) => r.deliveryStatus === statusFilter);
     if (vehicleFilter !== "all") rows = rows.filter((r) => r.vehicle === vehicleFilter);
     if (driverFilter !== "all") rows = rows.filter((r) => r.driverId === driverFilter);
     if (dateFrom) rows = rows.filter((r) => new Date(r.createdAt) >= new Date(dateFrom));
     if (dateTo) rows = rows.filter((r) => new Date(r.createdAt) <= new Date(dateTo + "T23:59:59"));
 
-    if (scheduleFilter !== "all") {
+    if (CLIENT_ONLY_SCHEDULE_FILTERS.has(scheduleFilter)) {
       const now = Date.now();
       const startToday = new Date(); startToday.setHours(0, 0, 0, 0);
       const endToday = new Date(); endToday.setHours(23, 59, 59, 999);
@@ -247,15 +282,10 @@ const Orders = () => {
         const t = new Date(r.scheduledAt).getTime();
         const status = r.deliveryStatus;
 
-        if (scheduleFilter === "pending_schedule") return status === "scheduled";
         if (scheduleFilter === "upcoming") {
           return status === "scheduled" && t > now;
         }
-        if (scheduleFilter === "today") {
-          return t >= startToday.getTime() && t <= endToday.getTime();
-        }
         if (scheduleFilter === "missed") {
-          // Past scheduledAt, still waiting / never dispatched.
           return status === "scheduled" && t < now;
         }
         if (scheduleFilter === "completed") {
@@ -268,20 +298,27 @@ const Orders = () => {
       });
     }
     return sortItems(rows, "createdAt", "desc");
-  }, [orders, search, activeTab, statusFilter, vehicleFilter, driverFilter, dateFrom, dateTo, scheduleFilter]);
+  }, [orders, search, vehicleFilter, driverFilter, dateFrom, dateTo, scheduleFilter]);
 
-  const { items: pageItems, total, totalPages } = useMemo(
-    () => paginateItems(filtered, page, pageSize),
-    [filtered, page, pageSize]
-  );
+  const { items: pageItems, total: displayTotal, totalPages: displayTotalPages } = useMemo(() => {
+    if (clientOnlyFiltersActive) {
+      return paginateItems(filtered, page, pageSize);
+    }
+    return {
+      items: filtered,
+      total,
+      totalPages,
+      page,
+    };
+  }, [filtered, page, pageSize, clientOnlyFiltersActive, total, totalPages]);
 
   const stats = useMemo(() => ({
-    total: orders.length,
-    pending: orders.filter((o) => o.deliveryStatus === "pending").length,
-    inTransit: orders.filter((o) => ["assigned", "driver_accepted", "picked_up", "in_transit", "near_destination"].includes(o.deliveryStatus)).length,
-    delivered: orders.filter((o) => o.deliveryStatus === "delivered").length,
-    revenue: orders.filter((o) => o.deliveryStatus === "delivered").reduce((a, o) => a + o.amount, 0),
-  }), [orders]);
+    total: tabCounts.all || 0,
+    pending: tabCounts.pending || 0,
+    inTransit: (tabCounts.searching_partner || 0) + (tabCounts.partner_accepted || 0),
+    delivered: tabCounts.delivered || 0,
+    revenue: orders.filter((o) => o.deliveryStatus === "delivered").reduce((sum, o) => sum + o.amount, 0),
+  }), [tabCounts, orders]);
 
   const openDetail = async (row) => {
     setSelected(row);
@@ -314,7 +351,7 @@ const Orders = () => {
       await porterAdminApi.assignDriver(selected.id, assignDriverId);
       setAssignOpen(false);
       setAssignDriverId("");
-      await loadOrders();
+      await refreshOrders();
     } catch (err) {
       window.alert(err?.response?.data?.message || "Assign failed");
     } finally {
@@ -337,7 +374,7 @@ const Orders = () => {
       await porterAdminApi.cancelOrder(cancelOrderId, reason, cancelNote.trim());
       setCancelOpen(false);
       setDetailOpen(false);
-      await loadOrders();
+      await refreshOrders();
     } catch (err) {
       window.alert(err?.response?.data?.message || "Cancel failed");
     } finally {
@@ -350,7 +387,7 @@ const Orders = () => {
     setActionLoading(true);
     try {
       await porterAdminApi.startScheduledDispatch(row.id);
-      await loadOrders();
+      await refreshOrders();
       setDetailOpen(false);
     } catch (err) {
       alert(err?.response?.data?.message || "Failed to start dispatch");
@@ -371,7 +408,7 @@ const Orders = () => {
     setActionLoading(true);
     try {
       await porterAdminApi.rescheduleOrder(row.id, when.toISOString());
-      await loadOrders();
+      await refreshOrders();
     } catch (err) {
       alert(err?.response?.data?.message || "Failed to reschedule");
     } finally {
@@ -516,8 +553,8 @@ const Orders = () => {
               </div>
             }
           />
-          <AdminTable columns={columns} data={pageItems} getRowId={(r) => r.id}
-            pagination={{ page, totalPages, total, pageSize, onPageChange: setPage, onPageSizeChange: (s) => { setPageSize(s); setPage(1); } }}
+          <AdminTable columns={columns} data={pageItems} loading={loading} getRowId={(r) => r.id}
+            pagination={{ page, totalPages: displayTotalPages, total: displayTotal, pageSize, onPageChange: setPage, onPageSizeChange: (s) => { setPageSize(s); setPage(1); } }}
           />
         </div>
       </SectionCard>

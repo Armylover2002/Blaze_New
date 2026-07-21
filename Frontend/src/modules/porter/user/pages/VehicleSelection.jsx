@@ -68,7 +68,8 @@ export default function VehicleSelection() {
     if (!vehicleId || !vehicles.some((v) => String(v.id) === String(vehicleId))) {
       selectVehicle(recommendedVehicle.id, {
         id: recommendedVehicle.id,
-        name: recommendedVehicle.name,
+        name: recommendedVehicle.name || recommendedVehicle.category,
+        category: recommendedVehicle.category,
         vehicleCode: recommendedVehicle.vehicleCode,
         iconUrl: recommendedVehicle.iconUrl,
         maxWeight: recommendedVehicle.maxWeight,
@@ -79,7 +80,8 @@ export default function VehicleSelection() {
   const handleSelect = (v) => {
     selectVehicle(v.id, {
       id: v.id,
-      name: v.name,
+      name: v.name || v.category,
+      category: v.category,
       vehicleCode: v.vehicleCode,
       iconUrl: v.iconUrl,
       maxWeight: v.maxWeight,

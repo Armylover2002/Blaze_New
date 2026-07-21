@@ -53,6 +53,10 @@ export default function VehicleSwitcherSheet({
         driverVehicles: payload.driverVehicles,
       });
 
+      if (payload.visibleZones) {
+        useDeliveryStore.getState().setMapContext({ visibleZones: payload.visibleZones });
+      }
+
       if (onVehicleSelected) {
         await onVehicleSelected(payload.activeVehicleId || vId, vehicle);
       } else {

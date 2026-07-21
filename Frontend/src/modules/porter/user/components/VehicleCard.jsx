@@ -16,8 +16,9 @@ export default function VehicleCard({
   const iconUrl = vehicle.iconUrl;
   const eta = estimatedTime ?? vehicle.estimatedTime ?? vehicle.etaMins;
   // Convert category to display name (e.g., "mini_truck" → "Mini Truck")
-  const displayCategory = vehicle.category
-    ? vehicle.category.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
+  const rawLabel = vehicle.category || vehicle.name || "";
+  const displayCategory = rawLabel
+    ? String(rawLabel).replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
     : "";
 
   return (
