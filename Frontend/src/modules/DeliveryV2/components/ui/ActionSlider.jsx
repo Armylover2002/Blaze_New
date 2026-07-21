@@ -72,13 +72,14 @@ export const ActionSlider = ({
         disabled ? 'h-[58px]' : 'h-[60px]'
       }`}
     >
-      {/* Time Progress Background */}
+      {/* Time Progress Background — CSS only (avoid Framer Motion re-animate every second) */}
       {timeProgress !== null && !isSuccess && !disabled && (
-        <motion.div
+        <div
           className={`absolute inset-y-0 left-0 ${color} rounded-full`}
-          initial={{ width: `${timeProgress}%` }}
-          animate={{ width: `${timeProgress}%` }}
-          transition={{ duration: 1, ease: "linear" }}
+          style={{
+            width: `${Math.max(0, Math.min(100, Number(timeProgress) || 0))}%`,
+            transition: "width 1s linear",
+          }}
         />
       )}
 
