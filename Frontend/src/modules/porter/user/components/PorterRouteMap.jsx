@@ -127,7 +127,7 @@ export default function PorterRouteMap({
         polylineRef.current = new window.google.maps.Polyline({
           path,
           map: mapRef.current,
-          strokeColor: "#FF0000",
+          strokeColor: "#2563EB",
           strokeWeight: 5,
           strokeOpacity: 0.9,
         });
@@ -148,7 +148,7 @@ export default function PorterRouteMap({
         suppressMarkers: true,
         preserveViewport: false,
         polylineOptions: {
-          strokeColor: "#FF0000",
+          strokeColor: "#2563EB",
           strokeWeight: 5,
           strokeOpacity: 0.9,
         },
@@ -184,7 +184,7 @@ export default function PorterRouteMap({
       <div ref={mapContainerRef} style={{ height, width: "100%" }} />
       {loading && (
         <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/80">
-          <Loader2 className="h-6 w-6 animate-spin text-[#FF0000]" />
+          <Loader2 className="h-6 w-6 animate-spin text-[#2563EB]" />
         </div>
       )}
       {!loading && error && (
@@ -196,7 +196,7 @@ export default function PorterRouteMap({
         Route preview
       </div>
       {previewText && !error && (
-        <div className="absolute bottom-3 left-3 rounded-full bg-[#FF0000] px-3 py-1 text-[11px] font-bold text-white shadow-sm">
+        <div className="absolute bottom-3 left-3 rounded-full bg-[#2563EB] px-3 py-1 text-[11px] font-bold text-white shadow-sm">
           {previewText}
         </div>
       )}

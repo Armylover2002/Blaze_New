@@ -46,7 +46,7 @@ export default function ShipmentDetails() {
     return (
       <Screen title="Shipment details">
         <div className="flex justify-center py-16">
-          <Loader2 className="h-8 w-8 animate-spin text-[#FF0000]" />
+          <Loader2 className="h-8 w-8 animate-spin text-[#2563EB]" />
         </div>
       </Screen>
     );
@@ -95,7 +95,7 @@ export default function ShipmentDetails() {
           </div>
         </div>
         <div className="flex items-start gap-2">
-          <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-[#FF0000]" />
+          <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-[#2563EB]" />
           <div>
             <p className="text-[13px] font-bold text-gray-900">{shipment.delivery?.title || "Dropoff"}</p>
             <p className="text-[12px] text-gray-500">{shipment.delivery?.address || "Address not provided"}</p>
@@ -133,9 +133,9 @@ export default function ShipmentDetails() {
           <SectionLabel>Delivery partner</SectionLabel>
           <div className="mb-4 flex items-center gap-3 rounded-2xl border border-gray-100 bg-white p-4">
             {shipment.partner.profilePhoto ? (
-              <img src={shipment.partner.profilePhoto} alt={shipment.partner.name} className="h-12 w-12 rounded-full object-cover ring-2 ring-[#FFF1F1]" />
+              <img src={shipment.partner.profilePhoto} alt={shipment.partner.name} className="h-12 w-12 rounded-full object-cover ring-2 ring-[#EFF6FF]" />
             ) : (
-              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[#FFF1F1] text-[18px] font-bold text-[#FF0000]">
+              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[#EFF6FF] text-[18px] font-bold text-[#2563EB]">
                 {shipment.partner.name?.charAt(0) || "P"}
               </div>
             )}
@@ -151,7 +151,7 @@ export default function ShipmentDetails() {
             </div>
             {shipment.partner.phone && (
               <a href={`tel:${shipment.partner.phone.replace(/\s/g, "")}`} className="flex h-9 w-9 items-center justify-center rounded-full bg-gray-100">
-                <Phone className="h-4 w-4 text-[#FF0000]" />
+                <Phone className="h-4 w-4 text-[#2563EB]" />
               </a>
             )}
           </div>

@@ -140,12 +140,12 @@ export default function HomeHeader({
   const isPorter = activeTab === "porter";
   const theme =
     activeTab === "quick"
-      ? { accent: FIXED_QUICK_THEME_COLOR }
+      ? foodTheme(vegMode)
       : isPorter
-        ? { accent: "#FF0000" }
+        ? { accent: "#2563EB" } // Keeping Porter theme consistent with its inner pages (Blue)
         : foodTheme(vegMode);
   const isFood = activeTab === "food";
-  const isLightChrome = isFood || isPorter;
+  const isLightChrome = isFood || isPorter || activeTab === "quick";
   const isDarkTheme = !isLightChrome && isColorDark(theme.accent);
   const textColorClass = isLightChrome
     ? "text-gray-900"

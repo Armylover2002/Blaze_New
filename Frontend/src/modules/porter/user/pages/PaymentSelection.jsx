@@ -22,7 +22,7 @@ export default function PaymentSelection() {
               onClick={() => setPaymentMethodId(m.id)}
               className={`flex w-full items-center gap-3 rounded-2xl border p-4 text-left transition ${
                 selected
-                  ? "border-[#FF0000] bg-[#FFF1F1] shadow-[0_8px_24px_rgba(255,0,0,0.10)]"
+                  ? "border-[#2563EB] bg-[#EFF6FF] shadow-[0_8px_24px_rgba(255,0,0,0.10)]"
                   : "border-gray-100 bg-white hover:border-gray-200"
               }`}
             >
@@ -31,13 +31,13 @@ export default function PaymentSelection() {
                 <div className="flex items-center gap-2">
                   <p className="text-[15px] font-bold text-gray-900">{m.label}</p>
                   {m.recommended && (
-                    <span className="rounded-full bg-[#FF0000] px-2 py-0.5 text-[9px] font-bold text-white">Recommended</span>
+                    <span className="rounded-full bg-[#2563EB] px-2 py-0.5 text-[9px] font-bold text-white">Recommended</span>
                   )}
                 </div>
                 <p className="text-[12px] text-gray-500">{m.subtitle}</p>
               </div>
               {selected && (
-                <div className="flex h-6 w-6 items-center justify-center rounded-full bg-[#FF0000] text-white">
+                <div className="flex h-6 w-6 items-center justify-center rounded-full bg-[#2563EB] text-white">
                   <Check className="h-3.5 w-3.5" />
                 </div>
               )}

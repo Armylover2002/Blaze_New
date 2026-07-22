@@ -47,9 +47,9 @@ export default function RateDelivery() {
     <Screen title="Rate delivery" subtitle="How was your parcel delivery?">
       <div className="mb-6 flex flex-col items-center rounded-2xl bg-white p-6 shadow-sm">
         {activeShipment?.partner?.profilePhoto ? (
-          <img src={activeShipment.partner.profilePhoto} alt={activeShipment.partner.name || "Partner"} className="mb-3 h-16 w-16 rounded-full object-cover ring-2 ring-[#FFF1F1]" />
+          <img src={activeShipment.partner.profilePhoto} alt={activeShipment.partner.name || "Partner"} className="mb-3 h-16 w-16 rounded-full object-cover ring-2 ring-[#EFF6FF]" />
         ) : (
-          <div className="mb-3 flex h-16 w-16 items-center justify-center rounded-full bg-[#FFF1F1] text-[24px] font-bold text-[#FF0000] uppercase">
+          <div className="mb-3 flex h-16 w-16 items-center justify-center rounded-full bg-[#EFF6FF] text-[24px] font-bold text-[#2563EB] uppercase">
             {activeShipment?.partner?.name ? activeShipment.partner.name.charAt(0) : "P"}
           </div>
         )}
@@ -78,7 +78,7 @@ export default function RateDelivery() {
             type="button"
             onClick={() => toggleTag(tag)}
             className={`rounded-full px-3 py-1.5 text-[12px] font-bold transition ${
-              tags.includes(tag) ? "bg-[#FF0000] text-white" : "bg-gray-100 text-gray-600"
+              tags.includes(tag) ? "bg-[#2563EB] text-white" : "bg-gray-100 text-gray-600"
             }`}
           >
             {tag}
@@ -91,7 +91,7 @@ export default function RateDelivery() {
         onChange={(e) => setComment(e.target.value)}
         placeholder="Additional feedback (optional)"
         rows={3}
-        className="mb-4 w-full resize-none rounded-2xl border border-gray-200 bg-white p-3 text-[14px] outline-none focus:border-[#FF0000]"
+        className="mb-4 w-full resize-none rounded-2xl border border-gray-200 bg-white p-3 text-[14px] outline-none focus:border-[#2563EB]"
       />
 
       <StickyBar>

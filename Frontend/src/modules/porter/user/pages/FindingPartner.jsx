@@ -202,9 +202,9 @@ export default function FindingPartner() {
           <motion.div
             animate={{ scale: [1, 1.05, 1] }}
             transition={{ duration: 1.5, repeat: Infinity }}
-            className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-[#FFF1F1]"
+            className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-[#EFF6FF]"
           >
-            <Search className="h-7 w-7 text-[#FF0000]" />
+            <Search className="h-7 w-7 text-[#2563EB]" />
           </motion.div>
           <h2 className="text-center text-[18px] font-extrabold text-gray-900">
             {submitting ? "Confirming your booking…" : "Searching for delivery partner"}
@@ -216,14 +216,14 @@ export default function FindingPartner() {
             {[0, 1, 2].map((i) => (
               <motion.span
                 key={i}
-                className="h-2 w-2 rounded-full bg-[#FF0000]"
+                className="h-2 w-2 rounded-full bg-[#2563EB]"
                 animate={{ opacity: [0.3, 1, 0.3] }}
                 transition={{ duration: 1, repeat: Infinity, delay: i * 0.2 }}
               />
             ))}
           </div>
           <div className="mt-6 flex items-center justify-center gap-2 rounded-2xl bg-gray-50 p-3">
-            <Package className="h-4 w-4 text-[#FF0000]" />
+            <Package className="h-4 w-4 text-[#2563EB]" />
             <span className="text-[12px] font-semibold text-gray-600">Your parcel details are shared securely with the partner</span>
           </div>
 
@@ -290,7 +290,7 @@ export default function FindingPartner() {
                   type="button"
                   onClick={handleConfirmCancel}
                   disabled={cancelling}
-                  className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-[#FF0000] py-3.5 text-[14px] font-bold text-white active:scale-[0.99] transition-transform disabled:opacity-70"
+                  className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-[#2563EB] py-3.5 text-[14px] font-bold text-white active:scale-[0.99] transition-transform disabled:opacity-70"
                 >
                   {cancelling ? <Loader2 className="h-4 w-4 animate-spin" /> : "Cancel Booking"}
                 </button>

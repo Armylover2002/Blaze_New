@@ -26,10 +26,10 @@ const PorterBottomNav = () => {
         return (
           <Link key={item.id} to={item.path} className="group relative flex h-full flex-1 flex-col items-center justify-center">
             <motion.div animate={{ y: active ? -2 : 0, scale: active ? 1.1 : 1 }} transition={{ type: "spring", stiffness: 400, damping: 25 }}>
-              <item.icon size={24} strokeWidth={active ? 2.5 : 2} className={cn("transition-colors", active ? "text-[#FF0000]" : "text-gray-400")} />
+              <item.icon size={24} strokeWidth={active ? 2.5 : 2} className={cn("transition-colors", active ? "text-[#2563EB]" : "text-gray-400")} />
             </motion.div>
-            <span className={cn("mt-1 text-[10px] font-bold tracking-tight transition-colors", active ? "text-[#FF0000]" : "text-gray-400")}>{item.label}</span>
-            {active && <motion.div layoutId="porterTopLine" className="absolute -top-[1px] h-[3px] w-8 rounded-full bg-[#FF0000]" transition={{ type: "spring", stiffness: 400, damping: 30 }} />}
+            <span className={cn("mt-1 text-[10px] font-bold tracking-tight transition-colors", active ? "text-[#2563EB]" : "text-gray-400")}>{item.label}</span>
+            {active && <motion.div layoutId="porterTopLine" className="absolute -top-[1px] h-[3px] w-8 rounded-full bg-[#2563EB]" transition={{ type: "spring", stiffness: 400, damping: 30 }} />}
           </Link>
         );
       })}

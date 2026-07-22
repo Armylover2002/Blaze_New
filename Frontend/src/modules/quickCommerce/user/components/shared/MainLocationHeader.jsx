@@ -378,7 +378,7 @@ const MainLocationHeader = ({
   const displayCart = embedded ? "block" : rawDisplayCart;
 
   // Memoize derived color values
-  const baseHeaderColor = "#FF0000";
+  const baseHeaderColor = "#f97316"; // Orange-500 for Instamart theme
 
   const headerGradient = useMemo(() => {
     if (!baseHeaderColor) return "linear-gradient(180deg, #0f172a 0%, #1e293b 100%)";

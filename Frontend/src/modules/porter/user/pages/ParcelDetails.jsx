@@ -25,7 +25,7 @@ export default function ParcelDetails() {
             value={parcel.parcelName}
             onChange={(e) => updateParcel({ parcelName: e.target.value })}
             placeholder="Parcel Name (e.g., Office Docs)"
-            className="w-full rounded-2xl border border-gray-200 bg-white py-3 pl-10 pr-4 text-[14px] font-medium outline-none focus:border-[#FF0000]"
+            className="w-full rounded-2xl border border-gray-200 bg-white py-3 pl-10 pr-4 text-[14px] font-medium outline-none focus:border-[#2563EB]"
           />
         </div>
         <div className="relative">
@@ -35,7 +35,7 @@ export default function ParcelDetails() {
             onChange={(e) => updateParcel({ parcelDescription: e.target.value })}
             placeholder="Description (optional)"
             rows={2}
-            className="w-full resize-none rounded-2xl border border-gray-200 bg-white p-3 pl-10 text-[14px] font-medium outline-none focus:border-[#FF0000]"
+            className="w-full resize-none rounded-2xl border border-gray-200 bg-white p-3 pl-10 text-[14px] font-medium outline-none focus:border-[#2563EB]"
           />
         </div>
       </div>
@@ -49,7 +49,7 @@ export default function ParcelDetails() {
             value={parcel.weightKg || ""}
             onChange={(e) => updateParcel({ weightKg: Math.max(0, Number(e.target.value)) })}
             placeholder="Approx Weight (in KG) *"
-            className="w-full rounded-2xl border border-gray-200 bg-white py-3 pl-10 pr-4 text-[14px] font-medium outline-none focus:border-[#FF0000]"
+            className="w-full rounded-2xl border border-gray-200 bg-white py-3 pl-10 pr-4 text-[14px] font-medium outline-none focus:border-[#2563EB]"
           />
         </div>
         <div className="relative">
@@ -59,7 +59,7 @@ export default function ParcelDetails() {
             value={parcel.quantity || ""}
             onChange={(e) => updateParcel({ quantity: Math.max(1, Number(e.target.value)) })}
             placeholder="Number of Packages"
-            className="w-full rounded-2xl border border-gray-200 bg-white py-3 pl-10 pr-4 text-[14px] font-medium outline-none focus:border-[#FF0000]"
+            className="w-full rounded-2xl border border-gray-200 bg-white py-3 pl-10 pr-4 text-[14px] font-medium outline-none focus:border-[#2563EB]"
           />
         </div>
       </div>
@@ -72,7 +72,7 @@ export default function ParcelDetails() {
             value={parcel.receiverName}
             onChange={(e) => updateParcel({ receiverName: e.target.value })}
             placeholder="Receiver name *"
-            className="w-full rounded-2xl border border-gray-200 bg-white py-3 pl-10 pr-4 text-[14px] font-medium outline-none focus:border-[#FF0000]"
+            className="w-full rounded-2xl border border-gray-200 bg-white py-3 pl-10 pr-4 text-[14px] font-medium outline-none focus:border-[#2563EB]"
           />
         </div>
         <div className="relative">
@@ -82,7 +82,7 @@ export default function ParcelDetails() {
             onChange={(e) => updateParcel({ receiverPhone: e.target.value.replace(/\D/g, "").slice(0, 10) })}
             placeholder="Receiver mobile number *"
             inputMode="numeric"
-            className="w-full rounded-2xl border border-gray-200 bg-white py-3 pl-10 pr-4 text-[14px] font-medium outline-none focus:border-[#FF0000]"
+            className="w-full rounded-2xl border border-gray-200 bg-white py-3 pl-10 pr-4 text-[14px] font-medium outline-none focus:border-[#2563EB]"
           />
         </div>
         <textarea
@@ -90,7 +90,7 @@ export default function ParcelDetails() {
           onChange={(e) => updateParcel({ instructions: e.target.value })}
           placeholder="Special Instructions (optional)"
           rows={2}
-          className="w-full resize-none rounded-2xl border border-gray-200 bg-white p-3 text-[14px] font-medium outline-none focus:border-[#FF0000]"
+          className="w-full resize-none rounded-2xl border border-gray-200 bg-white p-3 text-[14px] font-medium outline-none focus:border-[#2563EB]"
         />
       </div>
 

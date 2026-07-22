@@ -17,7 +17,7 @@ export default function MapPreview({ className = "", height = 220, showRoute = f
           <line x1="74" y1="-10" x2="64" y2="110" />
         </g>
         {showRoute && (
-          <motion.path d="M 15 85 L 35 70 L 60 45 L 85 25" fill="none" stroke="#FF0000" strokeWidth="4" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round"
+          <motion.path d="M 15 85 L 35 70 L 60 45 L 85 25" fill="none" stroke="#2563EB" strokeWidth="4" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round"
             initial={{ pathLength: 0 }} animate={{ pathLength: 1 }} transition={{ duration: 1.1, ease: "easeInOut" }} />
         )}
       </svg>
@@ -30,14 +30,14 @@ export default function MapPreview({ className = "", height = 220, showRoute = f
       {animateCar && (
         <motion.div className="absolute" style={{ transform: 'translate(-50%, -50%)' }} initial={{ left: '15%', top: '85%' }} animate={{ left: ['15%', '35%', '60%', '85%'], top: ['85%', '70%', '45%', '25%'] }}
           transition={{ duration: 6, ease: "easeInOut", repeat: Infinity, repeatType: "reverse" }}>
-          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#FF0000] text-white shadow-lg">
+          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#2563EB] text-white shadow-lg">
             <Navigation className="h-4 w-4 fill-current" style={{ transform: 'rotate(45deg)' }} />
           </div>
         </motion.div>
       )}
       {pin && !showRoute && (
         <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-full">
-          <MapPin className="h-9 w-9 text-[#FF0000] fill-white drop-shadow-lg" strokeWidth={2.2} />
+          <MapPin className="h-9 w-9 text-[#2563EB] fill-white drop-shadow-lg" strokeWidth={2.2} />
         </div>
       )}
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/5 to-transparent" />

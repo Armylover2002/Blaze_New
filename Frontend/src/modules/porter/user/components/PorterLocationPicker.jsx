@@ -234,7 +234,7 @@ export default function PorterLocationPicker({
                   ref={searchInputRef}
                   type="text"
                   placeholder={searchPlaceholder}
-                  className="w-full rounded-full border border-gray-200 bg-white py-3 pl-10 pr-4 text-[14px] font-medium shadow-md outline-none focus:border-[#FF0000]"
+                  className="w-full rounded-full border border-gray-200 bg-white py-3 pl-10 pr-4 text-[14px] font-medium shadow-md outline-none focus:border-[#2563EB]"
                 />
               </div>
             </div>
@@ -246,7 +246,7 @@ export default function PorterLocationPicker({
 
             {loading && (
               <div className="absolute inset-0 z-20 flex items-center justify-center bg-gray-50">
-                <Loader2 className="h-8 w-8 animate-spin text-[#FF0000]" />
+                <Loader2 className="h-8 w-8 animate-spin text-[#2563EB]" />
               </div>
             )}
             {!loading && error && (
@@ -264,7 +264,7 @@ export default function PorterLocationPicker({
                 onClick={handleCurrentLocation}
                 disabled={fetchingLocation}
                 aria-label="Use current location"
-                className="absolute bottom-5 right-4 z-30 flex h-12 w-12 items-center justify-center rounded-full bg-white text-[#FF0000] shadow-lg active:scale-95 disabled:opacity-60"
+                className="absolute bottom-5 right-4 z-30 flex h-12 w-12 items-center justify-center rounded-full bg-white text-[#2563EB] shadow-lg active:scale-95 disabled:opacity-60"
               >
                 {fetchingLocation ? <Loader2 className="h-5 w-5 animate-spin" /> : <Navigation className="h-5 w-5" />}
               </button>
@@ -287,7 +287,7 @@ export default function PorterLocationPicker({
             </div>
 
             <div className="mb-4 flex items-start gap-3 rounded-2xl border border-gray-100 bg-gray-50 p-3">
-              <MapPin className="mt-0.5 h-5 w-5 shrink-0 text-[#FF0000]" />
+              <MapPin className="mt-0.5 h-5 w-5 shrink-0 text-[#2563EB]" />
               <div className="min-w-0 flex-1">
                 {resolving ? (
                   <div className="flex items-center gap-2 text-[13px] font-medium text-gray-400">

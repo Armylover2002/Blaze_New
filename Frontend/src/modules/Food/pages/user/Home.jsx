@@ -456,8 +456,9 @@ export default function Home() {
       )}
 
       {/* TABS SECTION / CARDS SECTION */}
-      <div className="grid grid-cols-3 gap-2 px-3 py-2 sm:px-4 sm:py-2.5 md:hidden">
-        {tabs.map((tab) => {
+      {activeTab === "food" && (
+        <div className="grid grid-cols-3 gap-2 px-3 py-2 sm:px-4 sm:py-2.5 md:hidden">
+          {tabs.map((tab) => {
           const isActive = activeTab === tab.id;
           const handleTabIntent = () => {
             if (tab.id === "quick") onQuickTabIntent?.();
@@ -482,8 +483,12 @@ export default function Home() {
               className={cn(
                 "relative rounded-[16px] border p-2 sm:p-2.5 flex flex-col justify-between overflow-hidden shadow-sm transition-all duration-300 text-left h-[85px] min-[380px]:h-[95px]",
                 isActive 
-                  ? "bg-red-50/40 border-[#FF0000] ring-1 ring-[#FF0000] shadow-[0_4px_12px_rgba(255,0,0,0.12)] scale-[1.02]" 
-                  : "bg-white border-gray-200 shadow-[0_2px_8px_rgba(0,0,0,0.06)] hover:border-gray-300 hover:shadow-md hover:scale-[1.01]"
+                  ? "bg-red-50/80 border-red-200 shadow-sm scale-[1.02]" 
+                  : tab.id === "quick"
+                  ? "bg-orange-50/60 border-orange-100 hover:bg-orange-50 hover:border-orange-200 hover:shadow-md hover:scale-[1.01]"
+                  : tab.id === "porter"
+                  ? "bg-blue-50/60 border-blue-100 hover:bg-blue-50 hover:border-blue-200 hover:shadow-md hover:scale-[1.01]"
+                  : "bg-white border-gray-200 hover:border-gray-300 hover:shadow-md hover:scale-[1.01]"
               )}
             >
               {/* Top content */}
@@ -507,13 +512,14 @@ export default function Home() {
                   <ArrowRight className="h-2.5 w-2.5" strokeWidth={3} />
                 </div>
                 <div className="absolute right-[-4px] bottom-[-4px] w-[55px] h-[55px] min-[380px]:w-[65px] min-[380px]:h-[65px] pointer-events-none">
-                  <img src={tab.image} className="w-full h-full object-contain" alt={tab.title} />
+                  <img src={tab.image} className="w-full h-full object-contain mix-blend-multiply" alt={tab.title} />
                 </div>
               </div>
             </button>
           );
         })}
       </div>
+      )}
 
       {activeTab === "food" && (
         <Suspense fallback={<HeroBannerSkeleton className="hidden h-72 w-full md:block" />}>

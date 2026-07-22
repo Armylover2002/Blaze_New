@@ -58,7 +58,7 @@ export default function PromoCode() {
 
   return (
     <Screen title="Promo codes" subtitle="Save on your parcel delivery">
-      {error && <p className="mb-3 text-[12px] font-semibold text-[#FF0000]">{error}</p>}
+      {error && <p className="mb-3 text-[12px] font-semibold text-[#2563EB]">{error}</p>}
 
       {coupon && (
         <div className="mb-4 flex items-center justify-between rounded-2xl border border-[#2e7d32]/30 bg-green-50 p-3">
@@ -79,16 +79,16 @@ export default function PromoCode() {
             type="button"
             onClick={() => setSelectedCoupon(c)}
             className={`flex w-full items-center gap-4 rounded-2xl border border-dashed p-4 text-left shadow-sm transition ${
-              coupon?.code === c.code ? "border-[#FF0000] bg-[#FFF1F1]" : "border-gray-200 bg-white hover:border-[#FF0000]/50"
+              coupon?.code === c.code ? "border-[#2563EB] bg-[#EFF6FF]" : "border-gray-200 bg-white hover:border-[#2563EB]/50"
             }`}
           >
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[#FF0000]/10 text-2xl drop-shadow-sm">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[#2563EB]/10 text-2xl drop-shadow-sm">
               🎉
             </div>
             <div className="min-w-0 flex-1">
               <p className="text-[15px] font-bold text-gray-900 uppercase tracking-tight">{c.code}</p>
               {c.name && <p className="text-[12px] font-medium text-gray-600 mt-0.5">{c.name}</p>}
-              <p className="mt-1 text-[11px] font-bold text-[#FF0000]">
+              <p className="mt-1 text-[11px] font-bold text-[#2563EB]">
                 {getDiscountSubtext(c)}
               </p>
             </div>
@@ -103,12 +103,12 @@ export default function PromoCode() {
       >
         {selectedCoupon && (
           <div className="space-y-4">
-            <div className="rounded-2xl border border-dashed border-[#FF0000]/30 bg-[#FFF1F1] p-5 text-center relative overflow-hidden">
+            <div className="rounded-2xl border border-dashed border-[#2563EB]/30 bg-[#EFF6FF] p-5 text-center relative overflow-hidden">
               <div className="absolute top-1/2 -left-3 h-6 w-6 -translate-y-1/2 rounded-full bg-white"></div>
               <div className="absolute top-1/2 -right-3 h-6 w-6 -translate-y-1/2 rounded-full bg-white"></div>
               <div className="text-3xl mb-2">🎉</div>
               <h3 className="text-xl font-black text-gray-900 uppercase tracking-widest">{selectedCoupon.code}</h3>
-              <p className="text-[14px] font-bold text-[#FF0000] mt-1">
+              <p className="text-[14px] font-bold text-[#2563EB] mt-1">
                 {getDiscountText(selectedCoupon)}
               </p>
             </div>
