@@ -11,6 +11,7 @@ import { useLocation } from "@food/hooks/useLocation"
 import { useZone } from "@food/hooks/useZone"
 import { useCart } from "@food/context/CartContext"
 import PageNavbar from "@food/components/user/PageNavbar"
+import RestaurantDishCard from "@food/components/user/restaurant-details/RestaurantDishCard"
 import Under250DesktopHero from "@food/components/user/under-250/Under250DesktopHero"
 import offerImage from "@food/assets/offerimage.png"
 import AddToCartAnimation from "@food/components/user/AddToCartAnimation"
@@ -1069,125 +1070,29 @@ export default function Under250() {
                         const itemId = item.id || item._id
                         const quantity = quantities[itemId] || 0
                         return (
-                          <motion.div
-                            key={itemId}
-                            className="w-[200px] flex-shrink-0 cursor-pointer overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-gray-800 dark:bg-[#1a1a1a] sm:w-[220px] md:w-full md:rounded-xl"
-                            onClick={() => handleItemClick(item, restaurant)}
-                            initial={{ opacity: 0, y: 20 }}
-                            whileInView={{ opacity: 1, y: 0 }}
-                            viewport={{ once: true, margin: "-50px" }}
-                            transition={{ duration: 0.4, delay: itemIndex * 0.05 }}
-                            whileHover={{ y: -8, scale: 1.02 }}
-                            style={{ boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)" }}
-                          >
-                            {/* Item Image */}
-                            <div className="relative w-full h-32 sm:h-36 md:h-40 lg:h-48 xl:h-52 overflow-hidden">
-                              <motion.div
-                                className="absolute inset-0"
-                                whileHover={{ scale: 1.1 }}
-                                transition={{ duration: 0.5, ease: "easeOut" }}
-                              >
-                                <OptimizedImage
-                                  src={item.image}
-                                  alt={item.name}
-                                  className="w-full h-full"
-                                  objectFit="cover"
-                                  sizes="(max-width: 640px) 200px, (max-width: 768px) 220px, 100vw"
-                                  placeholder="blur"
-                                  priority={itemIndex < 4}
-                                />
-                              </motion.div>
-                              {/* Gradient Overlay on Hover */}
-                              <motion.div
-                                className="absolute inset-0 bg-gradient-to-t from-black/30 via-transparent to-transparent"
-                                initial={{ opacity: 0 }}
-                                whileHover={{ opacity: 1 }}
-                                transition={{ duration: 0.3 }}
-                              />
-                              {/* Veg Indicator */}
-                              {item.isVeg && (
-                                <motion.div
-                                  className="absolute top-2 left-2 md:top-3 md:left-3 h-4 w-4 md:h-5 md:w-5 lg:h-6 lg:w-6 rounded border-2 border-green-600 bg-white flex items-center justify-center z-10"
-                                  whileHover={{ scale: 1.2, rotate: 5 }}
-                                  transition={{ duration: 0.2 }}
-                                >
-                                  <div className="h-2 w-2 md:h-2.5 md:w-2.5 lg:h-3 lg:w-3 rounded-full bg-green-600" />
-                                </motion.div>
-                              )}
-                            </div>
-
-                            {/* Item Details */}
-                            <div className="p-3 md:p-4 lg:p-5">
-                              <div className="flex items-center gap-1 md:gap-2 mb-1 md:mb-2 lg:mb-3">
-                                {item.isVeg && (
-                                  <div className="h-3 w-3 md:h-4 md:w-4 lg:h-5 lg:w-5 rounded border border-green-600 bg-green-50 dark:bg-green-900/20 flex items-center justify-center">
-                                    <div className="h-1.5 w-1.5 md:h-2 md:w-2 lg:h-2.5 lg:w-2.5 rounded-full bg-green-600" />
-                                  </div>
-                                )}
-                                <span className="text-sm md:text-base lg:text-lg font-semibold text-gray-900 dark:text-white">
-                                  1 x {item.name}
-                                </span>
-                              </div>
-                              <ItemSlotAvailabilityNote item={item} className="mb-1.5 md:mb-2" />
-                              <div className="flex items-center justify-between">
-                                <div>
-                                  <p className="text-base md:text-lg lg:text-xl xl:text-2xl font-bold text-gray-900 dark:text-white">
-                                    {RUPEE_SYMBOL}{Math.round(item.price)}
-                                  </p>
-                                  {item.bestPrice && (
-                                    <p className="text-xs md:text-sm lg:text-base text-gray-500 dark:text-gray-400">Best price</p>
-                                  )}
-                                </div>
-                                {quantity > 0 ? (
-                                  <div className="flex items-center justify-between gap-2 bg-[#FFF5F5] border border-[#FF0000] rounded-lg px-1 h-7 md:h-8 lg:h-9" onClick={(e) => e.stopPropagation()}>
-                                    <button
-                                      onClick={(e) => {
-                                        e.stopPropagation()
-                                        updateItemQuantity(item, quantity - 1, e, restaurant.name)
-                                      }}
-                                      className="text-[#FF0000] hover:bg-red-50 p-1 rounded-md"
-                                    >
-                                      <Minus className="h-3 w-3 md:h-4 md:w-4" />
-                                    </button>
-                                    <span className="text-[#FF0000] font-semibold text-xs md:text-sm lg:text-base w-4 text-center">
-                                      {quantity}
-                                    </span>
-                                    <button
-                                      onClick={(e) => {
-                                        e.stopPropagation()
-                                        updateItemQuantity(item, quantity + 1, e, restaurant.name)
-                                      }}
-                                      className="text-[#FF0000] hover:bg-red-50 p-1 rounded-md"
-                                    >
-                                      <Plus className="h-3 w-3 md:h-4 md:w-4" />
-                                    </button>
-                                  </div>
-                                ) : (
-                                  <Button
-                                    variant={"outline"}
-                                    size="sm"
-                                    disabled={shouldShowGrayscale}
-                                    className={`h-7 md:h-8 lg:h-9 px-3 md:px-4 lg:px-5 text-xs md:text-sm lg:text-base ${shouldShowGrayscale
-                                      ? 'bg-gray-100 dark:bg-gray-800 text-gray-400 border-gray-300 dark:border-gray-700 cursor-not-allowed opacity-50'
-                                      : 'bg-[#FFF5F5] text-[#FF0000] border-[#FF0000] hover:bg-[#FF0000] hover:text-white'
-                                      }`}
-                                    onClick={(e) => {
-                                      e.stopPropagation()
-                                      if (!shouldShowGrayscale) {
-                                        if (item.customisable) {
-                                          handleItemClick(item, restaurant)
-                                        } else {
-                                          updateItemQuantity(item, 1, e, restaurant.name)
-                                        }
-                                      }
-                                    }}
-                                  >
-                                    Add
-                                  </Button>
-                                )}
-                              </div>
-                            </div>
-                          </motion.div>
+                          <div key={itemId} className="w-[180px] sm:w-[200px] md:w-full flex-shrink-0">
+                            <RestaurantDishCard
+                              item={item}
+                              quantity={quantity}
+                              disabled={shouldShowGrayscale}
+                              isBookmarked={false}
+                              onOpen={() => handleItemClick(item, restaurant)}
+                              onIncrease={(e) => {
+                                if (e) e.stopPropagation();
+                                if (!shouldShowGrayscale) {
+                                  if (item.customisable && quantity === 0) {
+                                    handleItemClick(item, restaurant);
+                                  } else {
+                                    updateItemQuantity(item, quantity + 1, e, restaurant.name);
+                                  }
+                                }
+                              }}
+                              onDecrease={(e) => {
+                                if (e) e.stopPropagation();
+                                updateItemQuantity(item, Math.max(0, quantity - 1), e, restaurant.name);
+                              }}
+                            />
+                          </div>
                         )
                       })}
                     </div>

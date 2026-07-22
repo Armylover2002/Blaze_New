@@ -12,6 +12,7 @@ import React, {
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import { isModuleAuthenticated } from "@food/utils/auth";
+import { cn } from "@/lib/utils";
 import {
   Star,
   Clock,
@@ -24,8 +25,6 @@ import {
   ShoppingCart,
   Mic,
   SlidersHorizontal,
-  CheckCircle2,
-  Bookmark,
   BadgePercent,
   X,
   ArrowDownUp,
@@ -33,13 +32,22 @@ import {
   CalendarClock,
   ShieldCheck,
   IndianRupee,
-  UtensilsCrossed,
-  Leaf,
   AlertCircle,
   Loader2,
   Plus,
   Check,
+  ArrowRight,
+  UtensilsCrossed,
+  ChevronDown,
+  ChevronRight,
+  CheckCircle2,
+  Bookmark,
+  Sparkles,
+  TrendingUp,
+  Percent,
+  Play,
   Share2,
+  Leaf,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -89,7 +97,6 @@ import { useZone } from "@food/hooks/useZone";
 
 import offerImage from "@food/assets/offerimage.png";
 import bannerEatingFood from "../../../../assets/eading_food_2_image-removebg-preview.png";
-import bannerEatingBoy from "../../../../assets/eating_boy_image-removebg-preview.png";
 import api, { publicGetOnce, restaurantAPI, adminAPI } from "@food/api";
 import { API_BASE_URL } from "@food/api/config";
 import OptimizedImage from "@food/components/OptimizedImage";
@@ -144,15 +151,42 @@ const getStoredDeliveryAddressMode = () => {
 };
 
 const defaultBannersImages = [
-  bannerEatingBoy,
-  bannerEatingFood,
-  bannerEatingBoy
+  "/banner.png",
+  "/banner.png",
+  "/banner.png"
 ];
 
 const defaultBannersData = [
-  { isFallback: true, title: "A SIX IS HIT! 🏏", subtitle: "66% OFF FOR 10 MIN!", action: "Order Now" },
-  { isFallback: true, title: "MATCH DAY SPECIAL", subtitle: "Free Delivery on Pizza", action: "Explore" },
-  { isFallback: true, title: "CRAVINGS SATISFIED", subtitle: "Flat ₹150 Off", action: "Claim Offer" }
+  { isFallback: true, title: "Order food & groceries.\nDiscover best restaurants.\nBlaze it! ⚡", subtitle: "", action: "" },
+  { isFallback: true, title: "Order food & groceries.\nDiscover best restaurants.\nBlaze it! ⚡", subtitle: "", action: "" },
+  { isFallback: true, title: "Order food & groceries.\nDiscover best restaurants.\nBlaze it! ⚡", subtitle: "", action: "" }
+];
+
+const tabs = [
+  { 
+    id: "food", 
+    title: "FOOD", 
+    subtitle: "FROM RESTAURANTS", 
+    discount: "UPTO 30% OFF",
+    image: "/super-app/food.png",
+    icon: UtensilsCrossed
+  },
+  { 
+    id: "quick", 
+    title: "INSTAMART", 
+    subtitle: "INSTANT GROCERY", 
+    discount: "UPTO 20% OFF",
+    image: "/super-app/grocery.png",
+    icon: ShoppingBag
+  },
+  { 
+    id: "porter", 
+    title: "PORTER", 
+    subtitle: "SEND PACKAGES", 
+    discount: "UPTO 50% OFF",
+    image: "/super-app/taxi.png",
+    icon: Star
+  },
 ];
 
 export default function Home() {
@@ -253,7 +287,7 @@ export default function Home() {
     return defaultBannersImages;
   }, [banners?.data]);
 
-  const activeBannerData = useMemo(() => banners?.data?.length > 0 ? banners.data : defaultBannersData, [banners?.data]);
+  const activeBannerData = defaultBannersData;
 
   // Auto-slide banners
   useEffect(() => {
@@ -361,9 +395,9 @@ export default function Home() {
       </div>
 
       {state.isBootstrapped && activeTab === "food" && (
-        <div className="relative z-10 w-full px-3 py-2 sm:px-4 md:hidden">
+        <div className="relative z-10 w-full md:hidden">
           <div
-            className="relative overflow-hidden rounded-2xl shadow-sm"
+            className="relative overflow-hidden shadow-sm pb-3.5 rounded-[20px] mx-3 sm:mx-4 mt-0"
             style={{
               background: vegMode
                 ? "linear-gradient(135deg, #2e7d32 0%, #388e3c 100%)"
@@ -371,7 +405,7 @@ export default function Home() {
             }}
           >
             <Suspense fallback={<HeroBannerSkeleton className="h-[130px] w-full" />}>
-              <div className="h-[130px] sm:h-36 md:h-44 mt-3 relative z-10 w-full">
+              <div className="h-[130px] sm:h-36 md:h-44 mt-0 relative z-10 w-full px-0">
                 <BannerSection
                   showBannerSkeleton={banners.loading}
                   heroBannerImages={activeBannerImages}
@@ -383,9 +417,103 @@ export default function Home() {
                 />
               </div>
             </Suspense>
+
+            {/* Banner Search and Location */}
+            <div className="px-4 pt-0 -mt-2 relative z-20">
+              <div className="flex w-full items-center bg-white rounded-full shadow-md overflow-hidden relative pr-2">
+                {/* Location */}
+                <button
+                  type="button"
+                  onClick={() => openLocationSelector()}
+                  className="flex items-center gap-1.5 px-4 py-3 bg-transparent border-0 hover:bg-gray-50 transition-colors shrink-0 max-w-[140px]"
+                >
+                  <MapPin className="h-4 w-4 shrink-0 text-[#FF0000]" strokeWidth={2.5} />
+                  <div className="flex items-center min-w-0">
+                    <span className="truncate text-xs font-bold text-gray-800">
+                      {imgUtils.formatSavedAddress(effectiveLocation) || "Select Location"}
+                    </span>
+                    <ChevronDown className="ml-1 h-3.5 w-3.5 shrink-0 text-gray-800" strokeWidth={2.5} />
+                  </div>
+                </button>
+
+                <div className="h-6 w-px bg-gray-200 shrink-0" />
+
+                {/* Search */}
+                <button
+                  type="button"
+                  onClick={handleSearchFocus}
+                  className="flex-1 flex items-center justify-between px-3 py-3 bg-transparent border-0 text-left hover:bg-gray-50 transition-colors min-w-0"
+                >
+                  <span className="block truncate text-xs text-gray-400 font-medium w-full">
+                    {placeholders?.[placeholderIndex] || "Search for restaurants, food or more"}
+                  </span>
+                  <Search className="h-4 w-4 shrink-0 text-gray-400 ml-2" strokeWidth={2} />
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
+
+      {/* TABS SECTION / CARDS SECTION */}
+      <div className="grid grid-cols-3 gap-2 px-3 py-2 sm:px-4 sm:py-2.5 md:hidden">
+        {tabs.map((tab) => {
+          const isActive = activeTab === tab.id;
+          const handleTabIntent = () => {
+            if (tab.id === "quick") onQuickTabIntent?.();
+          };
+          const handleTabClick = () => {
+            if (tab.route) {
+              const redirectTo = `${routerLocation.pathname || "/food/user"}${routerLocation.search || ""}${routerLocation.hash || ""}`;
+              navigate(tab.route, { state: { redirectTo } });
+              return;
+            }
+            handleTabChange(tab.id);
+          };
+
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={handleTabClick}
+              onMouseEnter={handleTabIntent}
+              onTouchStart={handleTabIntent}
+              onFocus={handleTabIntent}
+              className={cn(
+                "relative rounded-[16px] border p-2 sm:p-2.5 flex flex-col justify-between overflow-hidden shadow-sm transition-all duration-300 text-left h-[85px] min-[380px]:h-[95px]",
+                isActive 
+                  ? "bg-red-50/40 border-[#FF0000] ring-1 ring-[#FF0000] shadow-[0_4px_12px_rgba(255,0,0,0.12)] scale-[1.02]" 
+                  : "bg-white border-gray-200 shadow-[0_2px_8px_rgba(0,0,0,0.06)] hover:border-gray-300 hover:shadow-md hover:scale-[1.01]"
+              )}
+            >
+              {/* Top content */}
+              <div className="flex gap-1.5 w-full items-start z-10">
+                <div className="bg-[#FF0000] text-white rounded-full p-1 shrink-0 flex items-center justify-center h-[20px] w-[20px] mt-0.5">
+                  <tab.icon className="h-3 w-3" strokeWidth={2.5} />
+                </div>
+                <div className="flex flex-col min-w-0 mt-0.5">
+                  <span className="text-[9.5px] min-[380px]:text-[10.5px] sm:text-[12px] font-bold text-gray-900 leading-tight truncate">
+                    {tab.title}
+                  </span>
+                  <p className="text-[7px] sm:text-[8px] font-medium text-gray-500 uppercase tracking-tight mt-0.5 truncate">
+                    {tab.subtitle}
+                  </p>
+                </div>
+              </div>
+
+              {/* Bottom content: arrow and image */}
+              <div className="mt-1 flex items-end justify-between w-full z-10">
+                <div className="bg-[#FF0000] text-white rounded-full p-1 shrink-0 flex items-center justify-center h-4 w-4 shadow-sm mb-0.5">
+                  <ArrowRight className="h-2.5 w-2.5" strokeWidth={3} />
+                </div>
+                <div className="absolute right-[-4px] bottom-[-4px] w-[55px] h-[55px] min-[380px]:w-[65px] min-[380px]:h-[65px] pointer-events-none">
+                  <img src={tab.image} className="w-full h-full object-contain" alt={tab.title} />
+                </div>
+              </div>
+            </button>
+          );
+        })}
+      </div>
 
       {activeTab === "food" && (
         <Suspense fallback={<HeroBannerSkeleton className="hidden h-72 w-full md:block" />}>
@@ -422,13 +550,17 @@ export default function Home() {
             </Suspense>
 
             <Suspense fallback={null}>
-              <RecommendedSection recommendedForYouRestaurants={meta.recommended} />
+              <RecommendedSection 
+                recommendedForYouRestaurants={meta.recommended} 
+                isFavorite={isFavorite}
+                onFavoriteToggle={handleFavoriteToggle}
+              />
             </Suspense>
 
             <Suspense fallback={<HeroBannerSkeleton className="h-full w-full px-4 mt-3 md:hidden" />}>
               {(banners.loading || (banners.images && banners.images.length > 0)) && (
-                <section className="content-auto px-4 py-4 sm:py-6 md:hidden lg:py-8">
-                  <div className="overflow-hidden rounded-2xl h-48 sm:h-64 md:h-72 lg:h-[350px] shadow-lg border border-gray-100">
+                <section className="content-auto px-4 py-2 sm:py-3 md:hidden lg:py-6">
+                  <div className="overflow-hidden rounded-[20px] h-48 sm:h-64 md:h-72 lg:h-[350px] shadow-lg border border-gray-100">
                     <BannerSection
                       showBannerSkeleton={banners.loading}
                       heroBannerImages={banners.images}

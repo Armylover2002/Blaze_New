@@ -36,111 +36,88 @@ const FoodRestaurantCard = memo(({
   return (
     <div
       key={restaurant?.id || restaurant?._id || restaurantSlug || index}
-      className="h-full transform transition-all duration-300 hover:-translate-y-3 hover:scale-[1.02]"
+      className={`h-full transform transition-all duration-300 ${isOutOfService || !availability.isOpen ? "grayscale opacity-75" : ""}`}
       style={{
-        perspective: 1000,
         animation: index < 10 ? `fade-in-up 0.5s ease-out ${index * 0.05}s backwards` : "none",
       }}
     >
-      <div className="h-full group">
-        <Link to={`/user/restaurants/${restaurantSlug}`} className="flex h-full">
-          <Card
-            className={`relative flex h-full w-full flex-col gap-0 overflow-hidden rounded-[28px] border-0 border-background bg-white py-0 shadow-sm transition-all duration-500 hover:shadow-xl dark:border-gray-800 dark:bg-[#1a1a1a] ${
-              isOutOfService || !availability.isOpen ? "grayscale opacity-75" : ""
-            }`}
-          >
-            <div className="relative">
+      <div className="h-full group flex flex-col cursor-pointer bg-white dark:bg-[#1a1a1a] rounded-[16px] border border-gray-200/80 dark:border-gray-800 shadow-[0_2px_8px_rgba(0,0,0,0.04)] hover:shadow-[0_8px_24px_rgba(0,0,0,0.08)] hover:-translate-y-1 transition-all duration-300 overflow-hidden">
+        <Link to={`/user/restaurants/${restaurantSlug}`} className="flex flex-col h-full relative">
+          
+          <div className="relative w-full aspect-[4/3] bg-gray-50 dark:bg-gray-900 overflow-hidden group/img">
+            <div className="absolute inset-0 w-full h-full transition-transform duration-500 group-hover/img:scale-105">
               <RestaurantImageCarousel
                 restaurant={restaurant}
                 priority={index < 3}
                 backendOrigin={backendOrigin}
+                className="relative w-full h-full overflow-hidden"
               />
+            </div>
 
-              {restaurant.featuredDish && (
-                <div className="absolute left-3 top-3 z-10 flex items-center transform transition-transform duration-300 group-hover:scale-105">
-                  <div className="flex items-center rounded-full bg-black/80 px-3 py-1 text-[11px] font-bold tracking-tight text-white shadow-xl backdrop-blur-md">
-                    {restaurant.featuredDish} {restaurant.featuredPrice ? `• ₹${restaurant.featuredPrice}` : ""}
-                  </div>
-                </div>
-              )}
-
-              <div className="absolute right-3 top-3 z-10 transform transition-transform duration-300 group-hover:scale-110">
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    onFavoriteToggle(event, restaurant, restaurantSlug, favorite);
-                  }}
-                  aria-label={favorite ? "Remove from favorites" : "Add to favorites"}
-                  className={`flex h-8 w-8 sm:h-9 sm:w-9 items-center justify-center rounded-full shadow-lg transition-all duration-300 ${
-                    favorite
-                      ? "bg-red-500 text-white"
-                      : "bg-white/90 text-gray-800 backdrop-blur-sm hover:bg-white"
-                  }`}
-                >
-                  <Bookmark className={`h-4 w-4 sm:h-5 sm:w-5 transition-all duration-300 ${favorite ? "fill-white" : ""}`} />
-                </Button>
+            {restaurant.featuredDish && (
+              <div className="absolute top-2 left-2 bg-black/60 backdrop-blur-md px-2 py-0.5 rounded z-10">
+                <span className="text-[10px] sm:text-[11px] text-white/95 font-medium tracking-wide">Promoted</span>
               </div>
-              
-              <div className="absolute right-3 bottom-3 z-10 transform transition-transform duration-300 group-hover:scale-110">
-                <div
-                  className={`flex-shrink-0 rounded-[8px] px-2 py-0.5 text-white shadow-md ${
-                    Number(restaurant.rating) > 0 ? "bg-[#FF0000]" : "bg-gray-400"
-                  } flex items-center gap-1`}
-                >
-                  <span className="text-[11px] font-bold tracking-tight">
-                    {Number(restaurant.rating) > 0 ? Number(restaurant.rating).toFixed(1) : "NEW"}
-                  </span>
-                  {Number(restaurant.rating) > 0 && (
-                    <Star className="h-3 w-3 fill-white text-white" strokeWidth={0} />
-                  )}
-                </div>
+            )}
+
+            <div className="absolute right-2 top-2 z-10">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onFavoriteToggle(event, restaurant, restaurantSlug, favorite);
+                }}
+                aria-label={favorite ? "Remove from favorites" : "Add to favorites"}
+                className={`flex h-7 w-7 sm:h-8 sm:w-8 items-center justify-center rounded-full shadow-md transition-all duration-300 ${
+                  favorite
+                    ? "bg-red-500 text-white hover:bg-red-600"
+                    : "bg-white/95 text-gray-800 backdrop-blur-sm hover:bg-white"
+                }`}
+              >
+                <Bookmark className={`h-3.5 w-3.5 sm:h-4 sm:w-4 transition-all duration-300 ${favorite ? "fill-white" : ""}`} />
+              </Button>
+            </div>
+
+            {restaurant.offer && (
+              <div className="absolute bottom-0 left-0 bg-blue-600 px-2 py-1 z-10 rounded-tr-[12px]">
+                <span className="text-[10px] sm:text-[11px] font-bold text-white flex items-center gap-1">
+                  <BadgePercent className="h-3 w-3" />
+                  {restaurant.offer}
+                </span>
+              </div>
+            )}
+            
+            <div className="pointer-events-none absolute inset-0 z-0 border-b border-black/5" />
+          </div>
+
+          <div className="flex flex-col flex-grow p-2.5 sm:p-3">
+            <div className="flex justify-between items-start mb-1 sm:mb-1.5 gap-2">
+              <h3 className="line-clamp-1 text-[13px] sm:text-[15px] font-bold text-gray-900 dark:text-white leading-tight group-hover:text-[#FF0000] transition-colors duration-300">
+                {restaurant.name}
+              </h3>
+              <div className="flex items-center justify-center gap-0.5 bg-green-700 text-white px-1.5 py-0.5 rounded-[6px] shrink-0 shadow-sm">
+                <span className="text-[10px] sm:text-[11px] font-bold tracking-tight">
+                  {Number(restaurant.rating) > 0 ? Number(restaurant.rating).toFixed(1) : "NEW"}
+                </span>
+                {Number(restaurant.rating) > 0 && <Star className="h-2.5 w-2.5 sm:h-3 sm:w-3 fill-white text-white" strokeWidth={0} />}
               </div>
             </div>
 
-            <div className="transform transition-transform duration-300 group-hover:-translate-y-1">
-              <CardContent className="flex flex-grow flex-col p-3 sm:p-4">
-                <div className="mb-2 lg:mb-3">
-                  <h3 className="line-clamp-1 text-lg font-bold leading-tight tracking-tight text-[#1c1c1e] transition-colors duration-300 group-hover:text-[#FF0000] dark:text-white">
-                    {restaurant.name}
-                  </h3>
-                  <div className="mt-2 flex flex-wrap items-center gap-2">
-                    <span
-                      className={`inline-flex rounded-[4px] px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider shadow-sm ${
-                        availability.isOpen ? "bg-[#FF0000] text-white" : "bg-gray-400 text-white"
-                      }`}
-                    >
-                      {availability.isOpen ? "Open now" : "Offline"}
-                    </span>
-                    {availability.isOpen && availability.closingCountdownLabel && (
-                      <div className="flex items-center gap-1 rounded-[4px] border border-red-100 bg-red-50 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-red-500">
-                        <Timer className="h-3 w-3 flex-shrink-0" strokeWidth={2.5} />
-                        <span>{availability.closingCountdownLabel}</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <div className="mb-2 flex items-center gap-1 text-sm text-gray-500 opacity-70 transition-opacity duration-300 group-hover:opacity-100 lg:mb-3 lg:text-base">
-                  <Clock className="h-4 w-4 text-gray-500 dark:text-gray-400 lg:h-5 lg:w-5" strokeWidth={1.5} />
-                  <span className="font-medium text-gray-700 dark:text-gray-300">{restaurant.deliveryTime}</span>
-                  <span className="mx-1">|</span>
-                  <span className="font-medium text-gray-700 dark:text-gray-300">{restaurant.distance}</span>
-                </div>
-
-                {restaurant.offer && (
-                  <div className="mt-auto flex items-center gap-2 text-sm transition-transform duration-300 group-hover:translate-x-1 lg:text-base">
-                    <BadgePercent className="h-4 w-4 text-black lg:h-5 lg:w-5" strokeWidth={2} />
-                    <span className="font-medium text-gray-700 dark:text-gray-300">{restaurant.offer}</span>
-                  </div>
-                )}
-              </CardContent>
+            <div className="flex justify-between items-center text-[11px] sm:text-xs text-gray-500 dark:text-gray-400">
+              <span className="line-clamp-1 mr-2">{restaurant.cuisine}</span>
+              <span className="shrink-0 font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded-[4px]">{restaurant.deliveryTime}</span>
             </div>
 
-            <div className="pointer-events-none absolute inset-0 z-0 rounded-md border border-transparent transition-all duration-300 group-hover:border-[#FF0000]/30 group-hover:shadow-[inset_0_0_0_1px_rgba(204,37,50,0.2)]" />
-          </Card>
+            <div className="flex justify-between items-center text-[11px] sm:text-xs text-gray-400 dark:text-gray-500 mt-1 sm:mt-1.5">
+              <span className="line-clamp-1 mr-2 flex items-center gap-0.5">
+                {typeof restaurant.location === "string" ? restaurant.location : (restaurant.location?.area || restaurant.location?.city || "Indore")}
+              </span>
+              <span className="shrink-0">{restaurant.distance}</span>
+            </div>
+          </div>
+
         </Link>
       </div>
     </div>
@@ -216,7 +193,7 @@ const RestaurantGrid = memo(({
         </AnimatePresence>
 
         <div
-          className={`grid grid-cols-1 items-stretch gap-5 px-4 pt-1 transition-opacity duration-300 sm:gap-4 sm:pt-1.5 md:grid-cols-2 lg:gap-5 lg:pt-2 lg:grid-cols-3 xl:gap-6 ${
+          className={`grid grid-cols-2 items-stretch gap-3 px-3 pt-1 transition-opacity duration-300 sm:gap-4 sm:pt-1.5 md:grid-cols-3 lg:gap-5 lg:pt-2 lg:grid-cols-4 xl:gap-6 ${
             isLoadingFilterResults || loadingRestaurants ? "opacity-50" : "opacity-100"
           }`}
         >
