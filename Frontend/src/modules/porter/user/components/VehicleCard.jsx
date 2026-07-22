@@ -1,6 +1,7 @@
 import React from "react";
 import { motion } from "framer-motion";
 import { Package, Clock, AlertTriangle } from "lucide-react";
+import { inr } from "./ui";
 
 export default function VehicleCard({
   vehicle,
@@ -72,7 +73,7 @@ export default function VehicleCard({
         ) : null}
       </div>
       <div className="text-right">
-        {fare != null && <p className="text-[16px] font-extrabold text-gray-900">₹{fare}</p>}
+        {fare != null && <p className="text-[16px] font-extrabold text-gray-900">{inr(fare)}</p>}
         {vehicle.surge > 1 && !disabled && (
           <span className="text-[10px] font-bold text-amber-600">{vehicle.surge}x demand</span>
         )}

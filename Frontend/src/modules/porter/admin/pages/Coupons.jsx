@@ -171,29 +171,33 @@ const Coupons = () => {
   const fetchCoupons = useCallback(async () => {
     setLoading(true);
     try {
-      const result = await porterAdminApi.getCoupons({
-        page,
-        limit: pageSize,
-        search: search.trim() || undefined,
-        status: statusFilter !== "all" ? statusFilter : undefined,
-        discountType: typeFilter !== "all" ? typeFilter : undefined,
-        sortBy: sortKey,
-        sortOrder: sortDir,
-      });
+      const [result, summaryData] = await Promise.all([
+        porterAdminApi.getCoupons({
+          page,
+          limit: pageSize,
+          search: search.trim() || undefined,
+          status: statusFilter !== "all" ? statusFilter : undefined,
+          discountType: typeFilter !== "all" ? typeFilter : undefined,
+          sortBy: sortKey,
+          sortOrder: sortDir,
+        }),
+        porterAdminApi.getCouponSummary().catch(() => null)
+      ]);
+      
       setCoupons(result.records || []);
       setTotal(result.total || 0);
       setTotalPages(result.pages || 1);
       
-      if (result.summary) {
+      if (summaryData) {
         setSummary({
-          total: result.summary.total || 0,
-          active: result.summary.active || 0,
-          scheduled: result.summary.scheduled || 0,
-          expired: result.summary.expired || 0,
-          inactive: result.summary.inactive || 0,
-          totalRedemption: result.summary.totalRedemption || 0,
-          totalDiscountGiven: result.summary.totalDiscountGiven || 0,
-          campaignRevenue: result.summary.campaignRevenue || 0,
+          total: summaryData.total || 0,
+          active: summaryData.active || 0,
+          scheduled: summaryData.scheduled || 0,
+          expired: summaryData.expired || 0,
+          inactive: summaryData.inactive || 0,
+          totalRedemption: summaryData.totalRedemption || 0,
+          totalDiscountGiven: summaryData.totalDiscountGiven || 0,
+          campaignRevenue: summaryData.campaignRevenue || 0,
         });
       }
     } catch (err) {

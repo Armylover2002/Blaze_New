@@ -8,17 +8,16 @@ import MapPreview from "../components/MapPreview";
 import { useBooking } from "../context/BookingContext";
 import { getPorterHomePath, getPorterPartnerAssignedPath } from "../utils/routes";
 import porterUserApi from "../services/userApi";
-import { toCoordinatePayload } from "../utils/location";
-import { mapActiveShipmentFromOrder, resolveActiveRouteForStatus } from "../utils/orderMapper";
+import { resolveActiveRouteForStatus } from "../utils/orderMapper";
+import { PORTER_SEARCHING_STATUSES } from "../constants/booking";
 import {
-  initRazorpayPayment,
-  isFlutterWebView,
-  handleFlutterRazorpayPayment,
-} from "@food/utils/razorpay";
+  getAdaptiveSearchPollDelayMs,
+  shouldStopActiveOrderPolling,
+  isSearchingPartnerStatus,
+} from "../utils/activeOrderSync";
 
-// Statuses where the customer is still waiting for a partner — cancel is allowed.
 // NOTE: `scheduled` uses /porter/scheduled — do NOT treat it as searching here.
-const SEARCHING_STATUSES = ["created", "searching_partner", "dispatching"];
+const SEARCHING_STATUSES = PORTER_SEARCHING_STATUSES;
 // Once a partner accepts, the customer is routed to the Partner Assigned screen.
 const ACCEPTED_STATUSES = ["assigned", "partner_accepted", "en_route_pickup", "at_pickup"];
 const POST_PICKUP_STATUSES = ["picked_up", "in_transit", "at_drop", "delivered", "completed"];
@@ -28,24 +27,19 @@ export default function FindingPartner() {
   const navigate = useNavigate();
   const {
     setActiveShipment,
-    clearBookingDraft,
+    refreshActiveOrder,
     resetBooking,
     activeShipment,
     activeOrderEvent,
-    pickup,
-    delivery,
     vehicle,
-    total,
-    parcel,
-    resolvedVehicleId,
-    coupon,
     paymentMethodId,
-    scheduledAt,
   } = useBooking();
   const [submitting, setSubmitting] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const userCancelRef = useRef(false);
+  const pollInFlightRef = useRef(false);
+  const searchStartedAtRef = useRef(Date.now());
 
   const orderId = activeShipment?.id || null;
   const status = String(activeShipment?.status || "").toLowerCase();
@@ -57,32 +51,52 @@ export default function FindingPartner() {
   useEffect(() => {
     let pollTimer;
     let cancelled = false;
+    searchStartedAtRef.current = Date.now();
+
+    const scheduleNextPoll = (delayMs) => {
+      if (cancelled) return;
+      const delay = delayMs ?? getAdaptiveSearchPollDelayMs(Date.now() - searchStartedAtRef.current);
+      pollTimer = setTimeout(pollStatus, delay);
+    };
 
     const pollStatus = async () => {
       if (cancelled) return;
+      if (pollInFlightRef.current) {
+        scheduleNextPoll();
+        return;
+      }
+
+      pollInFlightRef.current = true;
       try {
-        const active = await porterUserApi.getActiveOrder({ forceRefresh: true });
-        const current = active?.order ?? active;
-        if (!current) return;
+        const mapped = await refreshActiveOrder({ forceRefresh: true });
+        if (cancelled) return;
 
-        const mapped = mapActiveShipmentFromOrder(current);
-        if (!mapped) return;
-
-        setActiveShipment(mapped);
-
-        if (["assigned", "partner_accepted", "en_route_pickup", "at_pickup"].includes(current.status)) {
-          navigate(getPorterPartnerAssignedPath(), { replace: true });
+        if (!mapped) {
+          scheduleNextPoll();
           return;
         }
 
-        if (["picked_up", "in_transit", "at_drop", "delivered"].includes(current.status)) {
-          navigate(resolveActiveRouteForStatus(current.status), { replace: true });
+        const nextStatus = String(mapped.status || "").toLowerCase();
+
+        if (shouldStopActiveOrderPolling(nextStatus)) {
+          if (ACCEPTED_STATUSES.includes(nextStatus)) {
+            navigate(getPorterPartnerAssignedPath(), { replace: true });
+          } else if (POST_PICKUP_STATUSES.includes(nextStatus)) {
+            navigate(resolveActiveRouteForStatus(nextStatus), { replace: true });
+          }
           return;
         }
 
-        pollTimer = setTimeout(pollStatus, 2500);
+        if (!isSearchingPartnerStatus(nextStatus)) {
+          scheduleNextPoll();
+          return;
+        }
+
+        scheduleNextPoll();
       } catch {
-        pollTimer = setTimeout(pollStatus, 3000);
+        scheduleNextPoll();
+      } finally {
+        pollInFlightRef.current = false;
       }
     };
 
@@ -90,22 +104,10 @@ export default function FindingPartner() {
 
     return () => {
       cancelled = true;
+      pollInFlightRef.current = false;
       if (pollTimer) clearTimeout(pollTimer);
     };
-  }, [
-    navigate,
-    setActiveShipment,
-    clearBookingDraft,
-    pickup,
-    delivery,
-    vehicle,
-    total,
-    parcel,
-    resolvedVehicleId,
-    coupon,
-    paymentMethodId,
-    scheduledAt,
-  ]);
+  }, [navigate, refreshActiveOrder]);
 
   // Real-time forward transitions: as soon as the order advances (socket or
   // poll updates activeShipment.status), route the customer to the right screen
@@ -125,6 +127,15 @@ export default function FindingPartner() {
     return undefined;
   }, [status, navigate]);
 
+  // Driver released the order — customer is sent back to partner search (not a terminal cancel).
+  useEffect(() => {
+    if (!activeOrderEvent || userCancelRef.current) return undefined;
+    if (activeOrderEvent.redispatch && isSearchingPartnerStatus(activeOrderEvent.status)) {
+      toast.info("Your delivery partner cancelled. Finding a new partner...");
+    }
+    return undefined;
+  }, [activeOrderEvent]);
+
   // Handle admin cancellation (and any externally-triggered cancel) delivered
   // over the socket. Terminal orders don't refresh into activeShipment, so we
   // react to the raw socket event instead.
@@ -133,15 +144,31 @@ export default function FindingPartner() {
     const evtOrderId = activeOrderEvent.orderId;
     if (orderId && evtOrderId && String(evtOrderId) !== String(orderId)) return undefined;
     const evtStatus = String(activeOrderEvent.status || "").toLowerCase();
-    const isCancelled = activeOrderEvent.cancelled === true || CANCELLED_STATUSES.includes(evtStatus);
+    const isRedispatch = activeOrderEvent.redispatch === true
+      || isSearchingPartnerStatus(evtStatus);
+    const isCancelled = !isRedispatch && (
+      activeOrderEvent.cancelled === true || CANCELLED_STATUSES.includes(evtStatus)
+    );
     if (!isCancelled) return undefined;
 
     setConfirmOpen(false);
-    const message = evtStatus === "cancelled_by_admin"
+    let message = evtStatus === "cancelled_by_admin"
       ? "This booking was cancelled by support."
       : evtStatus === "cancelled_by_driver"
         ? "This booking was cancelled by the delivery partner."
         : "This booking was cancelled.";
+
+    const refund = activeOrderEvent.refund;
+    const refundAmount = Number(refund?.amount || 0);
+    if (refundAmount > 0 && refund?.status === "processed") {
+      message += String(refund?.method || "").toLowerCase() === "razorpay"
+        ? ` ₹${refundAmount} will be refunded to your online payment method.`
+        : ` ₹${refundAmount} has been credited to your wallet.`;
+    }
+    if (activeOrderEvent.couponConsumed && activeOrderEvent.couponCode) {
+      message += ` Coupon ${activeOrderEvent.couponCode} cannot be reused.`;
+    }
+
     toast.error(message);
     resetBooking();
     navigate(getPorterHomePath(), { replace: true });
@@ -175,7 +202,12 @@ export default function FindingPartner() {
       await porterUserApi.cancelOrder(orderId, "Cancelled by customer while searching for a partner");
       setConfirmOpen(false);
       resetBooking();
-      toast.success("Booking cancelled. Any eligible refund has been initiated.");
+      const paidOnline = paymentMethodId === "razorpay";
+      toast.success(
+        paidOnline
+          ? "Booking cancelled. Online payment refund will be processed to your original payment method."
+          : "Booking cancelled. Any eligible refund has been initiated.",
+      );
       navigate(getPorterHomePath(), { replace: true });
     } catch (err) {
       userCancelRef.current = false;

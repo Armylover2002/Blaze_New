@@ -2,7 +2,7 @@ import { useDeliveryStore } from '@/modules/DeliveryV2/store/useDeliveryStore';
 import { deliveryAPI } from '@food/api';
 import { toast } from 'sonner';
 import { getPrimaryPickupLocation, normalizeLocationPoint, normalizePickupPoints, isReturnPickupTrip, isPorterParcelTrip, getDeliveryDocumentId, getReturnDropLocation, enrichReturnDeliveryOrder, enrichPorterDeliveryOrder, mapPorterStatusToTripStatus } from '@/modules/DeliveryV2/utils/orderRouting';
-import porterDriverApi from '@/modules/porter/driver/services/driverApi';
+import porterDriverApi, { invalidateDriverActiveOrderCache } from '@/modules/porter/driver/services/driverApi';
 import { refreshActiveTrip } from '@/modules/DeliveryV2/services/deliveryOrderSync';
 
 /**
@@ -102,7 +102,8 @@ export const useOrderManager = () => {
 
         console.log('[OrderManager] Locations Mapped Result:', { resLoc, cusLoc, dropLocation });
 
-        setActiveOrder(enrichReturnDeliveryOrder({
+        const mergedOrder = {
+          ...order,
           ...fullOrder,
           orderId: isReturnPickupTrip(fullOrder) ? orderId : (fullOrder.orderId || orderId),
           returnId: fullOrder.returnId || (isReturnPickupTrip(fullOrder) ? orderId : undefined),
@@ -112,7 +113,13 @@ export const useOrderManager = () => {
           restaurantLocation: primaryPickupLocation || resLoc,
           customerLocation: cusLoc,
           sellerDropLocation: dropLocation,
-        }));
+        };
+
+        setActiveOrder(
+          isPorterParcelTrip(mergedOrder) 
+            ? enrichPorterDeliveryOrder(mergedOrder) 
+            : enrichReturnDeliveryOrder(mergedOrder)
+        );
 
         updateTripStatus('PICKING_UP');
         void refreshActiveTrip('accept');
@@ -149,7 +156,14 @@ export const useOrderManager = () => {
     const orderId = getDeliveryDocumentId(activeOrder);
     try {
       if (isPorterParcelTrip(activeOrder)) {
-        await porterDriverApi.reachedPickup(orderId);
+        const result = await porterDriverApi.reachedPickup(orderId);
+        const apiOrder = result?.order || result;
+        if (apiOrder) {
+          setActiveOrder((prev) => enrichPorterDeliveryOrder({
+            ...(prev || {}),
+            ...apiOrder,
+          }));
+        }
         updateTripStatus('REACHED_PICKUP');
         return;
       }
@@ -346,8 +360,10 @@ export const useOrderManager = () => {
     try {
       await porterDriverApi.cancelOrder(orderId, trimmed);
       toast.success('Trip cancelled');
+      invalidateDriverActiveOrderCache();
       clearActiveOrder();
-      void refreshActiveTrip('cancel');
+      updateTripStatus('IDLE');
+      await refreshActiveTrip('cancel');
     } catch (error) {
       const message = error?.response?.data?.message || error?.message;
       toast.error(message || 'Failed to cancel trip');

@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { User, Phone, Package, Scale, FileText, AlignLeft } from "lucide-react";
 import Screen from "../components/Screen";
@@ -8,12 +8,21 @@ import { getPorterVehiclePath } from "../utils/routes";
 
 export default function ParcelDetails() {
   const navigate = useNavigate();
-  const { parcel, updateParcel } = useBooking();
+  const { parcel, updateParcel, refreshRouteQuote, quoteLoading } = useBooking();
 
   const canContinue =
     parcel.weightKg > 0 &&
     parcel.receiverName.trim() &&
     parcel.receiverPhone.trim().length >= 10;
+
+  const handleContinue = useCallback(async () => {
+    if (!canContinue || quoteLoading) return;
+
+    const quote = await refreshRouteQuote();
+    if (quote) {
+      navigate(getPorterVehiclePath());
+    }
+  }, [canContinue, quoteLoading, refreshRouteQuote, navigate]);
 
   return (
     <Screen title="Parcel details" subtitle="Package information">
@@ -70,7 +79,7 @@ export default function ParcelDetails() {
           <User className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
           <input
             value={parcel.receiverName}
-            onChange={(e) => updateParcel({ receiverName: e.target.value })}
+            onChange={(e) => updateParcel({ receiverName: e.target.value.replace(/[0-9]/g, "") })}
             placeholder="Receiver name *"
             className="w-full rounded-2xl border border-gray-200 bg-white py-3 pl-10 pr-4 text-[14px] font-medium outline-none focus:border-[#FF0000]"
           />
@@ -95,8 +104,11 @@ export default function ParcelDetails() {
       </div>
 
       <StickyBar>
-        <PrimaryButton disabled={!canContinue} onClick={() => navigate(getPorterVehiclePath())}>
-          Choose delivery vehicle
+        <PrimaryButton
+          disabled={!canContinue || quoteLoading}
+          onClick={handleContinue}
+        >
+          {quoteLoading ? "Loading vehicles…" : "Choose delivery vehicle"}
         </PrimaryButton>
       </StickyBar>
     </Screen>

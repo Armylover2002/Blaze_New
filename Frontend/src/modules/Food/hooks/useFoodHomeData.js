@@ -30,7 +30,8 @@ export const useFoodHomeData = ({
   location, 
   vegMode, 
   backendOrigin,
-  availabilityTick 
+  availabilityTick,
+  enabled = true 
 }) => {
   // Use cache as initial state if valid
   const hasValidCache = globalHomeCache.bootstrap && (Date.now() - globalHomeCache.lastFetched < CACHE_EXPIRY_MS);
@@ -97,6 +98,7 @@ export const useFoodHomeData = ({
 
   // --- Consolidated Bootstrap Fetch ---
   useEffect(() => {
+    if (!enabled) return;
     let cancelled = false;
     const zoneKey = String(zoneId || "global");
 
@@ -206,7 +208,7 @@ export const useFoodHomeData = ({
 
     fetchBootstrap();
     return () => { cancelled = true; };
-  }, [zoneId, normalizeImageUrl]);
+  }, [zoneId, normalizeImageUrl, enabled]);
 
   // --- Fetch Restaurants ---
   const fetchRestaurants = useCallback(async (filters = {}) => {
@@ -286,8 +288,9 @@ export const useFoodHomeData = ({
   }, [location, zoneId, buildRestaurantImageCandidates, extractImages]);
 
   useEffect(() => {
+    if (!enabled) return;
     fetchRestaurants(appliedFilters);
-  }, [appliedFilters, fetchRestaurants]);
+  }, [appliedFilters, fetchRestaurants, enabled]);
 
   // --- Menu Context Fetching (Veg Mode) ---
   // Memoized stable string key — prevents .join() re-computation on every render
@@ -296,6 +299,10 @@ export const useFoodHomeData = ({
     [restaurantsData]
   );
   useEffect(() => {
+    if (!enabled) {
+      setMenuCategories([]);
+      return;
+    }
     const restaurantIds = menuUnionRestaurantIdsKey.split(",").filter(Boolean);
     const shouldFetchMenuMeta = vegMode || realCategories.length === 0;
     if (!menuUnionRestaurantIdsKey || !shouldFetchMenuMeta) {
@@ -343,7 +350,7 @@ export const useFoodHomeData = ({
       }
     };
     fetchMenu();
-  }, [menuUnionRestaurantIdsKey, vegMode, realCategories.length, normalizeImageUrl, slugifyCategory]);
+  }, [menuUnionRestaurantIdsKey, vegMode, realCategories.length, normalizeImageUrl, slugifyCategory, enabled]);
 
   const deferredRestaurants = useDeferredValue(restaurantsData);
 

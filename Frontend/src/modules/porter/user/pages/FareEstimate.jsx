@@ -4,7 +4,8 @@ import { useNavigate } from "react-router-dom";
 import { MapPin, Package, Calendar, Tag, CreditCard, ChevronRight, Navigation, FileText, Scale, Check } from "lucide-react";
 import Screen from "../components/Screen";
 import PorterRouteMap from "../components/PorterRouteMap";
-import { PrimaryButton, StickyBar, FareRow, SectionLabel, inr } from "../components/ui";
+import CouponBottomSheet from "../components/CouponBottomSheet";
+import { PrimaryButton, StickyBar, FareBreakdown, SectionLabel } from "../components/ui";
 import { useBooking } from "../context/BookingContext";
 import { toast } from "sonner";
 import {
@@ -53,6 +54,7 @@ export default function FareEstimate() {
 
   const [walletBalance, setWalletBalance] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  const [showPromoSheet, setShowPromoSheet] = useState(false);
 
   useEffect(() => {
     userAPI.getWallet()
@@ -148,7 +150,7 @@ export default function FareEstimate() {
         </button>
         <button
           type="button"
-          onClick={() => navigate(getPorterPromoPath())}
+          onClick={() => setShowPromoSheet(true)}
           className="flex w-full items-center justify-between rounded-2xl border border-gray-100 bg-white p-3 shadow-sm"
         >
           <div className="flex items-center gap-2">
@@ -201,17 +203,14 @@ export default function FareEstimate() {
 
       <SectionLabel>Estimated Fare</SectionLabel>
       <div className="mb-4 rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
-        <FareRow label="Base delivery fare" value={inr(baseFare ?? 0)} />
-        {(distanceText || distanceKm != null) && (
-          <FareRow label="Distance" value={distanceText || `${distanceKm} km`} />
-        )}
-        {(durationText || durationMin != null) && (
-          <FareRow label="ETA" value={durationText || `${durationMin} min`} />
-        )}
-        {serviceTax > 0 && <FareRow label="Service Tax / GST" value={inr(serviceTax)} />}
-        {discount > 0 && <FareRow label="Promo discount" value={`−${inr(discount)}`} accent />}
-        <div className="my-2 border-t border-gray-100" />
-        <FareRow label="Total Payable" value={inr(payable)} strong />
+        <FareBreakdown
+          baseFare={baseFare ?? 0}
+          serviceTax={serviceTax}
+          discount={discount}
+          total={payable}
+          distanceText={distanceText || (distanceKm != null ? `${distanceKm} km` : null)}
+          durationText={durationText || (durationMin != null ? `${durationMin} min` : null)}
+        />
       </div>
 
       <StickyBar>
@@ -269,6 +268,7 @@ export default function FareEstimate() {
 
                 await porterUserApi.verifyPayment({
                   orderId: order.id || order._id,
+                  isPreOrder: order.isPreOrder,
                   razorpayOrderId: paymentResult.razorpay_order_id,
                   razorpayPaymentId: paymentResult.razorpay_payment_id,
                   razorpaySignature: paymentResult.razorpay_signature,
@@ -315,6 +315,10 @@ export default function FareEstimate() {
           {submitting ? "Processing..." : "Book Parcel"}
         </PrimaryButton>
       </StickyBar>
+      <CouponBottomSheet 
+        open={showPromoSheet} 
+        onClose={() => setShowPromoSheet(false)} 
+      />
     </Screen>
   );
 }

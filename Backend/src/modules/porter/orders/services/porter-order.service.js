@@ -7,8 +7,8 @@ import {
     verifyPaymentSignature,
 } from '../../../food/orders/helpers/razorpay.helper.js';
 import { PorterOrder } from '../models/porterOrder.model.js';
+import { PorterPreOrder } from '../models/porterPreOrder.model.js';
 import { FoodOrder } from '../../../food/orders/models/order.model.js';
-import { PorterCoupon } from '../../models/porterCoupon.model.js';
 import { FoodDeliveryPartner } from '../../../food/delivery/models/deliveryPartner.model.js';
 import { NotFoundError, ValidationError, ConflictError } from '../../../../core/auth/errors.js';
 import {
@@ -31,6 +31,8 @@ import {
 } from '../utils/porterOrder.helpers.js';
 import { calculatePorterOrderPricing } from './porter-order-pricing.service.js';
 import { chargePorterOrderWallet, applyPorterRefund } from './porter-order-payment.service.js';
+import { consumePorterCouponIfPaid, finalizePorterCouponOnCancel } from './porter-coupon-lifecycle.service.js';
+import { ensurePorterOrderActivatedAfterPaidPayment } from './porter-order-post-payment.service.js';
 import { startPorterDispatch, emitPorterOrderStatus, emitPorterOrderCancelled } from './porter-order-dispatch.service.js';
 import {
     schedulePorterOrderDispatch,
@@ -84,6 +86,37 @@ export async function createPorterOrder(userId, dto, performer = null) {
     const orderNumber = generateOrderNumber();
     const paymentMethod = dto.paymentMethod || 'wallet';
 
+    if (paymentMethod === 'razorpay') {
+        const amountPaise = Math.round(pricingResult.pricing.total * 100);
+        const rzOrder = await createRazorpayOrder(amountPaise, "INR", orderNumber);
+        const preOrder = new PorterPreOrder({
+            userId: new mongoose.Types.ObjectId(userId),
+            dto,
+            pricingResult,
+            orderNumber,
+            razorpayOrderId: rzOrder.id,
+            paymentMethod: 'razorpay',
+        });
+        await preOrder.save();
+
+        return {
+            id: preOrder._id.toString(),
+            isPreOrder: true,
+            orderNumber,
+            status: PORTER_ORDER_STATUS.CREATED,
+            payment: {
+                method: 'razorpay',
+                status: PORTER_PAYMENT_STATUS.PENDING,
+                razorpay: {
+                    orderId: rzOrder.id,
+                    amount: rzOrder.amount,
+                    currency: rzOrder.currency,
+                    key: await getRazorpayKeyId(),
+                }
+            }
+        };
+    }
+
     const order = new PorterOrder({
         orderNumber,
         userId: new mongoose.Types.ObjectId(userId),
@@ -119,30 +152,17 @@ export async function createPorterOrder(userId, dto, performer = null) {
     appendStatusHistory(order, PORTER_ORDER_STATUS.CREATED, performer, 'Order created');
     await order.save();
 
-    if (paymentMethod === 'razorpay') {
-        const amountPaise = Math.round(pricingResult.pricing.total * 100);
-        const rzOrder = await createRazorpayOrder(amountPaise, "INR", order._id.toString());
-        order.payment.razorpay = {
-            orderId: rzOrder.id,
-            amount: rzOrder.amount,
-            currency: rzOrder.currency,
-            key: await getRazorpayKeyId(),
-        };
-        order.payment.status = PORTER_PAYMENT_STATUS.PENDING;
-        order.markModified('payment');
-    } else {
-        const paymentResult = await chargePorterOrderWallet({
-            userId,
-            orderId: order._id,
-            orderNumber,
-            amount: pricingResult.pricing.total,
-            paymentMethod,
-        });
+    const paymentResult = await chargePorterOrderWallet({
+        userId,
+        orderId: order._id,
+        orderNumber,
+        amount: pricingResult.pricing.total,
+        paymentMethod,
+    });
 
-        order.payment.status = paymentResult.status;
-        order.payment.paidAt = paymentResult.paidAt;
-        order.markModified('payment');
-    }
+    order.payment.status = paymentResult.status;
+    order.payment.paidAt = paymentResult.paidAt;
+    order.markModified('payment');
 
     const scheduledDate = dto.scheduledAt ? new Date(dto.scheduledAt) : null;
     if (scheduledDate && Number.isNaN(scheduledDate.getTime())) {
@@ -179,12 +199,7 @@ export async function createPorterOrder(userId, dto, performer = null) {
         appendStatusHistory(order, PORTER_ORDER_STATUS.SCHEDULED, performer, 'Scheduled for later dispatch');
         await order.save();
 
-        if (pricingResult.coupon?.id) {
-            await PorterCoupon.updateOne(
-                { _id: pricingResult.coupon.id },
-                { $inc: { usedCount: 1 } },
-            );
-        }
+        await consumePorterCouponIfPaid(order);
 
         await logPorterOrderAction({
             orderId: order._id,
@@ -211,12 +226,7 @@ export async function createPorterOrder(userId, dto, performer = null) {
     appendStatusHistory(order, PORTER_ORDER_STATUS.SEARCHING_PARTNER, performer, 'Searching for partner');
     await order.save();
 
-    if (pricingResult.coupon?.id) {
-        await PorterCoupon.updateOne(
-            { _id: pricingResult.coupon.id },
-            { $inc: { usedCount: 1 } },
-        );
-    }
+    await consumePorterCouponIfPaid(order);
 
     await logPorterOrderAction({
         orderId: order._id,
@@ -349,12 +359,12 @@ export async function cancelPorterOrderByUser(userId, orderId, reason, performer
     void removePorterScheduledJobs(refunded._id, refunded);
 
     const refundResult = await applyPorterRefund(refunded, reason);
+    await finalizePorterCouponOnCancel(refunded);
 
     await emitPorterOrderCancelled(refunded, userId, refunded.dispatch?.deliveryPartnerId);
     await emitPorterOrderStatus(refunded, userId, refunded.dispatch?.deliveryPartnerId);
-    const { notifyPorterOrderStatusChange, notifyPorterRefund } = await import('./porter-notification.service.js');
-    void notifyPorterOrderStatusChange(refunded);
-    if (refundResult?.status === 'processed') void notifyPorterRefund(refunded, refundResult);
+    const { notifyPorterOrderCancellation } = await import('./porter-notification.service.js');
+    void notifyPorterOrderCancellation(refunded, { refund: refundResult, cancelledBy: 'user' });
     await logPorterOrderAction({
         orderId: refunded._id,
         orderNumber: refunded.orderNumber,
@@ -497,7 +507,13 @@ export async function adminStartScheduledPorterDispatch(orderId, performer = nul
 export async function listPorterOrdersAdmin(query = {}) {
     const parsed = parseListQuery(query);
     const filter = { ...baseFilter };
-    if (parsed.status) filter.status = parsed.status;
+    if (parsed.status) {
+        if (parsed.status === 'cancelled') {
+            filter.status = { $in: ['cancelled_by_user', 'cancelled_by_admin', 'cancelled_by_driver', 'failed'] };
+        } else {
+            filter.status = parsed.status;
+        }
+    }
     if (parsed.search) {
         filter.$or = [
             { orderNumber: { $regex: parsed.search, $options: 'i' } },
@@ -556,9 +572,13 @@ export async function listPorterOrdersAdmin(query = {}) {
         ])
     ]);
 
-    const tabCounts = { all: 0 };
+    const tabCounts = { all: 0, cancelled: 0 };
     statusGroups.forEach(g => {
-        tabCounts[g._id] = g.count;
+        if (['cancelled_by_user', 'cancelled_by_admin', 'cancelled_by_driver', 'failed'].includes(g._id)) {
+            tabCounts.cancelled = (tabCounts.cancelled || 0) + g.count;
+        } else {
+            tabCounts[g._id] = g.count;
+        }
         tabCounts.all += g.count;
     });
 
@@ -568,13 +588,129 @@ export async function listPorterOrdersAdmin(query = {}) {
 }
 
 export async function verifyPorterPayment(userId, dto) {
+    if (dto.isPreOrder) {
+        const preOrder = await PorterPreOrder.findOne({
+            _id: new mongoose.Types.ObjectId(dto.orderId),
+            userId: new mongoose.Types.ObjectId(userId),
+        });
+        if (!preOrder) throw new NotFoundError('Order session expired or not found. Please try booking again.');
+
+        const expectedRazorpayOrderId = String(preOrder.razorpayOrderId || '').trim();
+        const providedRazorpayOrderId = String(dto.razorpayOrderId || '').trim();
+        if (!expectedRazorpayOrderId || providedRazorpayOrderId !== expectedRazorpayOrderId) {
+            throw new ValidationError('Payment order mismatch');
+        }
+
+        const valid = verifyPaymentSignature(
+            expectedRazorpayOrderId,
+            dto.razorpayPaymentId,
+            dto.razorpaySignature,
+        );
+        if (!valid) throw new ValidationError('Payment verification failed');
+
+        const paymentId = String(dto.razorpayPaymentId || '').trim();
+        const [porterExisting, foodExisting] = await Promise.all([
+            PorterOrder.findOne({
+                $or: [
+                    { 'payment.razorpay.paymentId': paymentId },
+                    { 'payment.razorpayPaymentId': paymentId },
+                ],
+            })
+                .select('_id orderNumber')
+                .lean(),
+            FoodOrder.findOne({
+                'payment.razorpay.paymentId': paymentId,
+            })
+                .select('_id orderId')
+                .lean(),
+        ]);
+        if (porterExisting || foodExisting) {
+            throw new ValidationError('Razorpay payment already consumed');
+        }
+
+        if (isRazorpayConfigured()) {
+            const fetchedPayment = await fetchRazorpayPayment(dto.razorpayPaymentId);
+            const fetchedOrderId = String(fetchedPayment?.order_id || '').trim();
+            const fetchedStatus = String(fetchedPayment?.status || '').toLowerCase();
+            const fetchedAmountPaise = Number(fetchedPayment?.amount || 0);
+            const expectedAmountPaise = Math.round(Number(preOrder.pricingResult.pricing?.total || 0) * 100);
+
+            if (fetchedOrderId !== expectedRazorpayOrderId) {
+                throw new ValidationError('Payment order mismatch');
+            }
+            if (fetchedStatus !== 'captured') {
+                throw new ValidationError('Payment not captured');
+            }
+            if (!Number.isFinite(expectedAmountPaise) || expectedAmountPaise < 100) {
+                throw new ValidationError('Invalid order payment amount');
+            }
+            if (fetchedAmountPaise !== expectedAmountPaise) {
+                throw new ValidationError('Payment amount mismatch');
+            }
+        }
+
+        const order = new PorterOrder({
+            orderNumber: preOrder.orderNumber,
+            userId: new mongoose.Types.ObjectId(userId),
+            status: PORTER_ORDER_STATUS.CREATED,
+            pickup: preOrder.dto.pickup,
+            delivery: preOrder.dto.delivery,
+            parcel: preOrder.dto.parcel || {},
+            vehicleId: preOrder.pricingResult.vehicle.id,
+            vehicleName: preOrder.pricingResult.vehicle.category,
+            zoneId: preOrder.pricingResult.zoneId ? new mongoose.Types.ObjectId(preOrder.pricingResult.zoneId) : null,
+            route: {
+                distanceKm: preOrder.pricingResult.route.distanceKm,
+                durationMin: preOrder.pricingResult.route.durationMin,
+                distanceText: preOrder.pricingResult.route.distanceText,
+                durationText: preOrder.pricingResult.route.durationText,
+                polyline: preOrder.pricingResult.route.polyline,
+            },
+            pricing: preOrder.pricingResult.pricing,
+            couponId: preOrder.pricingResult.coupon?.id ? new mongoose.Types.ObjectId(preOrder.pricingResult.coupon.id) : null,
+            couponCode: preOrder.pricingResult.coupon?.code || null,
+            payment: { 
+                method: 'razorpay', 
+                status: PORTER_PAYMENT_STATUS.PAID,
+                paidAt: new Date(),
+                razorpay: {
+                    orderId: expectedRazorpayOrderId,
+                    paymentId: dto.razorpayPaymentId,
+                    signature: dto.razorpaySignature
+                }
+            },
+            dispatch: { status: PORTER_DISPATCH_STATUS.UNASSIGNED, rejectedPartnerIds: [] },
+            deliveryState: {
+                pickupOtp: generateOtp(4),
+            },
+            scheduledAt: preOrder.dto.scheduledAt || null,
+            schedule: preOrder.dto.timezone
+                ? { timezone: normalizePorterTimezone(preOrder.dto.timezone) || 'Asia/Kolkata', status: 'none' }
+                : undefined,
+            createdBy: null,
+        });
+
+        appendStatusHistory(order, PORTER_ORDER_STATUS.CREATED, null, 'Order created after payment');
+        const scheduledDate = preOrder.dto.scheduledAt ? new Date(preOrder.dto.scheduledAt) : null;
+        if (scheduledDate) { order.scheduledAt = scheduledDate; }
+        
+        await order.save();
+        await PorterPreOrder.deleteOne({ _id: preOrder._id });
+
+        await ensurePorterOrderActivatedAfterPaidPayment(order, { performer: null, source: 'verify' });
+        return { order };
+    }
+
     const order = await PorterOrder.findOne({
         _id: new mongoose.Types.ObjectId(dto.orderId),
         userId: new mongoose.Types.ObjectId(userId),
     });
     
     if (!order) throw new NotFoundError('Order not found');
-    if (order.payment.status === PORTER_PAYMENT_STATUS.PAID) return { order };
+    if (order.payment.status === PORTER_PAYMENT_STATUS.PAID) {
+        await ensurePorterOrderActivatedAfterPaidPayment(order, { performer: null, source: 'verify' });
+        return { order };
+    }
 
     const expectedRazorpayOrderId = String(order.payment?.razorpay?.orderId || '').trim();
     const providedRazorpayOrderId = String(dto.razorpayOrderId || '').trim();
@@ -638,84 +774,9 @@ export async function verifyPorterPayment(userId, dto) {
     order.payment.razorpay.signature = dto.razorpaySignature;
     order.payment.razorpayPaymentId = dto.razorpayPaymentId;
     order.markModified('payment');
+    await order.save();
 
-    if (order.status === PORTER_ORDER_STATUS.CREATED) {
-        const isScheduled = isFuturePorterSchedule(order.scheduledAt)
-            && (() => {
-                try {
-                    parseAndValidatePorterScheduledAt(order.scheduledAt);
-                    return true;
-                } catch {
-                    return false;
-                }
-            })();
-        
-        if (isScheduled) {
-            order.status = PORTER_ORDER_STATUS.SCHEDULED;
-            order.schedule = order.schedule || {};
-            order.schedule.status = 'scheduled';
-            if (!order.schedule.timezone) {
-                order.schedule.timezone = 'Asia/Kolkata';
-            } else {
-                order.schedule.timezone = normalizePorterTimezone(order.schedule.timezone) || 'Asia/Kolkata';
-            }
-            order.schedule.scheduledUpdatedAt = new Date();
-            order.schedule.lastUpdatedAt = new Date();
-            order.markModified('schedule');
-            appendStatusHistory(order, PORTER_ORDER_STATUS.SCHEDULED, null, 'Scheduled for later dispatch after payment');
-            await order.save();
-
-            if (order.couponId) {
-                await mongoose.model('PorterCoupon').updateOne(
-                    { _id: order.couponId },
-                    { $inc: { usedCount: 1 } }
-                );
-            }
-
-            await logPorterOrderAction({
-                orderId: order._id,
-                orderNumber: order.orderNumber,
-                action: 'order_scheduled',
-                toStatus: order.status,
-                performedBy: null,
-                metadata: { scheduledAt: order.scheduledAt.toISOString() },
-            });
-
-            await schedulePorterOrderDispatch(order._id, order.scheduledAt, {
-                timezone: normalizePorterTimezone(order.schedule?.timezone) || 'Asia/Kolkata',
-            });
-            try {
-                const { notifyPorterOrderScheduled } = await import('./porter-notification.service.js');
-                void notifyPorterOrderScheduled(order);
-            } catch {
-                // non-blocking
-            }
-        } else {
-            order.status = PORTER_ORDER_STATUS.SEARCHING_PARTNER;
-            appendStatusHistory(order, PORTER_ORDER_STATUS.SEARCHING_PARTNER, null, 'Searching for partner after payment');
-            await order.save();
-
-            if (order.couponId) {
-                await mongoose.model('PorterCoupon').updateOne(
-                    { _id: order.couponId },
-                    { $inc: { usedCount: 1 } }
-                );
-            }
-
-            await logPorterOrderAction({
-                orderId: order._id,
-                orderNumber: order.orderNumber,
-                action: 'order_created',
-                toStatus: order.status,
-                performedBy: null,
-            });
-
-            startPorterDispatch(order._id).catch(() => {});
-        }
-    } else {
-        appendStatusHistory(order, order.status, null, 'Payment verified');
-        await order.save();
-    }
+    await ensurePorterOrderActivatedAfterPaidPayment(order, { performer: null, source: 'verify' });
 
     return { order };
 }

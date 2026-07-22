@@ -59,7 +59,16 @@ const Dashboard = () => {
     { header: "Goods", key: "goodsType" },
     { header: "Distance", key: "distance" },
     { header: "Amount", key: "amount" },
-    { header: "Payment", key: "payment" },
+    { header: "Payment", key: "paymentStatus", cell: (row) => {
+      let ps = row.paymentStatus?.toLowerCase() || "pending";
+      if (ps === "pending" && row.status?.startsWith("cancelled")) {
+        ps = "cancelled";
+      }
+      let tone = "warning";
+      if (ps === "paid") tone = "success";
+      else if (["refunded", "failed", "cancelled"].includes(ps)) tone = "danger";
+      return <StatusBadge status={tone} label={ps} />;
+    } },
     { header: "Status", key: "status", cell: (row) => <StatusBadge status={row.status === "in_transit" ? "warning" : row.status === "delivered" ? "success" : row.status === "cancelled" ? "error" : "default"} label={row.status.replace("_", " ")} /> },
     { header: "Time", key: "time", className: "text-gray-500 whitespace-nowrap" },
   ];
@@ -158,15 +167,18 @@ const Dashboard = () => {
       {loading ? (
         <p className="text-sm text-muted-foreground">Loading dashboard…</p>
       ) : (
-      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
         <StatCard title="Total Orders" value={String(kpis.totalOrders ?? 0)} icon={<Package size={18} />} iconBg="bg-blue-100 text-blue-600" />
         <StatCard title="Orders Today" value={String(kpis.todayOrders ?? 0)} icon={<Clock size={18} />} iconBg="bg-orange-100 text-orange-600" />
         <StatCard title="Active Orders" value={String(kpis.activeOrders ?? 0)} icon={<Activity size={18} />} iconBg="bg-purple-100 text-purple-600" />
-        <StatCard title="Revenue Today" value={`₹${(kpis.todayRevenue ?? 0).toLocaleString("en-IN")}`} icon={<DollarSign size={18} />} iconBg="bg-yellow-100 text-yellow-600" />
-        <StatCard title="Total Revenue" value={`₹${(kpis.totalRevenue ?? 0).toLocaleString("en-IN")}`} icon={<TrendingUp size={18} />} iconBg="bg-green-100 text-green-600" />
         <StatCard title="Delivered" value={String(kpis.deliveredOrders ?? 0)} icon={<CheckCircle size={18} />} iconBg="bg-green-100 text-green-600" />
         <StatCard title="Cancelled" value={String(kpis.cancelledOrders ?? 0)} icon={<XCircle size={18} />} iconBg="bg-red-100 text-red-600" />
-        <StatCard title="Scheduled Orders" value={String(kpis.scheduledOrders ?? 0)} icon={<Clock size={18} />} iconBg="bg-cyan-100 text-cyan-600" />
+        
+        <StatCard title="Revenue (Today)" value={`₹${(kpis.todayRevenue ?? 0).toLocaleString("en-IN")}`} icon={<DollarSign size={18} />} iconBg="bg-yellow-100 text-yellow-600" />
+        <StatCard title="Admin (Today)" value={`₹${(kpis.todayAdminEarning ?? 0).toLocaleString("en-IN")}`} icon={<DollarSign size={18} />} iconBg="bg-emerald-100 text-emerald-600" />
+        <StatCard title="Revenue (Total)" value={`₹${(kpis.totalRevenue ?? 0).toLocaleString("en-IN")}`} icon={<TrendingUp size={18} />} iconBg="bg-green-100 text-green-600" />
+        <StatCard title="Admin (Total)" value={`₹${(kpis.totalAdminEarning ?? 0).toLocaleString("en-IN")}`} icon={<TrendingUp size={18} />} iconBg="bg-emerald-100 text-emerald-600" />
+        <StatCard title="Scheduled" value={String(kpis.scheduledOrders ?? 0)} icon={<Clock size={18} />} iconBg="bg-cyan-100 text-cyan-600" />
       </div>
       )}
 

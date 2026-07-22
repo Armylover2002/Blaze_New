@@ -12,6 +12,7 @@ import { OnboardingPaymentLog } from '../../../modules/common/models/onboardingP
 import { processOrderPostPaymentFulfillment } from '../../../modules/food/orders/services/order.service.js';
 import { QuickOrder } from '../../../modules/quick-commerce/models/order.model.js';
 import { PorterOrder } from '../../../modules/porter/orders/models/porterOrder.model.js';
+import { ensurePorterOrderActivatedAfterPaidPayment } from '../../../modules/porter/orders/services/porter-order-post-payment.service.js';
 import { fanOutQuickSellerOrdersForParent } from '../../../modules/quick-commerce/services/quickSellerOrderFanout.service.js';
 
 import * as walletService from '../../../modules/food/subscriptions/services/wallet.service.js';
@@ -248,6 +249,11 @@ export const handleRazorpayWebhook = async (req, res) => {
             );
             if (porterOrder) {
                 logger.info(`Webhook [payment.captured]: Synced Porter Order ${porterOrder.orderNumber} (Status=paid)`);
+                try {
+                    await ensurePorterOrderActivatedAfterPaidPayment(porterOrder, { performer: null, source: 'webhook' });
+                } catch (porterActivateErr) {
+                    logger.error(`Webhook Porter post-payment activation failed for ${porterOrder.orderNumber}: ${porterActivateErr?.message || porterActivateErr}`);
+                }
             }
         }
 

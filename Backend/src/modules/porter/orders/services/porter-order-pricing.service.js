@@ -5,6 +5,7 @@ import { PorterCoupon } from '../../models/porterCoupon.model.js';
 import { PorterOrder } from '../models/porterOrder.model.js';
 import { NotFoundError, ValidationError } from '../../../../core/auth/errors.js';
 import { validateCouponForRedemption } from '../../services/coupon.service.js';
+import { countPorterCouponUsesForUser } from './porter-coupon-lifecycle.service.js';
 import { getRoutePreview } from '../../services/maps.service.js';
 import { assertPorterLocationsServiceable } from './porter-zone-lookup.service.js';
 import { calculateFareFromPricing } from '../../utils/porter-pricing-calculator.util.js';
@@ -87,11 +88,7 @@ async function validateCouponScope(coupon, { zoneId, vehicleId, userId }) {
     }
 
     if (coupon.perUserLimit > 0 && userId) {
-        const userUses = await PorterOrder.countDocuments({
-            userId: new mongoose.Types.ObjectId(userId),
-            couponId: coupon._id,
-            isDeleted: { $ne: true },
-        });
+        const userUses = await countPorterCouponUsesForUser(coupon._id, userId);
         if (userUses >= coupon.perUserLimit) {
             throw new ValidationError('Coupon per-user limit reached');
         }

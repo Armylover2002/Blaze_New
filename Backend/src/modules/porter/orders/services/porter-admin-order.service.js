@@ -21,8 +21,9 @@ import {
     partnerSupportsParcel,
 } from './porter-order-dispatch.service.js';
 import { applyPorterRefund } from './porter-order-payment.service.js';
+import { finalizePorterCouponOnCancel } from './porter-coupon-lifecycle.service.js';
 import { settlePorterOrderEarningsAtomic } from './porter-wallet-atomic.service.js';
-import { notifyPorterOrderStatusChange } from './porter-notification.service.js';
+import { notifyPorterOrderCancellation } from './porter-notification.service.js';
 import { activateScheduledPorterOrder } from './porter-scheduled-dispatch.service.js';
 import { assertPartnerNotBusy } from '../utils/porter-order-transition.util.js';
 
@@ -211,14 +212,11 @@ export async function adminCancelPorterOrder(orderId, reason, performer = null, 
     void removePorterScheduledJobs(cancelled._id, cancelled);
 
     const refundResult = await applyPorterRefund(cancelled, reason);
+    await finalizePorterCouponOnCancel(cancelled);
 
     await emitPorterOrderCancelled(cancelled, cancelled.userId, previousDriver);
     await emitPorterOrderStatus(cancelled, cancelled.userId, previousDriver);
-    await notifyPorterOrderStatusChange(cancelled);
-    if (refundResult?.status === 'processed') {
-        const { notifyPorterRefund } = await import('./porter-notification.service.js');
-        void notifyPorterRefund(cancelled, refundResult);
-    }
+    void notifyPorterOrderCancellation(cancelled, { refund: refundResult, cancelledBy: 'admin' });
     await logPorterOrderAction({
         orderId: cancelled._id,
         orderNumber: cancelled.orderNumber,

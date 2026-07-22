@@ -13,6 +13,7 @@ import {
   invalidateRecoveryCache,
   applySocketActiveOrder,
 } from '@/modules/DeliveryV2/services/deliveryOrderSync';
+import { invalidateDriverActiveOrderCache } from '@/modules/porter/driver/services/driverApi';
 import { showActorBrowserNotification } from '@food/utils/actorBrowserNotification';
 
 /** StrictMode-safe shared socket: remount within same tick does not tear down. */
@@ -1120,12 +1121,21 @@ export const useDeliveryNotifications = () => {
 
     socket.on('porter_order_cancelled', (statusData) => {
       invalidateRecoveryCache('order-status');
+      invalidateDriverActiveOrderCache();
+      const enriched = enrichPorterDeliveryOrder({
+        ...statusData,
+        documentType: 'porter_order',
+        module: 'parcel',
+      });
+      const eventKey = getOrderAlertKey(enriched);
+      const activeKey = getOrderAlertKey(activeOrderRef.current || {});
+      if (eventKey && activeKey && eventKey === activeKey) {
+        stopAlertLoopRef.current?.();
+        activeOrderRef.current = null;
+        setNewOrder(null);
+      }
       setOrderStatusUpdate({
-        ...enrichPorterDeliveryOrder({
-          ...statusData,
-          documentType: 'porter_order',
-          module: 'parcel',
-        }),
+        ...enriched,
         cancelled: true,
       });
     });

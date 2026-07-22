@@ -160,12 +160,14 @@ export default function UserLayout({ children }) {
   const isUnder250 = normalizedPath === "/under-250" || normalizedPath === "/user/under-250"
   const showFoodBottomNav = showBottomNav && !isSharedQuickProfile && !isSharedPorterProfile
 
+  const isPorterRoute = location.pathname === '/porter' || location.pathname.startsWith('/porter/');
+
   return (
     <div className="min-h-screen bg-[#f5f5f5] dark:bg-[#0a0a0a] transition-colors duration-200">
       <CartProvider>
         <ProfileProvider>
           <OrdersProvider>
-              <ActiveOrderManagerBridge />
+              {!isPorterRoute && <ActiveOrderManagerBridge />}
               <SearchOverlayProvider>
                 <LocationSelectorProvider>
                   <LocationProvider>

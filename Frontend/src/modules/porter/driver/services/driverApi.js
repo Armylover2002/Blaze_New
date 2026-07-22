@@ -4,7 +4,7 @@ const unwrap = (response) => response?.data?.data ?? response?.data ?? response;
 
 const createGetDedupe = (requestFn) => {
   let inFlight = null;
-  return (...args) => {
+  const deduped = (...args) => {
     if (inFlight) return inFlight;
     inFlight = Promise.resolve()
       .then(() => requestFn(...args))
@@ -13,6 +13,10 @@ const createGetDedupe = (requestFn) => {
       });
     return inFlight;
   };
+  deduped.invalidate = () => {
+    inFlight = null;
+  };
+  return deduped;
 };
 
 const porterDriverApi = {
@@ -33,9 +37,10 @@ const porterDriverApi = {
     axiosInstance.get('/porter/driver/orders/available').then(unwrap),
   ),
 
-  getActiveOrder: createGetDedupe(() =>
-    axiosInstance.get('/porter/driver/orders/active').then(unwrap),
-  ),
+  getActiveOrder: createGetDedupe(({ bustCache = false } = {}) => {
+    const suffix = bustCache ? `?_=${Date.now()}` : '';
+    return axiosInstance.get(`/porter/driver/orders/active${suffix}`).then(unwrap);
+  }),
 
   acceptOrder: (orderId) => axiosInstance.post(`/porter/driver/orders/${orderId}/accept`).then(unwrap),
 
@@ -71,5 +76,10 @@ const porterDriverApi = {
 
   listTrips: (params = {}) => axiosInstance.get('/porter/driver/trips', { params }).then(unwrap),
 };
+
+/** Drop in-flight GET /active dedupe after cancel/complete so stale responses cannot restore a trip. */
+export function invalidateDriverActiveOrderCache() {
+  porterDriverApi.getActiveOrder.invalidate?.();
+}
 
 export default porterDriverApi;

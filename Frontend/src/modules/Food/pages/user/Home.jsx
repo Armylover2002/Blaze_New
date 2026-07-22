@@ -212,6 +212,8 @@ export default function Home() {
   const effectiveLocation = (deliveryAddressMode === "current" ? location : defaultSavedAddressLocation) || location;
 
   // --- Core Data Hook ---
+  const isFoodRoute = !routerLocation.pathname.endsWith("/quick") && !routerLocation.pathname.includes("/porter");
+  
   const {
     banners,
     categories,
@@ -226,7 +228,8 @@ export default function Home() {
     location: effectiveLocation,
     vegMode,
     backendOrigin: BACKEND_ORIGIN,
-    availabilityTick
+    availabilityTick,
+    enabled: isFoodRoute
   });
 
   // --- UI Effects ---

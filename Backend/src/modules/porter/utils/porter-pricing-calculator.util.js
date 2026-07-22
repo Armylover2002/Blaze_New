@@ -26,16 +26,18 @@ export function calculateFareFromPricing(pricing, distanceKm) {
         commission = (fare * commissionValue) / 100;
     }
     
-    const driverEarning = Math.max(0, Math.round(fare - commission));
-    const platformFee = Math.round(commission);
-    const subtotal = fare + tax;
+    const roundedFare = Math.round(fare);
+    const roundedTax = Math.round(tax);
+    const roundedCommission = Math.round(commission);
+    const driverEarning = Math.max(0, roundedFare - roundedCommission);
+    const subtotal = roundedFare + roundedTax;
 
     return {
-        baseFare: Math.round(fare),
+        baseFare: roundedFare,
         distanceCharge: Math.round(Math.max(0, distanceKm - baseDistance) * distancePrice),
-        serviceTax: Math.round(tax),
-        commission: Math.round(commission),
-        total: Math.round(subtotal),
+        serviceTax: roundedTax,
+        commission: roundedCommission,
+        total: subtotal,
         driverEarning,
     };
 }

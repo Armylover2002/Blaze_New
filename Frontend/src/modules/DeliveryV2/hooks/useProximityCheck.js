@@ -6,6 +6,7 @@ import {
   getPrimaryPickupLocation,
   getReturnDropLocation,
   isReturnPickupTrip,
+  isPorterParcelTrip,
 } from '@/modules/DeliveryV2/utils/orderRouting';
 
 const NEAR_M = 300;
@@ -127,8 +128,24 @@ export const useProximityCheck = () => {
 
   const isWithinRange = isDevMode ? true : (distanceToTarget <= actionLimit);
 
+  // UI distance: parcel pickup prefers accept-time road distance when GPS snaps to ~0.
+  const displayDistanceToTarget = useMemo(() => {
+    const liveM = distanceToTarget;
+
+    if (isPorterParcelTrip(activeOrder) && tripStatus === 'PICKING_UP') {
+      const serverM = Number(activeOrder.pickupDistanceKm) * 1000;
+      if (Number.isFinite(serverM) && serverM > 0) {
+        if (!Number.isFinite(liveM) || liveM === Infinity) return serverM;
+        if (liveM <= NEAR_M && serverM > NEAR_M) return serverM;
+      }
+    }
+
+    return liveM;
+  }, [activeOrder, tripStatus, distanceToTarget]);
+
   return {
     distanceToTarget,
+    displayDistanceToTarget,
     isWithinRange,
     actionLimit,
   };

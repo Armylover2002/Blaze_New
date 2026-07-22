@@ -16,14 +16,14 @@ export default function Screen({
   const handleBack = () => (onBack ? onBack() : navigate(-1));
 
   return (
-    <div className={`min-h-screen bg-[#FAF7F2] dark:bg-[#0a0a0a] ${className}`}>
-      <header className="sticky top-0 z-40 bg-white/90 dark:bg-[#1a1a1a]/90 backdrop-blur-md border-b border-gray-100 dark:border-white/10">
-        <div className="flex items-center gap-3 px-4 py-3">
+    <div className={`min-h-screen bg-[#FAF7F2] dark:bg-[#0a0a0a] print:bg-white print:min-h-0 ${className}`}>
+      <header className="sticky top-0 z-40 bg-white/90 dark:bg-[#1a1a1a]/90 backdrop-blur-md border-b border-gray-100 dark:border-white/10 print:static print:border-none print:bg-transparent">
+        <div className="flex items-center gap-3 px-4 py-3 print:p-0">
           <button
             type="button"
             onClick={handleBack}
             aria-label="Go back"
-            className="flex h-9 w-9 items-center justify-center rounded-full bg-gray-100 text-gray-700 hover:bg-gray-200 active:scale-95 transition"
+            className="flex h-9 w-9 items-center justify-center rounded-full bg-gray-100 text-gray-700 hover:bg-gray-200 active:scale-95 transition print:hidden"
           >
             <ChevronLeft className="h-5 w-5" strokeWidth={2.4} />
           </button>

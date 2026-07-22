@@ -12,6 +12,7 @@ const unwrapPaginated = (response) => {
     hasNext: Boolean(data.hasNext),
     hasPrev: Boolean(data.hasPrev),
     limit: data.limit || 20,
+    tabCounts: data.tabCounts,
   };
 };
 

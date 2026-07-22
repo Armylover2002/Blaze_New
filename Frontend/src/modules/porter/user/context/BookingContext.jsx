@@ -6,6 +6,15 @@ import { computePorterCouponDiscount } from "../utils/couponCalculations";
 import { mapActiveShipmentFromOrder } from "../utils/orderMapper";
 import { usePorterCustomerSocket } from "../hooks/usePorterCustomerSocket";
 import {
+  PORTER_SEARCHING_STATUSES,
+  PORTER_SCHEDULED_STATUS,
+  PORTER_ACTIVE_ORDER_POLL_MS,
+} from "../constants/booking";
+import {
+  mergeSocketEventIntoShipment,
+  socketEventRequiresFullRefresh,
+} from "../utils/activeOrderSync";
+import {
   readStoredVehicleId,
   writeStoredVehicleId,
   readStoredSelectedVehicle,
@@ -123,6 +132,7 @@ export function PorterProvider({ children }) {
   const [delivery, setDeliveryState] = useState(() => readStoredLocation(DELIVERY_STORAGE_KEY));
   const [parcel, setParcelState] = useState(() => readStoredParcel());
   const [vehicleId, setVehicleIdState] = useState(() => readStoredVehicleId());
+  const vehicleIdRef = useRef(vehicleId);
   const [selectedVehicle, setSelectedVehicleState] = useState(() => readStoredSelectedVehicle());
   const [coupon, setCouponState] = useState(() => readStoredCoupon());
   const [couponPricing, setCouponPricingState] = useState(() => readStoredCouponPricing());
@@ -134,6 +144,12 @@ export function PorterProvider({ children }) {
   const [quoteLoading, setQuoteLoading] = useState(false);
   const quoteSeqRef = useRef(0);
   const hydrateSeqRef = useRef(0);
+  const refreshInFlightRef = useRef(null);
+  const hadSocketConnectionRef = useRef(false);
+  const socketEverConnectedRef = useRef(false);
+  const activeShipmentRef = useRef(activeShipment);
+  activeShipmentRef.current = activeShipment;
+  const totalParcelWeightRef = useRef(0);
 
   // --- TRACING BLOCK ---
   const prevRefs = useRef({ pickup, delivery, vehicleId, totalParcelWeight: 0 });
@@ -172,25 +188,49 @@ export function PorterProvider({ children }) {
     && !TERMINAL_ORDER_STATUSES.has(String(activeShipment?.status || "").toLowerCase()),
   );
 
-  const { lastUpdate } = usePorterCustomerSocket(activeOrderId, { enabled: isActiveOrderLive });
+  const { lastUpdate, isConnected: isSocketConnected } = usePorterCustomerSocket(
+    activeOrderId,
+    { enabled: isActiveOrderLive },
+  );
+
+  const activeOrderStatus = String(activeShipment?.status || "").toLowerCase();
+  const pageOwnsActiveOrderPolling = useMemo(
+    () =>
+      PORTER_SEARCHING_STATUSES.includes(activeOrderStatus)
+      || activeOrderStatus === PORTER_SCHEDULED_STATUS,
+    [activeOrderStatus],
+  );
 
   const refreshActiveOrder = useCallback(async ({ forceRefresh = true } = {}) => {
-    const seq = ++hydrateSeqRef.current;
-    try {
-      const data = await porterUserApi.getActiveOrder({ forceRefresh });
-      if (seq !== hydrateSeqRef.current) return null;
-      const order = data?.order ?? data;
-      const mapped = mapActiveOrder(order);
-      if (mapped && !TERMINAL_ORDER_STATUSES.has(String(mapped.status || "").toLowerCase())) {
-        writeStoredOrderId(mapped.id);
-        writeStoredActiveShipment(mapped);
-        setActiveShipment(mapped);
-        return mapped;
-      }
-      return null;
-    } catch {
-      return null;
+    if (refreshInFlightRef.current) {
+      return refreshInFlightRef.current;
     }
+
+    const seq = ++hydrateSeqRef.current;
+    const run = (async () => {
+      try {
+        const data = await porterUserApi.getActiveOrder({ forceRefresh });
+        if (seq !== hydrateSeqRef.current) return null;
+        const order = data?.order ?? data;
+        const mapped = mapActiveOrder(order);
+        if (mapped && !TERMINAL_ORDER_STATUSES.has(String(mapped.status || "").toLowerCase())) {
+          writeStoredOrderId(mapped.id);
+          writeStoredActiveShipment(mapped);
+          setActiveShipment(mapped);
+          return mapped;
+        }
+        return null;
+      } catch {
+        return null;
+      } finally {
+        if (refreshInFlightRef.current === run) {
+          refreshInFlightRef.current = null;
+        }
+      }
+    })();
+
+    refreshInFlightRef.current = run;
+    return run;
   }, []);
 
   const setPickup = useCallback((value) => {
@@ -270,6 +310,7 @@ export function PorterProvider({ children }) {
 
   const selectVehicle = useCallback((nextVehicleId, vehicleMeta = null) => {
     const id = nextVehicleId ? String(nextVehicleId) : null;
+    vehicleIdRef.current = id;
     setVehicleIdState(id);
     writeStoredVehicleId(id);
     if (vehicleMeta) {
@@ -282,6 +323,7 @@ export function PorterProvider({ children }) {
     setVehicleIdState((prev) => {
       const next = typeof value === "function" ? value(prev) : value;
       const id = next ? String(next) : null;
+      vehicleIdRef.current = id;
       writeStoredVehicleId(id);
       return id;
     });
@@ -394,9 +436,10 @@ export function PorterProvider({ children }) {
     () => Math.max(0, Number(parcel.weightKg || 0) * Math.max(1, Number(parcel.quantity || 1))),
     [parcel.weightKg, parcel.quantity],
   );
+  totalParcelWeightRef.current = totalParcelWeight;
 
   const refreshRouteQuote = useCallback(async () => {
-    console.log("[BookingContext] refreshRouteQuote() executed. Deps:", { pickup, delivery, totalParcelWeight, vehicleId });
+    const weight = totalParcelWeightRef.current;
     if (!hasCoordinates(pickup) || !hasCoordinates(delivery)) {
       setRouteQuote(null);
       return null;
@@ -408,8 +451,8 @@ export function PorterProvider({ children }) {
       const data = await porterUserApi.getQuotePreview({
         pickup: toCoordinatePayload(pickup),
         delivery: toCoordinatePayload(delivery),
-        parcelWeight: totalParcelWeight > 0 ? totalParcelWeight : undefined,
-        vehicleId: vehicleId || undefined,
+        parcelWeight: weight > 0 ? weight : undefined,
+        vehicleId: vehicleIdRef.current || undefined,
       });
       if (seq !== quoteSeqRef.current) return null;
       setRouteQuote(data);
@@ -431,7 +474,7 @@ export function PorterProvider({ children }) {
     } finally {
       if (seq === quoteSeqRef.current) setQuoteLoading(false);
     }
-  }, [pickup, delivery, totalParcelWeight, vehicleId]);
+  }, [pickup, delivery]);
 
   useEffect(() => {
     refreshRouteQuote();
@@ -495,17 +538,62 @@ export function PorterProvider({ children }) {
 
   useEffect(() => {
     if (!lastUpdate?.orderId) return undefined;
-    void refreshActiveOrder({ forceRefresh: true });
+
+    const prev = activeShipmentRef.current;
+    const merged = mergeSocketEventIntoShipment(prev, lastUpdate);
+
+    if (
+      merged
+      && merged.id
+      && !TERMINAL_ORDER_STATUSES.has(String(merged.status || "").toLowerCase())
+    ) {
+      writeStoredOrderId(merged.id);
+      writeStoredActiveShipment(merged);
+      setActiveShipment(merged);
+    }
+
+    if (socketEventRequiresFullRefresh(prev, lastUpdate)) {
+      void refreshActiveOrder({ forceRefresh: true });
+    }
+
     return undefined;
   }, [lastUpdate, refreshActiveOrder]);
 
+  // One GET /active after socket reconnect (initial connect is covered by hydrate).
+  useEffect(() => {
+    if (!isActiveOrderLive) {
+      hadSocketConnectionRef.current = false;
+      socketEverConnectedRef.current = false;
+      return undefined;
+    }
+
+    const wasConnected = hadSocketConnectionRef.current;
+
+    if (isSocketConnected && !wasConnected && socketEverConnectedRef.current) {
+      void refreshActiveOrder({ forceRefresh: true });
+    }
+
+    if (isSocketConnected) {
+      socketEverConnectedRef.current = true;
+    }
+
+    hadSocketConnectionRef.current = isSocketConnected;
+    return undefined;
+  }, [isActiveOrderLive, isSocketConnected, refreshActiveOrder]);
+
+  // Fallback poll only when no page owns polling and the socket is disconnected.
+  // FindingPartner owns /active during searching; ScheduleWaiting owns it while scheduled.
   useEffect(() => {
     if (!isActiveOrderLive) return undefined;
+    if (pageOwnsActiveOrderPolling) return undefined;
+    if (isSocketConnected) return undefined;
+
     const timer = setInterval(() => {
       void refreshActiveOrder({ forceRefresh: true });
-    }, 15000);
+    }, PORTER_ACTIVE_ORDER_POLL_MS.socketFallback);
+
     return () => clearInterval(timer);
-  }, [isActiveOrderLive, refreshActiveOrder]);
+  }, [isActiveOrderLive, isSocketConnected, pageOwnsActiveOrderPolling, refreshActiveOrder]);
 
   const setActiveShipmentPersisted = useCallback((value) => {
     setActiveShipment((prev) => {
@@ -576,6 +664,8 @@ export function PorterProvider({ children }) {
     setPickupState(null);
     setDeliveryState(null);
     setParcelState(DEFAULT_PARCEL);
+
+    vehicleIdRef.current = null;
     setVehicleIdState(null);
     setSelectedVehicleState(null);
     setCouponState(null);
