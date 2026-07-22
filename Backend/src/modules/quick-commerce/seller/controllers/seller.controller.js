@@ -46,6 +46,13 @@ import {
   buildSellerCatalogBrowseFilter,
   isPharmacyCatalogProduct,
 } from "../services/sellerCatalog.service.js";
+import { validateCategoryImageFile } from "../../utils/category.helpers.js";
+import {
+  escapeRegex,
+  effectiveStockExpr,
+} from "../../utils/productVisibility.helpers.js";
+
+const MAX_BULK_CSV_PRODUCTS = 500;
 
 const STATUS_LABELS = {
   pending: "Pending",
@@ -609,19 +616,7 @@ const parseVariants = (raw, fallback = {}) => {
     }))
     .filter((variant) => variant.name);
 
-  if (variants.length > 0) {
-    return variants;
-  }
-
-  return [
-    {
-      name: str(fallback.weight) || "Default",
-      price: num(fallback.price),
-      salePrice: num(fallback.salePrice),
-      stock: Math.max(0, num(fallback.stock)),
-      sku: str(fallback.sku) || createSellerSku(),
-    },
-  ];
+  return variants;
 };
 
 const populateProductQuery = (query) =>
@@ -817,6 +812,15 @@ const parseProductPayload = async (req, existingProduct = null) => {
   }
 
   // Upload images to Cloudinary when files are provided.
+  for (const file of [mainUpload, ...galleryUploads].filter(Boolean)) {
+    const imageError = validateCategoryImageFile(file);
+    if (imageError) {
+      const err = new Error(imageError);
+      err.statusCode = 400;
+      throw err;
+    }
+  }
+
   const uploadedMainImage = mainUpload?.buffer
     ? await uploadImageBuffer(mainUpload.buffer, "quick-commerce/products/main")
     : "";
@@ -830,6 +834,15 @@ const parseProductPayload = async (req, existingProduct = null) => {
           ),
       )
     : [];
+
+  const galleryProvided = req.body?.galleryImages !== undefined;
+  const galleryImages = galleryProvided
+    ? [...bodyGallery, ...uploadedGallery]
+        .filter(Boolean)
+        .filter((url, idx, all) => all.indexOf(url) === idx)
+    : [...bodyGallery, ...uploadedGallery, ...arr(existingProduct?.galleryImages)]
+        .filter(Boolean)
+        .filter((url, idx, all) => all.indexOf(url) === idx);
 
   return {
     name: str(req.body?.name) || existingProduct?.name || "Untitled Product",
@@ -874,11 +887,7 @@ const parseProductPayload = async (req, existingProduct = null) => {
       existingProduct?.mainImage ||
       existingProduct?.image ||
       "",
-    galleryImages:
-      [...bodyGallery, ...uploadedGallery, ...arr(existingProduct?.galleryImages)]
-        .filter(Boolean)
-        // de-dupe while preserving order
-        .filter((url, idx, all) => all.indexOf(url) === idx),
+    galleryImages,
     mrp: num(
       req.body?.mrp,
       req.body?.salePrice ??
@@ -898,9 +907,9 @@ const parseProductPayload = async (req, existingProduct = null) => {
         ? "inactive"
         : "active",
     isActive: str(req.body?.status).toLowerCase() === "inactive" ? false : true,
-    approvalStatus: existingProduct?.approvalStatus || "pending",
+    approvalStatus: existingProduct?.approvalStatus || "approved",
     approvedAt:
-      (existingProduct?.approvalStatus || "pending") === "approved"
+      (existingProduct?.approvalStatus || "approved") === "approved"
         ? existingProduct?.approvedAt || new Date()
         : null,
     variants,
@@ -1163,10 +1172,86 @@ export const getSellerProductsController = async (req, res) => {
     const limit = Math.max(1, Math.min(100, num(req.query?.limit, 20)));
     const skip = (page - 1) * limit;
     const stockStatus = str(req.query?.stockStatus).toLowerCase();
+    const status = str(req.query?.status).toLowerCase();
+    const search = str(req.query?.search || req.query?.q).trim();
+    const categoryId = str(req.query?.categoryId || req.query?.category);
+    const minPrice = optionalNumber(req.query?.minPrice);
+    const maxPrice = optionalNumber(req.query?.maxPrice);
 
     const query = { sellerId };
-    if (stockStatus === "in") query.stock = { $gt: 0 };
-    if (stockStatus === "out") query.stock = 0;
+    const exprAnd = [];
+
+    if (status === "active" || status === "inactive") {
+      query.status = status;
+      query.isActive = status === "active";
+    }
+
+    if (mongoose.isValidObjectId(categoryId)) {
+      query.$or = [
+        { categoryId },
+        { subcategoryId: categoryId },
+        { headerId: categoryId },
+      ];
+    }
+
+    if (search) {
+      const term = escapeRegex(search.slice(0, 80));
+      query.$and = [
+        ...(query.$and || []),
+        {
+          $or: [
+            { name: { $regex: term, $options: "i" } },
+            { sku: { $regex: term, $options: "i" } },
+            { brand: { $regex: term, $options: "i" } },
+            { "variants.sku": { $regex: term, $options: "i" } },
+          ],
+        },
+      ];
+    }
+
+    if (minPrice !== null || maxPrice !== null) {
+      exprAnd.push({
+        $let: {
+          vars: {
+            effectivePrice: {
+              $cond: [
+                { $gt: [{ $ifNull: ["$salePrice", 0] }, 0] },
+                "$salePrice",
+                { $ifNull: ["$price", 0] },
+              ],
+            },
+          },
+          in: {
+            $and: [
+              ...(minPrice !== null
+                ? [{ $gte: ["$$effectivePrice", minPrice] }]
+                : []),
+              ...(maxPrice !== null
+                ? [{ $lte: ["$$effectivePrice", maxPrice] }]
+                : []),
+            ],
+          },
+        },
+      });
+    }
+
+    // Variant-aware stock filters (parent stock alone is unreliable).
+    if (stockStatus === "in") {
+      exprAnd.push({ $gt: [effectiveStockExpr, 0] });
+    } else if (stockStatus === "out") {
+      exprAnd.push({ $eq: [effectiveStockExpr, 0] });
+    } else if (stockStatus === "low") {
+      exprAnd.push({
+        $and: [
+          { $gt: [effectiveStockExpr, 0] },
+          { $lte: [effectiveStockExpr, 10] },
+        ],
+      });
+    }
+
+    if (exprAnd.length) {
+      query.$expr = { $and: exprAnd };
+    }
 
     const [items, total] = await Promise.all([
       populateProductQuery(
@@ -1306,7 +1391,7 @@ export const lookupProductBySkuController = async (req, res) => {
 export const createSellerProductController = async (req, res) => {
   try {
     const sellerId = sellerScope(req);
-    const seller = await Seller.findById(sellerId).select("shopInfo.businessType").lean();
+    const seller = await Seller.findById(sellerId).select("shopInfo.businessType approvalStatus").lean();
     const sellerBusinessType = normalizeBusinessType(seller?.shopInfo?.businessType);
 
     const basePayload = await parseProductPayload(req);
@@ -1345,7 +1430,13 @@ export const createSellerProductController = async (req, res) => {
       headerId: req.body?.headerId,
       categoryId: req.body?.categoryId,
       subcategoryId: req.body?.subcategoryId,
+      allowDefaultFallback: false,
     });
+
+    const sellerApproved = seller?.approvalStatus === "approved";
+    basePayload.approvalStatus = sellerApproved ? "approved" : "pending";
+    basePayload.approvedAt = sellerApproved ? new Date() : null;
+    basePayload.isActive = basePayload.status === "active";
 
     const product = await SellerProduct.create({
       sellerId,
@@ -1363,6 +1454,9 @@ export const createSellerProductController = async (req, res) => {
       .status(201)
       .json({ success: true, result: serializeProduct(populated) });
   } catch (error) {
+    if (error?.statusCode === 400) {
+      return sendError(res, 400, error.message);
+    }
     if (error?.code === 11000) {
       const keys = error.keyPattern ? Object.keys(error.keyPattern) : [];
       if (keys.includes("slug")) {
@@ -1393,6 +1487,7 @@ export const updateSellerProductController = async (req, res) => {
       headerId: req.body?.headerId || existing.headerId,
       categoryId: req.body?.categoryId || existing.categoryId,
       subcategoryId: req.body?.subcategoryId || existing.subcategoryId,
+      allowDefaultFallback: false,
     });
 
     const payload = await parseProductPayload(req, existing);
@@ -1427,6 +1522,11 @@ export const updateSellerProductController = async (req, res) => {
       }
     }
 
+    // Sellers cannot self-approve; preserve existing approval fields.
+    payload.approvalStatus = existing.approvalStatus || payload.approvalStatus;
+    payload.approvedAt = existing.approvedAt || payload.approvedAt;
+    payload.isActive = payload.status === "active";
+
     Object.assign(existing, {
       ...payload,
       ...categoryIds,
@@ -1441,6 +1541,9 @@ export const updateSellerProductController = async (req, res) => {
 
     return res.json({ success: true, result: serializeProduct(populated) });
   } catch (error) {
+    if (error?.statusCode === 400) {
+      return sendError(res, 400, error.message);
+    }
     if (error?.code === 11000) {
       const keys = error.keyPattern ? Object.keys(error.keyPattern) : [];
       if (keys.includes("slug")) {
@@ -1520,12 +1623,23 @@ export const adjustSellerStockController = async (req, res) => {
     }
 
     const nextStock = Math.max(0, num(product.stock) + quantity);
-    product.stock = nextStock;
-    product.status = nextStock === 0 ? "inactive" : "active";
-    product.isActive = nextStock > 0;
-    if (Array.isArray(product.variants) && product.variants.length > 0) {
-      product.variants[0].stock = nextStock;
+    const variants = Array.isArray(product.variants) ? product.variants : [];
+
+    if (variants.length === 0) {
+      product.stock = nextStock;
+    } else if (variants.length === 1) {
+      variants[0].stock = Math.max(0, num(variants[0].stock) + quantity);
+      product.stock = Math.max(0, num(variants[0].stock));
+    } else {
+      // Apply delta to the first variant, then recalc parent from all variants
+      // so multi-variant stock stays consistent with order decrement logic.
+      variants[0].stock = Math.max(0, num(variants[0].stock) + quantity);
+      product.stock = variants.reduce((sum, v) => sum + Math.max(0, num(v.stock)), 0);
     }
+
+    product.status = product.stock === 0 ? "inactive" : "active";
+    product.isActive = product.stock > 0;
+    product.markModified("variants");
     await product.save();
 
     await SellerStockAdjustment.create({
@@ -3182,7 +3296,7 @@ const parseCSV = (text) => {
 export const bulkUploadSellerProductsController = async (req, res) => {
   try {
     const sellerId = sellerScope(req);
-    const seller = await Seller.findById(sellerId).select("shopInfo.businessType").lean();
+    const seller = await Seller.findById(sellerId).select("shopInfo.businessType approvalStatus").lean();
     const sellerBusinessType = String(seller?.shopInfo?.businessType || "").trim().toLowerCase();
     const isPharmacy = sellerBusinessType === "pharmacy" || sellerBusinessType === "pharmacies";
 
@@ -3195,6 +3309,14 @@ export const bulkUploadSellerProductsController = async (req, res) => {
 
     if (rows.length < 2) {
       return sendError(res, 400, "CSV file is empty or only contains headers");
+    }
+
+    if (rows.length - 1 > MAX_BULK_CSV_PRODUCTS * 20) {
+      return sendError(
+        res,
+        400,
+        `CSV is too large. Maximum ${MAX_BULK_CSV_PRODUCTS} products per upload.`,
+      );
     }
 
     const headers = rows[0].map((h) => String(h || "").trim().toLowerCase());
@@ -3579,6 +3701,23 @@ export const bulkUploadSellerProductsController = async (req, res) => {
         const status = statusStr === "inactive" ? "inactive" : "active";
         const tagsStr = getVal(firstRow, tagsAliases);
         const tags = tagsStr ? tagsStr.split(",").map((t) => t.trim()).filter(Boolean) : [];
+        const totalStock = finalizedVariants.reduce(
+          (sum, v) => sum + Math.max(0, num(v.stock)),
+          0,
+        );
+        const isDefaultVariantOnly =
+          finalizedVariants.length === 1 &&
+          String(finalizedVariants[0].name || "").trim() === "Default";
+        const parentStock = isDefaultVariantOnly
+          ? Math.max(0, num(firstVariant.stock))
+          : totalStock;
+
+        if (productsToCreate.length >= MAX_BULK_CSV_PRODUCTS) {
+          errors.push(
+            `Row ${i + 1}: Exceeded maximum of ${MAX_BULK_CSV_PRODUCTS} products per upload.`,
+          );
+          break;
+        }
 
         productsToCreate.push({
           sellerId,
@@ -3588,7 +3727,8 @@ export const bulkUploadSellerProductsController = async (req, res) => {
           description,
           price: firstVariant.price,
           salePrice: firstVariant.salePrice,
-          stock: firstVariant.stock,
+          mrp: Math.max(num(firstVariant.salePrice), num(firstVariant.price)),
+          stock: parentStock,
           lowStockAlert: isNaN(lowStockAlert) ? 5 : lowStockAlert,
           brand,
           weight: firstVariant.name !== "Default" ? firstVariant.name : "",
@@ -3601,6 +3741,9 @@ export const bulkUploadSellerProductsController = async (req, res) => {
           categoryId: new mongoose.Types.ObjectId(resolvedCategoryId),
           subcategoryId: new mongoose.Types.ObjectId(resolvedSubcategoryId),
           status,
+          isActive: status === "active",
+          approvalStatus: seller.approvalStatus === "approved" ? "approved" : "pending",
+          approvedAt: seller.approvalStatus === "approved" ? new Date() : null,
           pharmacyDetails,
           variants: finalizedVariants,
         });

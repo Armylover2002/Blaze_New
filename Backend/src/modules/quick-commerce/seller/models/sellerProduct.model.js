@@ -51,10 +51,20 @@ const sellerProductSchema = new mongoose.Schema(
       min: 0,
       default: 0,
     },
+    mrp: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
     salePrice: {
       type: Number,
       min: 0,
       default: 0,
+    },
+    unit: {
+      type: String,
+      trim: true,
+      default: "",
     },
     stock: {
       type: Number,
@@ -79,6 +89,10 @@ const sellerProductSchema = new mongoose.Schema(
     tags: {
       type: [String],
       default: [],
+    },
+    image: {
+      type: String,
+      default: "",
     },
     mainImage: {
       type: String,
@@ -107,6 +121,27 @@ const sellerProductSchema = new mongoose.Schema(
       type: String,
       enum: ["active", "inactive"],
       default: "active",
+      index: true,
+    },
+    // Keep in sync with QuickProduct so public catalog / admin filters work.
+    isActive: {
+      type: Boolean,
+      default: true,
+      index: true,
+    },
+    approvalStatus: {
+      type: String,
+      enum: ["pending", "approved", "rejected"],
+      default: "approved",
+      index: true,
+    },
+    approvedAt: {
+      type: Date,
+      default: null,
+    },
+    isFeatured: {
+      type: Boolean,
+      default: false,
     },
     variants: {
       type: [sellerVariantSchema],

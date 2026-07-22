@@ -17,21 +17,9 @@ import {
   SELLER_MISMATCH_CODE,
 } from '../utils/singleSeller.helpers.js';
 
-const approvedProductFilter = {
-  $or: [
-    { isActive: true },
-    { isActive: { $exists: false } },
-    { status: 'active' },
-  ],
-  $and: [
-    {
-      $or: [
-        { approvalStatus: { $exists: false } },
-        { approvalStatus: 'approved' },
-      ],
-    },
-  ],
-};
+import { publicProductVisibilityFilter } from '../utils/productVisibility.helpers.js';
+
+const approvedProductFilter = publicProductVisibilityFilter;
 
 const resolveId = (req) => {
   if (req.user?.userId) return { userId: req.user.userId };

@@ -19,6 +19,13 @@ import { toast } from "sonner";
 import { useAuth } from "@core/context/AuthContext";
 import { getCurrentUser } from "@food/utils/auth";
 import { canPerformAdminPermissionAction, extractAdminPermissions, extractAdminRoleId, fetchAdminRolePermissions } from "@food/utils/adminPermissions";
+import {
+  buildCategoryFormData,
+  bulkDeleteCategories,
+  extractCategoryApiError,
+  fetchAllCategoriesByType,
+  validateCategoryImage,
+} from "../../utils/categoryHelpers";
 
 
 const SubCategories = () => {
@@ -99,15 +106,16 @@ const SubCategories = () => {
   const fetchCategories = async () => {
     setIsLoading(true);
     try {
-      const res = await adminApi.getCategories({ limit: 1000 });
-      if (res.data.success) {
-        const allCats = res.data.results || res.data.result || [];
-        setCategories(allCats.filter((c) => c.type === "subcategory"));
-        setLevel2Categories(allCats.filter((c) => c.type === "category"));
-        setHeaderCategories(allCats.filter((c) => c.type === "header"));
-      }
+      const [subcategories, level2, headers] = await Promise.all([
+        fetchAllCategoriesByType(adminApi, "subcategory"),
+        fetchAllCategoriesByType(adminApi, "category"),
+        fetchAllCategoriesByType(adminApi, "header"),
+      ]);
+      setCategories(subcategories);
+      setLevel2Categories(level2);
+      setHeaderCategories(headers);
     } catch (error) {
-      toast.error("Failed to fetch categories");
+      toast.error(extractCategoryApiError(error, "Failed to fetch categories"));
     } finally {
       setIsLoading(false);
     }
@@ -142,10 +150,17 @@ const SubCategories = () => {
 
   const handleImageChange = (e) => {
     const file = e.target.files[0];
-    if (file) {
-      setImageFile(file);
-      setPreviewUrl(URL.createObjectURL(file));
+    if (!file) return;
+
+    const imageError = validateCategoryImage(file);
+    if (imageError) {
+      toast.error(imageError);
+      e.target.value = "";
+      return;
     }
+
+    setImageFile(file);
+    setPreviewUrl(URL.createObjectURL(file));
   };
 
   const handleSave = async () => {
@@ -154,17 +169,14 @@ const SubCategories = () => {
       return;
     }
 
+    if (!level2Categories.length) {
+      toast.error("Create a level 2 category before adding subcategories");
+      return;
+    }
+
     setIsSaving(true);
     try {
-      const data = new FormData();
-      data.append("type", "subcategory");
-      Object.keys(formData).forEach((key) => {
-        if (key !== "type") data.append(key, formData[key]);
-      });
-
-      if (imageFile) {
-        data.append("image", imageFile);
-      }
+      const data = buildCategoryFormData(formData, "subcategory", imageFile);
 
       if (editingItem) {
         await adminApi.updateCategory(editingItem._id || editingItem.id, data);
@@ -175,10 +187,13 @@ const SubCategories = () => {
       }
       setIsAddModalOpen(false);
       setEditingItem(null);
+      setImageFile(null);
+      setPreviewUrl(null);
       fetchCategories();
     } catch (error) {
-      console.error(error);
-      toast.error(editingItem ? "Failed to update" : "Failed to create");
+      toast.error(
+        extractCategoryApiError(error, editingItem ? "Failed to update" : "Failed to create"),
+      );
     } finally {
       setIsSaving(false);
     }
@@ -194,19 +209,21 @@ const SubCategories = () => {
       setDeleteTarget(null);
       fetchCategories();
     } catch (error) {
-      toast.error("Failed to delete subcategory");
+      toast.error(extractCategoryApiError(error, "Failed to delete subcategory"));
     }
   };
 
   const openAddModal = () => {
     setEditingItem(null);
+    const defaultParentId =
+      level2Categories[0]?._id || level2Categories[0]?.id || "";
     setFormData({
       name: "",
       slug: "",
       description: "",
       status: "active",
       type: "subcategory",
-      parentId: "",
+      parentId: defaultParentId,
     });
     setImageFile(null);
     setPreviewUrl(null);
@@ -249,21 +266,26 @@ const SubCategories = () => {
     if (selectedItems.length === 0) return;
 
     if (
-      window.confirm(
+      !window.confirm(
         `Are you sure you want to delete ${selectedItems.length} items?`,
       )
     ) {
-      try {
-        await Promise.all(
-          selectedItems.map((id) => adminApi.deleteCategory(id)),
+      return;
+    }
+
+    try {
+      const { deleted, failed, firstError } = await bulkDeleteCategories(adminApi, selectedItems);
+      if (failed > 0) {
+        toast.error(
+          extractCategoryApiError(firstError, `Deleted ${deleted}, but ${failed} could not be removed`),
         );
-        toast.success("Subcategories deleted");
-        setSelectedItems([]);
-        fetchCategories();
-      } catch (error) {
-        console.error("Bulk delete error:", error);
-        toast.error("Failed to delete some subcategories");
+      } else {
+        toast.success(`${deleted} subcategor${deleted === 1 ? "y" : "ies"} deleted`);
       }
+      setSelectedItems([]);
+      fetchCategories();
+    } catch (error) {
+      toast.error(extractCategoryApiError(error, "Failed to delete subcategories"));
     }
   };
 
@@ -288,6 +310,14 @@ const SubCategories = () => {
 
       <Card className="border-none shadow-sm">
         <div className="p-4 border-b border-gray-100 flex gap-4 items-center flex-wrap">
+          {selectedItems.length > 0 && canDelete && (
+            <button
+              onClick={handleBulkDelete}
+              className="flex items-center gap-2 px-4 py-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition-colors text-sm font-medium">
+              <Trash2 className="w-4 h-4" />
+              Delete ({selectedItems.length})
+            </button>
+          )}
           <div className="relative flex-1 min-w-[200px]">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
             <input
@@ -373,8 +403,8 @@ const SubCategories = () => {
                         <input
                           type="checkbox"
                           className="rounded border-gray-300 text-purple-600 focus:ring-purple-500"
-                          checked={selectedItems.includes(cat._id)}
-                          onChange={() => handleSelect(cat._id)}
+                        checked={selectedItems.includes(cat._id || cat.id)}
+                        onChange={() => handleSelect(cat._id || cat.id)}
                         />
                       </td>
                       <td className="py-3 px-4">
@@ -501,7 +531,6 @@ const SubCategories = () => {
                       setFormData({ ...formData, parentId: e.target.value })
                     }
                     className="w-full px-3 py-2 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
-                    <option value="">Select Parent Category</option>
                     {level2Categories.map((c) => {
                       const parentInfo = getParentInfo(c._id || c.id);
                       // Since getParentInfo uses level2Categories state which might be same as c,

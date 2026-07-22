@@ -5,52 +5,199 @@ import { Seller } from "../models/seller.model.js";
 
 const DEFAULT_CATEGORY_TREE = [
   {
-    name: "Catalog",
-    slug: "catalog",
+    name: "Fruits & Vegetables",
+    slug: "fruits-vegetables",
     children: [
       {
-        name: "Groceries",
-        slug: "groceries",
+        name: "Fresh Fruits",
+        slug: "fruits-vegetables-fresh-fruits",
         children: [
-          { name: "Staples", slug: "staples" },
-          { name: "Dairy & Breakfast", slug: "dairy-breakfast" },
-          { name: "Snacks", slug: "snacks" },
+          { name: "Apples & Pears", slug: "fruits-vegetables-fresh-fruits-apples-pears" },
+          { name: "Bananas & Melons", slug: "fruits-vegetables-fresh-fruits-bananas-melons" },
+          { name: "Citrus & Berries", slug: "fruits-vegetables-fresh-fruits-citrus-berries" },
         ],
       },
       {
-        name: "Fresh",
-        slug: "fresh",
+        name: "Fresh Vegetables",
+        slug: "fruits-vegetables-fresh-vegetables",
         children: [
-          { name: "Fruits", slug: "fruits" },
-          { name: "Vegetables", slug: "vegetables" },
-          { name: "Herbs", slug: "herbs" },
+          { name: "Leafy Greens", slug: "fruits-vegetables-fresh-vegetables-leafy-greens" },
+          { name: "Root Vegetables", slug: "fruits-vegetables-fresh-vegetables-root-vegetables" },
+          { name: "Exotic Veggies", slug: "fruits-vegetables-fresh-vegetables-exotic-veggies" },
         ],
       },
       {
-        name: "Beverages",
-        slug: "beverages",
+        name: "Herbs & Seasonings",
+        slug: "fruits-vegetables-herbs-seasonings",
         children: [
-          { name: "Soft Drinks", slug: "soft-drinks" },
-          { name: "Tea & Coffee", slug: "tea-coffee" },
-          { name: "Juices", slug: "juices" },
+          { name: "Fresh Herbs", slug: "fruits-vegetables-herbs-seasonings-fresh-herbs" },
+          { name: "Ginger & Garlic", slug: "fruits-vegetables-herbs-seasonings-ginger-garlic" },
+          { name: "Salad Essentials", slug: "fruits-vegetables-herbs-seasonings-salad-essentials" },
+        ],
+      },
+    ],
+  },
+  {
+    name: "Dairy, Bread & Eggs",
+    slug: "dairy-bread-eggs",
+    children: [
+      {
+        name: "Milk & Dairy",
+        slug: "dairy-bread-eggs-milk-dairy",
+        children: [
+          { name: "Milk", slug: "dairy-bread-eggs-milk-dairy-milk" },
+          { name: "Curd & Yogurt", slug: "dairy-bread-eggs-milk-dairy-curd-yogurt" },
+          { name: "Cheese & Butter", slug: "dairy-bread-eggs-milk-dairy-cheese-butter" },
         ],
       },
       {
-        name: "Home Essentials",
-        slug: "home-essentials",
+        name: "Bread & Bakery",
+        slug: "dairy-bread-eggs-bread-bakery",
         children: [
-          { name: "Cleaning", slug: "cleaning" },
-          { name: "Laundry", slug: "laundry" },
-          { name: "Kitchen Care", slug: "kitchen-care" },
+          { name: "Bread", slug: "dairy-bread-eggs-bread-bakery-bread" },
+          { name: "Buns & Pav", slug: "dairy-bread-eggs-bread-bakery-buns-pav" },
+          { name: "Cakes & Pastries", slug: "dairy-bread-eggs-bread-bakery-cakes-pastries" },
         ],
       },
       {
-        name: "Personal Care",
-        slug: "personal-care",
+        name: "Eggs",
+        slug: "dairy-bread-eggs-eggs",
         children: [
-          { name: "Skin Care", slug: "skin-care" },
-          { name: "Hair Care", slug: "hair-care" },
-          { name: "Daily Hygiene", slug: "daily-hygiene" },
+          { name: "Farm Eggs", slug: "dairy-bread-eggs-eggs-farm-eggs" },
+          { name: "Organic Eggs", slug: "dairy-bread-eggs-eggs-organic-eggs" },
+          { name: "Egg Products", slug: "dairy-bread-eggs-eggs-egg-products" },
+        ],
+      },
+    ],
+  },
+  {
+    name: "Cold Drinks & Juices",
+    slug: "cold-drinks-juices",
+    children: [
+      {
+        name: "Soft Drinks",
+        slug: "cold-drinks-juices-soft-drinks",
+        children: [
+          { name: "Cola", slug: "cold-drinks-juices-soft-drinks-cola" },
+          { name: "Energy Drinks", slug: "cold-drinks-juices-soft-drinks-energy-drinks" },
+          { name: "Soda & Mixers", slug: "cold-drinks-juices-soft-drinks-soda-mixers" },
+        ],
+      },
+      {
+        name: "Juices",
+        slug: "cold-drinks-juices-juices",
+        children: [
+          { name: "Fruit Juice", slug: "cold-drinks-juices-juices-fruit-juice" },
+          { name: "Coconut Water", slug: "cold-drinks-juices-juices-coconut-water" },
+          { name: "Health Drinks", slug: "cold-drinks-juices-juices-health-drinks" },
+        ],
+      },
+      {
+        name: "Water",
+        slug: "cold-drinks-juices-water",
+        children: [
+          { name: "Packaged Water", slug: "cold-drinks-juices-water-packaged-water" },
+          { name: "Sparkling Water", slug: "cold-drinks-juices-water-sparkling-water" },
+          { name: "Flavoured Water", slug: "cold-drinks-juices-water-flavoured-water" },
+        ],
+      },
+    ],
+  },
+  {
+    name: "Snacks & Munchies",
+    slug: "snacks-munchies",
+    children: [
+      {
+        name: "Chips & Crisps",
+        slug: "snacks-munchies-chips-crisps",
+        children: [
+          { name: "Potato Chips", slug: "snacks-munchies-chips-crisps-potato-chips" },
+          { name: "Nachos", slug: "snacks-munchies-chips-crisps-nachos" },
+          { name: "Puffed Snacks", slug: "snacks-munchies-chips-crisps-puffed-snacks" },
+        ],
+      },
+      {
+        name: "Namkeen",
+        slug: "snacks-munchies-namkeen",
+        children: [
+          { name: "Bhujia & Sev", slug: "snacks-munchies-namkeen-bhujia-sev" },
+          { name: "Mixture", slug: "snacks-munchies-namkeen-mixture" },
+          { name: "Roasted Snacks", slug: "snacks-munchies-namkeen-roasted-snacks" },
+        ],
+      },
+      {
+        name: "Chocolates",
+        slug: "snacks-munchies-chocolates",
+        children: [
+          { name: "Chocolate Bars", slug: "snacks-munchies-chocolates-chocolate-bars" },
+          { name: "Assorted Packs", slug: "snacks-munchies-chocolates-assorted-packs" },
+          { name: "Premium Chocolates", slug: "snacks-munchies-chocolates-premium-chocolates" },
+        ],
+      },
+    ],
+  },
+  {
+    name: "Bakery & Biscuits",
+    slug: "bakery-biscuits",
+    children: [
+      {
+        name: "Biscuits",
+        slug: "bakery-biscuits-biscuits",
+        children: [
+          { name: "Cream Biscuits", slug: "bakery-biscuits-biscuits-cream-biscuits" },
+          { name: "Digestive Biscuits", slug: "bakery-biscuits-biscuits-digestive-biscuits" },
+          { name: "Glucose Biscuits", slug: "bakery-biscuits-biscuits-glucose-biscuits" },
+        ],
+      },
+      {
+        name: "Cookies",
+        slug: "bakery-biscuits-cookies",
+        children: [
+          { name: "Chocolate Cookies", slug: "bakery-biscuits-cookies-chocolate-cookies" },
+          { name: "Oat Cookies", slug: "bakery-biscuits-cookies-oat-cookies" },
+          { name: "Assorted Cookies", slug: "bakery-biscuits-cookies-assorted-cookies" },
+        ],
+      },
+      {
+        name: "Rusks & Toast",
+        slug: "bakery-biscuits-rusks-toast",
+        children: [
+          { name: "Rusks", slug: "bakery-biscuits-rusks-toast-rusks" },
+          { name: "Toast", slug: "bakery-biscuits-rusks-toast-toast" },
+          { name: "Khari & Puff", slug: "bakery-biscuits-rusks-toast-khari-puff" },
+        ],
+      },
+    ],
+  },
+  {
+    name: "Instant & Frozen Food",
+    slug: "instant-frozen-food",
+    children: [
+      {
+        name: "Instant Noodles",
+        slug: "instant-frozen-food-instant-noodles",
+        children: [
+          { name: "Cup Noodles", slug: "instant-frozen-food-instant-noodles-cup-noodles" },
+          { name: "Pack Noodles", slug: "instant-frozen-food-instant-noodles-pack-noodles" },
+          { name: "Vermicelli", slug: "instant-frozen-food-instant-noodles-vermicelli" },
+        ],
+      },
+      {
+        name: "Frozen Snacks",
+        slug: "instant-frozen-food-frozen-snacks",
+        children: [
+          { name: "French Fries", slug: "instant-frozen-food-frozen-snacks-french-fries" },
+          { name: "Nuggets & Patties", slug: "instant-frozen-food-frozen-snacks-nuggets-patties" },
+          { name: "Frozen Paratha", slug: "instant-frozen-food-frozen-snacks-frozen-paratha" },
+        ],
+      },
+      {
+        name: "Ready to Eat",
+        slug: "instant-frozen-food-ready-to-eat",
+        children: [
+          { name: "Meals", slug: "instant-frozen-food-ready-to-eat-meals" },
+          { name: "Mixes & Gravies", slug: "instant-frozen-food-ready-to-eat-mixes-gravies" },
+          { name: "Soups", slug: "instant-frozen-food-ready-to-eat-soups" },
         ],
       },
     ],
@@ -84,12 +231,12 @@ const walkSeed = async (nodes, parentId = null, depth = 0, parentKey = "") => {
         $set: {
           isActive: true,
           status: "active",
+          type,
         },
         $setOnInsert: {
           name: node.name,
           slug: node.slug,
           parentId,
-          type,
           sortOrder: index,
         },
       },
@@ -102,18 +249,11 @@ const walkSeed = async (nodes, parentId = null, depth = 0, parentKey = "") => {
   }
 };
 
-// Once categories exist they are never removed back to zero, so we cache the
-// "seeded" state in-process to skip a countDocuments() on every catalog/category
-// operation (create/update/read all funnel through here).
+// Upserts are idempotent (slug + parentId), so we only need to run once per process.
 let sellerCategoriesSeeded = false;
 
 export const ensureSellerCategoriesSeeded = async () => {
   if (sellerCategoriesSeeded) return;
-  const existingCount = await QuickCategory.countDocuments();
-  if (existingCount > 0) {
-    sellerCategoriesSeeded = true;
-    return;
-  }
   await walkSeed(DEFAULT_CATEGORY_TREE);
   sellerCategoriesSeeded = true;
 };
@@ -179,6 +319,7 @@ export const resolveSellerCategoryIds = async ({
   headerId,
   categoryId,
   subcategoryId,
+  allowDefaultFallback = true,
 }) => {
   await ensureSellerCategoriesSeeded();
   const selectedIds = [headerId, categoryId, subcategoryId]
@@ -193,6 +334,23 @@ export const resolveSellerCategoryIds = async ({
     const selectedSubcategory = subcategoryId
       ? byId.get(String(subcategoryId))
       : null;
+
+    // Reject IDs that were sent but not found / wrong type.
+    if (headerId && !selectedHeader) {
+      const err = new Error("Invalid header category");
+      err.statusCode = 400;
+      throw err;
+    }
+    if (categoryId && !selectedCategory) {
+      const err = new Error("Invalid category");
+      err.statusCode = 400;
+      throw err;
+    }
+    if (subcategoryId && !selectedSubcategory) {
+      const err = new Error("Invalid subcategory");
+      err.statusCode = 400;
+      throw err;
+    }
 
     const category =
       selectedCategory?.type === "category"
@@ -221,13 +379,18 @@ export const resolveSellerCategoryIds = async ({
       selectedSubcategory?.type === "subcategory" ? selectedSubcategory : null;
 
     if (category && header && String(category.parentId) === String(header._id)) {
+      if (
+        subcategory &&
+        String(subcategory.parentId) !== String(category._id)
+      ) {
+        const err = new Error("Subcategory does not belong to the selected category");
+        err.statusCode = 400;
+        throw err;
+      }
       return {
         headerId: header._id,
         categoryId: category._id,
-        subcategoryId:
-          subcategory && String(subcategory.parentId) === String(category._id)
-            ? subcategory._id
-            : null,
+        subcategoryId: subcategory ? subcategory._id : null,
       };
     }
 
@@ -243,6 +406,16 @@ export const resolveSellerCategoryIds = async ({
         subcategoryId: fallback?.subcategoryId || null,
       };
     }
+
+    const err = new Error("Invalid category hierarchy");
+    err.statusCode = 400;
+    throw err;
+  }
+
+  if (!allowDefaultFallback) {
+    const err = new Error("Category selection is required");
+    err.statusCode = 400;
+    throw err;
   }
 
   return getDefaultSellerCategoryPath();
@@ -455,12 +628,15 @@ export const buildSellerCatalogBrowseFilter = async ({
   }
 
   if (trimmedSearch) {
+    const escapeRegex = (value) =>
+      String(value ?? "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const term = escapeRegex(trimmedSearch.slice(0, 80));
     andClauses.push({
       $or: [
-        { name: { $regex: trimmedSearch, $options: "i" } },
-        { sku: { $regex: trimmedSearch, $options: "i" } },
-        { brand: { $regex: trimmedSearch, $options: "i" } },
-        { "pharmacyDetails.genericName": { $regex: trimmedSearch, $options: "i" } },
+        { name: { $regex: term, $options: "i" } },
+        { sku: { $regex: term, $options: "i" } },
+        { brand: { $regex: term, $options: "i" } },
+        { "pharmacyDetails.genericName": { $regex: term, $options: "i" } },
       ],
     });
   }

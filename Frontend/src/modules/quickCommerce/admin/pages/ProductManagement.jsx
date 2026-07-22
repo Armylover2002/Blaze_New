@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import Card from '@shared/components/ui/Card';
 import Badge from '@shared/components/ui/Badge';
 import { adminApi } from '../services/adminApi';
@@ -296,6 +296,7 @@ const ProductManagement = () => {
         categoryId: '',
         subcategoryId: '',
         status: 'active',
+        approvalStatus: 'approved',
         isFeatured: false,
         tags: '',
         weight: '',
@@ -313,6 +314,7 @@ const ProductManagement = () => {
 
     const [imageFiles, setImageFiles] = useState([]);
     const [previews, setPreviews] = useState([]);
+    const fetchProductsRequestId = useRef(0);
 
     const fetchCategories = async () => {
         try {
@@ -325,8 +327,9 @@ const ProductManagement = () => {
         }
     };
 
-    const fetchProducts = async (requestedPage = 1) => {
+    const fetchProducts = async (requestedPage = 1, requestSeq) => {
         setIsLoading(true);
+        const seq = requestSeq ?? ++fetchProductsRequestId.current;
         try {
             const params = { page: requestedPage, limit: pageSize };
             if (searchTerm) params.search = searchTerm;
@@ -335,17 +338,21 @@ const ProductManagement = () => {
             if (filterBusinessType !== 'all') params.businessType = filterBusinessType;
 
             const response = await adminApi.getProducts(params);
+            if (seq !== fetchProductsRequestId.current) return;
             if (response.data.success) {
                 const payload = response.data.result || {};
                 const list = Array.isArray(payload.items) ? payload.items : (response.data.results || []);
-                setProducts(list);
-                setTotal(typeof payload.total === 'number' ? payload.total : list.length);
+                // Hide legacy mock/seed rows that have no seller (UI used to label them "Admin").
+                const sellerProducts = list.filter((p) => p.sellerId || p.seller?.shopName || p.storeName || p.restaurantName);
+                setProducts(sellerProducts);
+                setTotal(typeof payload.total === 'number' ? payload.total : sellerProducts.length);
                 setPage(typeof payload.page === 'number' ? payload.page : requestedPage);
             }
         } catch (error) {
+            if (seq !== fetchProductsRequestId.current) return;
             toast.error('Failed to fetch products');
         } finally {
-            setIsLoading(false);
+            if (seq === fetchProductsRequestId.current) setIsLoading(false);
         }
     };
 
@@ -385,6 +392,7 @@ const ProductManagement = () => {
             data.append('categoryId', formData.categoryId);
             data.append('subcategoryId', formData.subcategoryId);
             data.append('status', formData.status);
+            data.append('approvalStatus', formData.approvalStatus || 'approved');
             data.append('isFeatured', formData.isFeatured);
             data.append('brand', formData.brand);
             data.append('weight', formData.weight);
@@ -494,6 +502,7 @@ const ProductManagement = () => {
                 categoryId: product.categoryId?._id || product.categoryId || '',
                 subcategoryId: product.subcategoryId?._id || product.subcategoryId || '',
                 status: product.status || 'active',
+                approvalStatus: product.approvalStatus || 'approved',
                 isFeatured: product.isFeatured || false,
                 tags: Array.isArray(product.tags) ? product.tags.join(', ') : product.tags || '',
                 weight: product.weight || '',
@@ -501,7 +510,7 @@ const ProductManagement = () => {
                 mainImage: product.mainImage || null,
                 galleryImages: product.galleryImages || [],
                 pharmacyDetails: normalizePharmacyDetailsForForm(product.pharmacyDetails, product),
-                variants: (product.variants && product.variants.length > 0) ? product.variants.map(v => ({ ...v, id: v._id || Date.now() })) : [
+                variants: (product.variants && product.variants.length > 0) ? product.variants.map((v, idx) => ({ ...v, id: v._id || v.id || `variant-${Date.now()}-${idx}` })) : [
                     {
                         id: Date.now(),
                         name: 'Default',
@@ -520,6 +529,7 @@ const ProductManagement = () => {
                 name: '', slug: '', sku: '', description: '', price: '',
                 salePrice: '', stock: '', lowStockAlert: 5, unit: 'packet',
                 header: '', categoryId: '', subcategoryId: '', status: 'active',
+                approvalStatus: 'approved',
                 isFeatured: false, tags: '', weight: '', brand: '',
                 mainImage: null, galleryImages: [],
                 pharmacyDetails: { ...DEFAULT_PHARMACY_DETAILS },
@@ -708,7 +718,7 @@ const ProductManagement = () => {
                                         <div className="flex items-center gap-2">
                                             <div className="h-2 w-2 rounded-full bg-blue-500" />
                                             <span className="text-xs font-bold text-slate-700">
-                                                {p.seller?.shopName || p.storeName || p.restaurantName || 'Admin'}
+                                                {p.seller?.shopName || p.storeName || p.restaurantName || 'Unknown Store'}
                                             </span>
                                         </div>
                                     </td>
@@ -777,6 +787,16 @@ const ProductManagement = () => {
                                             >
                                                 <HiOutlineEye className="h-3.5 w-3.5" />
                                             </button>
+
+                                            {canEdit && (
+                                                <button
+                                                    onClick={() => openModal(p, false)}
+                                                    className="p-1.5 hover:bg-indigo-50 hover:text-indigo-600 rounded-lg transition-all text-gray-400 shadow-sm ring-1 ring-gray-100"
+                                                    title="Edit Product"
+                                                >
+                                                    <HiOutlinePencilSquare className="h-3.5 w-3.5" />
+                                                </button>
+                                            )}
 
                                             {canDelete && (
                                                 <button
@@ -878,6 +898,19 @@ const ProductManagement = () => {
                                             >
                                                 <option value="active">PUBLISHED</option>
                                                 <option value="inactive">DRAFT</option>
+                                            </select>
+                                        </div>
+                                        <div className="mt-3 p-4 bg-amber-50 rounded-2xl border border-amber-100">
+                                            <p className="text-[9px] font-bold text-amber-600 uppercase tracking-widest mb-1">Approval</p>
+                                            <select
+                                                value={formData.approvalStatus || 'approved'}
+                                                onChange={(e) => setFormData({ ...formData, approvalStatus: e.target.value })}
+                                                disabled={isViewMode}
+                                                className="w-full bg-transparent border-none text-xs font-bold text-amber-700 outline-none p-0 cursor-pointer disabled:opacity-80"
+                                            >
+                                                <option value="approved">APPROVED</option>
+                                                <option value="pending">PENDING</option>
+                                                <option value="rejected">REJECTED</option>
                                             </select>
                                         </div>
                                         <div className="mt-3 p-4 bg-indigo-50 rounded-2xl border border-indigo-100 flex items-center justify-between">

@@ -820,7 +820,7 @@ export const getQuickCategories = async (query = {}) => {
   }
 
   const categories = await QuickCategory.find(filter)
-    .sort({ order: 1, name: 1 })
+    .sort({ sortOrder: 1, name: 1 })
     .lean();
 
   if (!query.parentId) {

@@ -374,6 +374,42 @@ const getProductTotalStock = (product) => {
   return Math.max(Number(product.stock) || 0, variantStock);
 };
 
+const formatDateInputValue = (value) => {
+  if (!value) return "";
+  const raw = String(value).trim();
+  if (!raw) return "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return "";
+  return parsed.toISOString().slice(0, 10);
+};
+
+const normalizePharmacyDetailsForForm = (raw = {}, product = {}) => {
+  const source = raw && typeof raw === "object" ? raw : {};
+  return {
+    genericName: source.genericName || source.generic_name || product.name || "",
+    manufacturer: source.manufacturer || product.brand || "",
+    composition: source.composition || "",
+    strength: source.strength || product.weight || "",
+    dosageForm: source.dosageForm || source.dosage_form || "tablet",
+    packType: source.packType || source.pack_type || "strip",
+    packQuantity: source.packQuantity ?? source.pack_quantity ?? 10,
+    unit: source.unit || "tablet",
+    storageCondition: source.storageCondition || source.storage_condition || "",
+    prescriptionRequired: Boolean(
+      source.prescriptionRequired ?? source.prescription ?? false,
+    ),
+    drugClassification:
+      source.drugClassification || source.classification || "otc",
+    drugLicenseNumber: source.drugLicenseNumber || source.drug_license_number || "",
+    hsnCode: source.hsnCode || source.hsn_code || "",
+    batchNumber: source.batchNumber || source.batch_number || "",
+    mfgDate: formatDateInputValue(source.mfgDate || source.mfg_date),
+    expDate: formatDateInputValue(source.expDate || source.exp_date),
+    packSize: source.packSize || source.pack_size || "",
+  };
+};
+
 const getPharmacyProductMeta = (product) => {
   const pd = product.pharmacyDetails || {};
   const realVariants = variantsWithoutPharmacyPlaceholder(product.variants);
@@ -611,16 +647,38 @@ const ProductManagement = () => {
   const [products, setProducts] = useState([]);
   const [dbCategories, setDbCategories] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [total, setTotal] = useState(0);
+  const fetchProductsRequestId = useRef(0);
+
+  const [searchTerm, setSearchTerm] = useState(qFromUrl);
+  const [debouncedSearch, setDebouncedSearch] = useState(qFromUrl);
+  const [filterCategory, setFilterCategory] = useState("all");
+  const [filterStatus, setFilterStatus] = useState("All");
+  const [priceMin, setPriceMin] = useState("");
+  const [priceMax, setPriceMax] = useState("");
 
   const fetchProducts = useCallback(async (requestedPage = 1) => {
     setIsLoading(true);
+    const seq = ++fetchProductsRequestId.current;
     try {
-      const res = await sellerApi.getProducts({ page: requestedPage, limit: pageSize });
+      const params = { page: requestedPage, limit: pageSize };
+      const term = debouncedSearch.trim();
+      if (term) params.search = term;
+      if (filterCategory !== "all") params.categoryId = filterCategory;
+      if (priceMin !== "") params.minPrice = priceMin;
+      if (priceMax !== "") params.maxPrice = priceMax;
+
+      if (filterStatus === "Active") params.status = "active";
+      else if (filterStatus === "Low Stock") params.stockStatus = "low";
+      else if (filterStatus === "Out of Stock") params.stockStatus = "out";
+
+      const res = await sellerApi.getProducts(params);
+      if (seq !== fetchProductsRequestId.current) return;
       if (res.data.success) {
-        // Backend returns handleResponse(..., { items, page, limit, total, totalPages })
         const payload = res.data.result || {};
         const rawProducts = Array.isArray(payload.items)
           ? payload.items
@@ -639,11 +697,12 @@ const ProductManagement = () => {
         }
       }
     } catch (error) {
+      if (seq !== fetchProductsRequestId.current) return;
       toast.error("Failed to fetch products");
     } finally {
-      setIsLoading(false);
+      if (seq === fetchProductsRequestId.current) setIsLoading(false);
     }
-  }, [pageSize]);
+  }, [pageSize, debouncedSearch, filterCategory, filterStatus, priceMin, priceMax]);
 
   const fetchCategories = useCallback(async () => {
     try {
@@ -657,9 +716,19 @@ const ProductManagement = () => {
   }, []);
 
   React.useEffect(() => {
-    fetchProducts(1);
     fetchCategories();
-  }, []);
+  }, [fetchCategories]);
+
+  React.useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchTerm);
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
+
+  React.useEffect(() => {
+    fetchProducts(1);
+  }, [fetchProducts]);
 
   const categories = useMemo(() => {
     return dbCategories.filter((header) => {
@@ -674,16 +743,10 @@ const ProductManagement = () => {
     });
   }, [dbCategories, sellerBusinessType]);
 
-  const [searchTerm, setSearchTerm] = useState(qFromUrl);
-
   React.useEffect(() => {
     if (qFromUrl !== searchTerm) setSearchTerm(qFromUrl);
   }, [qFromUrl]);
 
-  const [filterCategory, setFilterCategory] = useState("all");
-  const [filterStatus, setFilterStatus] = useState("All");
-  const [priceMin, setPriceMin] = useState("");
-  const [priceMax, setPriceMax] = useState("");
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const filterDropdownRef = useRef(null);
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);
@@ -832,9 +895,7 @@ const ProductManagement = () => {
       // Legacy/free-text fallback kept for backwards compatibility.
       packSize: "",
     },
-    variants: [
-      { id: Date.now(), name: "Default", price: "", salePrice: "", stock: "", sku: "" },
-    ],
+    variants: [],
   });
 
   const sanitizeDigits = (value = "") => String(value).replace(/\D+/g, "");
@@ -856,57 +917,12 @@ const ProductManagement = () => {
     [products]
   );
 
-  const filteredProducts = useMemo(() => {
-    const term = searchTerm.trim().toLowerCase();
-    const min = priceMin ? Number(priceMin) : null;
-    const max = priceMax ? Number(priceMax) : null;
-
-    return safeProducts.filter((p) => {
-      const variantSkus = Array.isArray(p.variants)
-        ? p.variants
-            .map((v) => (v?.sku || "").toString().toLowerCase())
-            .filter(Boolean)
-        : [];
-      const skuCandidate =
-        (p.sku || "").toString().toLowerCase() ||
-        (variantSkus.length > 0 ? variantSkus[0] : "");
-
-      const matchesSearch =
-        !term ||
-        p.name.toLowerCase().includes(term) ||
-        (!!skuCandidate && skuCandidate.includes(term));
-      const matchesCategory =
-        filterCategory === "all" ||
-        (p.categoryId?._id || p.categoryId) === filterCategory ||
-        (p.headerId?._id || p.headerId) === filterCategory;
-
-      let matchesStatus = filterStatus === "All";
-      if (filterStatus === "Active") matchesStatus = p.status === "active";
-      if (filterStatus === "Low Stock")
-        matchesStatus = p.stock > 0 && p.stock <= 10;
-      if (filterStatus === "Out of Stock") matchesStatus = p.stock === 0;
-
-      let matchesPrice = true;
-      const effectivePrice = Number(p.salePrice ?? p.price ?? 0);
-      if (min !== null && !Number.isNaN(min)) {
-        matchesPrice = matchesPrice && effectivePrice >= min;
-      }
-      if (max !== null && !Number.isNaN(max)) {
-        matchesPrice = matchesPrice && effectivePrice <= max;
-      }
-
-      return matchesSearch && matchesCategory && matchesStatus && matchesPrice;
-    });
-  }, [safeProducts, searchTerm, filterCategory, filterStatus, priceMin, priceMax]);
-
-  const getProductTotalStock = (p) => {
-    const variantStock = p.variants?.reduce((sum, v) => sum + (Number(v.stock) || 0), 0) || 0;
-    return Math.max(Number(p.stock) || 0, variantStock);
-  };
+  // Filters are applied server-side; list already matches the active query.
+  const filteredProducts = safeProducts;
 
   const stats = useMemo(
     () => ({
-      total: safeProducts.length,
+      total,
       lowStock: safeProducts.filter((p) => {
         const stock = getProductTotalStock(p);
         return stock > 0 && stock <= 10;
@@ -914,10 +930,11 @@ const ProductManagement = () => {
       outOfStock: safeProducts.filter((p) => getProductTotalStock(p) === 0).length,
       active: safeProducts.filter((p) => p.status === "active").length,
     }),
-    [safeProducts],
+    [safeProducts, total],
   );
 
   const handleSave = async () => {
+    if (isSaving) return;
     try {
       if (!formData.name || !formData.price || !formData.stock || !formData.header || !formData.category || !formData.subcategory) {
         toast.error("Please fill all required fields, including categories");
@@ -935,6 +952,7 @@ const ProductManagement = () => {
         }
       }
 
+      setIsSaving(true);
       const data = new FormData();
       data.append("name", formData.name);
       data.append("slug", formData.slug);
@@ -978,9 +996,11 @@ const ProductManagement = () => {
 
       setIsProductModalOpen(false);
       setEditingItem(null);
-      fetchProducts();
+      fetchProducts(page);
     } catch (error) {
       toast.error(error.response?.data?.message || "Failed to save product");
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -1014,69 +1034,64 @@ const ProductManagement = () => {
   }, []);
 
   const confirmDelete = useCallback(async () => {
+    if (!itemToDelete || isDeleting) return;
+    setIsDeleting(true);
     try {
       await sellerApi.deleteProduct(itemToDelete._id || itemToDelete.id);
       toast.success("Product deleted successfully");
       setIsDeleteModalOpen(false);
       setItemToDelete(null);
-      fetchProducts();
+      fetchProducts(page);
     } catch (error) {
       toast.error("Failed to delete product");
+    } finally {
+      setIsDeleting(false);
     }
-  }, [itemToDelete, fetchProducts]);
+  }, [itemToDelete, fetchProducts, page, isDeleting]);
 
-  const openEditModal = useCallback((item = null, viewMode = false) => {
+  const openEditModal = useCallback(async (item = null, viewMode = false) => {
     setIsViewMode(viewMode);
     if (item) {
+      let product = item;
+      const productId = item._id || item.id;
+      if (productId) {
+        try {
+          const res = await sellerApi.getProductById(productId);
+          if (res.data?.success && res.data?.result) {
+            product = res.data.result;
+          }
+        } catch (_) {
+          // fall back to list row payload
+        }
+      }
+
       setFormData({
-        name: item.name || "",
-        slug: item.slug || "",
-        sku: item.sku || "",
-        description: item.description || "",
-        price: item.price || "",
-        salePrice: item.salePrice || "",
-        stock: item.stock || "",
-        lowStockAlert: item.lowStockAlert || 5,
-        header: item.headerId?._id || item.headerId || "",
-        category: item.categoryId?._id || item.categoryId || "",
-        subcategory: item.subcategoryId?._id || item.subcategoryId || "",
-        status: item.status || "active",
-        tags: Array.isArray(item.tags) ? item.tags.join(", ") : item.tags || "",
-        weight: item.weight || "",
-        brand: item.brand || "",
-        mainImage: item.mainImage || null,
-        galleryImages: item.galleryImages || [],
-        pharmacyDetails: item.pharmacyDetails || {
-          genericName: "",
-          manufacturer: "",
-          composition: "",
-          strength: "",
-          dosageForm: "tablet",
-          packType: "strip",
-          packQuantity: 10,
-          unit: "tablet",
-          storageCondition: "",
-          prescriptionRequired: false,
-          drugClassification: "otc",
-          drugLicenseNumber: "",
-          hsnCode: "",
-          batchNumber: "",
-          mfgDate: "",
-          expDate: "",
-          packSize: "",
-        },
-        variants: (item.variants && item.variants.length > 0) ? item.variants.map(v => ({ ...v, id: v._id || Date.now() })) : [
-          {
-            id: Date.now(),
-            name: "Default",
-            price: item.price || "",
-            salePrice: item.salePrice || "",
-            stock: item.stock || "",
-            sku: item.sku || "",
-          },
-        ],
+        name: product.name || "",
+        slug: product.slug || "",
+        sku: product.sku || "",
+        description: product.description || "",
+        price: product.price || "",
+        salePrice: product.salePrice || "",
+        stock: product.stock || "",
+        lowStockAlert: product.lowStockAlert || 5,
+        header: product.headerId?._id || product.headerId || "",
+        category: product.categoryId?._id || product.categoryId || "",
+        subcategory: product.subcategoryId?._id || product.subcategoryId || "",
+        status: product.status || "active",
+        tags: Array.isArray(product.tags) ? product.tags.join(", ") : product.tags || "",
+        weight: product.weight || "",
+        brand: product.brand || "",
+        mainImage: product.mainImage || null,
+        galleryImages: product.galleryImages || [],
+        pharmacyDetails: normalizePharmacyDetailsForForm(product.pharmacyDetails, product),
+        variants: (product.variants && product.variants.length > 0)
+          ? product.variants.map((v, idx) => ({
+              ...v,
+              id: v._id || v.id || `variant-${Date.now()}-${idx}`,
+            }))
+          : [],
       });
-      setEditingItem(item);
+      setEditingItem(product);
     } else {
       setFormData({
         name: "",
@@ -1089,6 +1104,7 @@ const ProductManagement = () => {
         lowStockAlert: 5,
         category: "",
         header: "",
+        subcategory: "",
         status: "active",
         tags: "",
         weight: "",
@@ -1114,16 +1130,7 @@ const ProductManagement = () => {
           expDate: "",
           packSize: "",
         },
-        variants: [
-          {
-            id: Date.now(),
-            name: "Default",
-            price: "",
-            salePrice: "",
-            stock: "",
-            sku: "",
-          },
-        ],
+        variants: [],
       });
       setEditingItem(null);
     }
@@ -1306,7 +1313,12 @@ const ProductManagement = () => {
         <Card className="relative z-10 border-none shadow-xl ring-1 ring-slate-100 overflow-hidden rounded-3xl">
           {/* Mobile Card List */}
           <div className="md:hidden divide-y divide-slate-100">
-            {filteredProducts.length === 0 ? (
+            {isLoading ? (
+              <div className="flex flex-col items-center justify-center py-12 px-4">
+                <HiOutlineArrowPath className="h-8 w-8 text-slate-300 mb-3 animate-spin" />
+                <p className="text-sm font-bold text-slate-600">Loading products…</p>
+              </div>
+            ) : filteredProducts.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-12 px-4">
                 <HiOutlineFolderOpen className="h-10 w-10 text-slate-300 mb-3" />
                 <p className="text-sm font-bold text-slate-600">No products found</p>
@@ -1388,7 +1400,26 @@ const ProductManagement = () => {
                 </tr>
               </thead>
               <tbody>
-                {filteredProducts.map((p) => (
+                {isLoading ? (
+                  <tr>
+                    <td colSpan={11} className="px-6 py-16 text-center">
+                      <div className="flex flex-col items-center justify-center">
+                        <HiOutlineArrowPath className="h-8 w-8 text-slate-300 mb-3 animate-spin" />
+                        <p className="text-sm font-bold text-slate-600">Loading products…</p>
+                      </div>
+                    </td>
+                  </tr>
+                ) : filteredProducts.length === 0 ? (
+                  <tr>
+                    <td colSpan={11} className="px-6 py-16 text-center">
+                      <div className="flex flex-col items-center justify-center">
+                        <HiOutlineFolderOpen className="h-10 w-10 text-slate-300 mb-3" />
+                        <p className="text-sm font-bold text-slate-600">No products found</p>
+                        <p className="text-xs text-slate-400 mt-1">Try adjusting your filters</p>
+                      </div>
+                    </td>
+                  </tr>
+                ) : filteredProducts.map((p) => (
                   sellerBusinessType === "pharmacy" ? (
                     <PharmacyProductRow
                       key={p._id || p.id}
@@ -2114,7 +2145,7 @@ const ProductManagement = () => {
                         {sellerBusinessType !== "pharmacy" && !isViewMode && (
                           <button
                             type="button"
-                            onClick={() => setFormData({ ...formData, variants: [...formData.variants, { id: Date.now(), name: "", price: "", salePrice: "", stock: "", sku: "" }] })}
+                            onClick={() => setFormData({ ...formData, variants: [...formData.variants, { id: `variant-${Date.now()}-${formData.variants.length}`, name: "", price: "", salePrice: "", stock: "", sku: "" }] })}
                             className="bg-red-500/10 text-red-500 px-3 py-1 rounded-lg text-[10px] font-bold">+ ADD</button>
                         )}
                       </div>
@@ -2255,7 +2286,7 @@ const ProductManagement = () => {
                       ) : (
                         <div className="space-y-3">
                           {formData.variants.map((v, i) => (
-                          <div key={v.id} className="p-4 bg-slate-50 rounded-2xl border border-slate-100 grid grid-cols-1 md:grid-cols-6 gap-4 items-end">
+                          <div key={`${v.id || "variant"}-${i}`} className="p-4 bg-slate-50 rounded-2xl border border-slate-100 grid grid-cols-1 md:grid-cols-6 gap-4 items-end">
                             <div className="md:col-span-2 space-y-1">
                               <label className="text-[8px] font-bold text-slate-600 uppercase tracking-widest ml-1">Variant Name</label>
                               <input value={v.name} onChange={e => {
@@ -2298,7 +2329,7 @@ const ProductManagement = () => {
                                 }} placeholder="SKU" className="w-full bg-white px-3 py-2 rounded-xl text-[10px] ring-1 ring-slate-100 outline-none" disabled={isViewMode} />
                               </div>
                               {!isViewMode && (
-                                <button type="button" onClick={() => setFormData({ ...formData, variants: formData.variants.filter((_, idx) => idx !== i) })} className="text-rose-500 p-2 hover:bg-rose-50 rounded-lg shrink-0 mb-0.5">
+                                <button type="button" onClick={() => setFormData((prev) => ({ ...prev, variants: (prev.variants || []).filter((_, idx) => idx !== i) }))} className="text-rose-500 p-2 hover:bg-rose-50 rounded-lg shrink-0 mb-0.5">
                                   <HiOutlineTrash className="h-4 w-4" />
                                 </button>
                               )}
@@ -2322,8 +2353,9 @@ const ProductManagement = () => {
                 {!isViewMode && (
                   <button
                     onClick={handleSave}
-                    className="bg-red-500 text-white px-10 py-2.5 rounded-xl text-xs font-bold shadow-xl hover:bg-red-600 hover:-translate-y-0.5 transition-all">
-                    SAVE CHANGES
+                    disabled={isSaving}
+                    className="bg-red-500 text-white px-10 py-2.5 rounded-xl text-xs font-bold shadow-xl hover:bg-red-600 hover:-translate-y-0.5 transition-all disabled:opacity-50 disabled:hover:translate-y-0">
+                    {isSaving ? "SAVING..." : "SAVE CHANGES"}
                   </button>
                 )}
               </div>
@@ -2347,8 +2379,9 @@ const ProductManagement = () => {
             </button>
             <button
               onClick={confirmDelete}
-              className="px-6 py-2.5 bg-rose-600 text-white rounded-xl text-sm font-semibold shadow-lg shadow-rose-100 hover:bg-rose-700 transition-all active:scale-95">
-              Delete product
+              disabled={isDeleting}
+              className="px-6 py-2.5 bg-rose-600 text-white rounded-xl text-sm font-semibold shadow-lg shadow-rose-100 hover:bg-rose-700 transition-all active:scale-95 disabled:opacity-50">
+              {isDeleting ? "Deleting…" : "Delete product"}
             </button>
           </div>
         }>
