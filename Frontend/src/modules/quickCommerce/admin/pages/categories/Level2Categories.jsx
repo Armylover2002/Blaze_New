@@ -19,36 +19,14 @@ import { toast } from "sonner";
 import { useAuth } from "@core/context/AuthContext";
 import { getCurrentUser } from "@food/utils/auth";
 import { canPerformAdminPermissionAction, extractAdminPermissions, extractAdminRoleId, fetchAdminRolePermissions } from "@food/utils/adminPermissions";
+import {
+  buildCategoryFormData,
+  bulkDeleteCategories,
+  extractCategoryApiError,
+  fetchAllCategoriesByType,
+  validateCategoryImage,
+} from "../../utils/categoryHelpers";
 
-
-const fetchAllCategoriesByType = async (type) => {
-  const pageSize = 100;
-  const firstRes = await adminApi.getCategories({ type, page: 1, limit: pageSize });
-  const firstPayload = firstRes.data?.result || {};
-  const firstItems = Array.isArray(firstPayload.items)
-    ? firstPayload.items
-    : firstRes.data?.results || [];
-  const total = Number(firstPayload.total || firstItems.length || 0);
-  const totalPages = Math.max(1, Math.ceil(total / pageSize));
-
-  if (totalPages === 1) {
-    return firstItems;
-  }
-
-  const remainingResponses = await Promise.all(
-    Array.from({ length: totalPages - 1 }, (_, index) =>
-      adminApi.getCategories({ type, page: index + 2, limit: pageSize }),
-    ),
-  );
-
-  return [
-    ...firstItems,
-    ...remainingResponses.flatMap((response) => {
-      const payload = response.data?.result || {};
-      return Array.isArray(payload.items) ? payload.items : response.data?.results || [];
-    }),
-  ];
-};
 
 const Level2Categories = () => {
   const { user: authUser } = useAuth();
@@ -128,8 +106,8 @@ const Level2Categories = () => {
     setIsLoading(true);
     try {
       const [allLevel2Categories, allHeaderCategories] = await Promise.all([
-        fetchAllCategoriesByType("category"),
-        fetchAllCategoriesByType("header"),
+        fetchAllCategoriesByType(adminApi, "category"),
+        fetchAllCategoriesByType(adminApi, "header"),
       ]);
       setCategories(allLevel2Categories);
       setHeaderCategories(allHeaderCategories);
@@ -155,10 +133,17 @@ const Level2Categories = () => {
 
   const handleImageChange = (e) => {
     const file = e.target.files[0];
-    if (file) {
-      setImageFile(file);
-      setPreviewUrl(URL.createObjectURL(file));
+    if (!file) return;
+
+    const imageError = validateCategoryImage(file);
+    if (imageError) {
+      toast.error(imageError);
+      e.target.value = "";
+      return;
     }
+
+    setImageFile(file);
+    setPreviewUrl(URL.createObjectURL(file));
   };
 
   const handleSave = async () => {
@@ -167,17 +152,14 @@ const Level2Categories = () => {
       return;
     }
 
+    if (!headerCategories.length) {
+      toast.error("Create a header category before adding level 2 categories");
+      return;
+    }
+
     setIsSaving(true);
     try {
-      const data = new FormData();
-      data.append("type", "category");
-      Object.keys(formData).forEach((key) => {
-        if (key !== "type") data.append(key, formData[key]);
-      });
-
-      if (imageFile) {
-        data.append("image", imageFile);
-      }
+      const data = buildCategoryFormData(formData, "category", imageFile);
 
       if (editingItem) {
         await adminApi.updateCategory(editingItem._id || editingItem.id, data);
@@ -188,10 +170,13 @@ const Level2Categories = () => {
       }
       setIsAddModalOpen(false);
       setEditingItem(null);
+      setImageFile(null);
+      setPreviewUrl(null);
       fetchCategories();
     } catch (error) {
-      console.error(error);
-      toast.error(editingItem ? "Failed to update" : "Failed to create");
+      toast.error(
+        extractCategoryApiError(error, editingItem ? "Failed to update" : "Failed to create"),
+      );
     } finally {
       setIsSaving(false);
     }
@@ -207,7 +192,7 @@ const Level2Categories = () => {
       setDeleteTarget(null);
       fetchCategories();
     } catch (error) {
-      toast.error("Failed to delete category");
+      toast.error(extractCategoryApiError(error, "Failed to delete category"));
     }
   };
 
@@ -271,21 +256,26 @@ const Level2Categories = () => {
     if (selectedItems.length === 0) return;
 
     if (
-      window.confirm(
+      !window.confirm(
         `Are you sure you want to delete ${selectedItems.length} items?`,
       )
     ) {
-      try {
-        await Promise.all(
-          selectedItems.map((id) => adminApi.deleteCategory(id)),
+      return;
+    }
+
+    try {
+      const { deleted, failed, firstError } = await bulkDeleteCategories(adminApi, selectedItems);
+      if (failed > 0) {
+        toast.error(
+          extractCategoryApiError(firstError, `Deleted ${deleted}, but ${failed} could not be removed`),
         );
-        toast.success("Categories deleted");
-        setSelectedItems([]);
-        fetchCategories();
-      } catch (error) {
-        console.error("Bulk delete error:", error);
-        toast.error("Failed to delete some categories");
+      } else {
+        toast.success(`${deleted} categor${deleted === 1 ? "y" : "ies"} deleted`);
       }
+      setSelectedItems([]);
+      fetchCategories();
+    } catch (error) {
+      toast.error(extractCategoryApiError(error, "Failed to delete categories"));
     }
   };
 
@@ -403,8 +393,8 @@ const Level2Categories = () => {
                       <input
                         type="checkbox"
                         className="rounded border-gray-300 text-purple-600 focus:ring-purple-500"
-                        checked={selectedItems.includes(cat._id)}
-                        onChange={() => handleSelect(cat._id)}
+                        checked={selectedItems.includes(cat._id || cat.id)}
+                        onChange={() => handleSelect(cat._id || cat.id)}
                       />
                     </td>
                     <td className="py-3 px-4">

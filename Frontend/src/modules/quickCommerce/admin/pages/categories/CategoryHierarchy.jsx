@@ -13,6 +13,7 @@ import {
   Package,
 } from "lucide-react";
 import { adminApi } from "../../services/adminApi";
+import { extractCategoryApiError } from "../../utils/categoryHelpers";
 import Card from "@shared/components/ui/Card";
 import Badge from "@shared/components/ui/Badge";
 import { toast } from "sonner";
@@ -56,7 +57,7 @@ const CategoryHierarchy = () => {
         setCategories(res.data.results || res.data.result || []);
       }
     } catch (error) {
-      toast.error("Failed to fetch category hierarchy");
+      toast.error(extractCategoryApiError(error, "Failed to fetch category hierarchy"));
     } finally {
       setIsLoading(false);
     }
