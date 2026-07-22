@@ -28,10 +28,18 @@ const recalculateParentStock = async (productId) => {
 };
 
 const applyVariantStockDelta = async (productId, variantName, delta) => {
+  const filter = { _id: productId };
+  const arrayFilters = [{ 'elem.name': variantName }];
+
+  // Prevent oversell: only decrement when the variant has enough stock.
+  if (delta < 0) {
+    arrayFilters[0]['elem.stock'] = { $gte: Math.abs(delta) };
+  }
+
   const result = await QuickProduct.updateOne(
-    { _id: productId },
+    filter,
     { $inc: { 'variants.$[elem].stock': delta } },
-    { arrayFilters: [{ 'elem.name': variantName }] },
+    { arrayFilters },
   );
 
   if (result.modifiedCount > 0) return true;
@@ -40,10 +48,15 @@ const applyVariantStockDelta = async (productId, variantName, delta) => {
   const variant = matchProductVariant(product, { variantName });
   if (!variant?.name || variant.name === variantName) return false;
 
+  const retryFilters = [{ 'elem.name': variant.name }];
+  if (delta < 0) {
+    retryFilters[0]['elem.stock'] = { $gte: Math.abs(delta) };
+  }
+
   const retry = await QuickProduct.updateOne(
     { _id: productId },
     { $inc: { 'variants.$[elem].stock': delta } },
-    { arrayFilters: [{ 'elem.name': variant.name }] },
+    { arrayFilters: retryFilters },
   );
   return retry.modifiedCount > 0;
 };
@@ -82,7 +95,15 @@ export const adjustQuickProductStock = async (
     return;
   }
 
-  await QuickProduct.updateOne({ _id: productId }, { $inc: { stock: delta } });
+  const parentFilter = { _id: productId };
+  if (delta < 0) {
+    parentFilter.stock = { $gte: Math.abs(delta) };
+  }
+
+  const result = await QuickProduct.updateOne(parentFilter, { $inc: { stock: delta } });
+  if (result.modifiedCount === 0 && delta < 0) {
+    logger.warn(`[QuickStock] Insufficient parent stock for product ${productId}`);
+  }
 };
 
 /**

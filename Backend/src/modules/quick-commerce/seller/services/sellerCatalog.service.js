@@ -319,6 +319,7 @@ export const resolveSellerCategoryIds = async ({
   headerId,
   categoryId,
   subcategoryId,
+  allowDefaultFallback = true,
 }) => {
   await ensureSellerCategoriesSeeded();
   const selectedIds = [headerId, categoryId, subcategoryId]
@@ -333,6 +334,23 @@ export const resolveSellerCategoryIds = async ({
     const selectedSubcategory = subcategoryId
       ? byId.get(String(subcategoryId))
       : null;
+
+    // Reject IDs that were sent but not found / wrong type.
+    if (headerId && !selectedHeader) {
+      const err = new Error("Invalid header category");
+      err.statusCode = 400;
+      throw err;
+    }
+    if (categoryId && !selectedCategory) {
+      const err = new Error("Invalid category");
+      err.statusCode = 400;
+      throw err;
+    }
+    if (subcategoryId && !selectedSubcategory) {
+      const err = new Error("Invalid subcategory");
+      err.statusCode = 400;
+      throw err;
+    }
 
     const category =
       selectedCategory?.type === "category"
@@ -361,13 +379,18 @@ export const resolveSellerCategoryIds = async ({
       selectedSubcategory?.type === "subcategory" ? selectedSubcategory : null;
 
     if (category && header && String(category.parentId) === String(header._id)) {
+      if (
+        subcategory &&
+        String(subcategory.parentId) !== String(category._id)
+      ) {
+        const err = new Error("Subcategory does not belong to the selected category");
+        err.statusCode = 400;
+        throw err;
+      }
       return {
         headerId: header._id,
         categoryId: category._id,
-        subcategoryId:
-          subcategory && String(subcategory.parentId) === String(category._id)
-            ? subcategory._id
-            : null,
+        subcategoryId: subcategory ? subcategory._id : null,
       };
     }
 
@@ -383,6 +406,16 @@ export const resolveSellerCategoryIds = async ({
         subcategoryId: fallback?.subcategoryId || null,
       };
     }
+
+    const err = new Error("Invalid category hierarchy");
+    err.statusCode = 400;
+    throw err;
+  }
+
+  if (!allowDefaultFallback) {
+    const err = new Error("Category selection is required");
+    err.statusCode = 400;
+    throw err;
   }
 
   return getDefaultSellerCategoryPath();
@@ -595,12 +628,15 @@ export const buildSellerCatalogBrowseFilter = async ({
   }
 
   if (trimmedSearch) {
+    const escapeRegex = (value) =>
+      String(value ?? "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const term = escapeRegex(trimmedSearch.slice(0, 80));
     andClauses.push({
       $or: [
-        { name: { $regex: trimmedSearch, $options: "i" } },
-        { sku: { $regex: trimmedSearch, $options: "i" } },
-        { brand: { $regex: trimmedSearch, $options: "i" } },
-        { "pharmacyDetails.genericName": { $regex: trimmedSearch, $options: "i" } },
+        { name: { $regex: term, $options: "i" } },
+        { sku: { $regex: term, $options: "i" } },
+        { brand: { $regex: term, $options: "i" } },
+        { "pharmacyDetails.genericName": { $regex: term, $options: "i" } },
       ],
     });
   }

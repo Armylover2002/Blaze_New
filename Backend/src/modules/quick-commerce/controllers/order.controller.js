@@ -55,21 +55,9 @@ import {
   isQuickCouponNotStarted,
 } from '../utils/coupon.helpers.js';
 
-const approvedProductFilter = {
-  $or: [
-    { isActive: true },
-    { isActive: { $exists: false } },
-    { status: 'active' },
-  ],
-  $and: [
-    {
-      $or: [
-        { approvalStatus: { $exists: false } },
-        { approvalStatus: 'approved' },
-      ],
-    },
-  ],
-};
+import { publicProductVisibilityFilter } from '../utils/productVisibility.helpers.js';
+
+const approvedProductFilter = publicProductVisibilityFilter;
 
 const getQuickSessionIdFromRequest = (req) =>
   String(req.headers['x-quick-session'] || req.body?.sessionId || req.query?.sessionId || '').trim();
