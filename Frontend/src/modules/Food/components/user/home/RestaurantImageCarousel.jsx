@@ -4,7 +4,7 @@ import OptimizedImage from "@food/components/OptimizedImage";
 const WEBVIEW_SESSION_CACHE_BUSTER = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
 const RestaurantImageCarousel = React.memo(
-  ({ restaurant, priority = false, backendOrigin = "" }) => {
+  ({ restaurant, priority = false, backendOrigin = "", className }) => {
     const webviewSessionKeyRef = useRef(WEBVIEW_SESSION_CACHE_BUSTER);
     const imageElementRef = useRef(null);
 
@@ -46,18 +46,19 @@ const RestaurantImageCarousel = React.memo(
     );
 
     const images = useMemo(() => {
-      const sourceImages =
-        Array.isArray(restaurant?.images) && restaurant.images.length > 0
-          ? restaurant.images
-          : [restaurant?.image];
+      let sourceImages = [];
+      if (Array.isArray(restaurant?.images) && restaurant.images.length > 0) {
+        sourceImages = restaurant.images;
+      } else {
+        sourceImages = [restaurant?.image || restaurant?.imageUrl || restaurant?.coverImage];
+      }
 
       const validImages = sourceImages
-        .filter((img) => typeof img === "string")
-        .map((img) => img.trim())
-        .filter(Boolean);
+        .filter((img) => typeof img === "string" && img.trim() !== "")
+        .map((img) => img.trim());
 
       return validImages.map((img) => withCacheBuster(img));
-    }, [restaurant?.images, restaurant?.image, withCacheBuster]);
+    }, [restaurant?.images, restaurant?.image, restaurant?.imageUrl, restaurant?.coverImage, withCacheBuster]);
 
     const [currentIndex, setCurrentIndex] = useState(0);
     const [loadedBySrc, setLoadedBySrc] = useState({});
@@ -89,25 +90,12 @@ const RestaurantImageCarousel = React.memo(
 
     useEffect(() => {
       if (!renderSrc) return;
-      const imgEl = imageElementRef.current;
-      if (!imgEl) return;
 
       setShowShimmer(true);
       const shimmerTimeout = setTimeout(() => {
         setShowShimmer(false);
       }, 2500);
 
-      if (imgEl.complete) {
-        if (imgEl.naturalWidth > 0) {
-          setLoadedBySrc((prev) =>
-            prev[renderSrc] ? prev : { ...prev, [renderSrc]: true },
-          );
-          setLastGoodSrc(renderSrc);
-          setShowShimmer(false);
-        } else {
-          setAttemptedSrcs((prev) => ({ ...prev, [renderSrc]: true }));
-        }
-      }
       return () => clearTimeout(shimmerTimeout);
     }, [renderSrc]);
 
@@ -142,7 +130,7 @@ const RestaurantImageCarousel = React.memo(
 
     return (
       <div
-        className="relative h-48 sm:h-56 md:h-60 lg:h-64 xl:h-72 w-full overflow-hidden rounded-t-md flex-shrink-0 group"
+        className={className || "relative h-48 sm:h-56 md:h-60 lg:h-64 xl:h-72 w-full overflow-hidden rounded-t-md flex-shrink-0 group"}
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}>

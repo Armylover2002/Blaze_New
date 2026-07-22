@@ -1,9 +1,8 @@
 import React, { memo } from "react";
 import { Link } from "react-router-dom";
-import { motion } from "framer-motion";
 import { ExploreGridSkeleton } from "@food/components/ui/loading-skeletons";
 import OptimizedImage from "@food/components/OptimizedImage";
-import discoveryBg from "@food/assets/food_discovery_bg.png";
+import { ArrowRight } from "lucide-react";
 
 const ExploreMoreSection = memo(({
   exploreMoreHeading,
@@ -11,39 +10,71 @@ const ExploreMoreSection = memo(({
   finalExploreItems,
   backendOrigin = ""
 }) => {
+  const getSubtitle = (label) => {
+    const map = {
+      "Collections": "Curated for you",
+      "Offers": "Best deals & discounts",
+      "Gourmet": "Premium experiences"
+    };
+    return map[label] || "Explore now";
+  };
+
+  const cardThemes = [
+    { bg: "bg-[#ffd1d1]", arrow: "text-[#FF0000]" }, // Noticeably darker pink
+    { bg: "bg-[#d1dcff]", arrow: "text-[#3b82f6]" }, // Noticeably darker blue
+    { bg: "bg-[#ffdbb3]", arrow: "text-[#f97316]" }, // Noticeably darker orange
+  ];
+
   return (
-    <section className="px-4 py-4 md:py-6">
-      <div className="relative overflow-hidden rounded-[24px] bg-[#1c1c1e] p-5 md:p-6">
+    <section className="px-4 py-2">
+      <div className="relative overflow-hidden rounded-[20px] bg-[#f0e6e6] p-3 shadow-sm border border-[#e8dada]">
         
-        <h2 className="relative z-10 text-[11px] font-bold text-[#FF0000] tracking-[0.1em] uppercase mb-5 text-center">
-          {exploreMoreHeading || "Explore More"}
-        </h2>
+        <div className="flex items-center justify-center gap-2 mb-3 mt-0.5">
+           <span className="text-[#FF0000] text-[11px] opacity-90 leading-none">⇋</span>
+           <h2 className="relative z-10 text-[12px] font-bold text-black tracking-[0.05em] uppercase">
+             {exploreMoreHeading || "Explore More"}
+           </h2>
+           <span className="text-[#FF0000] text-[11px] opacity-90 leading-none">⇌</span>
+        </div>
         
         {showExploreSkeleton ? (
-          <div className="relative z-10 w-full px-1">
-            <ExploreGridSkeleton count={3} className="grid-cols-3" />
-          </div>
+           <div className="w-full px-1">
+             <ExploreGridSkeleton count={3} />
+           </div>
         ) : (
-          <div className="relative z-10 flex flex-wrap items-start justify-center gap-4 md:justify-around md:gap-6">
-            {finalExploreItems.map((item, index) => (
-              <Link
-                key={item.id}
-                to={item.href}
-                className="flex w-[30%] min-w-[88px] flex-col items-center gap-2 group md:w-auto md:min-w-[112px]"
-              >
-                <div className="relative w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-gray-800 transition-transform duration-300 group-hover:-translate-y-1 group-active:scale-95 flex items-center justify-center overflow-hidden">
-                  <OptimizedImage
-                    src={item.image}
-                    alt={item.label}
-                    className="w-full h-full object-cover transition-all duration-500 group-hover:scale-110"
-                    backendOrigin={backendOrigin}
-                  />
-                </div>
-                <span className="text-[11px] font-bold text-white text-center tracking-wide group-hover:text-gray-300 transition-colors duration-300">
-                  {item.label}
-                </span>
-              </Link>
-            ))}
+          <div className="grid grid-cols-3 gap-2">
+            {finalExploreItems.map((item, index) => {
+              const theme = cardThemes[index % cardThemes.length];
+              return (
+                <Link
+                  key={item.id || `explore-${index}`}
+                  to={item.href}
+                  className={`relative flex flex-col p-1.5 rounded-[12px] ${theme.bg} group hover:shadow-sm transition-all duration-300 overflow-hidden pb-6`}
+                >
+                  <div className="flex flex-col items-start gap-1">
+                    <div className="w-8 h-8 rounded-full bg-white/90 flex items-center justify-center shrink-0 overflow-hidden shadow-sm">
+                      <OptimizedImage
+                        src={item.image}
+                        alt={item.label}
+                        className="w-5 h-5 object-contain transition-transform duration-300 group-hover:scale-110"
+                        backendOrigin={backendOrigin}
+                      />
+                    </div>
+                    <div className="flex flex-col mt-0.5">
+                      <span className="text-[9.5px] font-bold text-gray-900 leading-tight">
+                        {item.label}
+                      </span>
+                      <span className="text-[7px] text-gray-700 mt-[1px] whitespace-nowrap">
+                        {getSubtitle(item.label)}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="absolute bottom-1.5 right-1.5 w-3.5 h-3.5 rounded-full bg-white shadow-sm flex items-center justify-center shrink-0">
+                    <ArrowRight className={`h-2 w-2 ${theme.arrow}`} strokeWidth={3} />
+                  </div>
+                </Link>
+              );
+            })}
           </div>
         )}
       </div>

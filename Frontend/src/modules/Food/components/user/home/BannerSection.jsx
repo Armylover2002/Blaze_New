@@ -97,61 +97,28 @@ const BannerSection = memo(({
                   />
                 ) : (
                   <>
+                    <OptimizedImage
+                      src={image}
+                      alt={`Hero Banner ${index + 1}`}
+                      className="absolute inset-0 h-full w-full object-cover"
+                      priority={index === currentBannerIndex}
+                      backendOrigin={backendOrigin}
+                      draggable={false}
+                    />
                     {!hideOverlay && (
-                      <div className="relative h-full w-full flex items-center justify-between px-2 sm:px-6">
-                        {/* Left Side: Text Content */}
-                        <div className="relative z-10 flex flex-col justify-center h-full text-white w-[60%] sm:w-[65%] mt-2 pl-4 sm:pl-8">
-                          <div className="flex items-center gap-1.5 mb-1">
-                            <span className="text-[10px] sm:text-xs font-bold italic tracking-wider text-red-200 uppercase flex items-center gap-1">
-                              <TextReveal text={bannerData?.title || "A SIX IS HIT! 🏏"} isActive={isActive} delay={0.1} />
-                            </span>
-                          </div>
-                          <h3 className="text-xl sm:text-2xl lg:text-3xl font-bold leading-[1.1] mb-3 text-white uppercase italic drop-shadow-[0_2px_4px_rgba(0,0,0,0.4)]">
-                            <TextReveal text={bannerData?.subtitle || "66% OFF FOR 10 MIN!"} isActive={isActive} delay={0.4} />
+                      <div className="absolute inset-0 h-full w-full flex items-center justify-center text-center px-4">
+                        <div className="relative z-10 flex flex-col justify-center items-center h-full text-white w-full max-w-[320px] sm:max-w-md mt-0 sm:mt-0">
+                          <h3 className="text-[15px] sm:text-[18px] font-extrabold leading-[1.4] text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.6)]">
+                            {bannerData?.title?.split('\n').map((line, i) => (
+                              <div key={i}>
+                                <TextReveal text={line} isActive={isActive} delay={0.1 + (i * 0.1)} />
+                              </div>
+                            ))}
                           </h3>
-                          <motion.div
-                            initial={{ opacity: 0, scale: 0.8 }}
-                            animate={
-                              isActive
-                                ? { opacity: 1, scale: 1, y: [0, -4, 0, -2, 0] }
-                                : { opacity: 0, scale: 0.8, y: 0 }
-                            }
-                            transition={{
-                              opacity: { delay: 0.8, duration: 0.4 },
-                              scale: { delay: 0.8, duration: 0.4, type: "spring" },
-                              y: { delay: 1.5, duration: 1.2, ease: "easeInOut", repeat: Infinity, repeatDelay: 2.5 }
-                            }}
-                            className="w-fit"
-                          >
-                            <button className="bg-[#FF0000] hover:bg-[#CC0000] shadow-[0_4px_12px_rgba(255,0,0,0.5)] flex items-center gap-1 px-4 py-2 rounded-xl text-white font-bold transition-all transform hover:scale-105 active:scale-95">
-                              {bannerData?.action || "Order Now"} <span className="font-bold tracking-tighter">&gt;&gt;</span>
-                            </button>
-                          </motion.div>
                         </div>
-
-                        {/* Right Side: Image Content */}
-                        <motion.div
-                          initial={{ opacity: 0, x: 20, scale: 0.9 }}
-                          animate={{ opacity: currentBannerIndex === index ? 1 : 0, x: currentBannerIndex === index ? 0 : 20, scale: currentBannerIndex === index ? 1 : 0.9 }}
-                          transition={{ delay: 0.2, duration: 0.6, type: "spring", bounce: 0.4 }}
-                          className="absolute right-0 bottom-0 h-[120%] w-[45%] sm:w-[40%] flex items-end justify-end pointer-events-none"
-                        >
-                          <img src={image} className="max-h-full w-auto object-contain object-bottom drop-shadow-2xl translate-y-2 sm:translate-y-4 translate-x-2 sm:translate-x-4" alt="Banner Graphic" />
-                        </motion.div>
                       </div>
                     )}
-                    {!hideOverlay ? (
-                      <div className="absolute inset-0 w-full h-full bg-gradient-to-br from-white/5 to-transparent pointer-events-none" />
-                    ) : (
-                      <OptimizedImage
-                        src={image}
-                        alt={`Hero Banner ${index + 1}`}
-                        className="h-full w-full object-cover"
-                        priority={index === currentBannerIndex}
-                        backendOrigin={backendOrigin}
-                        draggable={false}
-                      />
-                    )}
+
                   </>
                 )}
               </div>

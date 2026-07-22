@@ -796,10 +796,10 @@ Order again from this restaurant in the ${companyName} app.`
             return (
               <div key={order.id} className="relative bg-white dark:bg-[#111111] rounded-xl shadow-sm border border-gray-100 dark:border-gray-800 overflow-hidden">
                 {/* Card Header: Restaurant Info */}
-                <div className="flex items-start justify-between p-4 pb-2">
-                  <div className="flex gap-3">
+                <div className="flex items-start justify-between p-3 pb-2">
+                  <div className="flex gap-2">
                     {/* Restaurant Image */}
-                    <div className="w-14 h-14 rounded-lg bg-gray-200 overflow-hidden flex-shrink-0">
+                    <div className="w-10 h-10 rounded-md bg-gray-200 overflow-hidden flex-shrink-0">
                       <img
                         src={restaurantImage}
                         alt={order.restaurant}
@@ -827,10 +827,10 @@ Order again from this restaurant in the ${companyName} app.`
                           </span>
                         )}
                       </div>
-                      <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
+                      <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">
                         Order ID: <span className="font-semibold text-gray-700 dark:text-gray-200">{order.orderId || order.id}</span>
                       </p>
-                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{location}</p>
+                      <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">{location}</p>
                       {order.deliveryPartnerName && (
                         <p className="text-xs text-gray-600 dark:text-gray-300 mt-1">
                           <span className="font-medium">Delivery:</span> {order.deliveryPartnerName}
@@ -877,10 +877,10 @@ Order again from this restaurant in the ${companyName} app.`
                 )}
 
                 {/* Separator */}
-                <div className="border-t border-dashed border-gray-200 dark:border-gray-700 mx-4 my-1"></div>
+                <div className="border-t border-dashed border-gray-200 dark:border-gray-700 mx-3 my-1"></div>
 
                 {/* Items List */}
-                <div className="px-4 py-2 space-y-2">
+                <div className="px-3 py-1 space-y-1">
                   {order.items && order.items.length > 0 ? (
                     order.items.map((item, idx) => {
                       const isVeg = item.isVeg !== undefined ? item.isVeg : (item.category === 'veg' || item.type === 'veg')
@@ -891,10 +891,10 @@ Order again from this restaurant in the ${companyName} app.`
                       const itemImage = item.image || null
 
                       return (
-                        <div key={item._id || item.id || item.itemId || idx} className="flex items-start gap-3">
+                        <div key={item._id || item.id || item.itemId || idx} className="flex items-start gap-2">
                           {/* Item Image */}
                           {itemImage && (
-                            <div className="w-12 h-12 rounded-lg bg-gray-100 overflow-hidden flex-shrink-0">
+                            <div className="w-8 h-8 rounded bg-gray-100 overflow-hidden flex-shrink-0">
                               <img
                                 src={itemImage}
                                 alt={itemName}
@@ -907,9 +907,9 @@ Order again from this restaurant in the ${companyName} app.`
                           )}
 
                           <div className="flex-1 min-w-0">
-                            <div className="flex items-start gap-2">
+                            <div className="flex items-start gap-1.5">
                               {/* Veg/Non-Veg Icon */}
-                              <div className={`w-4 h-4 border ${isVeg ? 'border-green-600' : 'border-red-600'} flex items-center justify-center p-[2px] flex-shrink-0 mt-0.5`}>
+                              <div className={`w-3 h-3 border ${isVeg ? 'border-green-600' : 'border-red-600'} flex items-center justify-center p-[1px] flex-shrink-0 mt-0.5`}>
                                 <div className={`w-full h-full rounded-full ${isVeg ? 'bg-green-600' : 'bg-red-600'}`}></div>
                               </div>
                               <div className="flex-1 min-w-0">
@@ -940,8 +940,8 @@ Order again from this restaurant in the ${companyName} app.`
                 </div>
 
                 {/* Order Summary Section */}
-                <div className="px-4 py-3 bg-gray-50 dark:bg-[#1a1a1a] rounded-lg mx-4 mb-2">
-                  <div className="space-y-1.5">
+                <div className="px-3 py-2 bg-gray-50 dark:bg-[#1a1a1a] rounded-md mx-3 my-1.5">
+                  <div className="space-y-1">
                     {order.subtotal > 0 && (
                       <div className="flex justify-between text-xs">
                         <span className="text-gray-600 dark:text-gray-300">Subtotal</span>
@@ -994,9 +994,9 @@ Order again from this restaurant in the ${companyName} app.`
                 </div>
 
                 {/* Date and Payment Info */}
-                <div className="px-4 py-2 flex items-center justify-between">
+                <div className="px-3 py-2 flex items-center justify-between">
                   <div className="flex-1">
-                    <p className="text-xs text-gray-400 dark:text-gray-500">Order placed on {formatDate(order.createdAt)}</p>
+                    <p className="text-[10px] text-gray-400 dark:text-gray-500">Order placed on {formatDate(order.createdAt)}</p>
                     {order.deliveredAt && (
                       <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">Delivered on {formatDate(order.deliveredAt)}</p>
                     )}
