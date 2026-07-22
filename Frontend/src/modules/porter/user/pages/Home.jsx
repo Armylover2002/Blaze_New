@@ -1,8 +1,39 @@
 import React, { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Package, MapPin, ChevronRight, Truck, Clock, Search } from "lucide-react";
+import { Package, MapPin, ChevronRight, Truck, Clock, Search, UtensilsCrossed, ShoppingBag, Star, ArrowRight, ChevronDown, ShieldCheck } from "lucide-react";
 import { Skeleton } from "@food/components/ui/skeleton";
+import { cn } from "@/lib/utils";
+
+const tabs = [
+  { 
+    id: "food", 
+    title: "FOOD", 
+    subtitle: "FROM RESTAURANTS", 
+    discount: "UPTO 30% OFF",
+    image: "/super-app/food.png",
+    icon: UtensilsCrossed,
+    route: "/food/user"
+  },
+  { 
+    id: "quick", 
+    title: "INSTAMART", 
+    subtitle: "INSTANT GROCERY", 
+    discount: "UPTO 20% OFF",
+    image: "/super-app/grocery.png",
+    icon: ShoppingBag,
+    route: "/quick"
+  },
+  { 
+    id: "porter", 
+    title: "PORTER", 
+    subtitle: "SEND PACKAGES", 
+    discount: "UPTO 50% OFF",
+    image: "/super-app/taxi.png",
+    icon: Star,
+    route: "/porter"
+  },
+];
 import PorterHomeMap from "../components/PorterHomeMap";
 import PorterBottomNav from "../components/layout/BottomNav";
 import BottomSheet from "../components/BottomSheet";
@@ -37,8 +68,8 @@ function VehicleCardSkeleton() {
 
 function OfferCardSkeleton() {
   return (
-    <div className="flex items-center gap-3 rounded-2xl border border-dashed border-[#FF0000]/30 bg-[#FFF1F1]/50 p-4">
-      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[#FF0000]/10">
+    <div className="flex items-center gap-3 rounded-2xl border border-dashed border-[#2563EB]/30 bg-[#EFF6FF]/50 p-4">
+      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[#2563EB]/10">
          <Skeleton className="h-6 w-6 rounded-md" />
       </div>
       <div className="min-w-0 flex-1 space-y-1.5">
@@ -54,10 +85,10 @@ function BannerCarousel({ banners, onBannerClick }) {
   return (
     <div className="flex overflow-x-auto snap-x snap-mandatory hide-scrollbar">
       {banners.map(b => (
-        <div key={b.id} onClick={() => onBannerClick(b)} className="w-[100vw] min-w-[100vw] px-4 pb-2 snap-center shrink-0 cursor-pointer">
-          <div className="w-full rounded-2xl overflow-hidden relative shadow-sm">
-            <img src={b.image} alt={b.title} className="w-full h-40 object-cover bg-gray-100" />
-            <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/10 to-transparent flex flex-col justify-end p-5">
+        <div key={b.id} onClick={() => onBannerClick(b)} className="w-[100vw] min-w-[100vw] snap-center shrink-0 cursor-pointer">
+          <div className="w-full relative h-[140px] sm:h-44 bg-gray-100">
+            <img src={b.image} alt={b.title} className="w-full h-full object-cover" />
+            <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/10 to-transparent flex flex-col justify-end p-4 pb-8">
                <h3 className="text-white font-extrabold text-xl leading-tight drop-shadow-md">{b.title}</h3>
                {b.subtitle && <p className="text-white/95 text-[13px] mt-1 font-semibold drop-shadow-md">{b.subtitle}</p>}
             </div>
@@ -68,20 +99,21 @@ function BannerCarousel({ banners, onBannerClick }) {
   );
 }
 
-function VehicleIcon({ iconUrl, name }) {
+function VehicleIcon({ iconUrl, name, className, style }) {
   if (iconUrl) {
     return (
       <img
         src={iconUrl}
         alt={name}
-        className="h-12 w-12 rounded-lg object-contain bg-gray-50 drop-shadow-sm p-1"
+        className={className || "h-12 w-12 rounded-lg object-contain bg-gray-50 drop-shadow-sm p-1"}
+        style={style}
         loading="lazy"
       />
     );
   }
   return (
-    <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-gray-50 shadow-sm border border-gray-100">
-      <Truck className="h-6 w-6 text-[#FF0000]" />
+    <div className={className || "flex h-12 w-12 items-center justify-center rounded-lg bg-gray-50 shadow-sm border border-gray-100"}>
+      <Truck className="h-6 w-6 text-[#2563EB]" />
     </div>
   );
 }
@@ -137,57 +169,199 @@ export default function Home({ embedded = false }) {
     return '';
   }, []);
 
+  const containerVariants = {
+    hidden: { opacity: 0 },
+    show: {
+      opacity: 1,
+      transition: { staggerChildren: 0.1 }
+    }
+  };
+
+  const itemVariants = {
+    hidden: { opacity: 0, y: 15 },
+    show: { opacity: 1, y: 0, transition: { type: "spring", stiffness: 350, damping: 25 } }
+  };
+
   return (
     <div className={`min-h-screen bg-[#FAF7F2] dark:bg-[#0a0a0a] ${embedded ? "pb-24" : "pb-28"}`}>
-      <header className="sticky top-0 z-40 bg-white/90 dark:bg-[#1a1a1a]/90 backdrop-blur-md border-b border-gray-100 dark:border-white/10">
-        <div className="px-4 py-3">
-          <div className="flex w-full items-center relative">
-            <Search className="absolute left-3 h-4 w-4 text-gray-400" />
-            <input
-              type="text"
-              placeholder="Search..."
-              className="w-full rounded-full bg-gray-100 dark:bg-[#2a2a2a] py-2 pl-9 pr-4 text-[13px] text-gray-900 dark:text-white outline-none border border-transparent focus:border-gray-200 dark:focus:border-white/10 transition-colors"
-            />
-          </div>
-        </div>
-      </header>
+      <motion.main 
+        className="pb-4"
+        variants={containerVariants}
+        initial="hidden"
+        animate="show"
+      >
+        {/* Banner + Search section matching Food module */}
+        <motion.div variants={itemVariants} className="relative z-10 w-full md:hidden pt-2">
+          <div
+            className="relative overflow-hidden shadow-sm pb-3.5 rounded-[20px] mx-3 sm:mx-4 mt-0"
+            style={{
+              background: "linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%)",
+            }}
+          >
+            <div className="h-[130px] sm:h-36 md:h-44 mt-0 relative z-10 w-full px-0">
+               {!isLoading && banners.length > 0 && (
+                  <BannerCarousel banners={banners} onBannerClick={handleBannerClick} />
+               )}
+            </div>
 
-      <main className="space-y-5 pb-4">
-        {!isLoading && banners.length > 0 && (
-           <div className="pt-4"><BannerCarousel banners={banners} onBannerClick={handleBannerClick} /></div>
-        )}
+            {/* Banner Search and Location */}
+            <div className="px-4 pt-0 -mt-2 relative z-20">
+              <div className="flex w-full items-center bg-white rounded-full shadow-md overflow-hidden relative pr-2">
+                {/* Location */}
+                <button
+                  type="button"
+                  onClick={() => navigate(getPorterAddressPath())}
+                  className="flex items-center gap-1.5 px-4 py-3 bg-transparent border-0 hover:bg-gray-50 transition-colors shrink-0 max-w-[140px]"
+                >
+                  <MapPin className="h-4 w-4 shrink-0 text-[#2563EB]" strokeWidth={2.5} />
+                  <div className="flex items-center min-w-0">
+                    <span className="truncate text-xs font-bold text-gray-800">
+                      {pickup?.title || "Select Location"}
+                    </span>
+                    <ChevronDown className="ml-1 h-3.5 w-3.5 shrink-0 text-gray-800" strokeWidth={2.5} />
+                  </div>
+                </button>
+
+                <div className="h-6 w-px bg-gray-200 shrink-0" />
+
+                {/* Search */}
+                <button
+                  type="button"
+                  className="flex-1 flex items-center justify-between px-3 py-3 bg-transparent border-0 text-left hover:bg-gray-50 transition-colors min-w-0"
+                >
+                  <span className="block truncate text-xs text-gray-400 font-medium w-full">
+                    Search...
+                  </span>
+                  <Search className="h-4 w-4 shrink-0 text-gray-400 ml-2" strokeWidth={2} />
+                </button>
+              </div>
+            </div>
+          </div>
+        </motion.div>
+
+        {/* TABS SECTION / CARDS SECTION */}
+        <motion.div variants={itemVariants} className="grid grid-cols-3 gap-2 px-3 sm:px-4 md:hidden mt-5">
+          {tabs.map((tab) => {
+            const isActive = tab.id === "porter";
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => navigate(tab.route)}
+                className={cn(
+                  "relative rounded-[16px] border p-2 sm:p-2.5 flex flex-col justify-between overflow-hidden shadow-sm transition-all duration-300 text-left h-[85px] min-[380px]:h-[95px]",
+                  isActive 
+                    ? "bg-blue-50/80 border-blue-200 shadow-sm scale-[1.02]" 
+                    : tab.id === "food"
+                    ? "bg-red-50/60 border-red-100 hover:bg-red-50 hover:border-red-200 hover:shadow-md hover:scale-[1.01]"
+                    : tab.id === "quick"
+                    ? "bg-orange-50/60 border-orange-100 hover:bg-orange-50 hover:border-orange-200 hover:shadow-md hover:scale-[1.01]"
+                    : "bg-white border-gray-200 hover:border-gray-300 hover:shadow-md hover:scale-[1.01]"
+                )}
+              >
+                {/* Top content */}
+                <div className="flex gap-1.5 w-full items-start z-10">
+                  <div className="bg-[#2563EB] text-white rounded-full p-1 shrink-0 flex items-center justify-center h-[20px] w-[20px] mt-0.5">
+                    <tab.icon className="h-3 w-3" strokeWidth={2.5} />
+                  </div>
+                  <div className="flex flex-col min-w-0 mt-0.5">
+                    <span className="text-[9.5px] min-[380px]:text-[10.5px] sm:text-[12px] font-bold text-gray-900 leading-tight truncate">
+                      {tab.title}
+                    </span>
+                    <p className="text-[7px] sm:text-[8px] font-medium text-gray-500 uppercase tracking-tight mt-0.5 truncate">
+                      {tab.subtitle}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Bottom content: arrow and image */}
+                <div className="mt-1 flex items-end justify-between w-full z-10">
+                  <div className="bg-[#2563EB] text-white rounded-full p-1 shrink-0 flex items-center justify-center h-4 w-4 shadow-sm mb-0.5">
+                    <ArrowRight className="h-2.5 w-2.5" strokeWidth={3} />
+                  </div>
+                  <div className="absolute right-[-4px] bottom-[-4px] w-[55px] h-[55px] min-[380px]:w-[65px] min-[380px]:h-[65px] pointer-events-none">
+                    <img src={tab.image} className="w-full h-full object-contain mix-blend-multiply" alt={tab.title} />
+                  </div>
+                </div>
+              </button>
+            );
+          })}
+        </motion.div>
 
         {showVehicles && (
-          <section className="px-4 pt-4">
+          <motion.section variants={itemVariants} className="px-4 mt-5">
             <SectionLabel>Delivery vehicles</SectionLabel>
             <div className="grid grid-cols-2 gap-3">
               {isLoading
                 ? Array.from({ length: FEATURED_VEHICLE_LIMIT }).map((_, i) => (
                     <VehicleCardSkeleton key={`vehicle-skeleton-${i}`} />
                   ))
-                : featuredVehicles.map((v) => (
-                    <button
-                      key={v.id}
-                      type="button"
-                      onClick={() => navigate(getPorterAddressPath())}
-                      className="flex flex-col items-center justify-center rounded-2xl border border-gray-100 bg-white p-4 text-center shadow-sm transition hover:border-[#FF0000]/30 hover:shadow-md hover:-translate-y-0.5 relative overflow-hidden"
-                    >
-                      <div className="absolute top-0 w-full h-1 bg-gradient-to-r from-transparent via-[#FF0000]/20 to-transparent"></div>
-                      <VehicleIcon iconUrl={v.iconUrl} name={v.name} />
-                      <div className="mt-3 w-full">
-                        <p className="text-[14px] font-bold text-gray-900">{v.name}</p>
-                        <p className="text-[11px] font-medium text-[#FF0000] bg-[#FFF1F1] inline-block px-2 py-0.5 rounded-full mt-1">Up to {v.maxWeight} kg</p>
-                      </div>
-                    </button>
-                  ))}
+                : featuredVehicles.map((v) => {
+                    const isBike = v.name.toLowerCase().includes('bike');
+                    return (
+                      <motion.button
+                        key={v.id}
+                        type="button"
+                        whileHover={{ scale: 1.02 }}
+                        whileTap={{ scale: 0.98 }}
+                        onClick={() => navigate(getPorterAddressPath())}
+                        className="flex flex-col rounded-[20px] border border-gray-100 bg-white overflow-hidden shadow-[0_2px_12px_rgba(0,0,0,0.04)] transition-shadow hover:shadow-lg relative text-left group"
+                      >
+                        {/* Shimmer Effect Overlay */}
+                        <motion.div 
+                          className="absolute top-0 bottom-0 w-[150%] z-40 bg-gradient-to-r from-transparent via-white/50 to-transparent skew-x-12 pointer-events-none"
+                          animate={{ x: ["-100%", "200%"] }}
+                          transition={{ repeat: Infinity, duration: 2, ease: "linear", repeatDelay: 3 }}
+                        />
+
+                        {/* Top Background Area */}
+                        <div className={`w-full h-[95px] relative flex justify-center items-center overflow-hidden ${isBike ? 'bg-[#FFECEC]' : 'bg-[#EEF5FF]'}`}>
+                          {/* Badge */}
+                          <div className="absolute top-2 left-2 bg-white/90 backdrop-blur-sm rounded-full px-2 py-1 flex items-center gap-1 shadow-sm z-20">
+                            <ShieldCheck className={`h-3 w-3 ${isBike ? 'text-[#E53935]' : 'text-[#3B82F6]'}`} />
+                            <span className={`text-[9px] font-bold ${isBike ? 'text-[#E53935]' : 'text-[#3B82F6]'}`}>
+                              {isBike ? 'Fast Delivery' : 'Heavy Duty'}
+                            </span>
+                          </div>
+                          
+                          {/* Floating Image */}
+                          <motion.div 
+                            animate={{ y: [0, -3, 0] }}
+                            transition={{ repeat: Infinity, duration: 2.5, ease: "easeInOut", delay: isBike ? 0 : 0.5 }}
+                            className="w-full h-full pt-4 pb-1 relative z-10 flex items-center justify-center mix-blend-multiply" 
+                            style={{ mixBlendMode: 'multiply' }}
+                          >
+                            <VehicleIcon iconUrl={v.iconUrl} name={v.name} className="h-full w-full object-contain mix-blend-multiply transition-transform duration-500 group-hover:scale-110" style={{ mixBlendMode: 'multiply' }} />
+                          </motion.div>
+                        </div>
+
+                        {/* Bottom Content Area */}
+                        <div className="p-2 sm:p-2.5 w-full bg-white flex flex-col gap-2 relative z-20 transition-colors duration-300 group-hover:bg-gray-50/50">
+                          <div className="flex items-center gap-2">
+                            <div className={`p-1.5 rounded-[10px] shrink-0 ${isBike ? 'bg-[#FFECEC] text-[#E53935]' : 'bg-[#EEF5FF] text-[#3B82F6]'}`}>
+                              <Truck className="h-4 w-4" />
+                            </div>
+                            <div className="flex flex-col min-w-0">
+                              <p className="text-[14px] sm:text-[15px] font-black tracking-tight text-gray-800 leading-none truncate">{v.name}</p>
+                              <p className="text-[9px] sm:text-[9.5px] font-medium text-gray-500 mt-0.5 leading-tight line-clamp-1">{isBike ? 'Quick & efficient delivery' : 'For heavy deliveries'}</p>
+                            </div>
+                          </div>
+                          <div className={`w-full rounded-[10px] py-1.5 flex items-center justify-center gap-1.5 border ${isBike ? 'bg-[#FFECEC]/50 border-[#E53935]/20 text-[#E53935]' : 'bg-[#EEF5FF]/50 border-[#3B82F6]/20 text-[#3B82F6]'}`}>
+                            <ShoppingBag className="h-3 w-3" />
+                            <span className="text-[11px] font-bold tracking-tight">Up to {v.maxWeight} kg</span>
+                          </div>
+                        </div>
+                      </motion.button>
+                    );
+                  })}
             </div>
-          </section>
+          </motion.section>
         )}
 
-        <div className="px-4">
+        <motion.div variants={itemVariants} className="px-4 mt-6">
           <SectionLabel>Map</SectionLabel>
           <div className="overflow-hidden rounded-2xl bg-white shadow-sm">
-            <PorterHomeMap height={320} className="rounded-2xl" />
+            <PorterHomeMap height={180} className="rounded-2xl" />
             {pickup?.address && (
               <div className="border-t border-gray-100 px-4 py-3">
                 <p className="text-[11px] font-bold uppercase text-gray-400">Pickup</p>
@@ -197,13 +371,13 @@ export default function Home({ embedded = false }) {
             )}
 
           </div>
-        </div>
+        </motion.div>
 
         {showOffers && (
-          <section className="px-4">
+          <motion.section variants={itemVariants} className="px-4 mt-6">
             <div className="mb-2 flex items-center justify-between">
               <SectionLabel className="mb-0">Offers for you</SectionLabel>
-              <button type="button" onClick={() => navigate(getPorterPromoPath())} className="text-[12px] font-bold text-[#FF0000]">
+              <button type="button" onClick={() => navigate(getPorterPromoPath())} className="text-[12px] font-bold text-[#2563EB]">
                 View all
               </button>
             </div>
@@ -216,39 +390,53 @@ export default function Home({ embedded = false }) {
                     <div
                       key={coupon.id}
                       onClick={() => setSelectedCoupon(coupon)}
-                      className="flex items-center gap-4 rounded-2xl border border-dashed border-[#FF0000]/30 bg-gradient-to-r from-[#FFF1F1] to-white p-4 shadow-sm cursor-pointer transition hover:border-[#FF0000]"
+                      className="relative w-full flex items-center bg-white border border-[#E2E8F0] rounded-[20px] shadow-[0_4px_16px_rgba(0,0,0,0.03)] overflow-hidden cursor-pointer transition hover:shadow-md hover:border-[#3B82F6]/40 group"
                     >
-                      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[#FF0000]/10 text-2xl drop-shadow-sm">
-                        🎉
+                      {/* Decorative background circle */}
+                      <div className="absolute -right-6 -top-6 w-20 h-20 rounded-full bg-[#EEF5FF] transition duration-500 group-hover:scale-[2] pointer-events-none"></div>
+                      
+                      <div className="p-3.5 pl-4 flex items-center w-full z-10">
+                        {/* Icon container */}
+                        <div className="flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-[12px] bg-gradient-to-br from-[#3B82F6] to-[#2563EB] shadow-sm shadow-blue-200">
+                          <span className="text-white font-black text-lg leading-none">%</span>
+                        </div>
+                        
+                        <div className="ml-3.5 flex-1 min-w-0 pr-2">
+                          <div className="flex flex-col">
+                            <p className="text-[14.5px] font-bold text-gray-900 tracking-tight leading-none mb-1">
+                              {coupon.code}
+                            </p>
+                            <p className="text-[11.5px] font-medium text-gray-500 leading-tight">
+                              {getDiscountSubtext(coupon)} on your next ride
+                            </p>
+                          </div>
+                        </div>
+                        
+                        <div className="ml-1 pl-3 py-2 border-l-2 border-dashed border-gray-100 flex flex-col items-center justify-center">
+                          <span className="text-[10.5px] font-extrabold text-[#2563EB] uppercase tracking-wide">Apply</span>
+                        </div>
                       </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-[14px] font-extrabold text-gray-900 uppercase tracking-tight">{coupon.code}</p>
-                        <p className="text-[12px] font-medium text-gray-600 mt-0.5">
-                          {getDiscountSubtext(coupon)} on your next ride
-                        </p>
-                      </div>
-                      <ChevronRight className="h-5 w-5 shrink-0 text-[#FF0000]" />
                     </div>
                   ))}
             </div>
-          </section>
+          </motion.section>
         )}
 
         {recentShipment && (
-          <section className="px-4 mt-5">
+          <motion.section variants={itemVariants} className="px-4 mt-5">
             <div className="mb-2 flex items-center justify-between">
               <SectionLabel className="mb-0">Recent Shipment</SectionLabel>
-              <button type="button" onClick={() => navigate('/porter/shipments')} className="text-[12px] font-bold text-[#FF0000]">
+              <button type="button" onClick={() => navigate('/porter/shipments')} className="text-[12px] font-bold text-[#2563EB]">
                 View history
               </button>
             </div>
             <div
               onClick={() => navigate(getPorterShipmentDetailsPath(recentShipment.id))}
-              className="flex flex-col rounded-2xl border border-gray-100 bg-white p-4 text-left shadow-sm transition hover:border-[#FF0000]/30 hover:shadow-md cursor-pointer"
+              className="flex flex-col rounded-2xl border border-gray-100 bg-white p-4 text-left shadow-sm transition hover:border-[#2563EB]/30 hover:shadow-md cursor-pointer"
             >
               <div className="flex items-center justify-between gap-2 mb-3 border-b border-gray-50 pb-3">
                 <p className="text-[13px] font-bold text-gray-900">#{recentShipment.orderNumber}</p>
-                <span className={`text-[11px] font-bold uppercase ${["delivered", "completed"].includes(recentShipment.status) ? "text-green-600" : "text-[#FF0000]"}`}>
+                <span className={`text-[11px] font-bold uppercase ${["delivered", "completed"].includes(recentShipment.status) ? "text-green-600" : "text-[#2563EB]"}`}>
                   {String(recentShipment.status || "").replace(/_/g, " ")}
                 </span>
               </div>
@@ -259,7 +447,7 @@ export default function Home({ embedded = false }) {
                     <p className="text-[12px] text-gray-700 font-medium line-clamp-1">{recentShipment.pickup?.address || "Pickup address"}</p>
                  </div>
                  <div className="relative">
-                    <div className="absolute -left-[18.5px] top-1.5 h-2 w-2 rounded-full border-2 border-[#FF0000] bg-white"></div>
+                    <div className="absolute -left-[18.5px] top-1.5 h-2 w-2 rounded-full border-2 border-[#2563EB] bg-white"></div>
                     <p className="text-[12px] text-gray-700 font-medium line-clamp-1">{recentShipment.delivery?.address || "Delivery address"}</p>
                  </div>
               </div>
@@ -270,10 +458,10 @@ export default function Home({ embedded = false }) {
                 </span>
               </div>
             </div>
-          </section>
+          </motion.section>
         )}
 
-      </main>
+      </motion.main>
 
       <BottomSheet
         open={!!selectedCoupon}
@@ -282,12 +470,12 @@ export default function Home({ embedded = false }) {
       >
         {selectedCoupon && (
           <div className="space-y-4">
-            <div className="rounded-2xl border border-dashed border-[#FF0000]/30 bg-[#FFF1F1] p-5 text-center relative overflow-hidden">
+            <div className="rounded-2xl border border-dashed border-[#2563EB]/30 bg-[#EFF6FF] p-5 text-center relative overflow-hidden">
               <div className="absolute top-1/2 -left-3 h-6 w-6 -translate-y-1/2 rounded-full bg-white"></div>
               <div className="absolute top-1/2 -right-3 h-6 w-6 -translate-y-1/2 rounded-full bg-white"></div>
               <div className="text-3xl mb-2">🎉</div>
               <h3 className="text-xl font-black text-gray-900 uppercase tracking-widest">{selectedCoupon.code}</h3>
-              <p className="text-[14px] font-bold text-[#FF0000] mt-1">
+              <p className="text-[14px] font-bold text-[#2563EB] mt-1">
                 {getDiscountText(selectedCoupon)}
               </p>
             </div>

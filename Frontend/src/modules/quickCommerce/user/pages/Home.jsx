@@ -9,6 +9,9 @@ import {
   Heart,
   Snowflake,
   Dog,
+  UtensilsCrossed,
+  ShoppingBag,
+  ArrowRight,
 } from 'lucide-react';
 
 // MUI Icons
@@ -95,6 +98,33 @@ const quickCategoryPalettes = [
 
 const QUICK_THEME_STORAGE_KEY = 'food.quick.headerColor';
 const QUICK_HEADER_RETURN_STORAGE_KEY = 'food.quick.headerReturn';
+
+const tabs = [
+  { 
+    id: "food", 
+    title: "FOOD", 
+    subtitle: "FROM RESTAURANTS", 
+    discount: "UPTO 30% OFF",
+    image: "/super-app/food.png",
+    icon: UtensilsCrossed
+  },
+  { 
+    id: "quick", 
+    title: "INSTAMART", 
+    subtitle: "INSTANT GROCERY", 
+    discount: "UPTO 20% OFF",
+    image: "/super-app/grocery.png",
+    icon: ShoppingBag
+  },
+  { 
+    id: "porter", 
+    title: "PORTER", 
+    subtitle: "SEND PACKAGES", 
+    discount: "UPTO 50% OFF",
+    image: "/super-app/taxi.png",
+    icon: Star
+  },
+];
 
 // Floating elements — purely visual, rendered at call-site, no state
 const getQuickCategoryImage = (category = {}) => {
@@ -684,6 +714,57 @@ const Home = ({ embedded = false, onThemeChange, embeddedHeaderColor = null }) =
                 <span className="whitespace-nowrap">🎁</span>
               </div>
             </div>
+          </div>
+
+          {/* TABS SECTION / CARDS SECTION */}
+          <div className="grid grid-cols-3 gap-2 px-3 py-2 sm:px-4 sm:py-2.5 md:hidden">
+            {tabs.map((tab) => {
+              const isActive = tab.id === "quick";
+              const handleTabClick = () => {
+                if (tab.id === "quick") navigate("/quick");
+                else if (tab.id === "porter") navigate("/porter");
+                else navigate("/food/user");
+              };
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={handleTabClick}
+                  className={cn(
+                    "relative rounded-[16px] border p-2 sm:p-2.5 flex flex-col justify-between overflow-hidden shadow-sm transition-all duration-300 text-left h-[85px] min-[380px]:h-[95px]",
+                    isActive 
+                      ? "bg-orange-50/80 border-orange-200 shadow-sm scale-[1.02]" 
+                      : tab.id === "food"
+                      ? "bg-red-50/60 border-red-100 hover:bg-red-50 hover:border-red-200 hover:shadow-md hover:scale-[1.01]"
+                      : tab.id === "porter"
+                      ? "bg-blue-50/60 border-blue-100 hover:bg-blue-50 hover:border-blue-200 hover:shadow-md hover:scale-[1.01]"
+                      : "bg-white border-gray-200 hover:border-gray-300 hover:shadow-md hover:scale-[1.01]"
+                  )}
+                >
+                  <div className="flex gap-1.5 w-full items-start z-10">
+                    <div className="bg-[#FF0000] text-white rounded-full p-1 shrink-0 flex items-center justify-center h-[20px] w-[20px] mt-0.5">
+                      <tab.icon className="h-3 w-3" strokeWidth={2.5} />
+                    </div>
+                    <div className="flex flex-col min-w-0 mt-0.5">
+                      <span className="text-[9.5px] min-[380px]:text-[10.5px] sm:text-[12px] font-bold text-gray-900 leading-tight truncate">
+                        {tab.title}
+                      </span>
+                      <p className="text-[7px] sm:text-[8px] font-medium text-gray-500 uppercase tracking-tight mt-0.5 truncate">
+                        {tab.subtitle}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="mt-1 flex items-end justify-between w-full z-10">
+                    <div className="bg-[#FF0000] text-white rounded-full p-1 shrink-0 flex items-center justify-center h-4 w-4 shadow-sm mb-0.5">
+                      <ArrowRight className="h-2.5 w-2.5" strokeWidth={3} />
+                    </div>
+                    <div className="absolute right-[-4px] bottom-[-4px] w-[55px] h-[55px] min-[380px]:w-[65px] min-[380px]:h-[65px] pointer-events-none">
+                      <img src={tab.image} className="w-full h-full object-contain mix-blend-multiply" alt={tab.title} />
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
           </div>
 
           {/* Quick Category Slider */}

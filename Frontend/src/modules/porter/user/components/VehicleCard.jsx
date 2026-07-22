@@ -29,7 +29,7 @@ export default function VehicleCard({
         disabled
           ? "border-gray-100 bg-gray-50 opacity-60"
           : selected
-            ? "border-[#FF0000] bg-[#FFF1F1] shadow-[0_8px_24px_rgba(255,0,0,0.10)]"
+            ? "border-[#2563EB] bg-[#EFF6FF] shadow-[0_8px_24px_rgba(255,0,0,0.10)]"
             : "border-gray-100 bg-white hover:border-gray-200"
       }`}
     >
@@ -44,7 +44,7 @@ export default function VehicleCard({
         <div className="flex items-center gap-2">
           <h3 className="text-[15px] font-bold text-gray-900">{displayCategory}</h3>
           {badge && !disabled && (
-            <span className="rounded-full bg-[#FF0000] px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white">
+            <span className="rounded-full bg-[#2563EB] px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white">
               {badge}
             </span>
           )}

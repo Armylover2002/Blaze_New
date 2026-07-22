@@ -72,7 +72,7 @@ export default function PartnerAssigned() {
     return (
       <Screen title="Partner assigned">
         <div className="flex justify-center py-16">
-          <Loader2 className="h-8 w-8 animate-spin text-[#FF0000]" />
+          <Loader2 className="h-8 w-8 animate-spin text-[#2563EB]" />
         </div>
       </Screen>
     );
@@ -98,7 +98,7 @@ export default function PartnerAssigned() {
       title="Partner assigned"
       subtitle={mapOrder?.orderNumber ? `#${mapOrder.orderNumber} · ${statusLabel}` : statusLabel}
       right={
-        <button type="button" onClick={() => navigate(getPorterSosPath())} className="text-[12px] font-bold text-[#FF0000]">
+        <button type="button" onClick={() => navigate(getPorterSosPath())} className="text-[12px] font-bold text-[#2563EB]">
           SOS
         </button>
       }
@@ -113,7 +113,7 @@ export default function PartnerAssigned() {
         />
       ) : loading ? (
         <div className="mb-4 flex h-[180px] items-center justify-center rounded-2xl border border-gray-100 bg-gray-50">
-          <Loader2 className="h-6 w-6 animate-spin text-[#FF0000]" />
+          <Loader2 className="h-6 w-6 animate-spin text-[#2563EB]" />
         </div>
       ) : null}
 
@@ -124,10 +124,10 @@ export default function PartnerAssigned() {
               <img
                 src={partner.profilePhoto}
                 alt={partner.name}
-                className="h-14 w-14 rounded-full object-cover ring-2 ring-[#FFF1F1]"
+                className="h-14 w-14 rounded-full object-cover ring-2 ring-[#EFF6FF]"
               />
             ) : (
-              <div className="flex h-14 w-14 items-center justify-center rounded-full bg-[#FFF1F1] text-[20px] font-bold text-[#FF0000]">
+              <div className="flex h-14 w-14 items-center justify-center rounded-full bg-[#EFF6FF] text-[20px] font-bold text-[#2563EB]">
                 {partner.name.charAt(0)}
               </div>
             )}
@@ -161,7 +161,7 @@ export default function PartnerAssigned() {
       {parcel && (parcel.parcelName || parcelWeight) && (
         <div className="mb-4 rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
           <div className="flex items-start gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#FFF1F1] text-[#FF0000]">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#EFF6FF] text-[#2563EB]">
               <Package className="h-5 w-5" />
             </div>
             <div className="min-w-0 flex-1">
@@ -179,8 +179,8 @@ export default function PartnerAssigned() {
       )}
 
       {pickupOtp && (
-        <div className="mb-4 rounded-2xl border-2 border-dashed border-[#FF0000]/30 bg-[#FFF1F1] p-4 text-center">
-          <p className="text-[11px] font-bold uppercase tracking-wider text-[#FF0000]">Pickup OTP</p>
+        <div className="mb-4 rounded-2xl border-2 border-dashed border-[#2563EB]/30 bg-[#EFF6FF] p-4 text-center">
+          <p className="text-[11px] font-bold uppercase tracking-wider text-[#2563EB]">Pickup OTP</p>
           <div className="mt-1 flex items-center justify-center gap-2">
             <span className="text-[32px] font-extrabold tracking-[0.3em] text-gray-900">{pickupOtp}</span>
             <button type="button" onClick={copyOtp} className="flex h-8 w-8 items-center justify-center rounded-full bg-white shadow-sm">

@@ -315,7 +315,7 @@ export default function SchedulePickup() {
             aria-checked={parcel.isScheduled}
             onClick={onToggleScheduled}
             className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-              parcel.isScheduled ? "bg-[#FF0000]" : "bg-gray-200"
+              parcel.isScheduled ? "bg-[#2563EB]" : "bg-gray-200"
             }`}
           >
             <span
@@ -331,7 +331,7 @@ export default function SchedulePickup() {
         <>
           <div className="mb-4 rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
             <div className="mb-3 flex items-center gap-2">
-              <Calendar className="h-4 w-4 text-[#FF0000]" />
+              <Calendar className="h-4 w-4 text-[#2563EB]" />
               <span className="text-[14px] font-bold text-gray-900">Delivery Date</span>
             </div>
             <div className="mb-3 grid grid-cols-3 gap-2">
@@ -339,7 +339,7 @@ export default function SchedulePickup() {
                 type="button"
                 onClick={() => setDate(todayKey)}
                 className={`rounded-xl py-2 text-[12px] font-bold transition border ${
-                  date === todayKey ? "border-[#FF0000] bg-[#FFF1F1] text-[#FF0000]" : "border-gray-200 bg-white text-gray-600"
+                  date === todayKey ? "border-[#2563EB] bg-[#EFF6FF] text-[#2563EB]" : "border-gray-200 bg-white text-gray-600"
                 }`}
               >
                 Today
@@ -348,7 +348,7 @@ export default function SchedulePickup() {
                 type="button"
                 onClick={() => setDate(tomorrowKey)}
                 className={`rounded-xl py-2 text-[12px] font-bold transition border ${
-                  date === tomorrowKey ? "border-[#FF0000] bg-[#FFF1F1] text-[#FF0000]" : "border-gray-200 bg-white text-gray-600"
+                  date === tomorrowKey ? "border-[#2563EB] bg-[#EFF6FF] text-[#2563EB]" : "border-gray-200 bg-white text-gray-600"
                 }`}
               >
                 Tomorrow
@@ -357,7 +357,7 @@ export default function SchedulePickup() {
                 type="button"
                 onClick={() => customDateRef.current?.showPicker?.() || customDateRef.current?.click()}
                 className={`rounded-xl py-2 text-[12px] font-bold transition border ${
-                  isCustomDate ? "border-[#FF0000] bg-[#FFF1F1] text-[#FF0000]" : "border-gray-200 bg-white text-gray-600"
+                  isCustomDate ? "border-[#2563EB] bg-[#EFF6FF] text-[#2563EB]" : "border-gray-200 bg-white text-gray-600"
                 }`}
               >
                 Custom
@@ -384,14 +384,14 @@ export default function SchedulePickup() {
 
           <div className="mb-4 rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
             <div className="mb-3 flex items-center gap-2">
-              <Clock className="h-4 w-4 text-[#FF0000]" />
+              <Clock className="h-4 w-4 text-[#2563EB]" />
               <span className="text-[14px] font-bold text-gray-900">Delivery Time</span>
             </div>
             <input 
               type="time" 
               value={time} 
               onChange={(e) => setTime(e.target.value)} 
-              className="w-full rounded-xl border border-gray-200 bg-white p-3 text-center text-[16px] font-bold text-gray-900 outline-none focus:border-[#FF0000] focus:ring-1 focus:ring-[#FF0000]"
+              className="w-full rounded-xl border border-gray-200 bg-white p-3 text-center text-[16px] font-bold text-gray-900 outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]"
             />
             <p className="mt-2 text-center text-[11px] text-gray-400">local time · min 5 minutes ahead</p>
           </div>
@@ -399,8 +399,8 @@ export default function SchedulePickup() {
       )}
 
       {!parcel.isScheduled && !isReschedule && (
-        <div className="mb-4 flex items-start gap-3 rounded-2xl border border-[#FF0000]/20 bg-[#FFF1F1] p-4">
-          <Clock className="mt-0.5 h-5 w-5 text-[#FF0000]" />
+        <div className="mb-4 flex items-start gap-3 rounded-2xl border border-[#2563EB]/20 bg-[#EFF6FF] p-4">
+          <Clock className="mt-0.5 h-5 w-5 text-[#2563EB]" />
           <div>
             <h4 className="text-[14px] font-bold text-gray-900">Immediate Booking</h4>
             <p className="mt-1 text-[12px] text-gray-600">
@@ -422,7 +422,7 @@ export default function SchedulePickup() {
             </div>
           </div>
           <div className="flex gap-3">
-            <Navigation className="mt-0.5 h-4 w-4 shrink-0 text-[#FF0000]" />
+            <Navigation className="mt-0.5 h-4 w-4 shrink-0 text-[#2563EB]" />
             <div className="min-w-0 flex-1">
               <p className="text-[11px] font-bold uppercase tracking-wide text-gray-500">Drop</p>
               <p className="truncate text-[13px] font-medium text-gray-900">{summaryDropTitle || "Not selected"}</p>

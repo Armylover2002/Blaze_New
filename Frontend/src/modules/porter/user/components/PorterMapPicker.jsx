@@ -249,7 +249,7 @@ export default function PorterMapPicker({
               ref={searchInputRef}
               type="text"
               placeholder={searchPlaceholder}
-              className="w-full rounded-2xl border border-gray-200 bg-white py-3 pl-10 pr-4 text-[14px] font-medium outline-none focus:border-[#FF0000]"
+              className="w-full rounded-2xl border border-gray-200 bg-white py-3 pl-10 pr-4 text-[14px] font-medium outline-none focus:border-[#2563EB]"
             />
           </div>
           <button
@@ -267,7 +267,7 @@ export default function PorterMapPicker({
           <div ref={mapContainerRef} className="h-[320px] w-full" />
           {loading && (
             <div className="absolute inset-0 z-10 flex items-center justify-center bg-gray-50">
-              <Loader2 className="h-8 w-8 animate-spin text-[#FF0000]" />
+              <Loader2 className="h-8 w-8 animate-spin text-[#2563EB]" />
             </div>
           )}
           {!loading && error && (

@@ -51,7 +51,7 @@ export default function ParcelTracking() {
   return (
     <Screen title="Track parcel" subtitle={order?.orderNumber || activeShipment?.trackingId || "Live shipment"}>
       {loading && !order ? (
-        <div className="flex justify-center py-12"><Loader2 className="h-8 w-8 animate-spin text-[#FF0000]" /></div>
+        <div className="flex justify-center py-12"><Loader2 className="h-8 w-8 animate-spin text-[#2563EB]" /></div>
       ) : (
         <>
           {mapOrder?.pickup && mapOrder?.delivery && (
@@ -65,9 +65,9 @@ export default function ParcelTracking() {
           )}
 
           {pickupOtp && ["at_pickup", "partner_accepted", "en_route_pickup", "assigned"].includes(order?.status) && (
-            <div className="mb-4 rounded-2xl border border-[#FF0000]/20 bg-[#FFF1F1] p-4">
+            <div className="mb-4 rounded-2xl border border-[#2563EB]/20 bg-[#EFF6FF] p-4">
               <p className="text-[13px] font-bold text-gray-900">
-                Pickup OTP: <span className="text-[#FF0000]">{pickupOtp}</span>
+                Pickup OTP: <span className="text-[#2563EB]">{pickupOtp}</span>
               </p>
               <p className="mt-1 text-[11px] text-gray-600">Share this OTP with the driver at pickup only</p>
             </div>
@@ -83,16 +83,16 @@ export default function ParcelTracking() {
                   <div key={s.id} className="flex gap-3">
                     <div className="flex flex-col items-center">
                       <div className={`flex h-8 w-8 items-center justify-center rounded-full text-sm ${
-                        done ? "bg-[#FF0000] text-white" : "bg-gray-100 text-gray-400"
+                        done ? "bg-[#2563EB] text-white" : "bg-gray-100 text-gray-400"
                       }`}>
                         {done && i < currentIdx ? <Check className="h-4 w-4" /> : i + 1}
                       </div>
                       {i < TRACKING_STAGES.length - 1 && (
-                        <div className={`my-1 h-8 w-0.5 ${i < currentIdx ? "bg-[#FF0000]" : "bg-gray-200"}`} />
+                        <div className={`my-1 h-8 w-0.5 ${i < currentIdx ? "bg-[#2563EB]" : "bg-gray-200"}`} />
                       )}
                     </div>
                     <div className="pb-6 pt-1">
-                      <p className={`text-[14px] font-bold ${active ? "text-[#FF0000]" : done ? "text-gray-900" : "text-gray-400"}`}>
+                      <p className={`text-[14px] font-bold ${active ? "text-[#2563EB]" : done ? "text-gray-900" : "text-gray-400"}`}>
                         {s.label}
                       </p>
                     </div>
