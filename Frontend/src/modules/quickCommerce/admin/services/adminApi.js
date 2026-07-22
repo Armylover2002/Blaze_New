@@ -277,7 +277,7 @@ export const adminApi = {
 
   getCategoryTree: async (params = {}) => {
     const response = await axiosInstance.get('/quick-commerce/admin/categories', {
-      params: { tree: true, limit: 100, ...params },
+      params: { tree: true, limit: 5000, ...params },
     });
     return {
       ...response,

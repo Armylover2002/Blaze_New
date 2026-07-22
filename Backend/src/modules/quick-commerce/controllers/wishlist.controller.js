@@ -2,21 +2,9 @@ import mongoose from 'mongoose';
 import { QuickProduct } from '../models/product.model.js';
 import { QuickWishlist } from '../models/wishlist.model.js';
 
-const approvedProductFilter = {
-  $or: [
-    { isActive: true },
-    { isActive: { $exists: false } },
-    { status: 'active' },
-  ],
-  $and: [
-    {
-      $or: [
-        { approvalStatus: { $exists: false } },
-        { approvalStatus: 'approved' },
-      ],
-    },
-  ],
-};
+import { publicProductVisibilityFilter } from '../utils/productVisibility.helpers.js';
+
+const approvedProductFilter = publicProductVisibilityFilter;
 
 const resolveId = (req) => {
   if (req.user?.userId) return { userId: req.user.userId };

@@ -23,6 +23,12 @@ import { getIconSvg } from "@shared/constants/categoryIcons";
 import { useAuth } from "@core/context/AuthContext";
 import { getCurrentUser } from "@food/utils/auth";
 import { canPerformAdminPermissionAction, extractAdminPermissions, extractAdminRoleId, fetchAdminRolePermissions } from "@food/utils/adminPermissions";
+import {
+  buildCategoryFormData,
+  bulkDeleteCategories,
+  extractCategoryApiError,
+  validateCategoryImage,
+} from "../../utils/categoryHelpers";
 
 
 // MUI icon library (shared with customer app & icon selector)
@@ -152,7 +158,10 @@ const HeaderCategories = () => {
   };
 
   useEffect(() => {
-    const timer = setTimeout(() => fetchCategories(1), 400);
+    const timer = setTimeout(() => {
+      setPage(1);
+      fetchCategories(1);
+    }, 400);
     return () => clearTimeout(timer);
   }, [searchTerm, pageSize]);
 
@@ -194,22 +203,46 @@ const HeaderCategories = () => {
     }
   };
 
-  const handleBulkDelete = () => {
+  const handleBulkDelete = async () => {
     if (selectedItems.length === 0) return;
-    // In a real app, you would have a bulk delete API endpoint
-    // For now, we'll just show a toast
-    toast.info(
-      `Bulk delete functionality for ${selectedItems.length} items would be triggered here.`,
-    );
-    setSelectedItems([]);
+
+    if (
+      !window.confirm(
+        `Are you sure you want to delete ${selectedItems.length} header categor${selectedItems.length === 1 ? "y" : "ies"}?`,
+      )
+    ) {
+      return;
+    }
+
+    try {
+      const { deleted, failed, firstError } = await bulkDeleteCategories(adminApi, selectedItems);
+      if (failed > 0) {
+        toast.error(
+          extractCategoryApiError(firstError, `Deleted ${deleted}, but ${failed} could not be removed`),
+        );
+      } else {
+        toast.success(`${deleted} header categor${deleted === 1 ? "y" : "ies"} deleted`);
+      }
+      setSelectedItems([]);
+      fetchCategories(page);
+    } catch (error) {
+      toast.error(extractCategoryApiError(error, "Failed to delete categories"));
+    }
   };
 
   const handleImageChange = (e) => {
     const file = e.target.files[0];
-    if (file) {
-      setImageFile(file);
-      setPreviewUrl(URL.createObjectURL(file));
+    if (!file) return;
+
+    const imageError = validateCategoryImage(file);
+    if (imageError) {
+      toast.error(imageError);
+      e.target.value = "";
+      return;
     }
+
+    setImageFile(file);
+    setPreviewUrl(URL.createObjectURL(file));
   };
 
   const handleSave = async () => {
@@ -220,16 +253,7 @@ const HeaderCategories = () => {
 
     setIsSaving(true);
     try {
-      const data = new FormData();
-      // Ensure type is always header
-      data.append("type", "header");
-      Object.keys(formData).forEach((key) => {
-        if (key !== "type") data.append(key, formData[key]);
-      });
-
-      if (imageFile) {
-        data.append("image", imageFile);
-      }
+      const data = buildCategoryFormData(formData, "header", imageFile);
 
       if (editingItem) {
         await adminApi.updateCategory(editingItem._id || editingItem.id, data);
@@ -240,10 +264,13 @@ const HeaderCategories = () => {
       }
       setIsAddModalOpen(false);
       setEditingItem(null);
+      setImageFile(null);
+      setPreviewUrl(null);
       fetchCategories(page);
     } catch (error) {
-      console.error(error);
-      toast.error(editingItem ? "Failed to update" : "Failed to create");
+      toast.error(
+        extractCategoryApiError(error, editingItem ? "Failed to update" : "Failed to create"),
+      );
     } finally {
       setIsSaving(false);
     }
@@ -259,7 +286,7 @@ const HeaderCategories = () => {
       setDeleteTarget(null);
       fetchCategories(page);
     } catch (error) {
-      toast.error("Failed to delete category");
+      toast.error(extractCategoryApiError(error, "Failed to delete category"));
     }
   };
 
@@ -298,7 +325,7 @@ const HeaderCategories = () => {
       headerColor: item.headerColor || "#FF1E1E",
       businessType: item.businessType || "quick_commerce",
     });
-    setPreviewUrl(item.image?.url || null);
+    setPreviewUrl(item.image?.url || item.image || null);
     setIsAddModalOpen(true);
   };
 
