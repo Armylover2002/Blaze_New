@@ -1,5 +1,6 @@
 import { Server } from 'socket.io';
 import { config } from './env.js';
+import { isOriginAllowed } from './cors.js';
 import { logger } from '../utils/logger.js';
 import { verifyAccessToken } from '../core/auth/token.util.js';
 import { getFirebaseDB } from './firebase.js';
@@ -47,9 +48,13 @@ const roomNames = {
 export const initSocket = async (server) => {
     io = new Server(server, {
         cors: {
-            origin: config.socketCorsOrigin,
-            methods: ['GET', 'POST']
-        }
+            origin: (origin, callback) => {
+                if (isOriginAllowed(origin)) return callback(null, true);
+                return callback(null, false);
+            },
+            methods: ['GET', 'POST'],
+            credentials: true,
+        },
     });
 
     // Socket auth middleware (Bearer token).

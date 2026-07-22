@@ -213,13 +213,15 @@ const Level2Categories = () => {
 
   const openAddModal = () => {
     setEditingItem(null);
+    const defaultParentId =
+      headerCategories[0]?._id || headerCategories[0]?.id || "";
     setFormData({
       name: "",
       slug: "",
       description: "",
       status: "active",
       type: "category",
-      parentId: "",
+      parentId: defaultParentId,
     });
     setImageFile(null);
     setPreviewUrl(null);
@@ -524,7 +526,6 @@ const Level2Categories = () => {
                       setFormData({ ...formData, parentId: e.target.value })
                     }
                     className="w-full px-3 py-2 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
-                    <option value="">Select Header Category</option>
                     {headerCategories.map((h) => (
                       <option key={h._id || h.id} value={h._id || h.id}>
                         {h.name}
