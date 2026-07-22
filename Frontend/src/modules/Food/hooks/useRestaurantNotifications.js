@@ -5,6 +5,7 @@ import { restaurantAPI } from '@food/api';
 import alertSound from '@food/assets/audio/alert.mp3';
 import { dispatchNotificationInboxRefresh } from '@food/hooks/useNotificationInbox';
 import { showActorBrowserNotification } from '@food/utils/actorBrowserNotification';
+import { useIncomingOrderQueueStore } from '../store/incomingOrderQueueStore';
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -80,7 +81,8 @@ const triggerWebViewNativeNotification = async (orderData = {}) => {
  * Hook for restaurant to receive real-time order notifications with sound
  * @returns {object} - { newOrder, playSound, isConnected }
  */
-export const useRestaurantNotifications = () => {
+export const useRestaurantNotifications = (options = {}) => {
+  const { enableSound = true } = options;
   const socketRef = useRef(null);
   const [newOrder, setNewOrder] = useState(null);
   const [isConnected, setIsConnected] = useState(false);
@@ -183,7 +185,7 @@ export const useRestaurantNotifications = () => {
 
       // Keep re-alerting while order is pending and tab is not visible.
       if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
-        playNotificationSound(activeOrderRef.current);
+        if (enableSound) playNotificationSound(activeOrderRef.current);
       }
     }, ALERT_LOOP_INTERVAL_MS);
   };
@@ -194,8 +196,10 @@ export const useRestaurantNotifications = () => {
     }
 
     activeOrderRef.current = orderData || { id: Date.now() };
-    playNotificationSound(orderData);
-    startAlertLoop();
+    if (enableSound) {
+      playNotificationSound(orderData);
+      startAlertLoop();
+    }
 
     if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
       showBackgroundOrderNotification(orderData);
@@ -315,7 +319,7 @@ export const useRestaurantNotifications = () => {
       if (document.visibilityState !== 'hidden') return;
       if (!activeOrderRef.current) return;
 
-      playNotificationSound(activeOrderRef.current);
+      if (enableSound) playNotificationSound(activeOrderRef.current);
       showBackgroundOrderNotification(activeOrderRef.current);
     };
 
@@ -625,11 +629,22 @@ export const useRestaurantNotifications = () => {
       ].filter(Boolean);
 
       const matchesActiveOrder = updatedIds.some((id) => activeIds.includes(id));
+      const status = String(data?.orderStatus || data?.status || '').trim().toLowerCase();
+
+      // Sync queue with socket events (works even if this is not the currently alerted order).
+      const waitingStatuses = new Set(['pending', 'placed', 'created', 'confirmed']);
+      if (status && !waitingStatuses.has(status)) {
+        try {
+          useIncomingOrderQueueStore.getState().removeIncomingOrder(data);
+        } catch {
+          // Non-blocking: queue sync is best-effort.
+        }
+      }
+
       if (!matchesActiveOrder) return;
 
-      const status = String(data?.orderStatus || data?.status || '').trim().toLowerCase();
       // Stop ring when restaurant accepts/rejects or order leaves waiting states.
-      if (status && !['pending', 'placed', 'created'].includes(status)) {
+      if (status && !waitingStatuses.has(status)) {
         stopAlertLoop();
         activeOrderRef.current = null;
         setNewOrder(null);
@@ -650,6 +665,13 @@ export const useRestaurantNotifications = () => {
       ].filter(Boolean);
 
       const matchesActiveOrder = deletedIds.some((id) => activeIds.includes(id));
+      // Sync queue with socket events.
+      try {
+        useIncomingOrderQueueStore.getState().removeIncomingOrder(data);
+      } catch {
+        // Non-blocking: queue sync is best-effort.
+      }
+
       if (!matchesActiveOrder) return;
 
       stopAlertLoop();

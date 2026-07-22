@@ -19,6 +19,7 @@ import { useDelayedLoading } from "@food/hooks/useDelayedLoading"
 import alertSound from "@food/assets/audio/alert.mp3"
 import originalSound from "@food/assets/audio/original.mp3"
 import { getCancellationDisplayLabel } from "@food/utils/cancellationDisplay"
+import { getLifecycleDisplay } from "@food/utils/orderLifecycleDisplay"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -488,7 +489,22 @@ export default function OrdersPage({ statusKey = "all" }) {
       const cancellationElapsedMs =
         createdAtMs !== null && cancelledAtMs !== null ? cancelledAtMs - createdAtMs : null
       let displayStatus = order.orderStatus
-      if (!backendStatus || backendStatus === "created" || backendStatus === "placed") {
+      const life = getLifecycleDisplay(order, { audience: "admin" })
+      if (life) {
+        if (life.stage === "cancelled") {
+          displayStatus =
+            getCancellationDisplayLabel(order) ||
+            (backendStatus === "cancelled_by_user"
+              ? "Cancelled by User"
+              : backendStatus === "cancelled_by_admin"
+                ? "Cancelled by Admin"
+                : backendStatus === "cancelled_by_restaurant"
+                  ? "Cancelled by Restaurant"
+                  : "Cancelled")
+        } else {
+          displayStatus = life.title
+        }
+      } else if (!backendStatus || backendStatus === "created" || backendStatus === "placed") {
         displayStatus = "Pending"
       } else if (backendStatus === "confirmed") {
         displayStatus = "Accepted"

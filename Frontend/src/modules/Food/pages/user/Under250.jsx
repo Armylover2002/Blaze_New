@@ -474,7 +474,10 @@ export default function Under250() {
   useEffect(() => {
     const cartQuantities = {}
     cart.forEach((item) => {
-      cartQuantities[item.id] = item.quantity || 0
+      const itemId = item.itemId || item.productId || item._id || item.id
+      if (itemId) {
+        cartQuantities[itemId] = item.quantity || 0
+      }
     })
     setQuantities(cartQuantities)
   }, [cart])
@@ -600,14 +603,19 @@ export default function Under250() {
 
     // CRITICAL: Check if user is in service zone
     if (isOutOfService) {
+      console.log("OUT OF SERVICE")
       toast.error('You are outside the service zone. Please select a location within the service area.')
       return
     }
 
+    console.log("updateItemQuantity called with:", { item, newQuantity, restaurantName })
+
+    const itemId = item.id || item._id
+
     // Update local state
     setQuantities((prev) => ({
       ...prev,
-      [item.id]: newQuantity,
+      [itemId]: newQuantity,
     }))
 
     // Find restaurant name from the item or use provided parameter
@@ -615,7 +623,8 @@ export default function Under250() {
 
     // Prepare cart item with all required properties
     const cartItem = {
-      id: item.id,
+      ...item,
+      id: itemId,
       name: item.name,
       price: item.price,
       otherPrice: item.otherPrice || item.originalPrice || 0,
@@ -643,7 +652,7 @@ export default function Under250() {
           viewportY: rect.top + rect.height / 2,
           scrollX: scrollX,
           scrollY: scrollY,
-          itemId: item.id,
+          itemId: itemId,
         }
       }
     }
@@ -651,16 +660,16 @@ export default function Under250() {
     // Update cart context
     if (newQuantity <= 0) {
       const productInfo = {
-        id: item.id,
+        id: itemId,
         name: item.name,
         imageUrl: item.image,
       }
-      removeFromCart(item.id, sourcePosition, productInfo)
+      removeFromCart(itemId, sourcePosition, productInfo)
     } else {
-      const existingCartItem = getCartItem(item.id)
+      const existingCartItem = getCartItem(itemId)
       if (existingCartItem) {
         const productInfo = {
-          id: item.id,
+          id: itemId,
           name: item.name,
           imageUrl: item.image,
         }
@@ -672,12 +681,12 @@ export default function Under250() {
             return
           }
           if (newQuantity > existingCartItem.quantity + 1) {
-            updateQuantity(item.id, newQuantity)
+            updateQuantity(itemId, newQuantity)
           }
         } else if (newQuantity < existingCartItem.quantity && sourcePosition) {
-          updateQuantity(item.id, newQuantity, sourcePosition, productInfo)
+          updateQuantity(itemId, newQuantity, sourcePosition, productInfo)
         } else {
-          updateQuantity(item.id, newQuantity)
+          updateQuantity(itemId, newQuantity)
         }
       } else {
         const result = addToCart(cartItem, sourcePosition)
@@ -686,7 +695,7 @@ export default function Under250() {
           return
         }
         if (newQuantity > 1) {
-          updateQuantity(item.id, newQuantity)
+          updateQuantity(itemId, newQuantity)
         }
       }
     }
@@ -1057,10 +1066,11 @@ export default function Under250() {
                       }}
                     >
                       {restaurant.menuItems.map((item, itemIndex) => {
-                        const quantity = quantities[item.id] || 0
+                        const itemId = item.id || item._id
+                        const quantity = quantities[itemId] || 0
                         return (
                           <motion.div
-                            key={item.id}
+                            key={itemId}
                             className="w-[200px] flex-shrink-0 cursor-pointer overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-gray-800 dark:bg-[#1a1a1a] sm:w-[220px] md:w-full md:rounded-xl"
                             onClick={() => handleItemClick(item, restaurant)}
                             initial={{ opacity: 0, y: 20 }}
@@ -1129,15 +1139,29 @@ export default function Under250() {
                                   )}
                                 </div>
                                 {quantity > 0 ? (
-                                  <Link to="/user/cart" onClick={(e) => e.stopPropagation()}>
-                                    <Button
-                                      variant={"outline"}
-                                      size="sm"
-                                      className="bg-[#FFF5F5] text-[#FF0000] border-[#FF0000] hover:bg-[#FF0000] hover:text-white h-7 md:h-8 lg:h-9 px-3 md:px-4 lg:px-5 text-xs md:text-sm lg:text-base"
+                                  <div className="flex items-center justify-between gap-2 bg-[#FFF5F5] border border-[#FF0000] rounded-lg px-1 h-7 md:h-8 lg:h-9" onClick={(e) => e.stopPropagation()}>
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        updateItemQuantity(item, quantity - 1, e, restaurant.name)
+                                      }}
+                                      className="text-[#FF0000] hover:bg-red-50 p-1 rounded-md"
                                     >
-                                      View cart
-                                    </Button>
-                                  </Link>
+                                      <Minus className="h-3 w-3 md:h-4 md:w-4" />
+                                    </button>
+                                    <span className="text-[#FF0000] font-semibold text-xs md:text-sm lg:text-base w-4 text-center">
+                                      {quantity}
+                                    </span>
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        updateItemQuantity(item, quantity + 1, e, restaurant.name)
+                                      }}
+                                      className="text-[#FF0000] hover:bg-red-50 p-1 rounded-md"
+                                    >
+                                      <Plus className="h-3 w-3 md:h-4 md:w-4" />
+                                    </button>
+                                  </div>
                                 ) : (
                                   <Button
                                     variant={"outline"}
@@ -1150,7 +1174,11 @@ export default function Under250() {
                                     onClick={(e) => {
                                       e.stopPropagation()
                                       if (!shouldShowGrayscale) {
-                                        handleItemClick(item, restaurant)
+                                        if (item.customisable) {
+                                          handleItemClick(item, restaurant)
+                                        } else {
+                                          updateItemQuantity(item, 1, e, restaurant.name)
+                                        }
                                       }
                                     }}
                                   >

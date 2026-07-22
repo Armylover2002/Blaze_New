@@ -154,7 +154,7 @@ export default function AllOrdersPage() {
   const [error, setError] = useState(null)
   const [restaurantData, setRestaurantData] = useState(null)
   const [selectedOrderId, setSelectedOrderId] = useState(null)
-  const { newOrder } = useRestaurantNotifications()
+  const { newOrder } = useRestaurantNotifications({ enableSound: false })
   const ORDERS_PER_PAGE = 10
   const [currentPage, setCurrentPage] = useState(1)
 

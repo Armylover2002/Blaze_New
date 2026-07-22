@@ -167,23 +167,6 @@ const Coupons = () => {
     return () => { active = false; };
   }, []);
 
-  const fetchSummary = useCallback(async () => {
-    try {
-      const data = await porterAdminApi.getCouponSummary();
-      setSummary({
-        total: data.total || 0,
-        active: data.active || 0,
-        scheduled: data.scheduled || 0,
-        expired: data.expired || 0,
-        inactive: data.inactive || 0,
-        totalRedemption: data.totalRedemption || 0,
-        totalDiscountGiven: data.totalDiscountGiven || 0,
-        campaignRevenue: data.campaignRevenue || 0,
-      });
-    } catch {
-      // Summary failure should not block the page
-    }
-  }, []);
 
   const fetchCoupons = useCallback(async () => {
     setLoading(true);
@@ -200,16 +183,25 @@ const Coupons = () => {
       setCoupons(result.records || []);
       setTotal(result.total || 0);
       setTotalPages(result.pages || 1);
+      
+      if (result.summary) {
+        setSummary({
+          total: result.summary.total || 0,
+          active: result.summary.active || 0,
+          scheduled: result.summary.scheduled || 0,
+          expired: result.summary.expired || 0,
+          inactive: result.summary.inactive || 0,
+          totalRedemption: result.summary.totalRedemption || 0,
+          totalDiscountGiven: result.summary.totalDiscountGiven || 0,
+          campaignRevenue: result.summary.campaignRevenue || 0,
+        });
+      }
     } catch (err) {
       toast.error(err?.response?.data?.message || "Failed to load coupons");
     } finally {
       setLoading(false);
     }
   }, [page, pageSize, search, statusFilter, typeFilter, sortKey, sortDir]);
-
-  useEffect(() => {
-    fetchSummary();
-  }, [fetchSummary]);
 
   useEffect(() => {
     fetchCoupons();
@@ -326,7 +318,7 @@ const Coupons = () => {
         toast.success("Coupon created successfully");
       }
       closeForm();
-      await Promise.all([fetchCoupons(), fetchSummary()]);
+      await fetchCoupons();
     } catch (err) {
       toast.error(err?.response?.data?.message || "Failed to save coupon");
       submitLockRef.current = false;
@@ -342,7 +334,7 @@ const Coupons = () => {
     try {
       await porterAdminApi.deleteCoupon(deleteTarget.id);
       toast.success("Coupon deleted");
-      await Promise.all([fetchCoupons(), fetchSummary()]);
+      await fetchCoupons();
     } catch (err) {
       toast.error(err?.response?.data?.message || "Failed to delete coupon");
     } finally {

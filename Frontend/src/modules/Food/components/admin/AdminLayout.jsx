@@ -4,6 +4,7 @@ import { setAppType } from "@common/utils/businessSettings"
 import AdminSidebar from "./AdminSidebar"
 import AdminNavbar from "./AdminNavbar"
 import { API_BASE_URL } from "@food/api/config"
+import { useAdminBadgeStore } from "@food/store/adminBadgeStore"
 import { ShieldAlert } from "lucide-react"
 import { getCurrentUser } from "@food/utils/auth"
 import { useMemo } from "react"
@@ -23,6 +24,11 @@ export default function AdminLayout() {
   const navigate = useNavigate();
   const { user: authUser } = useAuth();
   const user = useMemo(() => authUser || getCurrentUser("admin"), [authUser]);
+  const fetchBadges = useAdminBadgeStore(state => state.fetchBadges);
+
+  useEffect(() => {
+    fetchBadges();
+  }, [fetchBadges]);
   const [hasAccess, setHasAccess] = useState(true);
   const [resolvedPermissions, setResolvedPermissions] = useState({});
 

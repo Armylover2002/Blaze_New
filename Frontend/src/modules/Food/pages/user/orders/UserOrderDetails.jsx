@@ -22,6 +22,7 @@ import autoTable from "jspdf-autotable"
 import { getCompanyNameAsync } from "@common/utils/businessSettings"
 import { formatScheduledAtShort } from "@food/utils/scheduleTime"
 import { isFoodQuickOrder, formatQuickEtaWindow } from "@food/utils/quickDelivery"
+import { getLifecycleDisplay } from "@food/utils/orderLifecycleDisplay"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -454,14 +455,24 @@ export default function UserOrderDetails() {
           </div>
           <div>
             <h2 className="font-semibold text-gray-800">
-              {order.status === "delivered"
-                ? "Order was delivered"
-                : order.status === "scheduled"
-                ? (() => {
-                    const label = formatScheduledAtShort(order.scheduledAt)
-                    return label ? `Scheduled for ${label}` : "Order scheduled"
-                  })()
-                : "Order status: " + (order.status || "Processing")}
+              {(() => {
+                const life = getLifecycleDisplay(order, { audience: "user" });
+                if (life) {
+                  if (life.stage === "scheduled") {
+                    const label = formatScheduledAtShort(order.scheduledAt);
+                    return label ? `Scheduled for ${label}` : life.title;
+                  }
+                  return life.title;
+                }
+                return order.status === "delivered"
+                  ? "Order was delivered"
+                  : order.status === "scheduled"
+                  ? (() => {
+                      const label = formatScheduledAtShort(order.scheduledAt)
+                      return label ? `Scheduled for ${label}` : "Order scheduled"
+                    })()
+                  : "Order status: " + (order.status || "Processing");
+              })()}
             </h2>
             {isFoodQuickOrder(order) && (
               <p className="text-xs font-semibold text-emerald-700 mt-1">

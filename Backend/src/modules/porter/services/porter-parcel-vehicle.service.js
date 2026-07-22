@@ -8,7 +8,7 @@ const baseFilter = { isDeleted: { $ne: true } };
 const PARCEL_SERVICE = 'parcel';
 
 const vehicleListProjection = {
-    name: 1,
+    category: 1,
     vehicleCode: 1,
     iconUrl: 1,
     description: 1,
@@ -18,6 +18,11 @@ const vehicleListProjection = {
     status: 1,
     displayOrder: 1,
 };
+
+/** Display label for vehicle category (schema has category, not name). */
+function vehicleDisplayName(vehicle = {}) {
+    return String(vehicle.category || vehicle.name || '').trim();
+}
 
 export function computeParcelWeight(parcel = {}) {
     const weightKg = Number(parcel?.weightKg || 0);
@@ -71,7 +76,7 @@ export async function loadActiveParcelVehiclesWithPricing() {
         supportedServices: { $in: [PARCEL_SERVICE] },
     })
         .select(vehicleListProjection)
-        .sort({ displayOrder: 1, name: 1 })
+        .sort({ displayOrder: 1, category: 1 })
         .lean();
 
     if (!vehicles.length) {
@@ -92,9 +97,12 @@ export async function loadActiveParcelVehiclesWithPricing() {
 function mapEligibleVehicleQuote(vehicle, pricing, route, parcelWeight) {
     const pricingBreakdown = calculateFareFromPricing(pricing, route.distanceKm);
     const advice = getParcelVehicleWeightAdvice(vehicle, parcelWeight);
+    const category = vehicle.category || '';
+    const name = vehicleDisplayName(vehicle);
     return {
         id: String(vehicle._id),
-        name: vehicle.name || '',
+        name,
+        category,
         vehicleCode: vehicle.vehicleCode || '',
         iconUrl: vehicle.iconUrl || '',
         description: vehicle.description || '',
@@ -103,7 +111,6 @@ function mapEligibleVehicleQuote(vehicle, pricing, route, parcelWeight) {
         estimatedFare: pricingBreakdown?.total ?? null,
         estimatedTime: route.durationMin,
         pricing: pricingBreakdown,
-        eligible: true,
         weightAdvice: advice.label,
         advisoryBadge: advice.badge,
     };
@@ -144,12 +151,12 @@ export async function buildParcelVehicleQuotes({ parcelWeight, route }) {
             // Unbookable config issue only — surface as advisory disabled in older clients.
             ineligible.push({
                 id: String(vehicle._id),
-                name: vehicle.name || '',
+                name: vehicleDisplayName(vehicle),
+                category: vehicle.category || '',
                 iconUrl: vehicle.iconUrl || '',
                 maxWeight: Number(vehicle.maxWeight || 0),
                 minWeight: Number(vehicle.minWeight || 0),
                 reason: reason || 'Vehicle unavailable',
-                eligible: false,
             });
         }
     }

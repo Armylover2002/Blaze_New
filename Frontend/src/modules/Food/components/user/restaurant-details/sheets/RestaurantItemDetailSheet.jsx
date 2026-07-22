@@ -1,3 +1,4 @@
+import React, { useState, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { X, ChevronLeft, ChevronRight, Bookmark, Share2, Plus, Minus, Clock, Sparkles, Tag } from "lucide-react"
 import { Button } from "@food/components/ui/button"
@@ -67,6 +68,13 @@ export default function RestaurantItemDetailSheet({
   showBookmark = true,
   showShare = true,
 }) {
+  const [localQuantity, setLocalQuantity] = useState(1)
+
+  // Reset local quantity when item or variant changes
+  useEffect(() => {
+    setLocalQuantity(1)
+  }, [selectedItem?.id, selectedVariantId])
+
   if (!selectedItem) return null
 
   const variants = getFoodVariants(selectedItem)
@@ -350,33 +358,23 @@ export default function RestaurantItemDetailSheet({
             <button
               type="button"
               onClick={(e) => {
-                if (!shouldShowGrayscale) {
-                  updateItemQuantity(
-                    selectedItem,
-                    Math.max(0, quantity - 1),
-                    e,
-                    getVariantForDish(selectedItem, selectedVariantId),
-                  )
+                if (!shouldShowGrayscale && localQuantity > 1) {
+                  setLocalQuantity(localQuantity - 1)
                 }
               }}
-              disabled={quantity === 0 || shouldShowGrayscale}
+              disabled={localQuantity <= 1 || shouldShowGrayscale}
               className="w-9 h-9 flex items-center justify-center text-gray-600 disabled:text-gray-300"
             >
               <Minus className="h-5 w-5" />
             </button>
             <span className="text-lg font-bold min-w-[1.5rem] text-center text-gray-900 dark:text-white">
-              {quantity}
+              {localQuantity}
             </span>
             <button
               type="button"
               onClick={(e) => {
                 if (!shouldShowGrayscale) {
-                  updateItemQuantity(
-                    selectedItem,
-                    quantity + 1,
-                    e,
-                    getVariantForDish(selectedItem, selectedVariantId),
-                  )
+                  setLocalQuantity(localQuantity + 1)
                 }
               }}
               disabled={shouldShowGrayscale}
@@ -395,9 +393,12 @@ export default function RestaurantItemDetailSheet({
             }`}
             onClick={(e) => {
               if (!shouldShowGrayscale) {
+                // If item is already in cart, get Dish Quantity to add to the existing quantity!
+                // Wait! If the item is already in the cart, updating with localQuantity will overwrite it to `localQuantity` instead of adding.
+                // updateItemQuantity adds the absolute amount to the cart state.
                 updateItemQuantity(
                   selectedItem,
-                  quantity + 1,
+                  quantity + localQuantity,
                   e,
                   getVariantForDish(selectedItem, selectedVariantId),
                 )
@@ -408,8 +409,8 @@ export default function RestaurantItemDetailSheet({
           >
             <span>Add item</span>
             <span className="font-bold">
-              {RUPEE_SYMBOL}{Math.round(activePrice)}
-              {quantity > 0 ? ` · Qty ${quantity + 1}` : ""}
+              {RUPEE_SYMBOL}{Math.round(activePrice * localQuantity)}
+              {localQuantity > 1 ? ` · Qty ${localQuantity}` : ""}
             </span>
           </Button>
         </div>

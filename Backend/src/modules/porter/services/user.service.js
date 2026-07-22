@@ -9,7 +9,7 @@ import { validateListQuery } from '../validators/listQuery.validator.js';
 import { PorterOrder } from '../orders/models/porterOrder.model.js';
 
 const baseFilter = {
-    role: 'USER',
+    role: { $in: ['USER', null] },
     isDeleted: { $ne: true },
 };
 

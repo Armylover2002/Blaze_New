@@ -5,7 +5,7 @@ import { PorterPricing } from '../models/porterPricing.model.js';
 import { PorterVehicle } from '../models/porterVehicle.model.js';
 import { calculateFareFromPricing } from '../utils/porter-pricing-calculator.util.js';
 import { buildParcelVehicleQuotes } from './porter-parcel-vehicle.service.js';
-import { assertPorterLocationsServiceable, findZoneForPoint } from '../orders/services/porter-zone-lookup.service.js';
+import { assertPorterLocationsServiceable } from '../orders/services/porter-zone-lookup.service.js';
 import { logger } from '../../../utils/logger.js';
 
 const MAPS_TIMEOUT_MS = 8000;
@@ -151,8 +151,10 @@ export async function getPlaceDetails(placeId) {
     };
 }
 
-export async function getRoutePreview({ pickup, delivery }) {
-    await assertPorterLocationsServiceable(pickup, delivery);
+/**
+ * Directions / fallback only — serviceability must already be enforced by the caller.
+ */
+async function buildRouteDirections({ pickup, delivery }) {
     if (!pickup || !delivery
         || !Number.isFinite(Number(pickup.lat)) || !Number.isFinite(Number(pickup.lng))
         || !Number.isFinite(Number(delivery.lat)) || !Number.isFinite(Number(delivery.lng))) {
@@ -207,6 +209,21 @@ export async function getRoutePreview({ pickup, delivery }) {
     }
 }
 
+/**
+ * Single serviceability gate + route. Zones are returned so callers (quote-preview)
+ * can build the serviceability DTO without repeating $geoIntersects lookups.
+ */
+async function resolveRoutePreviewWithZones({ pickup, delivery }) {
+    const zones = await assertPorterLocationsServiceable(pickup, delivery);
+    const route = await buildRouteDirections({ pickup, delivery });
+    return { route, zones };
+}
+
+export async function getRoutePreview({ pickup, delivery }) {
+    const { route } = await resolveRoutePreviewWithZones({ pickup, delivery });
+    return route;
+}
+
 async function resolveVehiclePricing(vehicleId) {
     if (!vehicleId) return { vehicle: null, pricing: null };
 
@@ -215,7 +232,7 @@ async function resolveVehiclePricing(vehicleId) {
         ...baseFilter,
         status: 'active',
         supportedServices: { $in: ['parcel'] },
-    }).select({ name: 1, vehicleCode: 1 }).lean();
+    }).select({ category: 1, vehicleCode: 1, iconUrl: 1 }).lean();
 
     if (!vehicle) throw new NotFoundError('Vehicle not found');
 
@@ -228,76 +245,58 @@ async function resolveVehiclePricing(vehicleId) {
     return { vehicle, pricing };
 }
 
+function mapQuoteSelectedVehicle(source = {}) {
+    const category = source.category || '';
+    const name = category || source.name || '';
+    return {
+        id: String(source.id || source._id || ''),
+        name,
+        category,
+        vehicleCode: source.vehicleCode || '',
+        iconUrl: source.iconUrl || '',
+    };
+}
+
 export async function getQuotePreview({ pickup, delivery, vehicleId, parcelWeight }) {
-    const route = await getRoutePreview({ pickup, delivery });
-    // Zones already enforced in getRoutePreview; resolve names for UI metadata only.
-    const [pickupZone, dropZone] = await Promise.all([
-        findZoneForPoint(Number(pickup.lat), Number(pickup.lng)),
-        findZoneForPoint(Number(delivery.lat), Number(delivery.lng)),
-    ]);
+    // One pickup + one drop zone lookup (inside assert); reuse for serviceability DTO.
+    const { route, zones } = await resolveRoutePreviewWithZones({ pickup, delivery });
+    const pickupZone = zones.pickupZone;
+    const dropZone = zones.dropZone;
     const weight = parcelWeight != null && Number(parcelWeight) > 0 ? Number(parcelWeight) : null;
 
-    let eligibleVehicles = [];
-    let ineligibleVehicles = [];
-    let recommendedVehicleId = null;
-    let noVehiclesAvailable = false;
-    let message = null;
-
     const quotes = await buildParcelVehicleQuotes({ parcelWeight: weight || 0, route });
-    eligibleVehicles = quotes.eligible;
-    ineligibleVehicles = quotes.ineligible;
-    recommendedVehicleId = quotes.recommendedVehicleId;
-    noVehiclesAvailable = quotes.noVehiclesAvailable;
-    message = quotes.message;
+    const eligibleVehicles = quotes.eligible;
+    const recommendedVehicleId = quotes.recommendedVehicleId;
+    const noVehiclesAvailable = quotes.noVehiclesAvailable;
 
     let vehicle = null;
-    let fare = null;
     let pricing = null;
 
     if (vehicleId) {
-        const resolved = await resolveVehiclePricing(vehicleId);
-        if (resolved.vehicle) {
-            vehicle = {
-                id: String(resolved.vehicle._id),
-                name: resolved.vehicle.name,
-                vehicleCode: resolved.vehicle.vehicleCode,
-            };
-            pricing = calculateFareFromPricing(resolved.pricing, route.distanceKm);
-            fare = pricing
-                ? {
-                    baseFare: pricing.baseFare,
-                    serviceTax: pricing.serviceTax,
-                    total: pricing.total,
-                }
-                : null;
+        const fromEligible = eligibleVehicles.find((item) => String(item.id) === String(vehicleId));
+        if (fromEligible) {
+            vehicle = mapQuoteSelectedVehicle(fromEligible);
+            pricing = fromEligible.pricing || null;
+        } else {
+            const resolved = await resolveVehiclePricing(vehicleId);
+            if (resolved.vehicle) {
+                vehicle = mapQuoteSelectedVehicle(resolved.vehicle);
+                pricing = calculateFareFromPricing(resolved.pricing, route.distanceKm);
+            }
         }
     } else if (recommendedVehicleId && eligibleVehicles.length) {
         const recommended = eligibleVehicles.find((item) => item.id === recommendedVehicleId) || eligibleVehicles[0];
-        vehicle = {
-            id: recommended.id,
-            name: recommended.name,
-            vehicleCode: recommended.vehicleCode,
-        };
+        vehicle = mapQuoteSelectedVehicle(recommended);
         pricing = recommended.pricing || null;
-        fare = pricing
-            ? {
-                baseFare: pricing.baseFare,
-                serviceTax: pricing.serviceTax,
-                total: pricing.total,
-            }
-            : null;
     }
 
-    return {
+    // Canonical quote-preview DTO — omit null/unused duplicates (fare, parcelWeight, message:null).
+    const data = {
         route,
-        parcelWeight: weight,
         eligibleVehicles,
-        ineligibleVehicles,
         recommendedVehicleId,
         noVehiclesAvailable,
-        message,
         vehicle,
-        fare,
         pricing,
         serviceability: {
             status: 'IN_SERVICE',
@@ -311,4 +310,11 @@ export async function getQuotePreview({ pickup, delivery, vehicleId, parcelWeigh
             sameZone: Boolean(pickupZone && dropZone && String(pickupZone._id) === String(dropZone._id)),
         },
     };
+
+    // Only include message when there is a user-facing error (FE: routeQuote?.message || fallback).
+    if (quotes.message) {
+        data.message = quotes.message;
+    }
+
+    return data;
 }

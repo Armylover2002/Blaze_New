@@ -2115,6 +2115,8 @@ export const deliveryAPI = {
         data: { profile: res.data?.data?.user ?? res.data?.data },
       },
     })),
+  getMapContext: () =>
+    apiClient.get("/food/delivery/map/context", { contextModule: "delivery" }),
   getReferralStats: () =>
     apiClient.get("/food/delivery/referrals/stats", {
       contextModule: "delivery",
