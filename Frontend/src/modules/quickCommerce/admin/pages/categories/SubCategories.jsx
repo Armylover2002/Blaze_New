@@ -200,13 +200,15 @@ const SubCategories = () => {
 
   const openAddModal = () => {
     setEditingItem(null);
+    const defaultParentId =
+      level2Categories[0]?._id || level2Categories[0]?.id || "";
     setFormData({
       name: "",
       slug: "",
       description: "",
       status: "active",
       type: "subcategory",
-      parentId: "",
+      parentId: defaultParentId,
     });
     setImageFile(null);
     setPreviewUrl(null);
@@ -501,7 +503,6 @@ const SubCategories = () => {
                       setFormData({ ...formData, parentId: e.target.value })
                     }
                     className="w-full px-3 py-2 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
-                    <option value="">Select Parent Category</option>
                     {level2Categories.map((c) => {
                       const parentInfo = getParentInfo(c._id || c.id);
                       // Since getParentInfo uses level2Categories state which might be same as c,
