@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { API_BASE_URL } from '@food/api/config';
 import { dispatchNotificationInboxRefresh } from '@food/hooks/useNotificationInbox';
 import { getUserIdFromStorage } from '@food/utils/userSessionCache';
+import { getLifecycleDisplay } from '@food/utils/orderLifecycleDisplay';
 
 const debugLog = (...args) => {
   if (import.meta.env.DEV) {
@@ -81,9 +82,26 @@ export const useUserNotifications = () => {
 
     socketRef.current.on('order_status_update', (data) => {
       debugLog('🔔 Order status update received:', data);
-      
-      const title = data.title || `Order #${data.orderId || 'Update'}`;
-      const message = data.message || `Your order status is now ${String(data.orderStatus || '').replace(/_/g, ' ')}`;
+
+      const life = getLifecycleDisplay(
+        {
+          orderStatus: data.orderStatus,
+          status: data.orderStatus,
+          deliveryState: data.deliveryState,
+          dispatch: data.dispatch,
+          orderId: data.orderId,
+        },
+        { audience: 'user' },
+      );
+
+      const title =
+        data.title ||
+        life?.title ||
+        `Order #${data.orderId || 'Update'}`;
+      const message =
+        data.message ||
+        life?.subtitle ||
+        `Your order status is now ${String(data.orderStatus || '').replace(/_/g, ' ')}`;
 
       // Optional: Show toast for important updates (Cancel, Ready, etc.)
       const isImportant = String(data.orderStatus).includes('cancel') || ['ready_for_pickup', 'ready', 'confirmed'].includes(data.orderStatus);

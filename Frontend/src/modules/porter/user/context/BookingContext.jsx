@@ -135,6 +135,37 @@ export function PorterProvider({ children }) {
   const quoteSeqRef = useRef(0);
   const hydrateSeqRef = useRef(0);
 
+  // --- TRACING BLOCK ---
+  const prevRefs = useRef({ pickup, delivery, vehicleId, totalParcelWeight: 0 });
+  useEffect(() => {
+    // We compute totalParcelWeight here to compare
+    const currentTotalWeight = Math.max(0, Number(parcel.weightKg || 0) * Math.max(1, Number(parcel.quantity || 1)));
+    
+    const prev = prevRefs.current;
+    const changed = [];
+    if (prev.pickup !== pickup) {
+      const valChanged = JSON.stringify(prev.pickup) !== JSON.stringify(pickup);
+      changed.push(`pickup (ref changed: true, value changed: ${valChanged})`);
+    }
+    if (prev.delivery !== delivery) {
+      const valChanged = JSON.stringify(prev.delivery) !== JSON.stringify(delivery);
+      changed.push(`delivery (ref changed: true, value changed: ${valChanged})`);
+    }
+    if (prev.vehicleId !== vehicleId) {
+      changed.push(`vehicleId (changed to ${vehicleId})`);
+    }
+    if (prev.totalParcelWeight !== currentTotalWeight) {
+      changed.push(`totalParcelWeight (changed to ${currentTotalWeight})`);
+    }
+    
+    if (changed.length > 0) {
+      console.log("[BookingContext] Dependencies changed:", changed.join(", "));
+      prevRefs.current = { pickup, delivery, vehicleId, totalParcelWeight: currentTotalWeight };
+    }
+  }, [pickup, delivery, vehicleId, parcel.weightKg, parcel.quantity]);
+  // --- END TRACING BLOCK ---
+
+
   const activeOrderId = activeShipment?.id;
   const isActiveOrderLive = Boolean(
     activeOrderId
@@ -312,14 +343,21 @@ export function PorterProvider({ children }) {
     if (selectedVehicleQuote) {
       return {
         id: selectedVehicleQuote.id,
-        name: selectedVehicleQuote.name,
+        name: selectedVehicleQuote.name || selectedVehicleQuote.category,
+        category: selectedVehicleQuote.category,
         vehicleCode: selectedVehicleQuote.vehicleCode,
         iconUrl: selectedVehicleQuote.iconUrl,
         maxWeight: selectedVehicleQuote.maxWeight,
       };
     }
     const fromQuote = routeQuote?.vehicle;
-    if (fromQuote) return fromQuote;
+    if (fromQuote) {
+      return {
+        ...fromQuote,
+        name: fromQuote.name || fromQuote.category,
+        category: fromQuote.category || fromQuote.name,
+      };
+    }
     return catalogVehicles.find((v) => String(v.id) === String(vehicleId)) || null;
   }, [selectedVehicle, selectedVehicleQuote, routeQuote, catalogVehicles, vehicleId]);
 
@@ -340,7 +378,8 @@ export function PorterProvider({ children }) {
       if (recommended) {
         selectVehicle(recommendedId, {
           id: recommended.id,
-          name: recommended.name,
+          name: recommended.name || recommended.category,
+          category: recommended.category,
           vehicleCode: recommended.vehicleCode,
           iconUrl: recommended.iconUrl,
           maxWeight: recommended.maxWeight,
@@ -357,6 +396,7 @@ export function PorterProvider({ children }) {
   );
 
   const refreshRouteQuote = useCallback(async () => {
+    console.log("[BookingContext] refreshRouteQuote() executed. Deps:", { pickup, delivery, totalParcelWeight, vehicleId });
     if (!hasCoordinates(pickup) || !hasCoordinates(delivery)) {
       setRouteQuote(null);
       return null;
@@ -401,6 +441,7 @@ export function PorterProvider({ children }) {
     let cancelled = false;
 
     const hydrateActiveOrder = async () => {
+      console.log("[BookingContext] hydrateActiveOrder() executed");
       let hydrated = false;
       try {
         const data = await porterUserApi.getActiveOrder({ forceRefresh: true });

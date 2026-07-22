@@ -45,6 +45,7 @@ import { adminAPI } from "@food/api";
 import { clearModuleAuth } from "@food/utils/auth";
 import { useAppBranding } from "@common/hooks/useBusinessSettingsCache";
 import useAdminNotifications from "@food/hooks/useAdminNotifications";
+import { useAdminBadgeStore } from "@food/store/adminBadgeStore";
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -61,7 +62,12 @@ export default function AdminNavbar({ onMenuClick }) {
   const [adminData, setAdminData] = useState(null);
   const { logoUrl, companyName } = useAppBranding("admin");
   const searchInputRef = useRef(null);
-  const { items: adminNotifications } = useAdminNotifications();
+  const { items: adminNotifications, refresh: refreshNotifications } = useAdminNotifications({ autoload: false });
+  const [hasLoadedNotifications, setHasLoadedNotifications] = useState(false);
+  const badgeCount = useAdminBadgeStore((state) => state.totalCount);
+  const fetchBadges = useAdminBadgeStore((state) => state.fetchBadges);
+
+
 
   // Load recent searches from localStorage
   useEffect(() => {
@@ -209,7 +215,7 @@ export default function AdminNavbar({ onMenuClick }) {
     }
   };
 
-  const notificationCount = adminNotifications.length;
+  const notificationCount = badgeCount;
   const openNotificationsPage = () => {
     setNotificationsOpen(false);
     navigate("/admin/food/notifications");
@@ -246,7 +252,13 @@ export default function AdminNavbar({ onMenuClick }) {
 
           {/* Right: User Profile */}
           <div className="flex items-center gap-3">
-            <Popover open={notificationsOpen} onOpenChange={setNotificationsOpen}>
+            <Popover open={notificationsOpen} onOpenChange={(open) => {
+              setNotificationsOpen(open);
+              if (open && !hasLoadedNotifications) {
+                refreshNotifications();
+                setHasLoadedNotifications(true);
+              }
+            }}>
               <PopoverTrigger asChild>
                 <button
                   type="button"

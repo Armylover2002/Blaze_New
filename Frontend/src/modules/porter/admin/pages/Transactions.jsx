@@ -30,7 +30,7 @@ const Transactions = () => {
   const [selected, setSelected] = useState(null);
 
   useEffect(() => {
-    porterAdminApi.getTransactions({ limit: 200 })
+    porterAdminApi.getTransactions({ limit: 100 })
       .then((data) => {
         setTxns((data.records || []).map((t) => ({
           id: t.id,

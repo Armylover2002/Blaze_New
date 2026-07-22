@@ -442,29 +442,11 @@ const Orders = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Auto-refresh fallback (like Admin)
-  useEffect(() => {
-    const interval = window.setInterval(() => {
-      if (hasMountedRef.current) {
-        fetchOrders(page, false);
-      }
-    }, AUTO_REFRESH_INTERVAL_MS);
-
-    return () => window.clearInterval(interval);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, startDate, endDate]);
-
-  // Reactive load: fetch orders when page or filters change
-  useEffect(() => {
-    fetchOrders(page, !hasMountedRef.current).finally(() => {
-      hasMountedRef.current = true;
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, startDate, endDate]);
-
-
-
-  const fetchOrders = async (requestedPage = 1, showPageLoader = false) => {
+  const fetchOrders = useCallback(async (
+    requestedPage = 1,
+    showPageLoader = false,
+    { forceRefresh = false } = {},
+  ) => {
     try {
       if (showPageLoader) {
         setLoading(true);
@@ -473,7 +455,7 @@ const Orders = () => {
       if (startDate) params.startDate = startDate;
       if (endDate) params.endDate = endDate;
 
-      const response = await sellerApi.getOrders(params);
+      const response = await sellerApi.getOrders(params, { forceRefresh });
 
       // Backend returns handleResponse(..., { items, page, limit, total, totalPages })
       const payload = response.data.result || response.data.data || {};
@@ -566,7 +548,25 @@ const Orders = () => {
         setLoading(false);
       }
     }
-  };
+  }, [pageSize, startDate, endDate, showToast]);
+
+  // Auto-refresh fallback (like Admin) — forceRefresh bypasses short TTL cache
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      if (hasMountedRef.current) {
+        fetchOrders(page, false, { forceRefresh: true });
+      }
+    }, AUTO_REFRESH_INTERVAL_MS);
+
+    return () => window.clearInterval(interval);
+  }, [page, pageSize, startDate, endDate, fetchOrders]);
+
+  // Reactive load: one fetch per page / pageSize / date-filter change
+  useEffect(() => {
+    fetchOrders(page, !hasMountedRef.current).finally(() => {
+      hasMountedRef.current = true;
+    });
+  }, [page, pageSize, startDate, endDate, fetchOrders]);
 
   const tabs = [
     "All",
@@ -706,12 +706,12 @@ const Orders = () => {
       });
 
       showToast(`Order status updated to ${nextTabLabel}`, "success");
-      fetchOrders(page, false);
+      fetchOrders(page, false, { forceRefresh: true });
     } catch (error) {
       console.error("Failed to update status:", error);
       showToast("Failed to update status", "error");
     }
-  }, [page]);
+  }, [page, fetchOrders, showToast]);
 
   const handleResendDispatch = useCallback(async (orderId) => {
     try {
@@ -732,7 +732,7 @@ const Orders = () => {
           : "Driver notification sent again",
         "success",
       );
-      fetchOrders(page, false);
+      fetchOrders(page, false, { forceRefresh: true });
     } catch (error) {
       console.error("Failed to resend dispatch:", error);
       showToast(
@@ -741,7 +741,7 @@ const Orders = () => {
         "error",
       );
     }
-  }, [page]);
+  }, [page, fetchOrders, showToast]);
 
   const canResendDispatch = useCallback((order) => {
     const sellerStatus = String(order?.status || "").toLowerCase();
@@ -1166,7 +1166,6 @@ const Orders = () => {
               onPageSizeChange={(newSize) => {
                 setPageSize(newSize);
                 setPage(1);
-                fetchOrders(1, false);
               }}
               loading={loading}
             />
@@ -1652,7 +1651,7 @@ const Orders = () => {
                       showToast(`Order #${cancellingOrder.id} has been cancelled`, "success");
                       setIsCancelModalOpen(false);
                       setIsDetailsModalOpen(false);
-                      fetchOrders(page, false);
+                      fetchOrders(page, false, { forceRefresh: true });
                     } catch (error) {
                       showToast(error.response?.data?.message || "Failed to cancel order", "error");
                     }

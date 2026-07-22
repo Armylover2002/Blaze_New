@@ -15,6 +15,7 @@ import {
   getCancellationDisplayLabel,
   isRestaurantAcceptanceTimeout,
 } from "@food/utils/cancellationDisplay"
+import { getLifecycleDisplay } from "@food/utils/orderLifecycleDisplay"
 const debugLog = (...args) => { }
 const debugWarn = (...args) => { }
 const debugError = (...args) => { }
@@ -1127,7 +1128,11 @@ Order again from this restaurant in the ${companyName} app.`
                     </div>
                   ) : (
                     <div>
-                      <p className="text-xs text-gray-500 dark:text-gray-400">{order.status === 'preparing' ? 'Preparing' : order.status === 'outForDelivery' ? 'Out for delivery' : order.status === 'confirmed' ? 'Order confirmed' : order.status === 'scheduled' ? 'Scheduled' : ''}</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">{(() => {
+                        const life = getLifecycleDisplay(order, { audience: "user" });
+                        if (life) return life.timelineLabel || life.subtitle;
+                        return order.status === 'preparing' ? 'Preparing' : order.status === 'outForDelivery' ? 'Out for delivery' : order.status === 'confirmed' ? 'Order confirmed' : order.status === 'scheduled' ? 'Scheduled' : '';
+                      })()}</p>
                       {/* Countdown Timer */}
                       {countdowns[order.id] && countdowns[order.id] > 0 && (
                         <div className="flex items-center gap-1 mt-1 text-xs text-[#FF0000] font-medium">

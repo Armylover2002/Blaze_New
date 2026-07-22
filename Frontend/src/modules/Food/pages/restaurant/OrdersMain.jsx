@@ -681,6 +681,12 @@ function AllOrders({
       intervalId = setInterval(fetchOrders, 45000);
     }
     countdownIntervalId = setInterval(() => {
+      // Pause ETA tick only while the incoming panel is expanded over the list.
+      if (
+        useIncomingOrderQueueStore.getState().orders.length > 0 &&
+        !useIncomingOrderQueueStore.getState().panelMinimized
+      )
+        return;
       if (isMounted) {
         setCurrentTime(new Date());
       }
@@ -914,13 +920,16 @@ const IncomingOrderCard = memo(function IncomingOrderCard({
     useEffect(() => {
       if (countdown <= 0) return;
       if (isAcceptingOrder) return;
+      if (isRejectModalOpenForThisOrder) return;
 
+      // Stable 1s tick — do NOT depend on `countdown` value (that recreated the interval every second).
+      // `countdown === 0` in deps only re-runs when timer finishes so the interval is cleared.
       const timer = setInterval(() => {
         setCountdown((prev) => (prev > 0 ? prev - 1 : 0));
       }, 1000);
 
       return () => clearInterval(timer);
-    }, [countdown, isAcceptingOrder, isRejectModalOpenForThisOrder]);
+    }, [isAcceptingOrder, isRejectModalOpenForThisOrder, countdown === 0]);
 
     useEffect(() => {
       if (countdown > 0) return;
@@ -928,33 +937,42 @@ const IncomingOrderCard = memo(function IncomingOrderCard({
       if (autoRejectInFlightRef.current) return;
       if (isAcceptingOrder) return;
       if (rejectInFlightRef.current) return;
+      if (isRejectModalOpenForThisOrder) return;
 
       autoRejectInFlightRef.current = true;
 
-      (async () => {
-        // Stop ringtone immediately for this specific timed-out order.
-        stopRinging(order);
+      // Stop ringtone + remove from queue immediately so multi-order UI never sticks at 0:00.
+      markOrderAsShown(order);
+      stopRinging(order);
+      clearOrderTimer(order);
+      clearOrderTimer(orderIdForTimer);
+      removeIncomingOrder(order);
 
+      if (showRejectPopup && rejectTargetKey === orderKey) {
+        setShowRejectPopup(false);
+        setRejectTarget(null);
+        setRejectReason("");
+      }
+
+      (async () => {
         try {
-          await restaurantAPI.rejectOrder(
+          const rejectPromise = restaurantAPI.rejectOrder(
             orderIdForApi,
             "Restaurant not accept",
           );
+          // Bound wait so a hung API cannot block restaurant panel recovery.
+          await Promise.race([
+            rejectPromise,
+            new Promise((_, reject) =>
+              setTimeout(() => reject(new Error("auto-reject timeout")), 12000),
+            ),
+          ]);
           toast.info("Order auto-rejected due to timeout");
-          clearOrderTimer(orderIdForTimer);
           requestOrdersRefresh();
         } catch (error) {
           debugError("Error auto-rejecting order:", error);
-        } finally {
-          // Remove only this specific order from the queue.
-          removeIncomingOrder(order);
-
-          // If the reject modal is open for this order, close it.
-          if (showRejectPopup && rejectTargetKey === orderKey) {
-            setShowRejectPopup(false);
-            setRejectTarget(null);
-            setRejectReason("");
-          }
+          toast.error("Order timed out — remove failed on server. Refresh orders.");
+          requestOrdersRefresh();
         }
       })();
     }, [
@@ -966,6 +984,16 @@ const IncomingOrderCard = memo(function IncomingOrderCard({
       isRejectModalOpenForThisOrder,
       rejectTargetKey,
       showRejectPopup,
+      markOrderAsShown,
+      stopRinging,
+      clearOrderTimer,
+      removeIncomingOrder,
+      requestOrdersRefresh,
+      setShowRejectPopup,
+      setRejectTarget,
+      setRejectReason,
+      rejectInFlightRef,
+      order,
     ]);
 
     const handleAcceptIncoming = async () => {
@@ -1302,13 +1330,24 @@ export default function OrdersMain() {
   // Timer persistence helpers
 
 
-  const clearOrderTimer = (orderId) => {
-    if (orderId) {
-      localStorage.removeItem(`order_timer_${orderId}`);
+  const clearOrderTimer = useCallback((orderIdOrLike) => {
+    if (!orderIdOrLike) return;
+    if (typeof orderIdOrLike === "string" || typeof orderIdOrLike === "number") {
+      localStorage.removeItem(`order_timer_${String(orderIdOrLike).trim()}`);
+      return;
     }
-  };
+    const keys = [
+      orderIdOrLike?.orderMongoId,
+      orderIdOrLike?.orderId,
+      orderIdOrLike?._id,
+      orderIdOrLike?.id,
+    ]
+      .map((v) => (v == null ? "" : String(v).trim()))
+      .filter(Boolean);
+    for (const k of keys) localStorage.removeItem(`order_timer_${k}`);
+  }, []);
 
-  const markOrderAsShown = (orderLike) => {
+  const markOrderAsShown = useCallback((orderLike) => {
     const keys = [
       orderLike?.orderMongoId,
       orderLike?.orderId,
@@ -1319,9 +1358,9 @@ export default function OrdersMain() {
       .filter(Boolean);
 
     for (const k of keys) shownOrdersRef.current.add(k);
-  };
+  }, []);
 
-  const hasOrderBeenShown = (orderLike) => {
+  const hasOrderBeenShown = useCallback((orderLike) => {
     const keys = [
       orderLike?.orderMongoId,
       orderLike?.orderId,
@@ -1332,7 +1371,7 @@ export default function OrdersMain() {
       .filter(Boolean);
 
     return keys.some((k) => shownOrdersRef.current.has(k));
-  };
+  }, []);
 
   // Restaurant notifications hook for real-time orders
   const { newOrder, clearNewOrder, isConnected } = useRestaurantNotifications({
@@ -1575,10 +1614,21 @@ export default function OrdersMain() {
   }, []);
 
   const [ordersRefreshToken, setOrdersRefreshToken] = useState(0);
-  const requestOrdersRefresh = () => {
-    invalidateRestaurantOrdersCache();
-    setOrdersRefreshToken((t) => t + 1);
-  };
+  const refreshDebounceRef = useRef(null);
+  const requestOrdersRefresh = useCallback(() => {
+    if (refreshDebounceRef.current) clearTimeout(refreshDebounceRef.current);
+    refreshDebounceRef.current = setTimeout(() => {
+      invalidateRestaurantOrdersCache();
+      setOrdersRefreshToken((t) => t + 1);
+      refreshDebounceRef.current = null;
+    }, 400);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (refreshDebounceRef.current) clearTimeout(refreshDebounceRef.current);
+    };
+  }, []);
 
   // Check for confirmed orders that haven't been shown in popup yet, or scheduled orders whose time has come
   useEffect(() => {
@@ -1673,6 +1723,10 @@ export default function OrdersMain() {
   }, []);
 
   const incomingQueueOrders = useIncomingOrderQueueStore((s) => s.orders);
+  const incomingPanelMinimized = useIncomingOrderQueueStore((s) => s.panelMinimized);
+  const setIncomingPanelMinimized = useIncomingOrderQueueStore(
+    (s) => s.setPanelMinimized,
+  );
   const ringPulseCounter = useIncomingOrderQueueStore((s) => s.ringPulseCounter);
   const removeIncomingOrder = useIncomingOrderQueueStore(
     (s) => s.removeIncomingOrder,
@@ -1719,12 +1773,12 @@ export default function OrdersMain() {
       .catch((err) => debugLog("Audio replay failed:", err));
   }, [ringPulseCounter, shouldPlayRingtone]);
 
-  const handleRejectClick = (order) => {
+  const handleRejectClick = useCallback((order) => {
     if (!order) return;
     setRejectTarget(order);
     setRejectReason("");
     setShowRejectPopup(true);
-  };
+  }, []);
 
   const handleRejectConfirm = async () => {
     if (!rejectReason || rejectInFlightRef.current || isRejectingOrder) return;
@@ -1963,6 +2017,14 @@ export default function OrdersMain() {
     setIsSheetOpen(true);
   }, []);
 
+  // Incoming panel and mobile order sheet must not stack — sheet left at opacity 0
+  // was blocking the whole mobile viewport.
+  useEffect(() => {
+    if (incomingQueueOrders.length > 0 && !incomingPanelMinimized) {
+      setIsSheetOpen(false);
+    }
+  }, [incomingQueueOrders.length, incomingPanelMinimized]);
+
   const renderContent = () => {
     switch (activeFilter) {
       case "all":
@@ -2043,9 +2105,15 @@ case "cancelled":
           <h1 className="text-xl font-bold text-gray-900 tracking-tight flex items-center gap-2">
             Live orders
             {incomingQueueOrders.length > 0 && (
-              <span className="inline-flex items-center rounded-full bg-[#FF0000] text-white text-xs px-2 py-0.5 font-bold">
+              <button
+                type="button"
+                onClick={() => setIncomingPanelMinimized(false)}
+                className="inline-flex items-center rounded-full bg-[#FF0000] text-white text-xs px-2 py-0.5 font-bold hover:bg-red-600 transition-colors"
+                title="Open incoming orders"
+              >
                 {incomingQueueOrders.length}
-              </span>
+                {incomingPanelMinimized ? " · Open" : ""}
+              </button>
             )}
           </h1>
           <p className="text-xs text-gray-500 mt-0.5">Manage incoming and active orders</p>
@@ -2334,40 +2402,60 @@ case "cancelled":
         aria-label="New order notification sound"
       />
 
-      {/* Incoming Orders Queue — horizontal side scroll */}
-      <AnimatePresence>
-        {incomingQueueOrders.length > 0 && (
-          <motion.div
-            className="fixed inset-0 z-[200] bg-black/60 flex items-end sm:items-center justify-center p-3 sm:p-6"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
+      {/* Incoming Orders Queue — non-blocking; Live Orders stays usable underneath */}
+      {incomingQueueOrders.length > 0 && (
+        <>
+          {/*
+            Keep cards mounted when minimized so countdown/auto-reject keep running.
+            Use `hidden` (not opacity/size animation) so Framer never leaves an
+            invisible full-screen hit layer that freezes mobile.
+          */}
+          <div
+            className={
+              incomingPanelMinimized
+                ? "hidden"
+                : "fixed inset-0 z-[200] pointer-events-none flex items-end sm:items-center justify-center p-3 sm:p-6"
+            }
+            aria-hidden={incomingPanelMinimized}
           >
             <div
-              className="w-full max-w-[100vw] flex flex-col items-stretch"
+              className="pointer-events-auto w-full max-w-[100vw] flex flex-col items-stretch drop-shadow-2xl"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-center justify-between mb-3 px-1 sm:px-2">
                 <div className="flex items-center gap-2">
-                  <span className="text-white text-sm font-bold tracking-wide">
+                  <span className="text-white text-sm font-bold tracking-wide bg-black/55 px-2.5 py-1 rounded-lg backdrop-blur-sm">
                     Incoming Orders
                   </span>
                   <span className="inline-flex items-center justify-center min-w-[1.5rem] h-6 px-2 rounded-full bg-[#FF0000] text-white text-xs font-bold">
                     {incomingQueueOrders.length}
                   </span>
                 </div>
-                <button
-                  type="button"
-                  onClick={toggleMute}
-                  className="p-2 rounded-full bg-white/15 hover:bg-white/25 transition-colors"
-                  aria-label={isMuted ? "Unmute" : "Mute"}
-                >
-                  {isMuted ? (
-                    <VolumeX className="w-5 h-5 text-white" />
-                  ) : (
-                    <Volume2 className="w-5 h-5 text-white" />
-                  )}
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={toggleMute}
+                    className="p-2 rounded-full bg-black/55 hover:bg-black/70 transition-colors backdrop-blur-sm"
+                    aria-label={isMuted ? "Unmute" : "Mute"}
+                  >
+                    {isMuted ? (
+                      <VolumeX className="w-5 h-5 text-white" />
+                    ) : (
+                      <Volume2 className="w-5 h-5 text-white" />
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIncomingPanelMinimized(true);
+                      setIsSheetOpen(false);
+                    }}
+                    className="px-3 py-2 rounded-full bg-white text-gray-900 text-xs font-bold hover:bg-gray-100 transition-colors shadow-md"
+                    aria-label="Go to live orders"
+                  >
+                    Live orders
+                  </button>
+                </div>
               </div>
 
               <div
@@ -2393,20 +2481,35 @@ case "cancelled":
                     toggleMute={toggleMute}
                     handlePrint={handlePrint}
                     handleRejectClick={handleRejectClick}
-                    getInitialCountdown={getInitialCountdown}
+                    rejectInFlightRef={rejectInFlightRef}
                     clearOrderTimer={clearOrderTimer}
                     markOrderAsShown={markOrderAsShown}
-                    getPopupOrderTotal={getPopupOrderTotal}
-                    rejectInFlightRef={rejectInFlightRef}
                     removeIncomingOrder={removeIncomingOrder}
                     stopRinging={stopRinging}
                   />
                 ))}
               </div>
             </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+          </div>
+
+          {incomingPanelMinimized && (
+            <button
+              type="button"
+              onClick={() => {
+                setIncomingPanelMinimized(false);
+                setIsSheetOpen(false);
+              }}
+              className="fixed bottom-20 md:bottom-6 right-4 z-[210] flex items-center gap-2 px-4 py-3 rounded-full bg-[#FF0000] text-white text-sm font-bold shadow-xl hover:bg-red-600 active:scale-95 transition-all"
+              aria-label="Open incoming orders"
+            >
+              <span className="inline-flex items-center justify-center min-w-[1.5rem] h-6 px-1.5 rounded-full bg-white text-[#FF0000] text-xs font-black">
+                {incomingQueueOrders.length}
+              </span>
+              Incoming — Open
+            </button>
+          )}
+        </>
+      )}
 
       {/* New Order Popup */}
       <AnimatePresence>
@@ -2623,7 +2726,7 @@ case "cancelled":
                     />
 
                     <button
-                      onClick={handleRejectClick}
+                      onClick={() => handleRejectClick(popupOrder || newOrder)}
                       disabled={isAcceptingOrder}
                       className="w-full py-3 bg-white border border-[#FF0000]/20 text-[#FF0000] rounded-xl font-bold text-sm hover:bg-red-50 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed">
                       Reject Order
@@ -2831,11 +2934,14 @@ case "cancelled":
       <AnimatePresence>
         {isSheetOpen && selectedOrder && (
           <motion.div
+            key="mobile-order-sheet"
             className="fixed inset-0 z-50 bg-black/40 flex items-end justify-center md:hidden"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={() => setIsSheetOpen(false)}>
+            exit={{ opacity: 0, pointerEvents: "none" }}
+            onClick={() => {
+              setIsSheetOpen(false);
+            }}>
             <motion.div
               className="w-full max-w-md mx-auto max-h-[90vh] overflow-y-auto bg-white rounded-t-3xl p-4 pb-[calc(1.25rem+env(safe-area-inset-bottom)+6rem)] shadow-lg"
               initial={{ y: 80 }}
@@ -3278,6 +3384,12 @@ function PreparingOrders({
 
     // Update countdown every second
     const countdownIntervalId = setInterval(() => {
+      // Pause while incoming panel is expanded (not when minimized to Live Orders).
+      if (
+        useIncomingOrderQueueStore.getState().orders.length > 0 &&
+        !useIncomingOrderQueueStore.getState().panelMinimized
+      )
+        return;
       if (isMounted) {
         setCurrentTime(new Date());
       }

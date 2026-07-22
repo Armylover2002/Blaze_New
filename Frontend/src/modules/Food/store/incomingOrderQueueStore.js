@@ -48,8 +48,13 @@ export const useIncomingOrderQueueStore = create((set, get) => ({
   // Each entry is { key, order, ringing }
   orders: [],
   ringPulseCounter: 0,
+  // When true, restaurant can use Live Orders behind; queue timers keep running.
+  panelMinimized: false,
 
   getOrderKey,
+
+  setPanelMinimized: (minimized) =>
+    set({ panelMinimized: Boolean(minimized) }),
 
   enqueueIncomingOrder: (orderLike = {}, { ringOnNew = false } = {}) => {
     const key = getOrderKey(orderLike);
@@ -67,6 +72,8 @@ export const useIncomingOrderQueueStore = create((set, get) => ({
     });
     if (exists) return { added: false, key };
 
+    const wasEmpty = state.orders.length === 0;
+
     set((s) => ({
       orders: [
         ...s.orders,
@@ -77,6 +84,9 @@ export const useIncomingOrderQueueStore = create((set, get) => ({
         },
       ],
       ringPulseCounter: ringOnNew ? s.ringPulseCounter + 1 : s.ringPulseCounter,
+      // Only force-open when queue was empty. If staff minimized to work Live Orders,
+      // a new arrival must not yank them back onto the popup layer.
+      panelMinimized: wasEmpty ? false : s.panelMinimized,
     }));
 
     return { added: true, key };
@@ -105,14 +115,19 @@ export const useIncomingOrderQueueStore = create((set, get) => ({
         : getOrderCandidateKeys(orderLikeOrKey);
     if (!incomingKeys.length) return;
 
-    set((s) => ({
-      orders: s.orders.filter((o) => {
+    set((s) => {
+      const nextOrders = s.orders.filter((o) => {
         const existingKeys = getOrderCandidateKeys(o.order);
         return !existingKeys.some((k) => incomingKeys.includes(k));
-      }),
-    }));
+      });
+      return {
+        orders: nextOrders,
+        panelMinimized: nextOrders.length === 0 ? false : s.panelMinimized,
+      };
+    });
   },
 
-  clearQueue: () => set({ orders: [], ringPulseCounter: 0 }),
+  clearQueue: () =>
+    set({ orders: [], ringPulseCounter: 0, panelMinimized: false }),
 }));
 

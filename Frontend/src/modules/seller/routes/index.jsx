@@ -1,4 +1,4 @@
-import React, { Suspense, useEffect, useState } from "react";
+import React, { Suspense } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import DashboardLayout from "@shared/layout/DashboardLayout";
 import { useAuth } from "@core/context/AuthContext";
@@ -108,33 +108,9 @@ const SellerWorkspace = () => (
 );
 
 const SellerAccessRouter = () => {
-  const { user, refreshUser } = useAuth();
-  const [isChecking, setIsChecking] = useState(!user);
+  const { user, isLoading } = useAuth();
 
-  useEffect(() => {
-    let alive = true;
-
-    const bootstrap = async () => {
-      if (user) {
-        setIsChecking(false);
-        return;
-      }
-
-      try {
-        await refreshUser();
-      } finally {
-        if (alive) setIsChecking(false);
-      }
-    };
-
-    bootstrap();
-
-    return () => {
-      alive = false;
-    };
-  }, [refreshUser, user]);
-
-  if (isChecking) {
+  if (isLoading) {
     return <Loader />;
   }
 
