@@ -101,11 +101,13 @@ const Wallet = () => {
         }
       />
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <StatCard title="Wallet Balance (All Drivers)" value={formatCurrency(summary.availableBalance)} icon={<WalletIcon size={18} />} />
-        <StatCard title="Today's Earnings" value={formatCurrency(summary.todayEarnings)} icon={<TrendingUp size={18} />} />
-        <StatCard title="Total Earnings" value={formatCurrency(summary.totalEarnings)} icon={<IndianRupee size={18} />} />
-        <StatCard title="Cash Pending Settlement" value={formatCurrency(summary.pendingSettlement)} icon={<Clock size={18} />} />
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+        <StatCard title="Driver Wallet" value={formatCurrency(summary.availableBalance)} icon={<WalletIcon size={18} />} />
+        <StatCard title="Driver (Today)" value={formatCurrency(summary.todayEarnings)} icon={<TrendingUp size={18} />} />
+        <StatCard title="Admin (Today)" value={formatCurrency(summary.adminTodayEarning || 0)} icon={<IndianRupee size={18} />} iconBg="bg-emerald-100 text-emerald-600" />
+        <StatCard title="Driver (Total)" value={formatCurrency(summary.totalEarnings)} icon={<IndianRupee size={18} />} />
+        <StatCard title="Admin (Total)" value={formatCurrency(summary.adminTotalEarning || 0)} icon={<IndianRupee size={18} />} iconBg="bg-emerald-100 text-emerald-600" />
+        <StatCard title="Cash Pending" value={formatCurrency(summary.pendingSettlement)} icon={<Clock size={18} />} />
       </div>
 
       <SectionCard title={`Driver Wallets${summary.totalDrivers ? ` (${summary.totalDrivers})` : ""}`} flush>

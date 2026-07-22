@@ -282,9 +282,9 @@ export const ParcelTripDetailsPanel = ({ order }) => {
 
   return (
     <div className="mb-4 space-y-2">
-      {row("Sender", senderName, senderPhone || pickupAddress)}
+      {row("Sender", senderName, senderPhone || undefined)}
       {row("Pickup address", pickupAddress)}
-      {row("Receiver", receiverName, receiverPhone || deliveryAddress)}
+      {row("Receiver", receiverName, receiverPhone || undefined)}
       {row("Delivery address", deliveryAddress)}
       {row("Parcel name", parcelName, parcelWeight != null ? `${parcelWeight} kg` : null)}
       {instructions ? row("Instructions", instructions) : null}

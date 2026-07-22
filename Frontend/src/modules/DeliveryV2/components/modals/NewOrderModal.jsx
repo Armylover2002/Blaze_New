@@ -4,7 +4,7 @@ import { ChevronDown } from 'lucide-react';
 import { ActionSlider } from '@/modules/DeliveryV2/components/ui/ActionSlider';
 import { useDeliveryStore } from '@/modules/DeliveryV2/store/useDeliveryStore';
 import { getHaversineDistance } from '@/modules/DeliveryV2/utils/geo';
-import { normalizePickupPoints, normalizeLocationPoint, isMixedOrder, isReturnPickupTrip, getReturnPickupStopLabels, formatDeliveryAddressText } from '@/modules/DeliveryV2/utils/orderRouting';
+import { normalizePickupPoints, normalizeLocationPoint, isMixedOrder, isReturnPickupTrip, isPorterParcelTrip, getReturnPickupStopLabels, formatDeliveryAddressText } from '@/modules/DeliveryV2/utils/orderRouting';
 import { RenderNewOrder } from './renderers/NewOrderRenderers';
 
 /**
@@ -61,6 +61,8 @@ export const NewOrderModal = ({ order, onAccept, onReject, onMinimize }) => {
     }
   }, [timeLeft, onReject]);
 
+  const isParcelOffer = isPorterParcelTrip(order);
+
   const { distanceKm, etaMins } = useMemo(() => {
     if (!order) return { distanceKm: null, etaMins: null };
 
@@ -114,6 +116,28 @@ export const NewOrderModal = ({ order, onAccept, onReject, onMinimize }) => {
     const riderLat = Number(riderLocation?.lat);
     const riderLng = Number(riderLocation?.lng);
     const hasRider = Number.isFinite(riderLat) && Number.isFinite(riderLng);
+
+    // Porter parcel: PICKUP = rider→pickup, server road distance preferred over GPS snap-to-zero.
+    if (isParcelOffer) {
+      const serverPickupKm = Number(order.pickupDistanceKm);
+      let gpsPickupKm = null;
+      if (hasRider && hasRestaurant) {
+        const toPickupM = getHaversineDistance(riderLat, riderLng, resLat, resLng);
+        if (Number.isFinite(toPickupM) && toPickupM >= 0) {
+          gpsPickupKm = toPickupM <= NEAR_M ? 0 : toPickupM / 1000;
+        }
+      }
+      if (Number.isFinite(serverPickupKm) && serverPickupKm > 0) {
+        return { distanceKm: formatKm(serverPickupKm), etaMins: etaFromKm(serverPickupKm) };
+      }
+      if (gpsPickupKm != null) {
+        return { distanceKm: formatKm(gpsPickupKm), etaMins: etaFromKm(gpsPickupKm || 0.1) };
+      }
+      if (Number.isFinite(serverPickupKm) && serverPickupKm >= 0) {
+        return { distanceKm: formatKm(serverPickupKm), etaMins: etaFromKm(serverPickupKm || 0.1) };
+      }
+      return { distanceKm: '??', etaMins: order.prepTime || 15 };
+    }
 
     // PICKUP must be rider → restaurant only.
     // Never use order.distanceKm as a blind fallback (that is restaurant→customer).
@@ -170,7 +194,7 @@ export const NewOrderModal = ({ order, onAccept, onReject, onMinimize }) => {
     }
 
     return { distanceKm: '??', etaMins: order.prepTime || 15 };
-  }, [order, primaryPickup, riderLocation]);
+  }, [order, primaryPickup, riderLocation, isParcelOffer]);
 
   if (!order) return null;
 
@@ -224,9 +248,17 @@ export const NewOrderModal = ({ order, onAccept, onReject, onMinimize }) => {
       },
     ];
 
-  const dropDistanceKm = 
-    order?.deliveryDistanceKm != null ? Number(order.deliveryDistanceKm).toFixed(1) : 
-    order?.distanceKm != null ? Number(order.distanceKm).toFixed(1) : '??';
+  const dropDistanceKm = (() => {
+    // Porter parcel: DROP = pickup→delivery trip length (NOT rider→pickup distanceKm).
+    if (isParcelOffer) {
+      const tripKm = Number(order.tripDistanceKm ?? order.route?.distanceKm ?? order.deliveryDistanceKm);
+      if (Number.isFinite(tripKm) && tripKm >= 0) return tripKm.toFixed(1);
+      return '??';
+    }
+    if (order?.deliveryDistanceKm != null) return Number(order.deliveryDistanceKm).toFixed(1);
+    if (order?.distanceKm != null) return Number(order.distanceKm).toFixed(1);
+    return '??';
+  })();
 
   return (
     <motion.div

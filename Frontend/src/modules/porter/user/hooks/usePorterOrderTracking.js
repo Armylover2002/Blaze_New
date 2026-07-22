@@ -24,6 +24,9 @@ export function usePorterOrderTracking(orderId, { pollMs = 5000, enabled = true 
     } catch (err) {
       if (seq !== seqRef.current) return null;
       setError(err);
+      if (err?.response?.status === 404) {
+        setOrder(null);
+      }
       return null;
     } finally {
       if (seq === seqRef.current) setLoading(false);

@@ -46,4 +46,69 @@ export function SectionLabel({ children, className = "" }) {
   return <h2 className={`mb-2 text-[15px] font-semibold text-[#1c1c1e] dark:text-white md:text-xl tracking-tight ${className}`}>{children}</h2>;
 }
 
-export const inr = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
+/** Display-only INR formatter — always 2 decimal places; does not alter stored amounts. */
+export const inr = (n) => {
+  const value = Number(n);
+  const safe = Number.isFinite(value) ? value : 0;
+  return `₹${safe.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+};
+
+/**
+ * Reconciles displayed line items with authoritative payable total (backend value).
+ * Covers per-field rounding vs total rounding — display only, no pricing recalculation.
+ */
+export function computeFareRoundingAdjustment({
+  baseFare = 0,
+  serviceTax = 0,
+  discount = 0,
+  total = 0,
+}) {
+  const fare = Number(baseFare) || 0;
+  const tax = Number(serviceTax) || 0;
+  const disc = Number(discount) || 0;
+  const payable = Number(total) || 0;
+  const lineSum = fare + tax - disc;
+  return Math.round((payable - lineSum) * 100) / 100;
+}
+
+/**
+ * Standard Porter fare breakdown — line items always sum to total payable.
+ */
+export function FareBreakdown({
+  baseFare = 0,
+  serviceTax = 0,
+  discount = 0,
+  total = 0,
+  baseLabel = "Base delivery fare",
+  taxLabel = "Service Tax / GST",
+  discountLabel = "Promo discount",
+  roundingLabel = "Rounding adjustment",
+  totalLabel = "Total Payable",
+  distanceText,
+  durationText,
+}) {
+  const payable = Number(total) || 0;
+  const tax = Number(serviceTax) || 0;
+  const disc = Number(discount) || 0;
+  const roundingAdjustment = computeFareRoundingAdjustment({
+    baseFare,
+    serviceTax: tax,
+    discount: disc,
+    total: payable,
+  });
+
+  return (
+    <>
+      <FareRow label={baseLabel} value={inr(baseFare)} />
+      {distanceText && <FareRow label="Distance" value={distanceText} />}
+      {durationText && <FareRow label="ETA" value={durationText} />}
+      {tax > 0 && <FareRow label={taxLabel} value={inr(tax)} />}
+      {disc > 0 && <FareRow label={discountLabel} value={`−${inr(disc)}`} accent />}
+      {roundingAdjustment !== 0 && (
+        <FareRow label={roundingLabel} value={inr(roundingAdjustment)} />
+      )}
+      <div className="my-2 border-t border-gray-100" />
+      <FareRow label={totalLabel} value={inr(payable)} strong />
+    </>
+  );
+}

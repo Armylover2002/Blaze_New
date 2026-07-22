@@ -24,7 +24,7 @@
     "cleanup:legacy-collections": "node scripts/cleanup-legacy-collections.js",
     "create-admin": "node scripts/create-admin.js",
     "install:sharp": "node scripts/install-sharp.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --test scripts/test-porter-coupon-payment-lifecycle.js && node scripts/test-porter-coupon-lifecycle.js"
   },
   "keywords": [],
   "author": "",

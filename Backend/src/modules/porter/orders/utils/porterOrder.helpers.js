@@ -95,6 +95,8 @@ export const mapPorterOrderForUser = (doc) => {
         vehicleName: o.vehicleName,
         route: o.route,
         pricing: o.pricing,
+        couponCode: o.couponCode || null,
+        couponConsumed: Boolean(o.couponConsumed),
         payment: o.payment,
         dispatch: o.dispatch ? {
             status: o.dispatch.status,
@@ -154,6 +156,10 @@ export const mapPorterOrderForDriver = (doc) => {
         receiverPhone: o.parcel?.receiverPhone,
         deliveryState: {
             currentPhase: o.deliveryState?.currentPhase,
+            pickupOtp: o.deliveryState?.pickupOtp,
+            pickupOtpVerifiedAt: o.deliveryState?.pickupOtpVerifiedAt,
+            pickupPhotoUrl: o.deliveryState?.pickupPhotoUrl,
+            deliveryPhotoUrl: o.deliveryState?.deliveryPhotoUrl,
             pickedUpAt: o.deliveryState?.pickedUpAt,
             deliveredAt: o.deliveryState?.deliveredAt,
         },

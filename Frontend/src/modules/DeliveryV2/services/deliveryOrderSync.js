@@ -8,7 +8,7 @@
  * - Available HTTP: available poller ONLY (recovery never fetches available)
  */
 import { deliveryAPI } from '@food/api';
-import porterDriverApi from '@/modules/porter/driver/services/driverApi';
+import porterDriverApi, { invalidateDriverActiveOrderCache } from '@/modules/porter/driver/services/driverApi';
 
 const AVAILABLE_POLL_MS_SOCKET_UP = 60_000;
 const AVAILABLE_POLL_MS_SOCKET_DOWN = 45_000;
@@ -169,20 +169,20 @@ export function invalidateRecoveryCache(_reason = 'invalidate') {
 }
 
 /** GET porter active + food current (deduped). Not used on available poll ticks. */
-export async function fetchActiveTripBundle() {
+export async function fetchActiveTripBundle({ bustCache = false } = {}) {
   if (activeTripInFlight) return activeTripInFlight;
 
   activeTripInFlight = (async () => {
     try {
       const [porterResult, currentResponse] = await Promise.all([
-        porterDriverApi.getActiveOrder().catch(() => null),
+        porterDriverApi.getActiveOrder({ bustCache }).catch(() => null),
         deliveryAPI.getCurrentDelivery().catch(() => null),
       ]);
 
       recoveryCache.lastActiveFetchAt = Date.now();
 
       const porterOrder = porterResult?.order || porterResult || null;
-      const hasPorter = Boolean(porterOrder?.id || porterOrder?.orderId);
+      const hasPorter = Boolean(porterOrder?.id || porterOrder?.orderId || porterOrder?._id);
 
       const rawData =
         currentResponse?.data?.data?.activeOrder ||
@@ -367,7 +367,9 @@ export function requestColdStart() {
 /** After accept / complete / cancel / manual refresh — active trip only. */
 export async function refreshActiveTrip(reason = 'manual') {
   invalidateRecoveryCache(reason);
-  const active = await fetchActiveTripBundle();
+  const bustCache = reason === 'cancel' || reason === 'complete';
+  if (bustCache) invalidateDriverActiveOrderCache();
+  const active = await fetchActiveTripBundle({ bustCache });
   recoveryCache.lastRecoveryAt = Date.now();
   recoveryGateInvalidated = false;
   const payload = {

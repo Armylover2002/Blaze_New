@@ -51,7 +51,7 @@ export async function getPorterDashboardStats() {
         PorterOrder.countDocuments({ ...baseFilter, status: 'scheduled' }),
         PorterOrder.aggregate([
             { $match: { ...baseFilter, status: { $in: ['delivered', 'completed'] } } },
-            { $group: { _id: null, total: { $sum: '$pricing.total' }, count: { $sum: 1 } } },
+            { $group: { _id: null, total: { $sum: '$pricing.total' }, driverEarning: { $sum: '$pricing.driverEarning' }, count: { $sum: 1 } } },
         ]),
         PorterOrder.aggregate([
             {
@@ -61,7 +61,7 @@ export async function getPorterDashboardStats() {
                     'deliveryState.deliveredAt': { $gte: todayStart },
                 },
             },
-            { $group: { _id: null, total: { $sum: '$pricing.total' } } },
+            { $group: { _id: null, total: { $sum: '$pricing.total' }, driverEarning: { $sum: '$pricing.driverEarning' } } },
         ]),
         PorterOrder.find(baseFilter)
             .sort({ createdAt: -1 })
@@ -77,8 +77,10 @@ export async function getPorterDashboardStats() {
     ]);
 
     const totalRevenue = Number(revenueAgg?.[0]?.total) || 0;
+    const totalDriverEarning = Number(revenueAgg?.[0]?.driverEarning) || 0;
     const completedCount = Number(revenueAgg?.[0]?.count) || 0;
     const todayRevenue = Number(todayRevenueAgg?.[0]?.total) || 0;
+    const todayDriverEarning = Number(todayRevenueAgg?.[0]?.driverEarning) || 0;
     const avgOrderValue = completedCount > 0 ? Math.round(totalRevenue / completedCount) : 0;
 
     return {
@@ -91,6 +93,8 @@ export async function getPorterDashboardStats() {
             scheduledOrders,
             totalRevenue,
             todayRevenue,
+            totalAdminEarning: totalRevenue - totalDriverEarning,
+            todayAdminEarning: todayRevenue - todayDriverEarning,
             avgOrderValue,
             fleetUtilization: totalOrders > 0
                 ? `${Math.round((activeOrders / Math.max(totalOrders, 1)) * 100)}%`
@@ -108,7 +112,8 @@ export async function getPorterDashboardStats() {
             goodsType: o.parcel?.parcelName || 'Parcel',
             distance: o.route?.distanceText || `${o.route?.distanceKm ?? 0} km`,
             amount: o.pricing?.total ?? 0,
-            payment: o.payment?.method || 'wallet',
+            paymentStatus: o.payment?.status,
+            paymentMethod: o.payment?.method || 'wallet',
             status: o.status,
             time: o.createdAt,
         })),
@@ -275,79 +280,95 @@ export async function getPorterReportsStats({ range = 'monthly' } = {}) {
 export async function getPorterAdminWallets() {
     const todayStart = startOfDay();
 
-    const rows = await PorterEarning.aggregate([
-        { $match: { isDeleted: { $ne: true } } },
-        {
-            $group: {
-                _id: '$deliveryPartnerId',
-                totalEarnings: { $sum: { $ifNull: ['$netEarning', 0] } },
-                totalTrips: { $sum: 1 },
-                todayEarnings: {
-                    $sum: {
-                        $cond: [{ $gte: ['$createdAt', todayStart] }, { $ifNull: ['$netEarning', 0] }, 0],
-                    },
-                },
-                lastSettlement: { $max: '$settledAt' },
-            },
-        },
-        {
-            // COD cash the driver collected (owed to platform => pending settlement)
-            $lookup: {
-                from: 'porter_orders',
-                let: { pid: '$_id' },
-                pipeline: [
-                    {
-                        $match: {
-                            $expr: { $eq: ['$dispatch.deliveryPartnerId', '$$pid'] },
-                            status: { $in: ['delivered', 'completed'] },
-                            'payment.method': 'cash',
-                            'payment.status': 'paid',
-                            isDeleted: { $ne: true },
+    const [rows, dashRev, dashTodayRev] = await Promise.all([
+        PorterEarning.aggregate([
+            { $match: { isDeleted: { $ne: true } } },
+            {
+                $group: {
+                    _id: '$deliveryPartnerId',
+                    totalEarnings: { $sum: { $ifNull: ['$netEarning', 0] } },
+                    totalTrips: { $sum: 1 },
+                    todayEarnings: {
+                        $sum: {
+                            $cond: [{ $gte: ['$createdAt', todayStart] }, { $ifNull: ['$netEarning', 0] }, 0],
                         },
                     },
-                    { $group: { _id: null, cash: { $sum: { $ifNull: ['$pricing.total', 0] } } } },
-                ],
-                as: 'cashAgg',
-            },
-        },
-        {
-            $lookup: {
-                from: 'food_delivery_partners',
-                localField: '_id',
-                foreignField: '_id',
-                as: 'driver',
-            },
-        },
-        { $unwind: { path: '$driver', preserveNullAndEmptyArrays: true } },
-        {
-            $lookup: {
-                from: 'food_delivery_wallets',
-                localField: '_id',
-                foreignField: 'deliveryPartnerId',
-                as: 'wallet',
-            },
-        },
-        { $unwind: { path: '$wallet', preserveNullAndEmptyArrays: true } },
-        {
-            $project: {
-                _id: 0,
-                driverId: { $toString: '$_id' },
-                driverName: { $ifNull: ['$driver.name', 'Unknown driver'] },
-                photo: '$driver.profilePhoto',
-                vehicle: {
-                    $ifNull: ['$driver.vehicleName', { $ifNull: ['$driver.vehicleType', '—'] }],
+                    lastSettlement: { $max: '$settledAt' },
                 },
-                driverStatus: { $ifNull: ['$driver.status', 'inactive'] },
-                walletBalance: { $ifNull: ['$wallet.balance', 0] },
-                totalEarnings: 1,
-                totalTrips: 1,
-                todayEarnings: 1,
-                lastSettlement: 1,
-                cashCollected: { $ifNull: [{ $arrayElemAt: ['$cashAgg.cash', 0] }, 0] },
             },
-        },
-        { $sort: { totalEarnings: -1 } },
-        { $limit: 1000 },
+            {
+                // COD cash the driver collected (owed to platform => pending settlement)
+                $lookup: {
+                    from: 'porter_orders',
+                    let: { pid: '$_id' },
+                    pipeline: [
+                        {
+                            $match: {
+                                $expr: { $eq: ['$dispatch.deliveryPartnerId', '$$pid'] },
+                                status: { $in: ['delivered', 'completed'] },
+                                'payment.method': 'cash',
+                                'payment.status': 'paid',
+                                isDeleted: { $ne: true },
+                            },
+                        },
+                        { $group: { _id: null, cash: { $sum: { $ifNull: ['$pricing.total', 0] } } } },
+                    ],
+                    as: 'cashAgg',
+                },
+            },
+            {
+                $lookup: {
+                    from: 'food_delivery_partners',
+                    localField: '_id',
+                    foreignField: '_id',
+                    as: 'driver',
+                },
+            },
+            { $unwind: { path: '$driver', preserveNullAndEmptyArrays: true } },
+            {
+                $lookup: {
+                    from: 'food_delivery_wallets',
+                    localField: '_id',
+                    foreignField: 'deliveryPartnerId',
+                    as: 'wallet',
+                },
+            },
+            { $unwind: { path: '$wallet', preserveNullAndEmptyArrays: true } },
+            {
+                $project: {
+                    _id: 0,
+                    driverId: { $toString: '$_id' },
+                    driverName: { $ifNull: ['$driver.name', 'Unknown driver'] },
+                    photo: '$driver.profilePhoto',
+                    vehicle: {
+                        $ifNull: ['$driver.vehicleName', { $ifNull: ['$driver.vehicleType', '—'] }],
+                    },
+                    driverStatus: { $ifNull: ['$driver.status', 'inactive'] },
+                    walletBalance: { $ifNull: ['$wallet.balance', 0] },
+                    totalEarnings: 1,
+                    totalTrips: 1,
+                    todayEarnings: 1,
+                    lastSettlement: 1,
+                    cashCollected: { $ifNull: [{ $arrayElemAt: ['$cashAgg.cash', 0] }, 0] },
+                },
+            },
+            { $sort: { totalEarnings: -1 } },
+            { $limit: 1000 },
+        ]),
+        PorterOrder.aggregate([
+            { $match: { ...baseFilter, status: { $in: ['delivered', 'completed'] } } },
+            { $group: { _id: null, total: { $sum: '$pricing.total' }, driverEarning: { $sum: '$pricing.driverEarning' } } },
+        ]),
+        PorterOrder.aggregate([
+            {
+                $match: {
+                    ...baseFilter,
+                    status: { $in: ['delivered', 'completed'] },
+                    'deliveryState.deliveredAt': { $gte: todayStart },
+                },
+            },
+            { $group: { _id: null, total: { $sum: '$pricing.total' }, driverEarning: { $sum: '$pricing.driverEarning' } } },
+        ]),
     ]);
 
     const records = rows.map((d, i) => {
@@ -368,6 +389,11 @@ export async function getPorterAdminWallets() {
         };
     });
 
+    const totalRev = Number(dashRev?.[0]?.total) || 0;
+    const totalDrv = Number(dashRev?.[0]?.driverEarning) || 0;
+    const todayRev = Number(dashTodayRev?.[0]?.total) || 0;
+    const todayDrv = Number(dashTodayRev?.[0]?.driverEarning) || 0;
+
     const summary = records.reduce(
         (acc, r) => {
             acc.availableBalance += r.walletBalance;
@@ -376,7 +402,11 @@ export async function getPorterAdminWallets() {
             acc.pendingSettlement += r.pending;
             return acc;
         },
-        { availableBalance: 0, todayEarnings: 0, totalEarnings: 0, pendingSettlement: 0, totalDrivers: records.length },
+        { 
+            availableBalance: 0, todayEarnings: 0, totalEarnings: 0, pendingSettlement: 0, totalDrivers: records.length,
+            adminTotalEarning: totalRev - totalDrv,
+            adminTodayEarning: todayRev - todayDrv
+        },
     );
 
     return { summary, records };
@@ -413,7 +443,7 @@ export async function getPorterAdminTransactions(query = {}) {
                     grossRevenue: { $sum: '$pricing.total' },
                     totalCommission: { $sum: '$pricing.commission' },
                     totalTax: { $sum: '$pricing.serviceTax' },
-                    netPayout: { $sum: { $subtract: [ '$pricing.total', { $add: ['$pricing.commission', '$pricing.serviceTax'] } ] } },
+                    netPayout: { $sum: { $ifNull: ['$pricing.driverEarning', 0] } },
                 },
             },
         ]),
@@ -432,6 +462,8 @@ export async function getPorterAdminTransactions(query = {}) {
             const amount = o.pricing?.total ?? 0;
             const commission = o.pricing?.commission ?? 0;
             const tax = o.pricing?.serviceTax ?? 0;
+            const platformFee = o.pricing?.platformFee ?? 0;
+            const discount = o.pricing?.discount ?? 0;
             
             return {
                 id: String(o._id),
@@ -439,7 +471,9 @@ export async function getPorterAdminTransactions(query = {}) {
                 amount: amount,
                 commission: commission,
                 tax: tax,
-                netPayout: Math.max(0, amount - commission - tax),
+                platformFee: platformFee,
+                discount: discount,
+                netPayout: o.pricing?.driverEarning ?? 0,
                 driverPayout: o.pricing?.driverEarning ?? 0,
                 paymentMethod: o.payment?.method || 'wallet',
                 customer: o.userId?.name || 'Customer',

@@ -1,5 +1,6 @@
-import React, { useEffect, useMemo } from "react";
+import React, { useEffect, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
+import { toast } from "sonner";
 import { Phone, Star, Copy, Navigation, Shield, Loader2, Package } from "lucide-react";
 import Screen from "../components/Screen";
 import PorterRouteMap from "../components/PorterRouteMap";
@@ -9,11 +10,13 @@ import { getPorterTrackingPath, getPorterCancelPath, getPorterSosPath } from "..
 import { usePorterOrderTracking } from "../hooks/usePorterOrderTracking";
 import { mapPartnerFromOrder } from "../utils/orderMapper";
 import { PORTER_STATUS_LABELS } from "../constants/booking";
+import { isSearchingPartnerStatus } from "../utils/activeOrderSync";
 
 export default function PartnerAssigned() {
   const navigate = useNavigate();
   const { activeShipment, setActiveShipment, refreshActiveOrder } = useBooking();
   const orderId = activeShipment?.id;
+  const redispatchNotifiedRef = useRef(false);
 
   const { order, loading } = usePorterOrderTracking(orderId, {
     enabled: Boolean(orderId),
@@ -41,6 +44,27 @@ export default function PartnerAssigned() {
       total: order.pricing?.total ?? prev?.total,
     }));
   }, [order, setActiveShipment]);
+
+  useEffect(() => {
+    const nextStatus = String(order?.status || activeShipment?.status || "").toLowerCase();
+    if (!isSearchingPartnerStatus(nextStatus)) return undefined;
+
+    if (!redispatchNotifiedRef.current) {
+      redispatchNotifiedRef.current = true;
+      toast.info("Your delivery partner cancelled. Finding a new partner...");
+      setActiveShipment((prev) => (prev ? {
+        ...prev,
+        status: nextStatus,
+        partner: null,
+        dispatch: prev.dispatch
+          ? { ...prev.dispatch, deliveryPartnerId: null, driver: null, status: "unassigned" }
+          : prev.dispatch,
+      } : prev));
+    }
+
+    navigate("/porter/finding-partner", { replace: true });
+    return undefined;
+  }, [order?.status, activeShipment?.status, navigate, setActiveShipment]);
 
   useEffect(() => {
     if (!orderId) {

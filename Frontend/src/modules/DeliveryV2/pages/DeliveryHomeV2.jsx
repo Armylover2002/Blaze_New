@@ -227,6 +227,54 @@ const CashLimitBlockingModal = ({ isOpen, onClose }) => {
   );
 };
 
+const CancelTripModal = ({ isOpen, onClose, onConfirm, loading }) => {
+  const [reason, setReason] = useState("");
+
+  useEffect(() => {
+    if (isOpen) setReason("");
+  }, [isOpen]);
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4">
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+      <motion.div 
+        initial={{ scale: 0.9, opacity: 0 }} 
+        animate={{ scale: 1, opacity: 1 }} 
+        exit={{ scale: 0.9, opacity: 0 }}
+        className="relative bg-white rounded-[40px] p-8 max-w-sm w-full text-center shadow-2xl overflow-hidden"
+      >
+        <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-red-500 to-amber-400" />
+        <h3 className="text-2xl font-black text-slate-900 mb-2 leading-tight">Cancel Trip</h3>
+        <p className="text-slate-500 text-sm mb-4 leading-relaxed">
+          Please provide a reason for cancelling this trip.
+        </p>
+        <input 
+          type="text" 
+          placeholder="Reason for cancellation" 
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          className="w-full px-4 py-3 rounded-2xl bg-gray-50 border border-gray-200 focus:outline-none focus:ring-2 focus:ring-red-500 mb-6 text-sm"
+          autoFocus
+        />
+        <div className="flex gap-3">
+          <Button variant="outline" onClick={onClose} disabled={loading} className="flex-1 rounded-2xl h-12 font-bold border-gray-200 text-gray-500">Back</Button>
+          <Button onClick={() => {
+            if (reason.trim()) {
+              onConfirm(reason.trim());
+            } else {
+              toast.error("Please enter a reason");
+            }
+          }} disabled={loading || !reason.trim()} className="flex-1 rounded-2xl h-12 font-black bg-red-600 hover:bg-red-700 text-white shadow-lg shadow-red-200">
+            {loading ? <Loader2 className="w-5 h-5 animate-spin mx-auto" /> : "Confirm Cancel"}
+          </Button>
+        </div>
+      </motion.div>
+    </div>
+  );
+};
+
 /**
  * DeliveryHomeV2 - Premium 1:1 Match with Original App UI.
  * Featuring logical tab switching for Feed, Pocket, History, and Profile.
@@ -244,10 +292,12 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
   const [isVehicleDetailsExpanded, setIsVehicleDetailsExpanded] = useState(false);
   const [showVehicleSwitcher, setShowVehicleSwitcher] = useState(false);
   const [vehicleSelectMode, setVehicleSelectMode] = useState('switch');
-  const { isWithinRange, distanceToTarget } = useProximityCheck();
+  const { isWithinRange, distanceToTarget, displayDistanceToTarget } = useProximityCheck();
   const { acceptOrder, reachPickup, pickUpOrder, reachDrop, completeDelivery, resetTrip, cancelPorterTrip } = useOrderManager();
   const { newOrder, clearNewOrder, orderStatusUpdate, clearOrderStatusUpdate, isConnected: isSocketConnected, emitLocation, forcedOfflineEvent, clearForcedOfflineEvent } = useDeliveryNotificationsContext();
   const [isProcessingToggle, setIsProcessingToggle] = useState(false);
+  const [showCancelTripModal, setShowCancelTripModal] = useState(false);
+  const [cancelTripLoading, setCancelTripLoading] = useState(false);
 
   useEffect(() => {
     if (forcedOfflineEvent) {
@@ -344,7 +394,7 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
   const applyActiveTripBundle = useCallback((bundle = {}) => {
     try {
       const porterOrder = bundle.porterOrder;
-      if (porterOrder?.id || porterOrder?.orderId) {
+      if (porterOrder?.id || porterOrder?.orderId || porterOrder?._id) {
         const enriched = enrichPorterDeliveryOrder(porterOrder);
         if (isPorterParcelTrip(enriched)) {
           setActiveOrder(enriched);
@@ -417,11 +467,8 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
         return;
       }
 
-      if (bundle.type === 'idle' || (!porterOrder && !serverData && bundle.reason === 'coldStart')) {
-        // Only clear on explicit idle/cold-start empty — avoid wiping local accept race.
-        if (bundle.reason === 'coldStart' || bundle.reason === 'complete' || bundle.reason === 'cancel') {
-          clearActiveOrder();
-        }
+      if (bundle.type === 'idle' && !porterOrder && !serverData) {
+        clearActiveOrder();
       }
     } catch (err) {
       console.error('Order Sync Failed:', err);
@@ -747,16 +794,16 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
   // 1.5 Professional Unified ETA Calculation Hook
   useEffect(() => {
     // If we have distance, calculate ETA. Fallback to 8m/s (28km/h) avg if GPS speed is unknown.
-    if (distanceToTarget != null && distanceToTarget !== Infinity) {
+    if (displayDistanceToTarget != null && displayDistanceToTarget !== Infinity) {
       const avgSpeed = rollingSpeedRef.current.length > 0 
         ? rollingSpeedRef.current.reduce((a, b) => a + b, 0) / rollingSpeedRef.current.length 
         : 8;
       
-      setEta(calculateETA(distanceToTarget, avgSpeed));
+      setEta(calculateETA(displayDistanceToTarget, avgSpeed));
     } else {
       setEta(null);
     }
-  }, [distanceToTarget]);
+  }, [displayDistanceToTarget]);
 
   // 2. Online/Offline Status Sync (REMOVED: Handled manually in toggle for subscription safety)
 
@@ -938,16 +985,19 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
     if (!orderStatusUpdate) return;
 
     if (isPorterParcelTrip(orderStatusUpdate)) {
+      const status = String(orderStatusUpdate.status || '').toLowerCase();
       const cancelled = orderStatusUpdate.cancelled
-        || String(orderStatusUpdate.status || '').toLowerCase().includes('cancelled');
-      if (cancelled) {
-        toast.error('Parcel order cancelled');
+        || status.includes('cancelled');
+      const driverReleased = cancelled
+        || status === 'searching_partner'
+        || status === 'created'
+        || status === 'dispatching';
+      if (driverReleased) {
+        if (!cancelled) {
+          toast.info('Trip removed from your queue');
+        }
         resetTrip();
-      } else if (orderStatusUpdate.recoverySource || orderStatusUpdate.orderId || orderStatusUpdate.id) {
-        const enriched = enrichPorterDeliveryOrder(orderStatusUpdate);
-        setActiveOrder(enriched);
-        updateTripStatus(mapPorterStatusToTripStatus(enriched.status));
-      } else if (orderStatusUpdate.status) {
+      } else {
         setActiveOrder((prev) => enrichPorterDeliveryOrder({
           ...(prev || {}),
           ...orderStatusUpdate,
@@ -964,6 +1014,14 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
     }
     clearOrderStatusUpdate();
   }, [orderStatusUpdate, resetTrip, clearOrderStatusUpdate, setActiveOrder, updateTripStatus]);
+
+  useEffect(() => {
+    if (!activeOrder) {
+      setShowVerification(false);
+      setIsModalMinimized(false);
+      setShowCancelTripModal(false);
+    }
+  }, [activeOrder]);
 
 
   const handleCenterMap = () => {
@@ -1041,7 +1099,7 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
                       <span className="text-[9px] text-white/70 font-black uppercase tracking-[0.15em] mb-1">Distance</span>
                       <div className="flex items-end gap-1">
                         <span className="text-2xl font-black text-white leading-none tracking-tighter">
-                          {distanceToTarget && distanceToTarget !== Infinity ? (distanceToTarget / 1000).toFixed(1) : '--'}
+                          {displayDistanceToTarget != null && displayDistanceToTarget !== Infinity ? (displayDistanceToTarget / 1000).toFixed(1) : '--'}
                         </span>
                         <span className="text-[11px] text-white/80 font-bold mb-0.5">KM</span>
                       </div>
@@ -1306,16 +1364,12 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
                     order={activeOrder} 
                     status={tripStatus} 
                     isWithinRange={isWithinRange} 
-                    distanceToTarget={distanceToTarget}
+                    distanceToTarget={displayDistanceToTarget}
                     eta={eta}
                     onReachedPickup={reachPickup} 
                     onPickedUp={(billImageUrl, extra) => pickUpOrder(billImageUrl, extra)} 
                     onMinimize={() => setIsModalMinimized(true)}
-                    onCancelTrip={isPorterParcelTrip(activeOrder) ? () => {
-                      const reason = window.prompt('Reason for cancelling this trip:');
-                      if (!reason || !reason.trim()) return;
-                      cancelPorterTrip(reason.trim()).catch(() => {});
-                    } : undefined}
+                    onCancelTrip={isPorterParcelTrip(activeOrder) ? () => setShowCancelTripModal(true) : undefined}
                   />
                 )}
                 {(tripStatus === 'PICKED_UP' || tripStatus === 'REACHED_DROP') && (
@@ -1381,7 +1435,7 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
                                  </>
                                )}
                                <p className={`text-[10px] font-bold uppercase tracking-[0.2em] mt-1.5 ${isWithinRange ? 'text-green-600' : 'text-red-500'}`}>
-                                 {isWithinRange ? 'Ready - Swipe to Arrive √' : `${(distanceToTarget / 1000).toFixed(1)} km • ${eta || '--'} min Arrival`}
+                                 {isWithinRange ? 'Ready - Swipe to Arrive √' : `${(displayDistanceToTarget / 1000).toFixed(1)} km • ${eta || '--'} min Arrival`}
                                </p>
                             </div>
                           </div>
@@ -1564,6 +1618,23 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
         }}
         mode={vehicleSelectMode}
         onVehicleSelected={vehicleSelectMode === 'go_online' ? handleVehicleSelectedForOnline : undefined}
+      />
+      
+      <CancelTripModal 
+        isOpen={showCancelTripModal}
+        onClose={() => setShowCancelTripModal(false)}
+        loading={cancelTripLoading}
+        onConfirm={async (reason) => {
+          setCancelTripLoading(true);
+          try {
+            await cancelPorterTrip(reason);
+            setShowCancelTripModal(false);
+          } catch(err) {
+            // Error handled by store/toast
+          } finally {
+            setCancelTripLoading(false);
+          }
+        }}
       />
     </div>
   );

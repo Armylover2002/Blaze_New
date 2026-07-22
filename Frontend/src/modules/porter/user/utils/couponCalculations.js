@@ -18,3 +18,27 @@ export function computePorterCouponDiscount(coupon, baseFare) {
 
   return Math.min(Math.max(0, discount), baseFare);
 }
+
+/** Normalize coupon vehicle entries that may be strings or populated vehicle docs. */
+export function formatApplicableVehicleEntry(vehicle, index = 0) {
+  if (vehicle == null) {
+    return { key: `vehicle-${index}`, label: "Vehicle" };
+  }
+  if (typeof vehicle === "string" || typeof vehicle === "number") {
+    const text = String(vehicle);
+    return { key: text, label: text };
+  }
+  if (typeof vehicle === "object") {
+    const key = String(vehicle.id || vehicle._id || vehicle.category || index);
+    const label = String(
+      vehicle.category
+      || vehicle.name
+      || vehicle.vehicleName
+      || vehicle.vehicleCode
+      || key,
+    );
+    return { key, label };
+  }
+  const text = String(vehicle);
+  return { key: text, label: text };
+}

@@ -24,6 +24,7 @@ import {
 } from './porter-order-dispatch.service.js';
 import { settlePorterOrderEarnings } from './porter-order.service.js';
 import { createPorterCollectQr, syncPorterCollectQr } from './porter-order-payment.service.js';
+import { consumePorterCouponIfPaid } from './porter-coupon-lifecycle.service.js';
 import { notifyPorterOrderStatusChange } from './porter-notification.service.js';
 import {
     assertPorterStatusTransition,
@@ -265,27 +266,38 @@ export async function cancelPorterOrderByDriver(partnerId, orderId, reason, perf
     const fromStatus = order.status;
     const previousPartnerId = order.dispatch?.deliveryPartnerId;
 
-    // Release the driver and reopen the order for redispatch.
-    order.status = PORTER_ORDER_STATUS.SEARCHING_PARTNER;
-    order.dispatch.status = PORTER_DISPATCH_STATUS.UNASSIGNED;
-    order.dispatch.deliveryPartnerId = null;
-    order.dispatch.activeVehicleId = null;
-    order.dispatch.assignedAt = null;
-    order.dispatch.acceptedAt = null;
-    order.dispatch.rejectedPartnerIds = order.dispatch.rejectedPartnerIds || [];
-    if (previousPartnerId && !order.dispatch.rejectedPartnerIds.some((id) => String(id) === String(previousPartnerId))) {
-        order.dispatch.rejectedPartnerIds.push(previousPartnerId);
+    // Permanently cancel the order and initiate refund
+    order.status = PORTER_ORDER_STATUS.CANCELLED_BY_DRIVER;
+    order.dispatch.status = PORTER_DISPATCH_STATUS.CANCELLED;
+    order.cancellation = {
+        reason: trimmedReason,
+        cancelledBy: 'driver',
+        cancelledAt: new Date()
+    };
+    if (order.schedule) {
+        order.schedule.status = 'cancelled';
+        order.schedule.lastUpdatedAt = new Date();
     }
-    order.deliveryState.currentPhase = undefined;
+    
     appendStatusHistory(order, order.status, performer, `Driver cancelled: ${trimmedReason}`);
     await order.save();
 
-    // Remove the assignment from the (previous) driver and push the customer
-    // back to the searching state in real time.
-    await emitPorterOrderCancelled(order, null, previousPartnerId);
-    await emitPorterOrderStatus(order, order.userId, null);
-    const { notifyPorterDriverAssignmentRemoved } = await import('./porter-notification.service.js');
+    const { removePorterScheduledJobs } = await import('./porter-scheduled-dispatch.service.js');
+    void removePorterScheduledJobs(order._id, order);
+
+    const { applyPorterRefund } = await import('./porter-order-payment.service.js');
+    const refundResult = await applyPorterRefund(order, trimmedReason);
+    
+    const { finalizePorterCouponOnCancel } = await import('./porter-coupon-lifecycle.service.js');
+    await finalizePorterCouponOnCancel(order);
+
+    // Notify user and admin of cancellation
+    await emitPorterOrderCancelled(order, order.userId, previousPartnerId);
+    await emitPorterOrderStatus(order, order.userId, previousPartnerId);
+    
+    const { notifyPorterDriverAssignmentRemoved, notifyPorterOrderCancellation } = await import('./porter-notification.service.js');
     if (previousPartnerId) void notifyPorterDriverAssignmentRemoved(order, previousPartnerId);
+    void notifyPorterOrderCancellation(order, { refund: refundResult, cancelledBy: 'driver' });
 
     await logPorterOrderAction({
         orderId: order._id,
@@ -293,14 +305,11 @@ export async function cancelPorterOrderByDriver(partnerId, orderId, reason, perf
         action: 'cancelled_by_driver',
         fromStatus,
         toStatus: order.status,
-        metadata: { reason: trimmedReason, previousPartnerId: previousPartnerId ? String(previousPartnerId) : null, redispatched: true },
+        metadata: { reason: trimmedReason, previousPartnerId: previousPartnerId ? String(previousPartnerId) : null, refundResult },
         performedBy: performer,
     });
 
-    // Redispatch to other eligible partners.
-    void startPorterDispatch(order._id);
-
-    return { cancelled: true, redispatched: true };
+    return { success: true, cancelled: true };
 }
 
 export async function confirmPorterReachedPickup(partnerId, orderId, performer = null) {
@@ -430,6 +439,8 @@ export async function completePorterDelivery(partnerId, orderId, deliveryPhotoUr
         order.payment.paidAt = order.payment.paidAt || now;
     }
 
+    await consumePorterCouponIfPaid(order);
+
     appendStatusHistory(order, order.status, performer, 'Delivered');
     await order.save();
 
@@ -478,6 +489,7 @@ export async function getActivePorterOrderForDriver(partnerId) {
         ...baseFilter,
     })
         .sort({ createdAt: -1 })
+        .populate('userId', 'name phone')
         .lean();
 
     return order ? mapPorterOrderForDriver(order) : null;

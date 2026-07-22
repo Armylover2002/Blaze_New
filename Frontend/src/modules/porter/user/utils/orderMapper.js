@@ -46,6 +46,7 @@ export function mapActiveShipmentFromOrder(order) {
     total: order.pricing?.total,
     scheduledAt: order.scheduledAt,
     schedule: order.schedule,
+    cancellation: order.cancellation,
     rating: order.rating,
     createdAt: order.createdAt,
   };

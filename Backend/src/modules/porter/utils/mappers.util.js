@@ -249,7 +249,14 @@ export const mapPublicBanner = (doc = {}) => {
 export const mapPublicCoupon = (doc = {}) => {
     let applicableVehicles = [];
     if (doc.vehicleIds && doc.vehicleIds.length > 0) {
-        applicableVehicles = doc.vehicleIds.map(v => (v.category || v)).filter(Boolean);
+        applicableVehicles = doc.vehicleIds.map((v) => {
+            if (v == null) return null;
+            if (typeof v === 'string' || typeof v === 'number') return String(v);
+            if (typeof v === 'object') {
+                return v.category || v.name || v.vehicleName || v.vehicleCode || null;
+            }
+            return String(v);
+        }).filter(Boolean);
     }
 
     return {

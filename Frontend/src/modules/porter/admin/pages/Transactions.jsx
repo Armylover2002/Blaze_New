@@ -38,6 +38,8 @@ const Transactions = () => {
           amount: t.amount,
           commission: t.commission,
           tax: t.tax,
+          platformFee: t.platformFee,
+          discount: t.discount,
           netPayout: t.netPayout,
           driverPayout: t.driverPayout,
           paymentMethod: t.paymentMethod,
@@ -172,10 +174,19 @@ const Transactions = () => {
                 
                 <FormSection title="Financial Breakdown">
                   <div className="rounded-lg bg-gray-50/50 p-4 space-y-3 text-sm border">
-                    <div className="flex justify-between"><span>Gross Amount</span><span className="font-medium">{formatCurrency(selected.amount)}</span></div>
-                    <div className="flex justify-between text-muted-foreground"><span>Commission</span><span>- {formatCurrency(selected.commission)}</span></div>
+                    <div className="flex justify-between"><span>Gross Amount (Charged to Customer)</span><span className="font-medium">{formatCurrency(selected.amount)}</span></div>
+                    {selected.discount > 0 && (
+                      <div className="flex justify-between text-muted-foreground"><span>Discount (Promo)</span><span>- {formatCurrency(selected.discount)}</span></div>
+                    )}
+                    <div className="flex justify-between text-muted-foreground"><span>Commission (Platform Cut)</span><span>- {formatCurrency(selected.commission)}</span></div>
                     <div className="flex justify-between text-muted-foreground"><span>Tax</span><span>- {formatCurrency(selected.tax)}</span></div>
-                    <div className="flex justify-between font-bold border-t pt-3 mt-1 text-emerald-600"><span>Net Payout</span><span>{formatCurrency(selected.netPayout)}</span></div>
+                    {selected.platformFee > 0 && (
+                      <div className="flex justify-between text-muted-foreground"><span>Platform Fee / Rounding</span><span>- {formatCurrency(selected.platformFee)}</span></div>
+                    )}
+                    {(selected.amount - selected.commission - selected.tax - selected.discount - selected.platformFee) !== selected.netPayout && (
+                      <div className="flex justify-between text-muted-foreground"><span>Adjustment</span><span>- {formatCurrency(Math.max(0, selected.amount - selected.commission - selected.tax - selected.discount - selected.platformFee - selected.netPayout))}</span></div>
+                    )}
+                    <div className="flex justify-between font-bold border-t pt-3 mt-1 text-emerald-600"><span>Net Payout (To Driver)</span><span>{formatCurrency(selected.netPayout)}</span></div>
                   </div>
                 </FormSection>
               </FormLayout>

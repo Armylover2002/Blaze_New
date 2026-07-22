@@ -174,9 +174,8 @@ async function buildRouteDirections({ pickup, delivery }) {
     const destination = `${delivery.lat},${delivery.lng}`;
 
     try {
-        const data = await googleGet(
-            `https://maps.googleapis.com/maps/api/directions/json?origin=${origin}&destination=${destination}&mode=driving&key=${key}`,
-        );
+        const googleDirectionsUrl = `https://maps.googleapis.com/maps/api/directions/json?origin=${origin}&destination=${destination}&mode=driving&key=${key}`;
+        const data = await googleGet(googleDirectionsUrl);
 
         const leg = data.status === 'OK' ? data.routes?.[0]?.legs?.[0] : null;
         if (!leg) {
@@ -191,7 +190,7 @@ async function buildRouteDirections({ pickup, delivery }) {
         const distanceKm = Math.round((distanceMeters / 1000) * 100) / 100;
         const durationMin = Math.max(1, Math.round(durationSeconds / 60));
 
-        return {
+        const response = {
             distanceMeters,
             distanceKm,
             durationSeconds,
@@ -201,6 +200,32 @@ async function buildRouteDirections({ pickup, delivery }) {
             polyline: route.overview_polyline?.points || '',
             bounds: route.bounds || null,
         };
+
+        // TEMP DEBUG — remove after maps distance audit
+        console.log('[DEBUG buildRouteDirections] frontend payload coordinates:', {
+            pickup: { lat: pickup.lat, lng: pickup.lng },
+            delivery: { lat: delivery.lat, lng: delivery.lng },
+        });
+        console.log('[DEBUG buildRouteDirections] google request coordinates:', {
+            origin,
+            destination,
+        });
+        console.log('[DEBUG buildRouteDirections] exact Google Directions URL:', googleDirectionsUrl);
+        console.log('[DEBUG buildRouteDirections] full routes[0].legs[0]:', JSON.stringify(leg, null, 2));
+        console.log('[DEBUG buildRouteDirections] distance.value:', leg.distance?.value);
+        console.log('[DEBUG buildRouteDirections] distance.text:', leg.distance?.text);
+        console.log('[DEBUG buildRouteDirections] duration.value:', leg.duration?.value);
+        console.log('[DEBUG buildRouteDirections] start_location:', leg.start_location);
+        console.log('[DEBUG buildRouteDirections] end_location:', leg.end_location);
+        console.log('[DEBUG buildRouteDirections] overview_polyline:', route.overview_polyline?.points || '');
+        console.log('[DEBUG buildRouteDirections] summary:', route.summary);
+        console.log('[DEBUG buildRouteDirections] backend response coordinates:', {
+            start_location: leg.start_location,
+            end_location: leg.end_location,
+        });
+        console.log('[DEBUG buildRouteDirections] backend route DTO:', JSON.stringify(response, null, 2));
+
+        return response;
     } catch (err) {
         // Network/DNS/timeout (e.g. ENOTFOUND maps.googleapis.com) — never let a
         // Maps outage block booking/pricing/coupon flows; use offline estimate.
