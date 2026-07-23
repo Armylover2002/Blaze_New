@@ -14,22 +14,9 @@ import {
 } from '@/shared/utils/returnWindow';
 
 const initialFeeSettings = {
-  deliveryFee: '',
   deliveryFeeRanges: [],
-  freeDeliveryThreshold: '',
-  platformFee: '',
-  gstRate: '',
   returnsEnabled: true,
   returnWindowDays: 3,
-};
-
-const initialRuleForm = {
-  name: '',
-  minDistance: '0',
-  maxDistance: '',
-  maxDistanceUnlimited: false,
-  commissionPerKm: '',
-  basePayout: '',
 };
 
 const toInputValue = (value) =>
@@ -84,23 +71,19 @@ export default function BillingCharges() {
 
   const [loading, setLoading] = useState(true);
   const [savingFeeSettings, setSavingFeeSettings] = useState(false);
-  const [savingRule, setSavingRule] = useState(false);
-  const [rulesLoading, setRulesLoading] = useState(true);
   const [feeSettings, setFeeSettings] = useState(initialFeeSettings);
-  const [rules, setRules] = useState([]);
-  const [editingRuleId, setEditingRuleId] = useState('');
-  const [ruleForm, setRuleForm] = useState(initialRuleForm);
-
-  const sortedRules = useMemo(
-    () =>
-      [...rules].sort(
-        (a, b) => Number(a.minDistance || 0) - Number(b.minDistance || 0),
-      ),
-    [rules],
-  );
+  
+  const [editingRangeIndex, setEditingRangeIndex] = useState(null);
+  const [newRange, setNewRange] = useState({ 
+    min: '', 
+    max: '', 
+    fee: '0', 
+    deliveryBoyPerKm: '0', 
+    deliveryBoyBasePay: '0' 
+  });
 
   useEffect(() => {
-    void Promise.all([loadFeeSettings(), loadRules()]);
+    loadFeeSettings();
   }, []);
 
   const loadFeeSettings = async () => {
@@ -113,11 +96,7 @@ export default function BillingCharges() {
         return;
       }
       setFeeSettings({
-        deliveryFee: toInputValue(settings.deliveryFee),
         deliveryFeeRanges: Array.isArray(settings.deliveryFeeRanges) ? settings.deliveryFeeRanges : [],
-        freeDeliveryThreshold: toInputValue(settings.freeDeliveryThreshold),
-        platformFee: toInputValue(settings.platformFee),
-        gstRate: toInputValue(settings.gstRate),
         returnsEnabled: settings.returnsEnabled !== false,
         returnWindowDays: hoursToReturnWindowDays(settings.returnWindowHours),
       });
@@ -129,45 +108,25 @@ export default function BillingCharges() {
     }
   };
 
-  const loadRules = async () => {
-    try {
-      setRulesLoading(true);
-      const response = await adminApi.getDeliveryCommissionRules();
-      const list =
-        response?.data?.data?.commissions ||
-        response?.data?.commissions ||
-        [];
-      setRules(Array.isArray(list) ? list : []);
-    } catch (error) {
-      console.error('Failed to load quick delivery commission rules', error);
-      showToast('Failed to load delivery commission rules', 'error');
-    } finally {
-      setRulesLoading(false);
-    }
-  };
-
-  const handleSaveFeeSettings = async () => {
+  const saveSettings = async (settingsToSave) => {
     try {
       setSavingFeeSettings(true);
       const payload = {
-        deliveryFee: toNullableNumber(feeSettings.deliveryFee),
-        deliveryFeeRanges: [],
-        freeDeliveryThreshold: toNullableNumber(feeSettings.freeDeliveryThreshold),
-        platformFee: toNullableNumber(feeSettings.platformFee),
-        gstRate: toNullableNumber(feeSettings.gstRate),
-        returnsEnabled: Boolean(feeSettings.returnsEnabled),
-        returnWindowHours: returnWindowDaysToHours(feeSettings.returnWindowDays),
+        deliveryFeeRanges: settingsToSave.deliveryFeeRanges.map(r => ({
+          ...r,
+          deliveryBoyPerKm: r.deliveryBoyPerKm === "" ? 0 : Number(r.deliveryBoyPerKm),
+          deliveryBoyBasePay: r.deliveryBoyBasePay === "" ? 0 : Number(r.deliveryBoyBasePay),
+        })),
+        returnsEnabled: Boolean(settingsToSave.returnsEnabled),
+        returnWindowHours: returnWindowDaysToHours(settingsToSave.returnWindowDays),
         isActive: true,
       };
+      
       const response = await adminApi.createOrUpdateFeeSettings(payload);
       const saved = response?.data?.data?.feeSettings;
       if (saved) {
         setFeeSettings({
-          deliveryFee: toInputValue(saved.deliveryFee),
-          deliveryFeeRanges: [],
-          freeDeliveryThreshold: toInputValue(saved.freeDeliveryThreshold),
-          platformFee: toInputValue(saved.platformFee),
-          gstRate: toInputValue(saved.gstRate),
+          deliveryFeeRanges: Array.isArray(saved.deliveryFeeRanges) ? saved.deliveryFeeRanges : [],
           returnsEnabled: saved.returnsEnabled !== false,
           returnWindowDays: hoursToReturnWindowDays(saved.returnWindowHours),
         });
@@ -181,97 +140,181 @@ export default function BillingCharges() {
     }
   };
 
-  const resetRuleForm = () => {
-    setEditingRuleId('');
-    setRuleForm(initialRuleForm);
+  const handleSaveFeeSettings = async () => {
+    await saveSettings(feeSettings);
   };
 
-  const handleEditRule = (rule) => {
-    const isUnlimited = rule.maxDistance === null || rule.maxDistance === undefined;
-    setEditingRuleId(rule._id);
-    setRuleForm({
-      name: rule.name || '',
-      minDistance: toInputValue(rule.minDistance),
-      maxDistance: isUnlimited ? '' : toInputValue(rule.maxDistance),
-      maxDistanceUnlimited: isUnlimited,
-      commissionPerKm: toInputValue(rule.commissionPerKm),
-      basePayout: toInputValue(rule.basePayout),
-    });
+  const hasBasePayConfigured = (excludeIndex = null) => {
+    return feeSettings.deliveryFeeRanges.some((range, idx) => 
+      idx !== excludeIndex && Number(range.deliveryBoyBasePay) > 0
+    );
   };
 
-  const handleSaveRule = async () => {
-    const minDistance = Number(ruleForm.minDistance || 0);
-    const maxDistance =
-      ruleForm.maxDistanceUnlimited || ruleForm.maxDistance === ''
-        ? null
-        : Number(ruleForm.maxDistance);
-    const commissionPerKm = Number(ruleForm.commissionPerKm || 0);
+  const handleAddRange = async () => {
+    const minRaw = String(newRange.min).trim();
+    const maxRaw = String(newRange.max).trim();
+    const feeRaw = String(newRange.fee).trim();
 
-    // Non-base slabs (minDistance > 0) MUST have basePayout as 0
-    const basePayout = minDistance === 0 ? Number(ruleForm.basePayout || 0) : 0;
-
-    if (![minDistance, commissionPerKm, basePayout].every(Number.isFinite)) {
-      showToast('Please fill all required commission rule fields', 'error');
+    if (minRaw === '' || maxRaw === '' || feeRaw === '') {
+      showToast('Please fill all fields (Min, Max, Fee)', 'error');
       return;
     }
 
-    try {
-      setSavingRule(true);
-      const payload = {
-        name: ruleForm.name.trim() || `${minDistance === 0 ? 'Base' : 'Slab'} (${minDistance}${maxDistance === null ? '+' : `-${maxDistance}`} km)`,
-        minDistance,
-        maxDistance,
-        commissionPerKm,
-        basePayout,
-        status: true,
-      };
+    const min = Number(minRaw);
+    const max = Number(maxRaw);
+    const fee = Number(feeRaw);
+    const dbPerKm = Number(newRange.deliveryBoyPerKm || 0);
+    const dbBasePay = Number(newRange.deliveryBoyBasePay || 0);
 
-      if (editingRuleId) {
-        await adminApi.updateDeliveryCommissionRule(editingRuleId, payload);
-        showToast('Distance slab updated successfully', 'success');
-      } else {
-        await adminApi.createDeliveryCommissionRule(payload);
-        showToast('Distance slab created successfully', 'success');
+    if (isNaN(min) || isNaN(max) || isNaN(fee) || isNaN(dbPerKm) || isNaN(dbBasePay)) {
+      showToast('Please enter valid numbers', 'error');
+      return;
+    }
+
+    if (min < 0 || max < 0 || fee < 0 || dbPerKm < 0 || dbBasePay < 0) {
+      showToast('All values must be positive numbers', 'error');
+      return;
+    }
+
+    if (dbPerKm > 0 && dbBasePay > 0) {
+      showToast('Please set either Per KM Amount or Base Pay, not both', 'error');
+      return;
+    }
+
+    if (dbBasePay > 0 && hasBasePayConfigured()) {
+      showToast('Base Pay can only be set for one range. It is already configured in another range.', 'error');
+      return;
+    }
+
+    if (min >= max) {
+      showToast('Min distance must be less than Max distance', 'error');
+      return;
+    }
+
+    const otherRanges = editingRangeIndex !== null
+      ? feeSettings.deliveryFeeRanges.filter((_, i) => i !== editingRangeIndex)
+      : feeSettings.deliveryFeeRanges;
+
+    for (const range of otherRanges) {
+      if (
+        (min >= range.min && min < range.max) ||
+        (max > range.min && max <= range.max) ||
+        (min <= range.min && max >= range.max)
+      ) {
+        showToast('This range overlaps with an existing range', 'error');
+        return;
       }
-
-      resetRuleForm();
-      await loadRules();
-    } catch (error) {
-      console.error('Failed to save quick delivery commission rule', error);
-      showToast(error?.response?.data?.message || 'Failed to save slab', 'error');
-    } finally {
-      setSavingRule(false);
     }
+
+    const updatedRanges = [...feeSettings.deliveryFeeRanges, { 
+      min, 
+      max, 
+      fee, 
+      deliveryBoyPerKm: dbPerKm, 
+      deliveryBoyBasePay: dbBasePay 
+    }];
+    updatedRanges.sort((a, b) => a.min - b.min);
+
+    const updatedSettings = {
+      ...feeSettings,
+      deliveryFeeRanges: updatedRanges
+    };
+
+    setFeeSettings(updatedSettings);
+    await saveSettings(updatedSettings);
+
+    setNewRange({ min: '', max: '', fee: '0', deliveryBoyPerKm: '0', deliveryBoyBasePay: '0' });
   };
 
-  const handleDeleteRule = async (ruleId) => {
-    try {
-      await adminApi.deleteDeliveryCommissionRule(ruleId);
-      setRules((prev) => prev.filter((rule) => rule._id !== ruleId));
-      if (editingRuleId === ruleId) resetRuleForm();
-      showToast('Distance slab deleted successfully', 'success');
-    } catch (error) {
-      console.error('Failed to delete quick delivery commission rule', error);
-      showToast(error?.response?.data?.message || 'Failed to delete slab', 'error');
-    }
+  const handleDeleteRange = async (index) => {
+    const newRanges = feeSettings.deliveryFeeRanges.filter((_, i) => i !== index);
+    const updatedSettings = {
+      ...feeSettings,
+      deliveryFeeRanges: newRanges
+    };
+    setFeeSettings(updatedSettings);
+    await saveSettings(updatedSettings);
   };
 
-  const handleToggleRuleStatus = async (rule) => {
-    try {
-      await adminApi.toggleDeliveryCommissionRuleStatus(rule._id, !rule.status);
-      setRules((prev) =>
-        prev.map((item) =>
-          item._id === rule._id ? { ...item, status: !rule.status } : item,
-        ),
-      );
-      showToast('Slab status updated', 'success');
-    } catch (error) {
-      console.error('Failed to toggle quick delivery commission rule', error);
-      showToast(error?.response?.data?.message || 'Failed to update status', 'error');
-    }
+  const handleEditRange = (index) => {
+    const range = feeSettings.deliveryFeeRanges[index];
+    setNewRange({ 
+      min: range.min, 
+      max: range.max, 
+      fee: range.fee || '0',
+      deliveryBoyPerKm: range.deliveryBoyPerKm ?? '0',
+      deliveryBoyBasePay: range.deliveryBoyBasePay ?? '0'
+    });
+    setEditingRangeIndex(index);
   };
 
-  const isBaseSlab = Number(ruleForm.minDistance || 0) === 0;
+  const handleSaveEditRange = async () => {
+    if (newRange.min === '' || newRange.max === '' || newRange.fee === '') {
+      showToast('Please fill all fields', 'error');
+      return;
+    }
+
+    const min = Number(newRange.min);
+    const max = Number(newRange.max);
+    const fee = Number(newRange.fee);
+    const dbPerKm = Number(newRange.deliveryBoyPerKm || 0);
+    const dbBasePay = Number(newRange.deliveryBoyBasePay || 0);
+
+    if (min < 0 || max < 0 || fee < 0 || dbPerKm < 0 || dbBasePay < 0) {
+      showToast('All values must be positive numbers', 'error');
+      return;
+    }
+
+    if (dbPerKm > 0 && dbBasePay > 0) {
+      showToast('Please set either Per KM Amount or Base Pay, not both', 'error');
+      return;
+    }
+
+    if (dbBasePay > 0 && hasBasePayConfigured(editingRangeIndex)) {
+      showToast('Base Pay can only be set for one range. It is already configured in another range.', 'error');
+      return;
+    }
+
+    if (min >= max) {
+      showToast('Min value must be less than Max value', 'error');
+      return;
+    }
+
+    const ranges = [...feeSettings.deliveryFeeRanges];
+    ranges.splice(editingRangeIndex, 1);
+
+    for (const range of ranges) {
+      if ((min >= range.min && min < range.max) || (max > range.min && max <= range.max) || (min <= range.min && max >= range.max)) {
+        showToast('This range overlaps with an existing range', 'error');
+        return;
+      }
+    }
+
+    ranges.push({ 
+      min, 
+      max, 
+      fee, 
+      deliveryBoyPerKm: dbPerKm, 
+      deliveryBoyBasePay: dbBasePay 
+    });
+    ranges.sort((a, b) => a.min - b.min);
+
+    const updatedSettings = {
+      ...feeSettings,
+      deliveryFeeRanges: ranges
+    };
+
+    setFeeSettings(updatedSettings);
+    await saveSettings(updatedSettings);
+
+    setNewRange({ min: '', max: '', fee: '0', deliveryBoyPerKm: '0', deliveryBoyBasePay: '0' });
+    setEditingRangeIndex(null);
+  };
+
+  const handleCancelEdit = () => {
+    setNewRange({ min: '', max: '', fee: '0', deliveryBoyPerKm: '0', deliveryBoyBasePay: '0' });
+    setEditingRangeIndex(null);
+  };
 
   return (
     <div className="space-y-8 pb-10">
@@ -279,7 +322,7 @@ export default function BillingCharges() {
         <div>
           <h1 className="admin-h1">Quick Billing Settings</h1>
           <p className="admin-description mt-1">
-            Food admin fee settings aur delivery commission slabs ke same quick-commerce controls.
+            Configure delivery fee slabs and return settings for Quick Commerce.
           </p>
         </div>
       </div>
@@ -292,7 +335,7 @@ export default function BillingCharges() {
               Fee Settings
             </h2>
             <p className="mt-1 text-sm text-slate-500">
-              Order value ke hisaab se delivery fee, platform fee, GST aur return commission set karein.
+              Configure Returns settings.
             </p>
           </div>
           <button
@@ -314,29 +357,6 @@ export default function BillingCharges() {
           </div>
         ) : (
           <div className="space-y-8 p-6">
-            <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-4">
-              {[
-                ['deliveryFee', 'Default Delivery Fee'],
-                ['freeDeliveryThreshold', 'Free Delivery Threshold'],
-                ['platformFee', 'Platform Fee'],
-                ['gstRate', 'GST Rate (%)'],
-              ].map(([field, label]) => (
-                <label key={field} className="space-y-2">
-                  <span className="text-sm font-semibold text-slate-700">{label}</span>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={feeSettings[field]}
-                    onChange={(e) =>
-                      setFeeSettings((prev) => ({ ...prev, [field]: e.target.value }))
-                    }
-                    className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-primary"
-                  />
-                </label>
-              ))}
-            </div>
-
             <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5 space-y-4">
               <div>
                 <h3 className="text-sm font-bold text-slate-900">Return Settings</h3>
@@ -384,8 +404,6 @@ export default function BillingCharges() {
                 </p>
               </div>
             </div>
-
-            {/* Delivery Fee Ranges removed as requested */}
           </div>
         )}
       </Card>
@@ -397,206 +415,183 @@ export default function BillingCharges() {
             Distance-Based Delivery Fee Slabs
           </h2>
           <p className="mt-1 text-sm text-slate-500">
-            Define delivery fee slabs based on the delivery distance. The user will be charged the exact fee configured for their distance slab.
+            Define delivery fee slabs based on the delivery distance. The user will be charged the exact fee configured for their distance slab, and the delivery boy will be paid according to the DB amounts.
           </p>
         </div>
 
         <div className="space-y-6 p-6">
-          {/* Slab Add/Edit form styled exactly as FeeSettings.jsx */}
           <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 shadow-xs">
             <div className="flex items-center gap-2 mb-3">
-              <Plus className="w-4 h-4 text-green-600" />
+              {editingRangeIndex !== null ? (
+                <Edit className="w-4 h-4 text-blue-600" />
+              ) : (
+                <Plus className="w-4 h-4 text-primary" />
+              )}
               <h4 className="text-sm font-semibold text-slate-700">
-                {editingRuleId === '' ? "Add Distance Slab" : "Edit Distance Slab"}
+                {editingRangeIndex !== null ? 'Edit Range' : 'Add New Range'}
               </h4>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-
-              {/* Min Distance (KM) */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
               <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">Min Distance (KM)</label>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Min Distance (km)</label>
                 <input
                   type="number"
+                  value={newRange.min}
+                  onChange={(e) => setNewRange({ ...newRange, min: e.target.value })}
                   min="0"
-                  step="0.01"
-                  value={ruleForm.minDistance}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setRuleForm((prev) => {
-                      const newMin = Number(val || 0);
-                      const isBase = newMin === 0;
-                      const currentFee = Number(prev.minDistance || 0) === 0 ? prev.basePayout : prev.commissionPerKm;
-                      return {
-                        ...prev,
-                        minDistance: val,
-                        basePayout: isBase ? currentFee : '0',
-                        commissionPerKm: isBase ? '0' : currentFee,
-                      };
-                    });
-                  }}
+                  step="0.1"
+                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-primary outline-none transition-all"
                   placeholder="0"
-                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-green-500 outline-none transition-all bg-white text-slate-800"
                 />
               </div>
-
-              {/* To Distance (KM) */}
               <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">To Distance (KM)</label>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Max Distance (km)</label>
                 <input
                   type="number"
+                  value={newRange.max}
+                  onChange={(e) => setNewRange({ ...newRange, max: e.target.value })}
                   min="0"
-                  step="0.01"
-                  value={ruleForm.maxDistance}
-                  disabled={ruleForm.maxDistanceUnlimited}
-                  onChange={(e) => setRuleForm((prev) => ({ ...prev, maxDistance: e.target.value }))}
+                  step="0.1"
+                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-primary outline-none transition-all"
                   placeholder="5"
-                  className={cn(
-                    "w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-green-500 outline-none transition-all text-slate-800",
-                    ruleForm.maxDistanceUnlimited
-                      ? "border-slate-100 bg-slate-100/50 text-slate-400 cursor-not-allowed"
-                      : "border-slate-300 bg-white"
-                  )}
                 />
-                <label className="flex items-center gap-2 mt-2 text-xs font-medium text-slate-500 cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={ruleForm.maxDistanceUnlimited}
-                    onChange={(e) =>
-                      setRuleForm((prev) => ({
-                        ...prev,
-                        maxDistanceUnlimited: e.target.checked,
-                        maxDistance: e.target.checked ? '' : prev.maxDistance,
-                      }))
-                    }
-                    className="rounded border-slate-300 text-green-600 focus:ring-green-500 w-3.5 h-3.5"
-                  />
-                  Max distance unlimited
-                </label>
               </div>
-
-              {/* Delivery Fee (₹) */}
               <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">Delivery Fee (₹)</label>
+                <label className="block text-xs font-medium text-slate-600 mb-1">User Delivery Fee (₹)</label>
                 <input
                   type="number"
+                  value={newRange.fee}
+                  onChange={(e) => setNewRange({ ...newRange, fee: e.target.value })}
                   min="0"
-                  step="0.01"
-                  value={Number(ruleForm.minDistance || 0) === 0 ? ruleForm.basePayout : ruleForm.commissionPerKm}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setRuleForm((prev) => {
-                      const isBase = Number(prev.minDistance || 0) === 0;
-                      return {
-                        ...prev,
-                        basePayout: isBase ? val : '0',
-                        commissionPerKm: isBase ? '0' : val,
-                      };
-                    });
-                  }}
-                  placeholder="60"
-                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-green-500 outline-none transition-all bg-white text-slate-800"
+                  step="1"
+                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-primary outline-none transition-all text-green-600 font-medium"
+                  placeholder="0"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">DB Per KM (₹)</label>
+                <input
+                  type="number"
+                  value={newRange.deliveryBoyPerKm}
+                  disabled={Number(newRange.deliveryBoyBasePay) > 0}
+                  onChange={(e) => setNewRange({ ...newRange, deliveryBoyPerKm: e.target.value, deliveryBoyBasePay: '0' })}
+                  min="0"
+                  step="1"
+                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-primary outline-none transition-all disabled:bg-slate-100 disabled:cursor-not-allowed"
+                  placeholder="0"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">DB Base Pay (₹)</label>
+                <input
+                  type="number"
+                  value={newRange.deliveryBoyBasePay}
+                  disabled={Number(newRange.deliveryBoyPerKm) > 0 || (hasBasePayConfigured(editingRangeIndex))}
+                  onChange={(e) => setNewRange({ ...newRange, deliveryBoyBasePay: e.target.value, deliveryBoyPerKm: '0' })}
+                  min="0"
+                  step="1"
+                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-primary outline-none transition-all disabled:bg-slate-100 disabled:cursor-not-allowed"
+                  placeholder="0"
                 />
               </div>
             </div>
-
             <div className="flex justify-end gap-3 mt-4">
-              {editingRuleId && canEdit && (
-                <button
-                  onClick={resetRuleForm}
-                  className="border border-slate-300 hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 transition-colors bg-white shadow-xs"
-                >
-                  <X className="w-4 h-4" />
-                  Cancel
-                </button>
-              )}
-              {((editingRuleId && canEdit) || (!editingRuleId && canCreate)) && (
-                <button
-                  onClick={handleSaveRule}
-                  disabled={savingRule}
-                  className="bg-primary hover:bg-primary/90 text-white px-5 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 transition-colors disabled:bg-primary/50 shadow-sm"
-                >
-                  {savingRule ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : editingRuleId ? (
-                    <>
+              {editingRangeIndex !== null ? (
+                <>
+                  <button
+                    onClick={handleCancelEdit}
+                    className="border border-slate-300 hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 transition-colors bg-white shadow-xs"
+                  >
+                    <X className="w-4 h-4" />
+                    Cancel
+                  </button>
+                  {canEdit && (
+                    <button
+                      onClick={handleSaveEditRange}
+                      className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 transition-colors shadow-sm"
+                    >
                       <Check className="w-4 h-4" />
-                      Save Slab
-                    </>
-                  ) : (
-                    <>
-                      <Plus className="w-4 h-4" />
-                      Add Slab
-                    </>
+                      Update Range
+                    </button>
                   )}
-                </button>
+                </>
+              ) : (
+                canCreate && (
+                  <button
+                    onClick={handleAddRange}
+                    className="bg-primary hover:bg-primary/90 text-white px-5 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 transition-colors shadow-sm"
+                  >
+                    <Plus className="w-4 h-4" />
+                    Add Range
+                  </button>
+                )
               )}
             </div>
           </div>
 
-          <div className="overflow-x-auto mt-6">
-            <table className="w-full border border-slate-200 rounded-lg">
-              <thead className="bg-slate-50">
-                <tr>
-                  <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700 border-b border-slate-200">Min Distance (KM)</th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700 border-b border-slate-200">To distance (KM)</th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700 border-b border-slate-200">Delivery Fee (₹)</th>
-                  <th className="px-4 py-3 text-center text-sm font-semibold text-slate-700 border-b border-slate-200">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rulesLoading ? (
+          {feeSettings.deliveryFeeRanges.length > 0 ? (
+            <div className="overflow-x-auto mt-6">
+              <table className="w-full border border-slate-200 rounded-lg">
+                <thead className="bg-slate-50">
                   <tr>
-                    <td colSpan="4" className="px-4 py-8 text-center border-b border-slate-100">
-                      <Loader2 className="mx-auto h-5 w-5 animate-spin text-green-600" />
-                    </td>
+                    <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700 border-b border-slate-200">Min Distance (km)</th>
+                    <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700 border-b border-slate-200">Max Distance (km)</th>
+                    <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700 border-b border-slate-200">User Delivery Fee (₹)</th>
+                    <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700 border-b border-slate-200">DB Per KM (₹)</th>
+                    <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700 border-b border-slate-200">DB Base Pay (₹)</th>
+                    <th className="px-4 py-3 text-center text-sm font-semibold text-slate-700 border-b border-slate-200">Actions</th>
                   </tr>
-                ) : sortedRules.length === 0 ? (
-                  <tr>
-                    <td colSpan="4" className="px-4 py-8 text-center text-slate-400 border-b border-slate-100">
-                      No distance delivery slabs configured.
-                    </td>
-                  </tr>
-                ) : (
-                  sortedRules.map((rule) => {
-                    const fee = Number(rule.minDistance) === 0 ? rule.basePayout : rule.commissionPerKm;
-                    return (
-                      <tr key={rule._id} className="hover:bg-slate-50/80 transition-colors">
-                        <td className="px-4 py-3 text-sm border-b border-slate-100">{Number(rule.minDistance).toFixed(1)} KM</td>
-                        <td className="px-4 py-3 text-sm border-b border-slate-100">
-                          {rule.maxDistance === null || rule.maxDistance === undefined
-                            ? 'Unlimited'
-                            : `${Number(rule.maxDistance).toFixed(1)} KM`}
-                        </td>
-                        <td className="px-4 py-3 text-sm border-b border-slate-100 font-semibold text-emerald-700">₹{Number(fee || 0).toFixed(2)}</td>
-                        <td className="px-4 py-3 text-center border-b border-slate-100">
-                          <div className="flex items-center justify-center gap-2">
-                            {canEdit && (
-                              <button
-                                onClick={() => handleEditRule(rule)}
-                                className="p-1.5 text-blue-600 hover:bg-blue-50 rounded transition-colors"
-                                title="Edit"
-                              >
-                                <Edit className="w-4 h-4" />
-                              </button>
-                            )}
-                            {canDelete && (
-                              <button
-                                onClick={() => handleDeleteRule(rule._id)}
-                                className="p-1.5 text-slate-900 hover:bg-red-50 rounded transition-colors"
-                                title="Delete"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {feeSettings.deliveryFeeRanges
+                    .map((range, originalIndex) => ({ range, originalIndex }))
+                    .sort((a, b) => a.range.min - b.range.min)
+                    .map(({ range, originalIndex }) => {
+                      const isEditing = editingRangeIndex === originalIndex;
+                      return (
+                        <tr key={originalIndex} className={cn(isEditing ? 'bg-blue-50/50' : 'hover:bg-slate-50/80', "transition-colors")}>
+                          <td className="px-4 py-3 text-sm border-b border-slate-100">{range.min} km</td>
+                          <td className="px-4 py-3 text-sm border-b border-slate-100">{range.max} km</td>
+                          <td className="px-4 py-3 text-sm border-b border-slate-100 font-semibold text-emerald-700">₹{range.fee}</td>
+                          <td className="px-4 py-3 text-sm border-b border-slate-100">
+                            {range.deliveryBoyPerKm ? `₹${range.deliveryBoyPerKm}` : '-'}
+                          </td>
+                          <td className="px-4 py-3 text-sm border-b border-slate-100">
+                            {range.deliveryBoyBasePay ? `₹${range.deliveryBoyBasePay}` : '-'}
+                          </td>
+                          <td className="px-4 py-3 text-center border-b border-slate-100">
+                            <div className="flex items-center justify-center gap-2">
+                              {canEdit && (
+                                <button
+                                  onClick={() => handleEditRange(originalIndex)}
+                                  className="p-1.5 text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                                  title="Edit"
+                                >
+                                  <Edit className="w-4 h-4" />
+                                </button>
+                              )}
+                              {canDelete && (
+                                <button
+                                  onClick={() => handleDeleteRange(originalIndex)}
+                                  className="p-1.5 text-slate-900 hover:bg-red-50 rounded transition-colors"
+                                  title="Delete"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="text-center py-8 border border-dashed border-slate-300 rounded-xl bg-slate-50 text-slate-500">
+              No delivery fee slabs configured. Add one above.
+            </div>
+          )}
         </div>
       </Card>
     </div>

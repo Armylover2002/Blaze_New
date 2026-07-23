@@ -18,9 +18,9 @@ import {
   createQuickExperienceSection,
   updateQuickExperienceSection,
   deleteQuickExperienceSection,
-  reorderQuickExperienceSections,
   setQuickHeroConfig,
   getQuickHeroConfig,
+  getAllQuickHeroConfigs,
   getQuickOfferSections,
   createQuickOfferSection,
   updateQuickOfferSection,
@@ -967,7 +967,7 @@ export const getAdminCustomers = async (req, res) => {
   const skip = (currentPage - 1) * perPage;
   const normalizedSearch = String(search || '').trim().toLowerCase();
 
-  const filter = { role: 'USER' };
+  const filter = { role: { $ne: 'ADMIN' } };
   if (normalizedSearch) {
     filter.$or = [
       { name: { $regex: normalizedSearch, $options: 'i' } },
@@ -1410,6 +1410,7 @@ export const getAdminExperienceSections = async (req, res) => {
 
 export const createAdminExperienceSection = async (req, res) => {
   const section = await createQuickExperienceSection(req.body);
+  clearContentCache();
   return res.status(201).json({ success: true, result: section });
 };
 
@@ -1418,21 +1419,28 @@ export const updateAdminExperienceSection = async (req, res) => {
   if (!section) {
     return res.status(404).json({ success: false, message: 'Section not found' });
   }
+  clearContentCache();
   return res.json({ success: true, result: section });
 };
 
 export const deleteAdminExperienceSection = async (req, res) => {
   await deleteQuickExperienceSection(req.params.id);
+  clearContentCache();
   return res.json({ success: true, result: { deleted: true } });
 };
 
 export const reorderAdminExperienceSections = async (req, res) => {
   await reorderQuickExperienceSections(req.body);
+  clearContentCache();
   return res.json({ success: true, result: { reordered: true } });
 };
 
 export const getAdminHeroConfig = async (req, res) => {
-  const { pageType = 'home', headerId = null } = req.query || {};
+  const { pageType = 'home', headerId = null, fetchAll = false } = req.query || {};
+  if (fetchAll === 'true' || fetchAll === true) {
+    const allConfigs = await getAllQuickHeroConfigs();
+    return res.json({ success: true, results: allConfigs });
+  }
   const config = await getQuickHeroConfig({ pageType, headerId });
   return res.json({ success: true, result: config || { banners: { items: [] }, categoryIds: [] } });
 };
@@ -1602,19 +1610,43 @@ export const toggleCouponStatus = async (req, res) => {
 export const getAdminQuickZoneSellersController = async (req, res, next) => {
   try {
     const { zoneId } = req.params;
+    const { page, limit } = req.query;
     if (!mongoose.Types.ObjectId.isValid(zoneId)) {
       return res.status(400).json({ success: false, message: "Invalid zone ID" });
     }
     const zoneObjId = new mongoose.Types.ObjectId(zoneId);
-    const sellers = await Seller.find({ 
+    const query = { 
       "shopInfo.zoneId": zoneObjId, 
       isDeleted: { $ne: true }, 
       approved: true 
-    })
-    .select('_id shopName name phone email isActive isZoneHub')
-    .lean();
+    };
 
-    return res.json({ success: true, result: sellers });
+    const hasPagination = !!page;
+    
+    let sellers = [];
+    if (hasPagination) {
+      const parsedPage = Math.max(1, parseInt(page, 10) || 1);
+      const parsedLimit = Math.max(1, Math.min(parseInt(limit, 10) || 20, 100));
+      const skip = (parsedPage - 1) * parsedLimit;
+      
+      const [data, total] = await Promise.all([
+        Seller.find(query).sort({ _id: -1 }).select('_id shopName name phone email isActive isZoneHub').skip(skip).limit(parsedLimit).lean(),
+        Seller.countDocuments(query)
+      ]);
+      
+      return res.json({ 
+        success: true, 
+        result: data,
+        total,
+        page: parsedPage,
+        limit: parsedLimit,
+        totalPages: Math.ceil(total / parsedLimit),
+        hasMore: parsedPage < Math.ceil(total / parsedLimit)
+      });
+    } else {
+      sellers = await Seller.find(query).sort({ _id: -1 }).select('_id shopName name phone email isActive isZoneHub').lean();
+      return res.json({ success: true, result: sellers });
+    }
   } catch (error) {
     next(error);
   }
@@ -1650,18 +1682,46 @@ export const assignAdminQuickZoneHubsController = async (req, res, next) => {
 
 export const getAdminSellerCODVerificationsController = async (req, res, next) => {
   try {
+    const { page, limit } = req.query;
     const { FoodDeliveryCashDeposit } = await import("../../food/delivery/models/foodDeliveryCashDeposit.model.js");
     await import("../../food/delivery/models/deliveryPartner.model.js");
 
-    const verifications = await FoodDeliveryCashDeposit.find({
+    const query = {
       status: 'Seller_Accepted',
       depositType: 'quick_zone_hub'
-    })
-    .populate('deliveryPartnerId', 'name phone profilePartnerId')
-    .populate('quickZoneHubSellerId', 'shopName name phone')
-    .populate('quickZoneId', 'name zoneName')
-    .sort({ createdAt: -1 })
-    .lean();
+    };
+
+    const hasPagination = !!page;
+    
+    let verifications = [];
+    let total = 0;
+    let parsedLimit = 20;
+    let parsedPage = 1;
+
+    if (hasPagination) {
+      parsedPage = Math.max(1, parseInt(page, 10) || 1);
+      parsedLimit = Math.max(1, Math.min(parseInt(limit, 10) || 20, 100));
+      const skip = (parsedPage - 1) * parsedLimit;
+      
+      [verifications, total] = await Promise.all([
+        FoodDeliveryCashDeposit.find(query)
+          .populate('deliveryPartnerId', 'name phone profilePartnerId')
+          .populate('quickZoneHubSellerId', 'shopName name phone')
+          .populate('quickZoneId', 'name zoneName')
+          .sort({ createdAt: -1, _id: -1 })
+          .skip(skip)
+          .limit(parsedLimit)
+          .lean(),
+        FoodDeliveryCashDeposit.countDocuments(query)
+      ]);
+    } else {
+      verifications = await FoodDeliveryCashDeposit.find(query)
+        .populate('deliveryPartnerId', 'name phone profilePartnerId')
+        .populate('quickZoneHubSellerId', 'shopName name phone')
+        .populate('quickZoneId', 'name zoneName')
+        .sort({ createdAt: -1, _id: -1 })
+        .lean();
+    }
 
     const formatted = verifications.map(v => ({
       id: v._id,
@@ -1682,6 +1742,19 @@ export const getAdminSellerCODVerificationsController = async (req, res, next) =
       sellerNote: v.sellerNote || '',
       sellerProcessedAt: v.sellerProcessedAt || null
     }));
+
+    if (hasPagination) {
+      return res.json({ 
+        success: true, 
+        result: formatted,
+        results: formatted,
+        total,
+        page: parsedPage,
+        limit: parsedLimit,
+        totalPages: Math.ceil(total / parsedLimit),
+        hasMore: parsedPage < Math.ceil(total / parsedLimit)
+      });
+    }
 
     return res.json({ success: true, results: formatted, result: formatted });
   } catch (error) {

@@ -19,13 +19,13 @@ export async function createSellerCoupon(sellerId, body) {
     }
     const sid = new mongoose.Types.ObjectId(String(sellerId));
     
-    const couponCode = String(body?.couponCode || '').trim().toUpperCase();
-    if (!couponCode) throw new ValidationError('Coupon code is required');
+    const code = String(body?.code || '').trim().toUpperCase();
+    if (!code) throw new ValidationError('Coupon code is required');
     
-    // Check if duplicate couponCode exists for this seller
+    // Check if duplicate code exists for this seller
     const existing = await SellerCoupon.findOne({
         sellerId: sid,
-        couponCode
+        code
     }).select('_id').lean();
     
     if (existing) {
@@ -36,8 +36,14 @@ export async function createSellerCoupon(sellerId, body) {
     if (!seller) throw new ValidationError('Seller not found');
 
     const discountType = body?.discountType;
-    if (!discountType || !['percentage', 'fixed'].includes(discountType)) {
-        throw new ValidationError('Discount type must be percentage or fixed');
+    if (!discountType || !['percentage', 'fixed', 'free_delivery'].includes(discountType)) {
+        throw new ValidationError('Discount type must be percentage, fixed, or free_delivery');
+    }
+
+    const couponType = body?.couponType || 'generic';
+    const validCouponTypes = ['generic', 'bulk_order', 'min_order_value', 'free_delivery', 'category_based', 'monthly_volume'];
+    if (!validCouponTypes.includes(couponType)) {
+        throw new ValidationError('Invalid coupon type');
     }
 
     const discountValue = Number(body?.discountValue);
@@ -45,20 +51,26 @@ export async function createSellerCoupon(sellerId, body) {
         throw new ValidationError('Discount value must be greater than 0');
     }
 
-    const expiryDate = body?.expiryDate ? new Date(body.expiryDate) : null;
-    if (!expiryDate || Number.isNaN(expiryDate.getTime())) {
+    const validTill = body?.validTill ? new Date(body.validTill) : null;
+    if (!validTill || Number.isNaN(validTill.getTime())) {
         throw new ValidationError('A valid expiry date is required');
     }
+    
+    const validFrom = body?.validFrom ? new Date(body.validFrom) : new Date();
 
     const doc = await SellerCoupon.create({
         sellerId: sid,
         sellerName: seller.shopName || seller.name || 'Unknown Seller',
-        couponCode,
+        code,
         discountType,
+        couponType,
         discountValue,
-        minOrderAmount: Number(body?.minOrderAmount) || 0,
-        expiryDate,
+        minOrderValue: Number(body?.minOrderValue) || 0,
+        maxDiscount: body?.maxDiscount ? Number(body.maxDiscount) : undefined,
+        validFrom,
+        validTill,
         usageLimit: body?.usageLimit ? Number(body.usageLimit) : null,
+        perUserLimit: body?.perUserLimit ? Number(body.perUserLimit) : 1,
         description: String(body?.description || '').trim(),
         status: 'Pending',
         isActive: true
@@ -90,13 +102,13 @@ export async function updateSellerCoupon(sellerId, couponId, body) {
         throw new ValidationError('Coupon not found');
     }
 
-    const couponCode = String(body?.couponCode || '').trim().toUpperCase();
-    if (!couponCode) throw new ValidationError('Coupon code is required');
+    const code = String(body?.code || '').trim().toUpperCase();
+    if (!code) throw new ValidationError('Coupon code is required');
 
     // Check duplicate excluding current
     const duplicate = await SellerCoupon.findOne({
         sellerId: sid,
-        couponCode,
+        code,
         _id: { $ne: cid }
     }).select('_id').lean();
 
@@ -105,8 +117,14 @@ export async function updateSellerCoupon(sellerId, couponId, body) {
     }
 
     const discountType = body?.discountType;
-    if (!discountType || !['percentage', 'fixed'].includes(discountType)) {
-        throw new ValidationError('Discount type must be percentage or fixed');
+    if (!discountType || !['percentage', 'fixed', 'free_delivery'].includes(discountType)) {
+        throw new ValidationError('Discount type must be percentage, fixed, or free_delivery');
+    }
+
+    const couponType = body?.couponType || 'generic';
+    const validCouponTypes = ['generic', 'bulk_order', 'min_order_value', 'free_delivery', 'category_based', 'monthly_volume'];
+    if (!validCouponTypes.includes(couponType)) {
+        throw new ValidationError('Invalid coupon type');
     }
 
     const discountValue = Number(body?.discountValue);
@@ -114,21 +132,27 @@ export async function updateSellerCoupon(sellerId, couponId, body) {
         throw new ValidationError('Discount value must be greater than 0');
     }
 
-    const expiryDate = body?.expiryDate ? new Date(body.expiryDate) : null;
-    if (!expiryDate || Number.isNaN(expiryDate.getTime())) {
+    const validTill = body?.validTill ? new Date(body.validTill) : null;
+    if (!validTill || Number.isNaN(validTill.getTime())) {
         throw new ValidationError('A valid expiry date is required');
     }
+    
+    const validFrom = body?.validFrom ? new Date(body.validFrom) : new Date();
 
     const updated = await SellerCoupon.findOneAndUpdate(
         { _id: cid, sellerId: sid },
         {
             $set: {
-                couponCode,
+                code,
                 discountType,
+                couponType,
                 discountValue,
-                minOrderAmount: Number(body?.minOrderAmount) || 0,
-                expiryDate,
+                minOrderValue: Number(body?.minOrderValue) || 0,
+                maxDiscount: body?.maxDiscount ? Number(body.maxDiscount) : undefined,
+                validFrom,
+                validTill,
                 usageLimit: body?.usageLimit ? Number(body.usageLimit) : null,
+                perUserLimit: body?.perUserLimit ? Number(body.perUserLimit) : 1,
                 description: String(body?.description || '').trim(),
                 status: 'Pending' // Reset to Pending upon edit
             }

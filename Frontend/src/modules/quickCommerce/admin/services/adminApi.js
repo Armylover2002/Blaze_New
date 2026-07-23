@@ -369,19 +369,7 @@ export const adminApi = {
   getFeeSettings: () => axiosInstance.get('/quick-commerce/admin/fee-settings'),
   createOrUpdateFeeSettings: (body) =>
     axiosInstance.put('/quick-commerce/admin/fee-settings', body ?? {}),
-  getDeliveryCommissionRules: () =>
-    axiosInstance.get('/quick-commerce/admin/delivery/commission-rules'),
-  createDeliveryCommissionRule: (body) =>
-    axiosInstance.post('/quick-commerce/admin/delivery/commission-rules', body ?? {}),
-  updateDeliveryCommissionRule: (id, body) =>
-    axiosInstance.patch(`/quick-commerce/admin/delivery/commission-rules/${String(id)}`, body ?? {}),
-  deleteDeliveryCommissionRule: (id) =>
-    axiosInstance.delete(`/quick-commerce/admin/delivery/commission-rules/${String(id)}`),
-  toggleDeliveryCommissionRuleStatus: (id, status) =>
-    axiosInstance.patch(
-      `/quick-commerce/admin/delivery/commission-rules/${String(id)}/status`,
-      { status: Boolean(status) },
-    ),
+
   getPlatformSettings: () => axiosInstance.get('/quick-commerce/admin/fee-settings'),
   updatePlatformSettings: (body) =>
     axiosInstance.put('/quick-commerce/admin/fee-settings', body ?? {}),

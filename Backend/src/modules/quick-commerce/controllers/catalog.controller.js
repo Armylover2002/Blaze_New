@@ -364,16 +364,16 @@ export const getCoupons = async (req, res) => {
       const sellerCoupons = await SellerCoupon.find({
         sellerId: new mongoose.Types.ObjectId(sellerId),
         status: 'Approved',
-        expiryDate: { $gt: now }
+        validTill: { $gt: now }
       }).lean();
 
       const mappedSellerCoupons = sellerCoupons.map(c => ({
         ...c,
         id: c._id,
-        code: c.couponCode,
-        minOrderValue: c.minOrderAmount,
-        title: c.discountType === 'percentage' ? `${c.discountValue}% OFF` : `₹${c.discountValue} FLAT OFF`,
-        validTill: c.expiryDate,
+        code: c.code,
+        minOrderValue: c.minOrderValue,
+        title: c.discountType === 'percent' ? `${c.discountValue}% OFF` : `₹${c.discountValue} FLAT OFF`,
+        validTill: c.validTill,
         isSellerCoupon: true
       }));
 
@@ -413,17 +413,17 @@ export const applyCoupon = async (req, res) => {
       const now = new Date();
       const sellerCoupon = await SellerCoupon.findOne({
         sellerId: new mongoose.Types.ObjectId(sellerId),
-        couponCode: String(code).toUpperCase().trim(),
+        code: String(code).toUpperCase().trim(),
         status: 'Approved',
-        expiryDate: { $gt: now }
+        validTill: { $gt: now }
       }).lean();
 
       if (sellerCoupon) {
         coupon = {
           ...sellerCoupon,
-          code: sellerCoupon.couponCode,
-          minOrderValue: sellerCoupon.minOrderAmount,
-          expiryDate: sellerCoupon.expiryDate,
+          code: sellerCoupon.code,
+          minOrderValue: sellerCoupon.minOrderValue,
+          validTill: sellerCoupon.validTill,
           isSellerCoupon: true
         };
       }
@@ -521,7 +521,7 @@ export const getProducts = async (req, res) => {
   setPublicCache(res, 60);
   // Note: ensureQuickCommerceSeedData runs at server startup — no need here.
 
-  const { categoryId, search, limit } = req.query;
+  const { categoryId, search, limit, page } = req.query;
   const query = { ...publicProductFilter };
 
   if (categoryId) {
@@ -533,16 +533,50 @@ export const getProducts = async (req, res) => {
   }
   if (search) query.name = { $regex: String(search).trim(), $options: 'i' };
 
-  const parsedLimit = Number(limit) > 0 ? Math.min(Number(limit), 100) : 50;
-  const products = await QuickProduct.find(query).sort({ createdAt: -1 }).limit(parsedLimit).lean();
+  // Backward compatible pagination
+  const hasPagination = !!req.query.page;
+  
+  let products = [];
+  let total = 0;
+  let totalPages = 0;
+  let hasMore = false;
+  let parsedLimit = 50;
+  let parsedPage = 1;
+
+  if (hasPagination) {
+    parsedPage = Math.max(1, parseInt(page, 10) || 1);
+    parsedLimit = Math.max(1, Math.min(parseInt(limit, 10) || 20, 100));
+    const skip = (parsedPage - 1) * parsedLimit;
+    
+    [products, total] = await Promise.all([
+      QuickProduct.find(query).sort({ createdAt: -1, _id: -1 }).skip(skip).limit(parsedLimit).lean(),
+      QuickProduct.countDocuments(query)
+    ]);
+    totalPages = Math.ceil(total / parsedLimit);
+    hasMore = parsedPage < totalPages;
+  } else {
+    parsedLimit = Number(limit) > 0 ? Math.min(Number(limit), 100) : 50;
+    products = await QuickProduct.find(query).sort({ createdAt: -1, _id: -1 }).limit(parsedLimit).lean();
+  }
+
   const sellerMap = await buildSellerMap(products);
 
-  return res.json({
+  const responsePayload = {
     success: true,
     result: {
       items: products.map((product) => mapProduct(product, sellerMap)),
     },
-  });
+  };
+
+  if (hasPagination) {
+    responsePayload.result.total = total;
+    responsePayload.result.page = parsedPage;
+    responsePayload.result.limit = parsedLimit;
+    responsePayload.result.totalPages = totalPages;
+    responsePayload.result.hasMore = hasMore;
+  }
+
+  return res.json(responsePayload);
 };
 
 export const getProductById = async (req, res) => {

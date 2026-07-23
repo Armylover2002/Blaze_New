@@ -4,6 +4,7 @@ import helmet from 'helmet';
 import morgan from 'morgan';
 import mongoSanitize from 'mongo-sanitize';
 import xssClean from 'xss-clean';
+import compression from 'compression';
 import routes from './routes/index.js';
 import errorHandler from './middleware/errorHandler.js';
 import { apiRateLimiter } from './middleware/rateLimit.js';
@@ -78,6 +79,9 @@ app.use(xssClean());
 
 // Global rate limiting for API routes
 app.use('/api', apiRateLimiter);
+
+// Compress all responses
+app.use(compression({ level: 6, threshold: 1024 }));
 
 // Optional: log API response time (method, path, status, duration) - no sensitive data
 app.use('/api', responseTimeLogger);

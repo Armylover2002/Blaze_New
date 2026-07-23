@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import { QuickCategory } from "../../models/category.model.js";
 import { SellerNotification } from "../models/sellerNotification.model.js";
+import { computeNotificationExpiresAt } from "../../../../core/notifications/utils/notificationTtl.js";
 import { Seller } from "../models/seller.model.js";
 
 const DEFAULT_CATEGORY_TREE = [
@@ -306,7 +307,10 @@ export const syncSellerInventoryNotification = async (sellerId, product) => {
         message: nextNotification.message,
         metadata: nextNotification.metadata,
       },
-      $setOnInsert: { isRead: false },
+      $setOnInsert: {
+        isRead: false,
+        expiresAt: computeNotificationExpiresAt(new Date())
+      },
     },
     { upsert: true, new: true },
   );

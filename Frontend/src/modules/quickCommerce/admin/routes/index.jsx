@@ -14,7 +14,6 @@ const CategoryHierarchy = React.lazy(() => import("../pages/categories/CategoryH
 const ProductManagement = React.lazy(() => import("../pages/ProductManagement"))
 const ActiveSellers = React.lazy(() => import("../pages/ActiveSellers"))
 const PendingSellers = React.lazy(() => import("../pages/PendingSellers"))
-const SellerLocations = React.lazy(() => import("../pages/SellerLocations"))
 const AdminWallet = React.lazy(() => import("../pages/AdminWallet"))
 const WithdrawalRequests = React.lazy(() => import("../pages/WithdrawalRequests"))
 const CustomerManagement = React.lazy(() => import("../pages/CustomerManagement"))
@@ -73,7 +72,6 @@ function QuickCommerceAdminRoutesInner() {
       <Route path="/shop-by-store" element={<ShopByStoreManagement />} />
       <Route path="/coupons" element={<CouponManagement />} />
       <Route path="/sellers/pending" element={<PendingSellers />} />
-      <Route path="/seller-locations" element={<SellerLocations />} />
       <Route path="/wallet" element={<AdminWallet />} />
       <Route path="/withdrawals" element={<WithdrawalRequests />} />
       <Route path="/transactions" element={<TransactionReport />} />

@@ -48,10 +48,12 @@ export default function HeroCategoriesPerPage() {
         const flatCategories = headerList.flatMap((h) => (h.children || []).map((c) => ({ ...c, headerName: h.name, headerId: h._id })));
         setAllCategories(flatCategories);
 
-        const homeRes = await adminApi.getHeroConfig({ pageType: "home" });
-        const homeResult = homeRes.data?.result || homeRes.data || {};
-        const homeBanners = homeResult.banners?.items || [];
-        const homeCatIds = homeResult.categoryIds || [];
+        const allRes = await adminApi.getHeroConfig({ fetchAll: true });
+        const allConfigs = allRes.data?.results || [];
+
+        const homeConfig = allConfigs.find(c => c.pageType === 'home') || {};
+        const homeBanners = homeConfig.banners?.items || [];
+        const homeCatIds = homeConfig.categoryIds || [];
 
         const rows = [
           {
@@ -64,26 +66,19 @@ export default function HeroCategoriesPerPage() {
           },
         ];
 
-        await Promise.all(
-          headerList.map(async (h) => {
-            const res = await adminApi.getHeroConfig({
-              pageType: "header",
-              headerId: h._id,
-            });
-            if (cancelled) return;
-            const result = res.data?.result || res.data || {};
-            const items = result.banners?.items || [];
-            const catIds = result.categoryIds || [];
-            rows.push({
-              id: h._id,
-              label: h.name || "Unnamed",
-              pageType: "header",
-              headerId: h._id,
-              bannerCount: items.length,
-              categoryCount: catIds.length,
-            });
-          })
-        );
+        headerList.forEach((h) => {
+          const config = allConfigs.find(c => c.pageType === 'header' && String(c.headerId) === String(h._id)) || {};
+          const items = config.banners?.items || [];
+          const catIds = config.categoryIds || [];
+          rows.push({
+            id: h._id,
+            label: h.name || "Unnamed",
+            pageType: "header",
+            headerId: h._id,
+            bannerCount: items.length,
+            categoryCount: catIds.length,
+          });
+        });
 
         if (!cancelled) setPageData(rows);
       } catch (e) {

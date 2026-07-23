@@ -67,7 +67,7 @@ import { SellerOrder } from '../../../quick-commerce/seller/models/sellerOrder.m
 import { PorterOrder } from '../../../porter/orders/models/porterOrder.model.js';
 import { getSellerCommissionSnapshot } from '../../../quick-commerce/admin/services/commission.service.js';
 import { QuickFeeSettings } from '../../../quick-commerce/admin/models/feeSettings.model.js';
-import { calculateQuickPricing, calculateDeliveryFeeFromSettings } from '../../../quick-commerce/admin/services/billing.service.js';
+import { calculateQuickPricing, calculateCustomerDeliveryFee } from '../../../quick-commerce/admin/services/billing.service.js';
 import {
     createRazorpayOrder,
     createPaymentLink,
@@ -3385,7 +3385,7 @@ export async function calculateOrder(userId, dto, options = {}) {
   // ----- Mixed cart: QC store delivery fee (Quick Commerce) — NEVER Food Quick surcharge -----
   // Food Quick surcharge uses foodQuickDeliveryFee / pricing.quickDeliveryFee (food Instant only).
   const qcStoreDeliveryFee = orderType === "mixed"
-    ? calculateDeliveryFeeFromSettings(quickSubtotal, quickFeeDoc || undefined)
+    ? calculateCustomerDeliveryFee(quickFeeDoc || {}, deliveryDistanceKm)
     : 0;
   const normalDeliveryFee =
     orderType === "mixed" ? Math.max(deliveryFee, qcStoreDeliveryFee) : deliveryFee;

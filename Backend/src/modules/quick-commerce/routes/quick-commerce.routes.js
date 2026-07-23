@@ -122,14 +122,9 @@ import {
   toggleSellerCommissionStatus,
 } from "../controllers/adminCommission.controller.js";
 import {
-  createDeliveryCommissionRule,
   createOrUpdateFeeSettings,
-  deleteDeliveryCommissionRule,
-  getDeliveryCommissionRules,
   getFeeSettings,
   getPublicBillingSettings,
-  toggleDeliveryCommissionRuleStatus,
-  updateDeliveryCommissionRule,
 } from "../controllers/billing.controller.js";
 import * as notificationBroadcastController from "../../food/admin/controllers/notificationBroadcast.controller.js";
 import {
@@ -520,36 +515,7 @@ router.patch(
 );
 router.get("/admin/fee-settings", ...adminOrEmployee, checkPermission("quick::core_management::billing", "view"), getFeeSettings);
 router.put("/admin/fee-settings", ...adminOrEmployee, checkPermission("quick::core_management::billing", "edit"), createOrUpdateFeeSettings);
-router.get(
-  "/admin/delivery/commission-rules",
-  ...adminOrEmployee,
-  checkPermission("quick::core_management::billing", "view"),
-  getDeliveryCommissionRules,
-);
-router.post(
-  "/admin/delivery/commission-rules",
-  ...adminOrEmployee,
-  checkPermission("quick::core_management::billing", "edit"),
-  createDeliveryCommissionRule,
-);
-router.patch(
-  "/admin/delivery/commission-rules/:id",
-  ...adminOrEmployee,
-  checkPermission("quick::core_management::billing", "edit"),
-  updateDeliveryCommissionRule,
-);
-router.delete(
-  "/admin/delivery/commission-rules/:id",
-  ...adminOrEmployee,
-  checkPermission("quick::core_management::billing", "delete"),
-  deleteDeliveryCommissionRule,
-);
-router.patch(
-  "/admin/delivery/commission-rules/:id/status",
-  ...adminOrEmployee,
-  checkPermission("quick::core_management::billing", "edit"),
-  toggleDeliveryCommissionRuleStatus,
-);
+
 
 // Admin Coupon Management
 router.get('/admin/coupons', ...adminOrEmployee, checkPermission('quick::core_management::promotions_management::coupons', 'view'), getAdminCoupons);

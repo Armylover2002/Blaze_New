@@ -14,6 +14,10 @@ import {
   startOfDay,
 } from '../utils/coupon.helpers.js';
 
+const CATEGORY_SELECT_FIELDS = '_id name slug image status isActive type parentId iconId headerColor accentColor handlingFees adminCommission approvalStatus sortOrder';
+const PRODUCT_SELECT_FIELDS = '_id name slug mainImage image galleryImages categoryId subcategoryId headerId price salePrice mrp unit stock status isActive brand description tags variants pharmacyDetails deliveryTime rating badge approvalStatus sellerId';
+
+
 const getCollection = (name) => mongoose.connection?.db?.collection(name) || null;
 
 // --- In-memory Cache ---
@@ -137,6 +141,12 @@ export const getQuickHeroConfig = async ({ pageType = 'home', headerId = null } 
   return data;
 };
 
+export const getAllQuickHeroConfigs = async () => {
+  const collection = getCollection('quick_hero_configs');
+  if (!collection) return [];
+  return QuickHeroConfig.find({}).lean();
+};
+
 export const setQuickHeroConfig = async (data) => {
   const query = { pageType: data.pageType };
   if (data.pageType === 'header') {
@@ -214,7 +224,7 @@ export const getQuickExperienceSections = async ({ pageType = 'home', headerId =
       cache.categories.treeInfo = treeInfo;
       return treeInfo;
     }
-    const allCategories = await QuickCategory.find(normalizeStatusQuery()).lean();
+    const allCategories = await QuickCategory.find(normalizeStatusQuery()).select(CATEGORY_SELECT_FIELDS).lean();
     const treeInfo = buildCategoryTreeInfo(allCategories);
     cache.categories.data = allCategories;
     cache.categories.treeInfo = treeInfo;
@@ -305,13 +315,13 @@ export const getQuickExperienceSections = async ({ pageType = 'home', headerId =
             approvedOrLegacyFilter,
             { isActive: { $ne: false } }
           ]
-        }).sort({ createdAt: -1 }).limit(500).lean()
+        }).select(PRODUCT_SELECT_FIELDS).sort({ createdAt: -1 }).limit(500).lean()
       : Promise.resolve([]),
     (categoryIds.size || subcategoryIds.size)
       ? QuickCategory.find({
           _id: { $in: Array.from(new Set([...Array.from(categoryIds), ...Array.from(subcategoryIds)])) },
           isActive: { $ne: false }
-        }).lean()
+        }).select(CATEGORY_SELECT_FIELDS).lean()
       : Promise.resolve([]),
   ]);
 
@@ -715,10 +725,10 @@ export const getQuickOfferSections = async (query = {}) => {
 
   const [products, categories] = await Promise.all([
     productIds.size
-      ? QuickProduct.find({ _id: { $in: Array.from(productIds) } }).lean()
+      ? QuickProduct.find({ _id: { $in: Array.from(productIds) } }).select(PRODUCT_SELECT_FIELDS).lean()
       : Promise.resolve([]),
     categoryIds.size
-      ? QuickCategory.find({ _id: { $in: Array.from(categoryIds) } }).lean()
+      ? QuickCategory.find({ _id: { $in: Array.from(categoryIds) } }).select(CATEGORY_SELECT_FIELDS).lean()
       : Promise.resolve([]),
   ]);
 
@@ -820,6 +830,8 @@ export const getQuickCategories = async (query = {}) => {
   }
 
   const categories = await QuickCategory.find(filter)
+    .select(CATEGORY_SELECT_FIELDS)
+    .sort({ sortOrder: 1, name: 1 })
     .sort({ order: 1, name: 1 })
     .lean();
 
