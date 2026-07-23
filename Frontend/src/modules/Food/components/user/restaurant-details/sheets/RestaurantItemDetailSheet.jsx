@@ -104,9 +104,9 @@ export default function RestaurantItemDetailSheet({
     <BottomSheetPortal
       open={open}
       onClose={onClose}
-      sheetClassName="fixed left-0 right-0 bottom-0 md:left-1/2 md:right-auto md:-translate-x-1/2 md:bottom-auto md:top-1/2 md:-translate-y-1/2 z-[10000] bg-white dark:bg-[#1a1a1a] rounded-t-3xl md:rounded-3xl shadow-2xl w-full md:w-auto flex flex-col max-h-[92vh] md:max-w-lg lg:max-w-xl"
+      sheetClassName="fixed left-0 right-0 bottom-0 md:left-1/2 md:right-auto md:-translate-x-1/2 md:bottom-auto md:top-1/2 md:-translate-y-1/2 z-[10000] bg-white dark:bg-[#1a1a1a] rounded-t-3xl md:rounded-3xl shadow-2xl w-full md:w-[700px] lg:w-[850px] flex flex-col md:flex-row max-h-[92vh] md:max-h-[600px]"
     >
-      <div className="absolute -top-[44px] left-1/2 -translate-x-1/2 z-[10001]">
+      <div className="absolute -top-[44px] left-1/2 -translate-x-1/2 md:left-auto md:right-0 md:translate-x-0 md:-top-[16px] md:-translate-y-full z-[10001]">
         <motion.button
           type="button"
           onClick={onClose}
@@ -122,7 +122,7 @@ export default function RestaurantItemDetailSheet({
       </div>
 
       {/* Image */}
-      <div className="relative w-full h-56 sm:h-64 overflow-hidden rounded-t-3xl bg-gray-100 dark:bg-gray-800 shrink-0">
+      <div className="relative w-full md:w-1/2 h-56 sm:h-64 md:h-full overflow-hidden rounded-t-3xl md:rounded-t-none md:rounded-l-3xl bg-gray-100 dark:bg-gray-800 shrink-0">
         {allImages.length === 0 ? (
           <div className="w-full h-full flex items-center justify-center">
             <span className="text-sm text-gray-400">No image available</span>
@@ -222,8 +222,10 @@ export default function RestaurantItemDetailSheet({
         )}
       </div>
 
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+      {/* Right Column for Desktop (Content + Footer) */}
+      <div className="flex-1 flex flex-col w-full md:w-1/2">
+        {/* Content */}
+        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
         <div className="space-y-2">
           <div className="flex flex-wrap items-center gap-2">
             <VegIndicator isVeg={isVeg} />
@@ -414,6 +416,7 @@ export default function RestaurantItemDetailSheet({
             </span>
           </Button>
         </div>
+      </div>
       </div>
     </BottomSheetPortal>
   )

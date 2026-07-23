@@ -46,23 +46,23 @@ const ProductCard = memo(({ product, quantity, onAdd, onIncrement, onDecrement, 
           </div>
         </div>
 
-        <div className="flex flex-1 flex-col px-3.5 pb-3.5">
+        <div className="flex flex-1 flex-col px-2.5 pb-2.5">
           <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-bold text-[#0c831f]">
             <Clock className="h-3 w-3" />
             {product.deliveryTime || '10 MINS'}
           </div>
 
           <h3 className={cn(
-            "line-clamp-2 font-bold leading-tight text-[#17212f]",
+            "line-clamp-2 font-semibold leading-tight text-[#17212f]",
             compact ? "text-[12px] min-h-[32px]" : "text-[13px] min-h-[36px]"
           )}>
             {product.name}
           </h3>
           <p className="mt-1 text-[11px] font-medium text-slate-500">{product.weight || product.unit || '1 unit'}</p>
 
-          <div className="mt-auto flex flex-wrap items-end justify-between pt-3.5 gap-2">
+          <div className="mt-auto flex flex-wrap items-end justify-between pt-2.5 gap-2">
             <div className="flex flex-col gap-0.5 min-w-0">
-              <p className="text-[15px] font-black leading-none text-[#111827]">{money(product.price)}</p>
+              <p className="text-[14px] font-bold leading-none text-[#111827]">{money(product.price)}</p>
               {discount > 0 && (
                 <p className="text-[10px] font-semibold text-[#9ca3af] line-through">{money(product.originalPrice)}</p>
               )}

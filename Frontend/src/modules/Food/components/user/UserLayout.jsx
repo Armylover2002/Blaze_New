@@ -6,13 +6,14 @@ import LocationPrompt from "./LocationPrompt"
 import { LocationProvider } from "@food/hooks/useLocation"
 import { CartProvider } from "@food/context/CartContext"
 import { OrdersProvider } from "@food/context/OrdersContext"
-const debugLog = (...args) => {}
-const debugWarn = (...args) => {}
-const debugError = (...args) => {}
+const debugLog = (...args) => { }
+const debugWarn = (...args) => { }
+const debugError = (...args) => { }
 
 import SearchOverlay from "./SearchOverlay"
 import BottomNavigation from "./BottomNavigation"
 import DesktopNavbar from "./DesktopNavbar"
+import QuickFooter from "@/modules/quickCommerce/user/components/layout/Footer"
 import QuickBottomNav from "@/modules/quickCommerce/user/components/layout/BottomNav"
 import PorterBottomNav from "@/modules/porter/user/components/layout/BottomNav"
 import { useUserNotifications } from "../../hooks/useUserNotifications"
@@ -162,30 +163,40 @@ export default function UserLayout({ children }) {
 
   const isPorterRoute = location.pathname === '/porter' || location.pathname.startsWith('/porter/');
 
+  const footerColor = location.pathname.startsWith("/porter")
+    ? "#2563EB"
+    : location.pathname.startsWith("/quick")
+      ? "#ea580c"
+      : "#FF0000"
+
   return (
     <div className="min-h-screen bg-[#f5f5f5] dark:bg-[#0a0a0a] transition-colors duration-200">
       <CartProvider>
         <ProfileProvider>
           <OrdersProvider>
-              {!isPorterRoute && <ActiveOrderManagerBridge />}
-              <SearchOverlayProvider>
-                <LocationSelectorProvider>
-                  <LocationProvider>
+            {!isPorterRoute && <ActiveOrderManagerBridge />}
+            <SearchOverlayProvider>
+              <LocationSelectorProvider>
+                <LocationProvider>
                   {/* <Navbar /> */}
-                  {/* Desktop Navbar - Hidden on mobile, visible on medium+ screens */}
                   <div className="hidden md:block">
-                    {showFoodBottomNav && <DesktopNavbar showLogo={true} />}
+                    {(!isSharedQuickProfile && !isSharedPorterProfile) && <DesktopNavbar showLogo={true} />}
                   </div>
                   <LocationPrompt />
-                  <main className={showFoodBottomNav ? "md:pt-[8.75rem]" : ""}>
+                  <main className={(!isSharedQuickProfile && !isSharedPorterProfile) ? "md:pt-[5.5rem] flex-1" : "flex-1"}>
                     {children || <Outlet />}
                   </main>
-                  {showFoodBottomNav && <BottomNavigation />}
+                  <div className="hidden md:block w-full">
+                    {(!isSharedQuickProfile && !isSharedPorterProfile) && <QuickFooter themeColor={footerColor} />}
+                  </div>
+                  <div className="block md:hidden">
+                    {showFoodBottomNav && <BottomNavigation />}
+                  </div>
                   {isSharedQuickProfile && <QuickBottomNav />}
                   {isSharedPorterProfile && <PorterBottomNav />}
-                  </LocationProvider>
-                </LocationSelectorProvider>
-              </SearchOverlayProvider>
+                </LocationProvider>
+              </LocationSelectorProvider>
+            </SearchOverlayProvider>
           </OrdersProvider>
         </ProfileProvider>
       </CartProvider>

@@ -45,7 +45,8 @@ export default function Support() {
   const profileSource = new URLSearchParams(routerLocation.search).get("from")
   const isQuickProfile = profileSource === "quick"
   const sharedSourceQuery = profileSource ? `?from=${profileSource}` : ""
-  const profileHomePath = isSharedProfile ? `/profile${sharedSourceQuery}` : "/user/profile"
+  const basePath = routerLocation.pathname.substring(0, routerLocation.pathname.lastIndexOf('/')) || '/user/profile';
+  const profileHomePath = isSharedProfile ? `/profile${sharedSourceQuery}` : basePath;
   const [step, setStep] = useState("pick")
   const [orders, setOrders] = useState([])
   const [stores, setStores] = useState([])

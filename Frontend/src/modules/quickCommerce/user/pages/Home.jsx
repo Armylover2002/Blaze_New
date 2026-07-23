@@ -127,6 +127,36 @@ const tabs = [
 ];
 
 // Floating elements — purely visual, rendered at call-site, no state
+const DEFAULT_CATEGORY_ICONS = {
+  "fruit": "https://images.unsplash.com/photo-1610832958506-aa56368176cf?q=80&w=200&auto=format&fit=crop",
+  "vegetable": "https://images.unsplash.com/photo-1566385101042-1a0aa0c1268c?q=80&w=200&auto=format&fit=crop",
+  "dairy": "https://images.unsplash.com/photo-1550583724-b2692b85b150?q=80&w=200&auto=format&fit=crop",
+  "milk": "https://images.unsplash.com/photo-1550583724-b2692b85b150?q=80&w=200&auto=format&fit=crop",
+  "meat": "https://images.unsplash.com/photo-1607623814075-e51df1bd682f?q=80&w=200&auto=format&fit=crop",
+  "bakery": "https://images.unsplash.com/photo-1509440159596-0249088772ff?q=80&w=200&auto=format&fit=crop",
+  "bread": "https://images.unsplash.com/photo-1509440159596-0249088772ff?q=80&w=200&auto=format&fit=crop",
+  "beverage": "https://images.unsplash.com/photo-1622483767028-3f66f32aef97?q=80&w=200&auto=format&fit=crop",
+  "drink": "https://images.unsplash.com/photo-1622483767028-3f66f32aef97?q=80&w=200&auto=format&fit=crop",
+  "snack": "https://images.unsplash.com/photo-1566478989037-e924e50cb0ee?q=80&w=200&auto=format&fit=crop",
+  "chips": "https://images.unsplash.com/photo-1566478989037-e924e50cb0ee?q=80&w=200&auto=format&fit=crop",
+  "crisps": "https://images.unsplash.com/photo-1566478989037-e924e50cb0ee?q=80&w=200&auto=format&fit=crop",
+  "noodle": "https://images.unsplash.com/photo-1612929633738-8fe44f7ec841?q=80&w=200&auto=format&fit=crop",
+  "biscuit": "https://images.unsplash.com/photo-1499636136210-6f4ee915583e?q=80&w=200&auto=format&fit=crop",
+  "cookie": "https://images.unsplash.com/photo-1499636136210-6f4ee915583e?q=80&w=200&auto=format&fit=crop",
+  "musical": "https://images.unsplash.com/photo-1552422535-c45813c61732?q=80&w=200&auto=format&fit=crop",
+  "piano": "https://images.unsplash.com/photo-1552422535-c45813c61732?q=80&w=200&auto=format&fit=crop",
+  "tablas": "https://images.unsplash.com/photo-1552422535-c45813c61732?q=80&w=200&auto=format&fit=crop",
+  "default": "https://images.unsplash.com/photo-1542838132-92c53300491e?q=80&w=200&auto=format&fit=crop"
+};
+
+const getFallbackCategoryIcon = (name = "") => {
+  const lowerName = name.toLowerCase();
+  for (const [key, url] of Object.entries(DEFAULT_CATEGORY_ICONS)) {
+    if (lowerName.includes(key)) return url;
+  }
+  return DEFAULT_CATEGORY_ICONS.default;
+};
+
 const getQuickCategoryImage = (category = {}) => {
   const candidate =
     category?.image ||
@@ -137,7 +167,12 @@ const getQuickCategoryImage = (category = {}) => {
     category?.media?.image ||
     category?.media?.url ||
     '';
-  return resolveQuickImageUrl(candidate) || 'https://cdn-icons-png.flaticon.com/128/2321/2321831.png';
+  
+  if (candidate === 'https://cdn-icons-png.flaticon.com/128/2321/2321831.png') {
+    return getFallbackCategoryIcon(category?.name);
+  }
+  
+  return resolveQuickImageUrl(candidate) || getFallbackCategoryIcon(category?.name);
 };
 
 // ─── Loading skeleton ─────────────────────────────────────────────────────────
@@ -717,7 +752,7 @@ const Home = ({ embedded = false, onThemeChange, embeddedHeaderColor = null }) =
           </div>
 
           {/* TABS SECTION / CARDS SECTION */}
-          <div className="grid grid-cols-3 gap-2 px-3 py-2 sm:px-4 sm:py-2.5 md:hidden">
+          <div className="grid grid-cols-3 md:flex md:justify-center gap-2 md:gap-4 px-3 py-3 sm:px-4 sm:py-4 mx-auto w-full max-w-7xl relative z-20">
             {tabs.map((tab) => {
               const isActive = tab.id === "quick";
               const handleTabClick = () => {
@@ -731,35 +766,65 @@ const Home = ({ embedded = false, onThemeChange, embeddedHeaderColor = null }) =
                   type="button"
                   onClick={handleTabClick}
                   className={cn(
-                    "relative rounded-[16px] border p-2 sm:p-2.5 flex flex-col justify-between overflow-hidden shadow-sm transition-all duration-300 text-left h-[85px] min-[380px]:h-[95px]",
+                    "relative border overflow-hidden shadow-sm transition-all duration-300 text-left w-full",
+                    "rounded-[16px] h-[85px] min-[380px]:h-[95px] p-2 sm:p-2.5",
+                    "md:rounded-[20px] md:h-[120px] md:w-[280px] md:p-0",
                     isActive 
-                      ? "bg-orange-50/80 border-orange-200 shadow-sm scale-[1.02]" 
+                      ? "bg-amber-50/80 border-amber-200 shadow-sm scale-[1.02]" 
                       : tab.id === "food"
-                      ? "bg-red-50/60 border-red-100 hover:bg-red-50 hover:border-red-200 hover:shadow-md hover:scale-[1.01]"
+                      ? "bg-rose-50/60 border-rose-100 hover:bg-rose-50 hover:border-rose-200 hover:shadow-md hover:scale-[1.01]"
                       : tab.id === "porter"
                       ? "bg-blue-50/60 border-blue-100 hover:bg-blue-50 hover:border-blue-200 hover:shadow-md hover:scale-[1.01]"
-                      : "bg-white border-gray-200 hover:border-gray-300 hover:shadow-md hover:scale-[1.01]"
+                      : "bg-white border-gray-100 hover:border-gray-200 hover:shadow-md hover:scale-[1.01]"
                   )}
                 >
-                  <div className="flex gap-1.5 w-full items-start z-10">
-                    <div className="bg-[#FF0000] text-white rounded-full p-1 shrink-0 flex items-center justify-center h-[20px] w-[20px] mt-0.5">
-                      <tab.icon className="h-3 w-3" strokeWidth={2.5} />
+                  {/* MOBILE CONTENT */}
+                  <div className="flex flex-col justify-between h-full md:hidden">
+                    <div className="flex gap-1.5 w-full items-start z-10">
+                      <div className="bg-[#FF0000] text-white rounded-full p-1 shrink-0 flex items-center justify-center h-[20px] w-[20px] mt-0.5">
+                        <tab.icon className="h-3 w-3" strokeWidth={2.5} />
+                      </div>
+                      <div className="flex flex-col min-w-0 mt-0.5">
+                        <span className="text-[9.5px] min-[380px]:text-[10.5px] sm:text-[12px] font-bold text-gray-900 leading-tight truncate">
+                          {tab.title}
+                        </span>
+                        <p className="text-[7px] sm:text-[8px] font-medium text-gray-500 uppercase tracking-tight mt-0.5 truncate">
+                          {tab.subtitle}
+                        </p>
+                      </div>
                     </div>
-                    <div className="flex flex-col min-w-0 mt-0.5">
-                      <span className="text-[9.5px] min-[380px]:text-[10.5px] sm:text-[12px] font-bold text-gray-900 leading-tight truncate">
-                        {tab.title}
-                      </span>
-                      <p className="text-[7px] sm:text-[8px] font-medium text-gray-500 uppercase tracking-tight mt-0.5 truncate">
-                        {tab.subtitle}
-                      </p>
+                    <div className="mt-1 flex items-end justify-between w-full z-10">
+                      <div className="bg-[#FF0000] text-white rounded-full p-1 shrink-0 flex items-center justify-center h-4 w-4 shadow-sm mb-0.5">
+                        <ArrowRight className="h-2.5 w-2.5" strokeWidth={3} />
+                      </div>
+                      <div className="absolute right-[-4px] bottom-[-4px] w-[55px] h-[55px] min-[380px]:w-[65px] min-[380px]:h-[65px] pointer-events-none">
+                        <img src={tab.image} className="w-full h-full object-contain mix-blend-multiply" alt={tab.title} />
+                      </div>
                     </div>
                   </div>
-                  <div className="mt-1 flex items-end justify-between w-full z-10">
-                    <div className="bg-[#FF0000] text-white rounded-full p-1 shrink-0 flex items-center justify-center h-4 w-4 shadow-sm mb-0.5">
-                      <ArrowRight className="h-2.5 w-2.5" strokeWidth={3} />
+
+                  {/* DESKTOP CONTENT */}
+                  <div className="hidden md:flex justify-between h-full w-full p-4">
+                    <div className="flex flex-col justify-between h-full z-10 w-[65%]">
+                      <div className="flex items-start gap-2">
+                        <div className="bg-[#FF0000] text-white rounded-full p-1.5 shrink-0 flex items-center justify-center md:h-[28px] md:w-[28px]">
+                          <tab.icon className="md:h-4 md:w-4" strokeWidth={2.5} />
+                        </div>
+                        <div className="flex flex-col min-w-0">
+                          <span className="md:text-[15px] font-extrabold text-gray-900 leading-tight truncate tracking-tight">
+                            {tab.title}
+                          </span>
+                          <p className="md:text-[9px] font-bold text-gray-500 uppercase tracking-wider mt-0.5 truncate">
+                            {tab.subtitle}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="bg-[#FF0000] text-white rounded-full shrink-0 flex items-center justify-center md:h-6 md:w-6 shadow-sm">
+                        <ArrowRight className="md:h-3.5 md:w-3.5" strokeWidth={3} />
+                      </div>
                     </div>
-                    <div className="absolute right-[-4px] bottom-[-4px] w-[55px] h-[55px] min-[380px]:w-[65px] min-[380px]:h-[65px] pointer-events-none">
-                      <img src={tab.image} className="w-full h-full object-contain mix-blend-multiply" alt={tab.title} />
+                    <div className="absolute right-0 bottom-0 top-0 md:w-[45%] pointer-events-none flex items-end justify-end md:pr-4 md:pb-2">
+                      <img src={tab.image} className="md:w-[100px] md:h-[100px] object-contain mix-blend-multiply" alt={tab.title} />
                     </div>
                   </div>
                 </button>
@@ -770,7 +835,7 @@ const Home = ({ embedded = false, onThemeChange, embeddedHeaderColor = null }) =
           {/* Quick Category Slider */}
           {effectiveQuickCategories.length > 0 ? (
             <div className={cn('w-full mb-5 overflow-hidden relative group z-20 md:mt-3', embedded ? 'mt-2' : 'mt-4 md:mt-6')}>
-              <div className={cn('relative overflow-hidden bg-white dark:bg-card', embedded ? 'shadow-none' : 'shadow-[0_14px_28px_rgba(15,23,42,0.09)]')}>
+              <div className={cn('relative overflow-hidden bg-white dark:bg-card mx-0 md:mx-8 lg:mx-[50px] rounded-none md:rounded-[32px]', embedded ? 'shadow-none' : 'shadow-[0_14px_28px_rgba(15,23,42,0.09)]')}>
                 <div className="relative z-10 px-4 pt-3 pb-1 md:px-8 md:pt-4">
                   <h2 className="text-center text-[18px] md:text-[20px] font-bold tracking-tight text-[#132018] leading-none">Quick categories</h2>
                 </div>
@@ -803,12 +868,14 @@ const Home = ({ embedded = false, onThemeChange, embeddedHeaderColor = null }) =
                         >
                           <div className="absolute inset-0 opacity-40 pointer-events-none" style={{ backgroundColor: palette.glowColor }} />
                           {categoryImage ? (
-                            <img
-                              src={categoryImage}
-                              alt={cat.name}
-                              className="absolute left-1/2 top-3 z-10 h-[68px] w-[68px] -translate-x-1/2 object-contain drop-shadow-[0_5px_12px_rgba(0,0,0,0.10)] mix-blend-multiply group-hover/item:scale-110 transition-transform duration-500"
-                              loading="lazy"
-                            />
+                            <div className="absolute left-1/2 top-2 z-10 h-[68px] w-[68px] -translate-x-1/2 rounded-full overflow-hidden border-2 border-white/80 shadow-sm group-hover/item:scale-110 transition-transform duration-500">
+                              <img
+                                src={categoryImage}
+                                alt={cat.name}
+                                className="h-full w-full object-cover"
+                                loading="lazy"
+                              />
+                            </div>
                           ) : (
                             <div className="absolute left-1/2 top-3 z-10 flex h-[68px] w-[68px] -translate-x-1/2 items-center justify-center rounded-[20px] bg-white/55 text-2xl font-black uppercase text-slate-400">
                               {(cat.name || '?').charAt(0)}
@@ -841,12 +908,12 @@ const Home = ({ embedded = false, onThemeChange, embeddedHeaderColor = null }) =
               <div className="relative z-10 px-4 md:px-8">
                 <div className="flex justify-between items-center mb-3 md:mb-5 px-1">
                   <div className="flex flex-col">
-                    <h3 className="text-lg md:text-3xl font-[1000] text-[#004b91] tracking-tighter uppercase leading-none">
+                    <h3 className="text-lg md:text-3xl font-extrabold text-[#004b91] tracking-tight uppercase leading-none">
                       Lowest Price <span className="text-[#004b91]">ever</span>
                     </h3>
                     <div className="flex items-center gap-1.5 md:gap-2 mt-1 md:mt-2">
                       <div className="h-1 w-1 md:h-1.5 md:w-1.5 bg-[#004b91] rounded-full animate-pulse" />
-                      <span className="text-[9px] md:text-[10px] font-black text-[#004b91] uppercase tracking-wider opacity-80">
+                      <span className="text-[9px] md:text-[10px] font-bold text-[#004b91] uppercase tracking-wider opacity-80">
                         Unbeatable Savings • Updated hourly
                       </span>
                     </div>
@@ -1038,15 +1105,7 @@ const Home = ({ embedded = false, onThemeChange, embeddedHeaderColor = null }) =
             </>
           )}
 
-          {embedded && (
-            <>
-              <div className="hidden md:block"><Footer /></div>
-              <div className="md:hidden">
-                <MobileFooterMessage />
-                <BottomNav />
-              </div>
-            </>
-          )}
+          {/* Duplicate Footer removed, handled by CustomerLayout */}
 
           {embedded && (
             <>
