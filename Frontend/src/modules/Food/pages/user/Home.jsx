@@ -289,15 +289,20 @@ export default function Home() {
 
   const activeBannerData = defaultBannersData;
 
+  const desktopBannerImages = useMemo(() => [
+    "/desktop-banner.png",
+    "/scooter-banner.png",
+    "/banner.png",
+    "/offer-banner.png"
+  ], []);
+
   // Auto-slide banners
   useEffect(() => {
-    if (!activeBannerImages.length) return;
     const interval = setInterval(() => {
-      setCurrentBannerIndex((prev) => (prev + 1) % activeBannerImages.length);
+      setCurrentBannerIndex((prev) => prev + 1);
     }, HERO_BANNER_AUTO_SLIDE_MS);
     return () => clearInterval(interval);
-  }, [activeBannerImages.length]);
-
+  }, []);
   // Prevent body scroll when popups are open
   useEffect(() => {
     if (showVegModePopup || showSwitchOffPopup || showAllCategoriesModal) {
@@ -395,9 +400,9 @@ export default function Home() {
       </div>
 
       {state.isBootstrapped && activeTab === "food" && (
-        <div className="relative z-10 w-full md:hidden">
+        <div className="relative z-10 w-full">
           <div
-            className="relative overflow-hidden shadow-sm pb-3.5 rounded-[20px] mx-3 sm:mx-4 mt-0"
+            className="relative overflow-hidden shadow-sm pb-3.5 rounded-[20px] md:rounded-none mx-3 sm:mx-4 md:mx-0 mt-0"
             style={{
               background: vegMode
                 ? "linear-gradient(135deg, #2e7d32 0%, #388e3c 100%)"
@@ -405,22 +410,44 @@ export default function Home() {
             }}
           >
             <Suspense fallback={<HeroBannerSkeleton className="h-[130px] w-full" />}>
-              <div className="h-[130px] sm:h-36 md:h-44 mt-0 relative z-10 w-full px-0">
-                <BannerSection
-                  showBannerSkeleton={banners.loading}
-                  heroBannerImages={activeBannerImages}
-                  heroBannersData={activeBannerData}
-                  currentBannerIndex={currentBannerIndex}
-                  setCurrentBannerIndex={setCurrentBannerIndex}
-                  heroShellRef={heroShellRef}
-                  navigate={navigate}
-                />
+              <div className="h-[130px] sm:h-36 md:h-[450px] lg:h-[500px] mt-0 relative z-10 w-full px-0">
+                {/* Mobile Slider */}
+                <div className="block md:hidden h-full w-full">
+                  <BannerSection
+                    showBannerSkeleton={banners.loading}
+                    heroBannerImages={activeBannerImages}
+                    heroBannersData={activeBannerData}
+                    currentBannerIndex={activeBannerImages.length ? currentBannerIndex % activeBannerImages.length : 0}
+                    setCurrentBannerIndex={setCurrentBannerIndex}
+                    heroShellRef={heroShellRef}
+                    navigate={navigate}
+                  />
+                </div>
+                {/* Desktop Slider */}
+                <div className="hidden md:block absolute inset-0 z-0">
+                  <BannerSection
+                    showBannerSkeleton={banners.loading}
+                    heroBannerImages={desktopBannerImages}
+                    heroBannersData={activeBannerData}
+                    currentBannerIndex={desktopBannerImages.length ? currentBannerIndex % desktopBannerImages.length : 0}
+                    setCurrentBannerIndex={setCurrentBannerIndex}
+                    heroShellRef={heroShellRef}
+                    navigate={navigate}
+                    hideOverlay={true}
+                  />
+                </div>
+                <div className="hidden md:flex absolute inset-0 flex-col items-center justify-center text-white text-center z-10 px-4 mt-[-60px] pointer-events-none">
+                  <h1 className="text-3xl lg:text-4xl font-bold mb-3 drop-shadow-md">
+                    Order food & groceries <br /> from your favourite restaurants.
+                  </h1>
+                  <p className="text-xl lg:text-2xl font-bold drop-shadow-md">Blaze It! 🔥</p>
+                </div>
               </div>
             </Suspense>
 
             {/* Banner Search and Location */}
-            <div className="px-4 pt-0 -mt-2 relative z-20">
-              <div className="flex w-full items-center bg-white rounded-full shadow-md overflow-hidden relative pr-2">
+            <div className="px-4 pt-0 -mt-2 relative z-20 md:hidden md:max-w-3xl md:mx-auto md:pb-8 md:-mt-16">
+              <div className="flex w-full items-center bg-white rounded-full shadow-lg overflow-hidden relative pr-2 border border-gray-100">
                 {/* Location */}
                 <button
                   type="button"
@@ -457,7 +484,7 @@ export default function Home() {
 
       {/* TABS SECTION / CARDS SECTION */}
       {activeTab === "food" && (
-        <div className="grid grid-cols-3 gap-2 px-3 py-2 sm:px-4 sm:py-2.5 md:hidden">
+        <div className="grid grid-cols-3 md:flex md:justify-center gap-2 md:gap-4 px-3 py-3 sm:px-4 sm:py-4 mx-auto w-full max-w-7xl relative z-20">
           {tabs.map((tab) => {
           const isActive = activeTab === tab.id;
           const handleTabIntent = () => {
@@ -481,61 +508,80 @@ export default function Home() {
               onTouchStart={handleTabIntent}
               onFocus={handleTabIntent}
               className={cn(
-                "relative rounded-[16px] border p-2 sm:p-2.5 flex flex-col justify-between overflow-hidden shadow-sm transition-all duration-300 text-left h-[85px] min-[380px]:h-[95px]",
+                "relative border overflow-hidden shadow-sm transition-all duration-300 text-left w-full",
+                "rounded-[16px] h-[85px] min-[380px]:h-[95px] p-2 sm:p-2.5",
+                "md:rounded-[20px] md:h-[120px] md:w-[280px] md:p-0",
                 isActive 
-                  ? "bg-red-50/80 border-red-200 shadow-sm scale-[1.02]" 
+                  ? "bg-rose-50/80 border-rose-200 shadow-sm scale-[1.02]" 
                   : tab.id === "quick"
-                  ? "bg-orange-50/60 border-orange-100 hover:bg-orange-50 hover:border-orange-200 hover:shadow-md hover:scale-[1.01]"
+                  ? "bg-amber-50/60 border-amber-100 hover:bg-amber-50 hover:border-amber-200 hover:shadow-md hover:scale-[1.01]"
                   : tab.id === "porter"
                   ? "bg-blue-50/60 border-blue-100 hover:bg-blue-50 hover:border-blue-200 hover:shadow-md hover:scale-[1.01]"
-                  : "bg-white border-gray-200 hover:border-gray-300 hover:shadow-md hover:scale-[1.01]"
+                  : "bg-white border-gray-100 hover:border-gray-200 hover:shadow-md hover:scale-[1.01]"
               )}
             >
-              {/* Top content */}
-              <div className="flex gap-1.5 w-full items-start z-10">
-                <div className="bg-[#FF0000] text-white rounded-full p-1 shrink-0 flex items-center justify-center h-[20px] w-[20px] mt-0.5">
-                  <tab.icon className="h-3 w-3" strokeWidth={2.5} />
+              {/* MOBILE CONTENT (Original Layout) */}
+              <div className="flex flex-col justify-between h-full md:hidden">
+                {/* Top content */}
+                <div className="flex gap-1.5 w-full items-start z-10">
+                  <div className="bg-[#FF0000] text-white rounded-full p-1 shrink-0 flex items-center justify-center h-[20px] w-[20px] mt-0.5">
+                    <tab.icon className="h-3 w-3" strokeWidth={2.5} />
+                  </div>
+                  <div className="flex flex-col min-w-0 mt-0.5">
+                    <span className="text-[9.5px] min-[380px]:text-[10.5px] sm:text-[12px] font-bold text-gray-900 leading-tight truncate">
+                      {tab.title}
+                    </span>
+                    <p className="text-[7px] sm:text-[8px] font-medium text-gray-500 uppercase tracking-tight mt-0.5 truncate">
+                      {tab.subtitle}
+                    </p>
+                  </div>
                 </div>
-                <div className="flex flex-col min-w-0 mt-0.5">
-                  <span className="text-[9.5px] min-[380px]:text-[10.5px] sm:text-[12px] font-bold text-gray-900 leading-tight truncate">
-                    {tab.title}
-                  </span>
-                  <p className="text-[7px] sm:text-[8px] font-medium text-gray-500 uppercase tracking-tight mt-0.5 truncate">
-                    {tab.subtitle}
-                  </p>
+
+                {/* Bottom content: arrow and image */}
+                <div className="mt-1 flex items-end justify-between w-full z-10">
+                  <div className="bg-[#FF0000] text-white rounded-full p-1 shrink-0 flex items-center justify-center h-4 w-4 shadow-sm mb-0.5">
+                    <ArrowRight className="h-2.5 w-2.5" strokeWidth={3} />
+                  </div>
+                  <div className="absolute right-[-4px] bottom-[-4px] w-[55px] h-[55px] min-[380px]:w-[65px] min-[380px]:h-[65px] pointer-events-none">
+                    <img src={tab.image} className="w-full h-full object-contain mix-blend-multiply" alt={tab.title} />
+                  </div>
                 </div>
               </div>
 
-              {/* Bottom content: arrow and image */}
-              <div className="mt-1 flex items-end justify-between w-full z-10">
-                <div className="bg-[#FF0000] text-white rounded-full p-1 shrink-0 flex items-center justify-center h-4 w-4 shadow-sm mb-0.5">
-                  <ArrowRight className="h-2.5 w-2.5" strokeWidth={3} />
+              {/* DESKTOP CONTENT (New Layout) */}
+              <div className="hidden md:flex justify-between h-full w-full p-4">
+                {/* Left Content (Text and Arrow) */}
+                <div className="flex flex-col justify-between h-full z-10 w-[65%]">
+                  {/* Icon + Text */}
+                  <div className="flex items-start gap-2">
+                    <div className="bg-[#FF0000] text-white rounded-full p-1.5 shrink-0 flex items-center justify-center md:h-[28px] md:w-[28px]">
+                      <tab.icon className="md:h-4 md:w-4" strokeWidth={2.5} />
+                    </div>
+                    <div className="flex flex-col min-w-0">
+                      <span className="md:text-[15px] font-extrabold text-gray-900 leading-tight truncate tracking-tight">
+                        {tab.title}
+                      </span>
+                      <p className="md:text-[9px] font-bold text-gray-500 uppercase tracking-wider mt-0.5 truncate">
+                        {tab.subtitle}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Arrow Button */}
+                  <div className="bg-[#FF0000] text-white rounded-full shrink-0 flex items-center justify-center md:h-6 md:w-6 shadow-sm">
+                    <ArrowRight className="md:h-3.5 md:w-3.5" strokeWidth={3} />
+                  </div>
                 </div>
-                <div className="absolute right-[-4px] bottom-[-4px] w-[55px] h-[55px] min-[380px]:w-[65px] min-[380px]:h-[65px] pointer-events-none">
-                  <img src={tab.image} className="w-full h-full object-contain mix-blend-multiply" alt={tab.title} />
+
+                {/* Right Content (Image) */}
+                <div className="absolute right-0 bottom-0 top-0 md:w-[45%] pointer-events-none flex items-end justify-end md:pr-4 md:pb-2">
+                  <img src={tab.image} className="md:w-[100px] md:h-[100px] object-contain mix-blend-multiply" alt={tab.title} />
                 </div>
               </div>
             </button>
           );
         })}
       </div>
-      )}
-
-      {activeTab === "food" && (
-        <Suspense fallback={<HeroBannerSkeleton className="hidden h-72 w-full md:block" />}>
-          <HomeDesktopHero
-            showBannerSkeleton={banners.loading}
-            heroBannerImages={banners.images?.length ? banners.images : activeBannerImages}
-            heroBannersData={activeBannerData}
-            currentBannerIndex={currentBannerIndex}
-            setCurrentBannerIndex={setCurrentBannerIndex}
-            heroShellRef={heroShellRef}
-            navigate={navigate}
-            backendOrigin={BACKEND_ORIGIN}
-            handleVegModeChange={handleVegModeChange}
-            isVegMode={Boolean(vegMode)}
-          />
-        </Suspense>
       )}
 
       <div className={activeTab === "food" ? "relative mx-auto w-full max-w-7xl md:px-4 lg:px-8" : "hidden"}>
@@ -563,21 +609,36 @@ export default function Home() {
               />
             </Suspense>
 
-            <Suspense fallback={<HeroBannerSkeleton className="h-full w-full px-4 mt-3 md:hidden" />}>
+            <Suspense fallback={<HeroBannerSkeleton className="h-full w-full px-4 mt-3" />}>
               {(banners.loading || (banners.images && banners.images.length > 0)) && (
-                <section className="content-auto px-4 py-2 sm:py-3 md:hidden lg:py-6">
-                  <div className="overflow-hidden rounded-[20px] h-48 sm:h-64 md:h-72 lg:h-[350px] shadow-lg border border-gray-100">
+                <section className="content-auto px-4 py-2 sm:py-3 lg:py-6 max-w-7xl mx-auto">
+                  {/* Mobile Slider */}
+                  <div className="block md:hidden overflow-hidden rounded-[20px] h-48 sm:h-64 shadow-lg border border-gray-100">
                     <BannerSection
                       showBannerSkeleton={banners.loading}
                       heroBannerImages={banners.images}
                       heroBannersData={banners.data}
-                      currentBannerIndex={currentBannerIndex}
+                      currentBannerIndex={banners.images?.length ? currentBannerIndex % banners.images.length : 0}
                       setCurrentBannerIndex={setCurrentBannerIndex}
                       heroShellRef={heroShellRef}
                       navigate={navigate}
                       backendOrigin={BACKEND_ORIGIN}
                       hideOverlay={true}
                     />
+                  </div>
+                  {/* Desktop Banners (Side-by-side Row) */}
+                  <div className="hidden md:flex w-full overflow-x-auto snap-x gap-4 px-2 pb-4 items-center scrollbar-hide" style={{ scrollBehavior: 'smooth' }}>
+                    {(banners.images || []).map((img, i) => (
+                      <div key={i} className="min-w-[calc(33.333%-10.66px)] snap-start rounded-[20px] overflow-hidden relative shadow-sm aspect-[21/9] group hover:shadow-md transition-shadow cursor-pointer">
+                         <OptimizedImage
+                            src={img}
+                            alt={`Promo Banner ${i+1}`}
+                            className="w-full h-full group-hover:scale-105 transition-transform duration-500"
+                            objectFit="cover"
+                            backendOrigin={BACKEND_ORIGIN}
+                         />
+                      </div>
+                    ))}
                   </div>
                 </section>
               )}

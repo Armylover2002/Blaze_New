@@ -1,4 +1,4 @@
-import { Link, useLocation } from "react-router-dom"
+import { Link, useLocation, useNavigate } from "react-router-dom"
 import { useState, useEffect } from "react"
 import { ArrowLeft, ArrowRight, Heart, Users, Shield, Clock, Star, Award, FileText, Lock, Loader2, Receipt, Truck, XCircle } from "lucide-react"
 import { motion } from "framer-motion"
@@ -28,16 +28,18 @@ const iconMap = {
 
 export default function About() {
   const location = useLocation()
+  const navigate = useNavigate()
   const companyName = useCompanyName()
   const isSharedProfile = location.pathname.startsWith("/profile")
   const profileSource = new URLSearchParams(location.search).get("from")
   const sharedSourceQuery = profileSource ? `?from=${profileSource}` : ""
-  const profileHomePath = isSharedProfile ? `/profile${sharedSourceQuery}` : "/user/profile"
-  const termsPath = isSharedProfile ? `/profile/terms${sharedSourceQuery}` : "/user/profile/terms"
-  const privacyPath = isSharedProfile ? `/profile/privacy${sharedSourceQuery}` : "/user/profile/privacy"
-  const refundPath = isSharedProfile ? `/profile/refund${sharedSourceQuery}` : "/user/profile/refund"
-  const shippingPath = isSharedProfile ? `/profile/shipping${sharedSourceQuery}` : "/user/profile/shipping"
-  const cancellationPath = isSharedProfile ? `/profile/cancellation${sharedSourceQuery}` : "/user/profile/cancellation"
+  const basePath = location.pathname.substring(0, location.pathname.lastIndexOf('/')) || '/user/profile';
+  const profileHomePath = isSharedProfile ? `/profile${sharedSourceQuery}` : basePath;
+  const termsPath = isSharedProfile ? `/profile/terms${sharedSourceQuery}` : `${basePath}/terms`;
+  const privacyPath = isSharedProfile ? `/profile/privacy${sharedSourceQuery}` : `${basePath}/privacy`;
+  const refundPath = isSharedProfile ? `/profile/refund${sharedSourceQuery}` : `${basePath}/refund`;
+  const shippingPath = isSharedProfile ? `/profile/shipping${sharedSourceQuery}` : `${basePath}/shipping`;
+  const cancellationPath = isSharedProfile ? `/profile/cancellation${sharedSourceQuery}` : `${basePath}/cancellation`;
   const [loading, setLoading] = useState(true)
   const [logoUrl, setLogoUrl] = useState(null)
   const [aboutData, setAboutData] = useState({
@@ -92,11 +94,9 @@ export default function About() {
       <div className="max-w-4xl mx-auto px-4 md:px-6 lg:px-8 py-6 md:py-8">
         {/* Header */}
         <div className="flex items-center gap-3 md:gap-4 mb-6 md:mb-8">
-          <Link to={profileHomePath}>
-            <Button variant="ghost" size="icon" className="h-9 w-9 md:h-10 md:w-10 p-0 hover:bg-gray-100 dark:hover:bg-gray-800">
-              <ArrowLeft className="h-5 w-5 md:h-6 md:w-6 text-gray-900 dark:text-white" />
-            </Button>
-          </Link>
+          <Button onClick={() => navigate(-1)} variant="ghost" size="icon" className="h-9 w-9 md:h-10 md:w-10 p-0 hover:bg-gray-100 dark:hover:bg-gray-800">
+            <ArrowLeft className="h-5 w-5 md:h-6 md:w-6 text-gray-900 dark:text-white" />
+          </Button>
           <h1 className="text-2xl md:text-3xl lg:text-4xl font-bold text-gray-900 dark:text-white">About</h1>
         </div>
 

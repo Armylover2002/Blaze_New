@@ -121,7 +121,7 @@ export default function RestaurantMenuSections({
                           </div>
                         )}
                         {isExpanded && sectionItems.length > 0 && (
-                          <div className="grid grid-cols-2 gap-3 sm:gap-4 px-1 pb-2">
+                          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-4 px-1 pb-2">
                             {sectionItems.map((item) => renderDishCard(item))}
                           </div>
                         )}
@@ -165,7 +165,7 @@ export default function RestaurantMenuSections({
       
                                   {/* Subsection Items */}
                                   {isSubsectionExpanded && subsectionItems.length > 0 && (
-                                    <div className="grid grid-cols-2 gap-3 sm:gap-4 px-1 pb-2">
+                                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-4 px-1 pb-2">
                                       {subsectionItems.map((item) => renderDishCard(item))}
                                     </div>
                                   )}

@@ -2496,7 +2496,7 @@ return (
     </div>
 
     {/* Scrollable Content Area */}
-    <div className="flex-1 overflow-y-auto overflow-x-hidden pb-28 md:pb-32">
+    <div className="flex-1 overflow-y-auto overflow-x-hidden pb-28 md:pb-6">
       {/* Offline Banner */}
       {isOffline && (
         <div className="bg-red-500 text-white px-4 py-2 text-center text-sm font-medium z-50 animate-fadeIn">
@@ -3393,11 +3393,11 @@ return (
 
     {/* Bottom Sticky - Place Order */}
     <div
-      className="bg-white dark:bg-[#1a1a1a] border-t dark:border-gray-800 shadow-lg z-30 flex-shrink-0 fixed bottom-0 left-0 right-0"
+      className="bg-white dark:bg-[#1a1a1a] md:bg-transparent border-t dark:border-gray-800 md:border-t-0 shadow-lg md:shadow-none z-30 flex-shrink-0 fixed md:static bottom-0 left-0 right-0 w-full"
       style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
     >
       <div className="max-w-7xl mx-auto px-4 md:px-6 py-3 md:py-4">
-        <div className="w-full max-w-lg mx-auto space-y-3">
+        <div className="w-full max-w-3xl mx-auto space-y-3">
           {/* Pay Using - Slim Pro UI */}
           <div
             className="flex items-center justify-between p-2 bg-gray-50 dark:bg-[#222222] rounded-xl border border-gray-100 dark:border-gray-800 cursor-pointer hover:bg-gray-100 dark:hover:bg-[#282828] active:scale-[0.98] transition-all duration-200 shadow-sm"

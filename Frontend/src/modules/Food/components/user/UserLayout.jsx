@@ -13,6 +13,7 @@ const debugError = (...args) => {}
 import SearchOverlay from "./SearchOverlay"
 import BottomNavigation from "./BottomNavigation"
 import DesktopNavbar from "./DesktopNavbar"
+import QuickFooter from "@/modules/quickCommerce/user/components/layout/Footer"
 import QuickBottomNav from "@/modules/quickCommerce/user/components/layout/BottomNav"
 import PorterBottomNav from "@/modules/porter/user/components/layout/BottomNav"
 import { useUserNotifications } from "../../hooks/useUserNotifications"
@@ -160,6 +161,12 @@ export default function UserLayout({ children }) {
   const isUnder250 = normalizedPath === "/under-250" || normalizedPath === "/user/under-250"
   const showFoodBottomNav = showBottomNav && !isSharedQuickProfile && !isSharedPorterProfile
 
+  const footerColor = location.pathname.startsWith("/porter")
+    ? "#2563EB"
+    : location.pathname.startsWith("/quick")
+    ? "#ea580c"
+    : "#FF0000"
+
   return (
     <div className="min-h-screen bg-[#f5f5f5] dark:bg-[#0a0a0a] transition-colors duration-200">
       <CartProvider>
@@ -170,15 +177,19 @@ export default function UserLayout({ children }) {
                 <LocationSelectorProvider>
                   <LocationProvider>
                   {/* <Navbar /> */}
-                  {/* Desktop Navbar - Hidden on mobile, visible on medium+ screens */}
                   <div className="hidden md:block">
-                    {showFoodBottomNav && <DesktopNavbar showLogo={true} />}
+                    {(!isSharedQuickProfile && !isSharedPorterProfile) && <DesktopNavbar showLogo={true} />}
                   </div>
                   <LocationPrompt />
-                  <main className={showFoodBottomNav ? "md:pt-[8.75rem]" : ""}>
+                  <main className={(!isSharedQuickProfile && !isSharedPorterProfile) ? "md:pt-[5.5rem] flex-1" : "flex-1"}>
                     {children || <Outlet />}
                   </main>
-                  {showFoodBottomNav && <BottomNavigation />}
+                  <div className="hidden md:block w-full">
+                    {(!isSharedQuickProfile && !isSharedPorterProfile) && <QuickFooter themeColor={footerColor} />}
+                  </div>
+                  <div className="block md:hidden">
+                    {showFoodBottomNav && <BottomNavigation />}
+                  </div>
                   {isSharedQuickProfile && <QuickBottomNav />}
                   {isSharedPorterProfile && <PorterBottomNav />}
                   </LocationProvider>

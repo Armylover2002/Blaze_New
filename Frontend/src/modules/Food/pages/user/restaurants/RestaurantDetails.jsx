@@ -1207,20 +1207,20 @@ function RestaurantDetailsContent() {
         
         if (isPureVegRest && section?.foodTypeScope?.toLowerCase() === "non-veg") return null
 
-        let validItems = Array.isArray(section?.items) ? section.items : []
-        let validSubsections = Array.isArray(section?.subsections) ? section.subsections : []
+        let validItems = toRenderableArray(section?.items)
+        let validSubsections = toRenderableArray(section?.subsections)
 
         if (isPureVegRest) {
           validItems = validItems.filter(item => item?.foodType?.toLowerCase() !== "non-veg")
           validSubsections = validSubsections.map(sub => ({
             ...sub,
-            items: Array.isArray(sub?.items) ? sub.items.filter(item => item?.foodType?.toLowerCase() !== "non-veg") : []
+            items: toRenderableArray(sub?.items).filter(item => item?.foodType?.toLowerCase() !== "non-veg")
           }))
         }
 
         const sectionTitle = getSectionDisplayName(section)
         const itemCount = validItems.length
-        const subsectionCount = validSubsections.reduce((sum, sub) => sum + (Array.isArray(sub?.items) ? sub.items.length : 0), 0)
+        const subsectionCount = validSubsections.reduce((sum, sub) => sum + toRenderableArray(sub?.items).length, 0)
         const totalCount = itemCount + subsectionCount
 
         if (totalCount <= 0) return null
@@ -2018,6 +2018,13 @@ function RestaurantDetailsContent() {
         setFilters={setFilters}
         vegMode={vegMode}
         activeFilterCount={activeFilterCount}
+        onCategoryClick={(sectionIndex) => {
+          setExpandedSections((prev) => {
+            const newSet = new Set(prev)
+            newSet.add(sectionIndex)
+            return newSet
+          })
+        }}
         showLocationSheet={showLocationSheet}
         setShowLocationSheet={setShowLocationSheet}
         restaurant={restaurant}
