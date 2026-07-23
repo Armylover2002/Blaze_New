@@ -24,7 +24,7 @@ export default function EmergencyContacts() {
       title="Emergency contacts"
       subtitle="Notified when SOS is triggered"
       right={
-        <button type="button" onClick={() => setSheetOpen(true)} className="flex h-9 w-9 items-center justify-center rounded-full bg-[#FFF1F1] text-[#FF0000]">
+        <button type="button" onClick={() => setSheetOpen(true)} className="flex h-9 w-9 items-center justify-center rounded-full bg-[#EFF6FF] text-[#2563EB]">
           <Plus className="h-5 w-5" />
         </button>
       }
@@ -36,15 +36,15 @@ export default function EmergencyContacts() {
       <div className="space-y-2">
         {contacts.map((c) => (
           <div key={c.id} className="flex items-center gap-3 rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
-            <div className="flex h-11 w-11 items-center justify-center rounded-full bg-[#FFF1F1]">
-              <User className="h-5 w-5 text-[#FF0000]" />
+            <div className="flex h-11 w-11 items-center justify-center rounded-full bg-[#EFF6FF]">
+              <User className="h-5 w-5 text-[#2563EB]" />
             </div>
             <div className="min-w-0 flex-1">
               <p className="text-[14px] font-bold text-gray-900">{c.name}</p>
               <p className="text-[12px] text-gray-500">{c.relation} · {c.phone}</p>
             </div>
             <a href={`tel:${c.phone.replace(/\s/g, "")}`} className="flex h-9 w-9 items-center justify-center rounded-full bg-gray-100">
-              <Phone className="h-4 w-4 text-[#FF0000]" />
+              <Phone className="h-4 w-4 text-[#2563EB]" />
             </a>
             <button type="button" onClick={() => removeContact(c.id)} className="flex h-8 w-8 items-center justify-center rounded-full bg-gray-50 text-gray-400">
               <Trash2 className="h-4 w-4" />
@@ -59,20 +59,20 @@ export default function EmergencyContacts() {
             value={form.name}
             onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
             placeholder="Contact name"
-            className="w-full rounded-2xl border border-gray-200 px-4 py-3 text-[14px] font-medium outline-none focus:border-[#FF0000]"
+            className="w-full rounded-2xl border border-gray-200 px-4 py-3 text-[14px] font-medium outline-none focus:border-[#2563EB]"
           />
           <input
             value={form.phone}
             onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
             placeholder="Phone number"
             inputMode="tel"
-            className="w-full rounded-2xl border border-gray-200 px-4 py-3 text-[14px] font-medium outline-none focus:border-[#FF0000]"
+            className="w-full rounded-2xl border border-gray-200 px-4 py-3 text-[14px] font-medium outline-none focus:border-[#2563EB]"
           />
           <input
             value={form.relation}
             onChange={(e) => setForm((f) => ({ ...f, relation: e.target.value }))}
             placeholder="Relation (e.g. Family, Friend)"
-            className="w-full rounded-2xl border border-gray-200 px-4 py-3 text-[14px] font-medium outline-none focus:border-[#FF0000]"
+            className="w-full rounded-2xl border border-gray-200 px-4 py-3 text-[14px] font-medium outline-none focus:border-[#2563EB]"
           />
           <PrimaryButton onClick={addContact}>Save contact</PrimaryButton>
         </div>

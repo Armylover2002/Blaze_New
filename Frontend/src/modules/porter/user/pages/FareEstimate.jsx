@@ -93,7 +93,7 @@ export default function FareEstimate() {
         </div>
         <div className="mb-3 ml-1.5 h-4 border-l-2 border-dashed border-gray-200" />
         <div className="flex items-start gap-2">
-          <Navigation className="mt-0.5 h-4 w-4 shrink-0 text-[#FF0000]" />
+          <Navigation className="mt-0.5 h-4 w-4 shrink-0 text-[#2563EB]" />
           <div>
             <p className="text-[11px] font-bold uppercase text-gray-400">Delivery</p>
             <p className="text-[13px] font-bold text-gray-900">{delivery?.title}</p>
@@ -105,14 +105,14 @@ export default function FareEstimate() {
       <SectionLabel>Parcel Details</SectionLabel>
       <div className="mb-4 rounded-2xl border border-gray-100 bg-white p-4 space-y-3">
         <div className="flex items-center gap-3">
-          <FileText className="h-4 w-4 text-[#FF0000]" />
+          <FileText className="h-4 w-4 text-[#2563EB]" />
           <div>
             <p className="text-[13px] font-bold text-gray-900">{parcel.parcelName || "N/A"}</p>
             {parcel.parcelDescription && <p className="text-[12px] text-gray-500">{parcel.parcelDescription}</p>}
           </div>
         </div>
         <div className="flex items-center gap-3">
-          <Scale className="h-4 w-4 text-[#FF0000]" />
+          <Scale className="h-4 w-4 text-[#2563EB]" />
           <p className="text-[13px] font-medium text-gray-900">{parcel.weightKg * parcel.quantity} kg (Total Weight)</p>
         </div>
         <div className="flex items-center gap-3">
@@ -139,7 +139,7 @@ export default function FareEstimate() {
           className="flex w-full items-center justify-between rounded-2xl border border-gray-100 bg-white p-3 shadow-sm"
         >
           <div className="flex items-center gap-2">
-            <Calendar className="h-4 w-4 text-[#FF0000]" />
+            <Calendar className="h-4 w-4 text-[#2563EB]" />
             <span className="text-[14px] font-bold text-gray-900">
               {scheduledAt
                 ? `Scheduled: ${new Date(scheduledAt).toLocaleString("en-IN")}`
@@ -154,7 +154,7 @@ export default function FareEstimate() {
           className="flex w-full items-center justify-between rounded-2xl border border-gray-100 bg-white p-3 shadow-sm"
         >
           <div className="flex items-center gap-2">
-            <Tag className="h-4 w-4 text-[#FF0000]" />
+            <Tag className="h-4 w-4 text-[#2563EB]" />
             <span className="text-[14px] font-bold text-gray-900">
               {coupon ? coupon.code : "Apply Promo Code"}
             </span>
@@ -172,7 +172,7 @@ export default function FareEstimate() {
             onClick={() => setPaymentMethodId(m.id)}
             className={`flex w-full items-center justify-between rounded-2xl border p-3 transition ${
               paymentMethodId === m.id
-                ? "border-[#FF0000] bg-[#FFF1F1]"
+                ? "border-[#2563EB] bg-[#EFF6FF]"
                 : "border-gray-100 bg-white"
             }`}
           >
@@ -182,7 +182,7 @@ export default function FareEstimate() {
                 <div className="flex items-center gap-2">
                   <p className="text-[14px] font-bold text-gray-900">{m.label}</p>
                   {m.recommended && (
-                    <span className="rounded-full bg-[#FF0000] px-2 py-0.5 text-[9px] font-bold text-white">Recommended</span>
+                    <span className="rounded-full bg-[#2563EB] px-2 py-0.5 text-[9px] font-bold text-white">Recommended</span>
                   )}
                 </div>
                 <p className="text-[11px] text-gray-500">
@@ -193,7 +193,7 @@ export default function FareEstimate() {
               </div>
             </div>
             {paymentMethodId === m.id && (
-              <div className="flex h-5 w-5 items-center justify-center rounded-full bg-[#FF0000] text-white">
+              <div className="flex h-5 w-5 items-center justify-center rounded-full bg-[#2563EB] text-white">
                 <Check className="h-3 w-3" />
               </div>
             )}

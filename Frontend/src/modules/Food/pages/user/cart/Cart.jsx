@@ -2496,7 +2496,7 @@ return (
     </div>
 
     {/* Scrollable Content Area */}
-    <div className="flex-1 overflow-y-auto overflow-x-hidden pb-28 md:pb-32">
+    <div className="flex-1 overflow-y-auto overflow-x-hidden pb-28 md:pb-6">
       {/* Offline Banner */}
       {isOffline && (
         <div className="bg-red-500 text-white px-4 py-2 text-center text-sm font-medium z-50 animate-fadeIn">
@@ -2506,10 +2506,10 @@ return (
 
       {/* Savings Banner */}
       {otherPlatformSavings > 0 && (
-        <div className="bg-red-100 dark:bg-red-900/20 px-4 md:px-6 py-2 md:py-3 flex-shrink-0 border-b border-red-200 dark:border-red-800/30">
+        <div className="bg-emerald-50 dark:bg-emerald-900/20 px-4 md:px-6 py-2.5 flex-shrink-0 border-b border-emerald-100 dark:border-emerald-800/30">
           <div className="max-w-7xl mx-auto flex items-center gap-2">
-            <Sparkles className="w-4 h-4 text-[#FF0000] dark:text-red-400" />
-            <p className="text-sm md:text-base font-bold text-[#FF0000] dark:text-red-200">
+            <Sparkles className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+            <p className="text-[13px] font-bold text-emerald-700 dark:text-emerald-300">
               You're saving {RUPEE_SYMBOL}{Math.round(otherPlatformSavings)} compared to other platforms!
             </p>
           </div>
@@ -2571,18 +2571,18 @@ return (
                       onClick={(e) => e.stopPropagation()}
                     >
                       {/* Quantity controls */}
-                      <div className="flex items-center border border-[#FF0000] dark:border-[#FF0000]/50 rounded">
+                      <div className="flex items-center bg-white dark:bg-[#222] rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden h-8">
                         <button
-                          className="px-2 md:px-3 py-1 text-[#FF0000] dark:text-[#FF0000] hover:bg-red-50 dark:hover:bg-[#FF0000]/10"
+                          className="w-8 h-full flex items-center justify-center text-[#FF0000] hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
                           onClick={() => updateQuantity(item.id, item.quantity - 1)}
                         >
                           <Minus className="h-3 w-3 md:h-4 md:w-4" />
                         </button>
-                        <span className="px-2 md:px-3 text-sm md:text-base font-semibold text-[#FF0000] dark:text-[#FF0000] min-w-[20px] md:min-w-[24px] text-center">
+                        <span className="w-6 text-[13px] font-bold text-gray-800 dark:text-gray-200 text-center">
                           {item.quantity}
                         </span>
                         <button
-                          className="px-2 md:px-3 py-1 text-[#FF0000] dark:text-[#FF0000] hover:bg-red-50 dark:hover:bg-[#FF0000]/10"
+                          className="w-8 h-full flex items-center justify-center text-[#FF0000] hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
                           onClick={() => {
                             let itemWithVariants = item;
                             if (!hasFoodVariants(item) && item.variantId && menuData) {
@@ -2649,38 +2649,21 @@ return (
             </div>
 
             {/* Delivery Time */}
-            <div className="relative overflow-hidden rounded-3xl border border-red-200/80 bg-[linear-gradient(135deg,#fff7ed_0%,#ffffff_52%,#fef2f2_100%)] px-4 py-5 shadow-[0_16px_50px_rgba(235,89,14,0.12)] dark:border-red-900/50 dark:bg-[linear-gradient(135deg,rgba(60,24,10,0.92)_0%,rgba(26,26,26,0.98)_48%,rgba(58,16,23,0.92)_100%)] md:px-6">
-              <div className="pointer-events-none absolute -right-12 -top-14 h-40 w-40 rounded-full bg-red-200/50 blur-3xl dark:bg-red-500/10" />
-              <div className="pointer-events-none absolute -left-10 bottom-0 h-24 w-24 rounded-full bg-rose-200/60 blur-2xl dark:bg-rose-500/10" />
-
-              <div className="relative flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
-                <div className="flex items-start gap-4">
-                  <div className="mt-1 flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-[#FF0000] to-[#FF0000] text-white shadow-lg shadow-red-500/25">
-                    <Zap className="h-5 w-5" />
+            <div className="relative overflow-hidden rounded-2xl md:rounded-3xl border border-gray-100 bg-white p-4 md:p-6 shadow-sm dark:border-gray-800 dark:bg-[#1a1a1a]">
+              <div className="relative flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                <div className="flex items-start gap-3 md:gap-4">
+                  <div className="mt-0.5 flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-gray-50 text-gray-700 border border-gray-100 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-700">
+                    <Clock className="h-5 w-5" />
                   </div>
                   <div className="flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="rounded-full border border-red-200 bg-white/80 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.22em] text-[#FF0000] shadow-sm dark:border-red-800/60 dark:bg-white/10">
-                        Express Delivery
-                      </span>
-                      <span className="rounded-full bg-red-100 px-2.5 py-1 text-[11px] font-semibold text-[#FF0000] dark:bg-red-500/15 dark:text-red-300">
-                        Fastest rider route
-                      </span>
-                    </div>
-
-                    <p className="mt-3 text-lg font-bold tracking-tight text-gray-900 dark:text-white md:text-xl">
-                      Delivery in <span className="text-[#FF0000]">
-                        {calculatedDeliveryTime}
-                      </span>
+                    <p className="text-[15px] md:text-base font-bold text-gray-900 dark:text-white">
+                      Delivery in {calculatedDeliveryTime}
                     </p>
-                    <p className="mt-1 max-w-xl text-sm leading-6 text-gray-600 dark:text-gray-300">
-                      We prioritize your order, match the nearest available rider, and keep the handoff moving smoothly.
+                    <p className="text-[13px] md:text-sm text-gray-500 dark:text-gray-400 mt-0.5">
+                      Standard delivery to your location
                     </p>
 
-                    <div className="mt-4 flex flex-wrap items-center gap-2">
-                      <div className="rounded-2xl border border-red-200/70 bg-white/85 px-3 py-2 text-xs font-medium text-gray-700 shadow-sm dark:border-red-900/50 dark:bg-white/10 dark:text-gray-200">
-                        Live prep to doorstep flow
-                      </div>
+                    <div className="mt-3">
                       <button
                         type="button"
                         onClick={() => {
@@ -2692,23 +2675,11 @@ return (
                             setDeliveryType("standard")
                           }
                         }}
-                        className="rounded-2xl border border-dashed border-[#FF0000]/60 bg-[#FFF2EB] px-3 py-2 text-xs font-bold text-[#FF0000] transition-colors hover:bg-[#ffe6d8] dark:bg-[#FF0000]/10 dark:hover:bg-[#FF0000]/20"
+                        className="text-[13px] font-semibold text-[#FF0000] hover:underline"
                       >
-                        {isScheduled ? "Switch back to express now" : "Want this later? Schedule it"}
+                        {isScheduled ? "Switch to standard delivery" : "Schedule for later"}
                       </button>
                     </div>
-                  </div>
-                </div>
-
-                <div className="relative mx-auto w-full max-w-[220px] flex-shrink-0 md:mx-0">
-                  <div className="absolute inset-x-6 bottom-2 h-10 rounded-full bg-red-300/40 blur-2xl dark:bg-red-500/20" />
-                  <div className="relative overflow-hidden rounded-[28px] border border-white/70 bg-white/75 p-2 shadow-xl backdrop-blur-sm dark:border-white/10 dark:bg-white/5">
-                    <img
-                      src={deliveryBoyGif}
-                      alt="Express delivery rider"
-                      className="h-40 w-full rounded-[22px] object-cover object-center md:h-44"
-                      loading="lazy"
-                    />
                   </div>
                 </div>
               </div>
@@ -3422,11 +3393,11 @@ return (
 
     {/* Bottom Sticky - Place Order */}
     <div
-      className="bg-white dark:bg-[#1a1a1a] border-t dark:border-gray-800 shadow-lg z-30 flex-shrink-0 fixed bottom-0 left-0 right-0"
+      className="bg-white dark:bg-[#1a1a1a] md:bg-transparent border-t dark:border-gray-800 md:border-t-0 shadow-lg md:shadow-none z-30 flex-shrink-0 fixed md:static bottom-0 left-0 right-0 w-full"
       style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
     >
       <div className="max-w-7xl mx-auto px-4 md:px-6 py-3 md:py-4">
-        <div className="w-full max-w-lg mx-auto space-y-3">
+        <div className="w-full max-w-3xl mx-auto space-y-3">
           {/* Pay Using - Slim Pro UI */}
           <div
             className="flex items-center justify-between p-2 bg-gray-50 dark:bg-[#222222] rounded-xl border border-gray-100 dark:border-gray-800 cursor-pointer hover:bg-gray-100 dark:hover:bg-[#282828] active:scale-[0.98] transition-all duration-200 shadow-sm"
@@ -3715,8 +3686,8 @@ return (
 
               <div className="flex items-center justify-between mb-5">
                 <div>
-                  <h2 className="text-xl font-bold text-gray-900 dark:text-white leading-none">Payment Method</h2>
-                  <p className="text-[11px] font-bold text-gray-400 uppercase tracking-tighter mt-1">Select how you want to pay</p>
+                  <h2 className="text-lg font-bold text-gray-900 dark:text-white leading-none">Payment Method</h2>
+                  <p className="text-[13px] font-medium text-gray-500 mt-1.5">Select how you want to pay</p>
                 </div>
                 <button
                   onClick={() => setShowPaymentSheet(false)}
@@ -3736,43 +3707,43 @@ return (
                         setShowPaymentSheet(false)
                       }
                     }}
-                    className={`w-full flex items-center justify-between p-4 rounded-2xl border-2 transition-all duration-300 group ${selectedPaymentMethod === option.id
-                      ? 'border-[#FF0000] bg-[#FF0000] shadow-lg shadow-red-500/30'
-                      : 'border-gray-100 dark:border-gray-800/80 bg-white dark:bg-[#222222] hover:border-red-200 dark:hover:border-red-900/30 shadow-sm'
+                    className={`w-full flex items-center justify-between p-4 rounded-2xl border transition-all duration-300 group ${selectedPaymentMethod === option.id
+                      ? 'border-[#FF0000] bg-red-50 dark:bg-red-900/10 shadow-sm'
+                      : 'border-gray-200 dark:border-gray-800 bg-white dark:bg-[#1a1a1a] hover:border-red-200 dark:hover:border-red-900/30 shadow-sm'
                       } ${option.disabled ? 'opacity-40 grayscale-[0.8] cursor-not-allowed' : 'cursor-pointer active:scale-[0.98]'}`}
                   >
                     <div className="flex items-center gap-4">
                       <div className={`w-11 h-11 rounded-xl flex items-center justify-center transition-all duration-300 ${selectedPaymentMethod === option.id
-                        ? 'bg-white/20 text-white'
+                        ? 'bg-red-100 dark:bg-red-900/30 text-[#FF0000]'
                         : option.color
                         }`}>
                         {option.icon}
                       </div>
                       <div className="text-left">
                         <div className="flex items-center gap-2">
-                          <span className={`text-sm font-bold tracking-tight leading-none transition-colors ${selectedPaymentMethod === option.id ? 'text-white' : 'text-gray-900 dark:text-gray-100'
+                          <span className={`text-[15px] font-semibold tracking-tight leading-none transition-colors ${selectedPaymentMethod === option.id ? 'text-[#FF0000] dark:text-red-400' : 'text-gray-900 dark:text-gray-100'
                             }`}>
                             {option.name}
                           </span>
                           {option.badge && (
-                            <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded-full shadow-sm tracking-wider ${selectedPaymentMethod === option.id
-                              ? 'bg-white/20 text-white'
-                              : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
+                            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-sm tracking-wider ${selectedPaymentMethod === option.id
+                              ? 'bg-red-100 text-[#FF0000] dark:bg-red-900/40'
+                              : 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400'
                               }`}>
                               {option.badge}
                             </span>
                           )}
                         </div>
-                        <div className="flex items-center gap-1.5 mt-1">
-                          <p className={`text-[11px] font-bold transition-colors ${selectedPaymentMethod === option.id ? 'text-white/80' : 'text-gray-400'
+                        <div className="flex items-center gap-1.5 mt-1.5">
+                          <p className={`text-[12px] transition-colors ${selectedPaymentMethod === option.id ? 'text-red-600/80 dark:text-red-400/80' : 'text-gray-500'
                             }`}>
                             {option.description}
                           </p>
                           {option.subInfo && !option.disabled && (
                             <>
-                              <span className={`w-1 h-1 rounded-full ${selectedPaymentMethod === option.id ? 'bg-white/40' : 'bg-red-300 dark:bg-red-700'
+                              <span className={`w-1 h-1 rounded-full ${selectedPaymentMethod === option.id ? 'bg-red-300 dark:bg-red-700' : 'bg-gray-300 dark:bg-gray-700'
                                 }`} />
-                              <p className={`text-[10px] font-bold uppercase tracking-tighter transition-colors ${selectedPaymentMethod === option.id ? 'text-white' : 'text-green-600 dark:text-green-500'
+                              <p className={`text-[10px] font-bold uppercase tracking-tighter transition-colors ${selectedPaymentMethod === option.id ? 'text-[#FF0000]' : 'text-emerald-600 dark:text-emerald-500'
                                 }`}>
                                 {option.subInfo}
                               </p>
@@ -3780,18 +3751,18 @@ return (
                           )}
                         </div>
                         {option.disabled && (
-                          <p className="text-[9px] font-bold text-red-500 mt-1 uppercase tracking-wide">
+                          <p className="text-[10px] font-medium text-red-500 mt-1">
                             {option.disabledText}
                           </p>
                         )}
                       </div>
                     </div>
 
-                    <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all duration-300 ${selectedPaymentMethod === option.id
-                      ? 'bg-white border-white'
-                      : 'border-gray-200 dark:border-gray-700'
+                    <div className={`w-5 h-5 rounded-full border flex items-center justify-center transition-all duration-300 ${selectedPaymentMethod === option.id
+                      ? 'bg-[#FF0000] border-[#FF0000]'
+                      : 'border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800'
                       }`}>
-                      {selectedPaymentMethod === option.id && <Check className="w-3.5 h-3.5 text-[#FF0000]" strokeWidth={4} />}
+                      {selectedPaymentMethod === option.id && <Check className="w-3.5 h-3.5 text-white" strokeWidth={3} />}
                     </div>
                   </button>
                 ))}

@@ -68,7 +68,7 @@ export default function ShipmentHistory() {
             type="button"
             onClick={() => setTab(t.id)}
             className={`shrink-0 rounded-full px-4 py-2 text-[12px] font-bold transition ${
-              tab === t.id ? "bg-[#FF0000] text-white" : "bg-white text-gray-600 border border-gray-100"
+              tab === t.id ? "bg-[#2563EB] text-white" : "bg-white text-gray-600 border border-gray-100"
             }`}
           >
             {t.label}
@@ -104,7 +104,7 @@ export default function ShipmentHistory() {
                         <CalendarClock className="h-3 w-3" /> Waiting
                       </span>
                     )}
-                    <span className={`text-[11px] font-bold uppercase ${["delivered", "completed"].includes(s.status) ? "text-green-600" : "text-[#FF0000]"}`}>
+                    <span className={`text-[11px] font-bold uppercase ${["delivered", "completed"].includes(s.status) ? "text-green-600" : "text-[#2563EB]"}`}>
                       {String(s.status || "").replace(/_/g, " ")}
                     </span>
                   </div>
@@ -121,7 +121,7 @@ export default function ShipmentHistory() {
                     <p className="text-[12px] text-gray-700 font-medium line-clamp-1">{s.pickup?.address || "Pickup address"}</p>
                   </div>
                   <div className="relative">
-                    <div className="absolute -left-[18.5px] top-1.5 h-2 w-2 rounded-full border-2 border-[#FF0000] bg-white" />
+                    <div className="absolute -left-[18.5px] top-1.5 h-2 w-2 rounded-full border-2 border-[#2563EB] bg-white" />
                     <p className="text-[12px] text-gray-700 font-medium line-clamp-1">{s.delivery?.address || "Delivery address"}</p>
                   </div>
                 </div>

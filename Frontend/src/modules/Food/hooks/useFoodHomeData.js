@@ -9,12 +9,11 @@ import { parseGeoPoint } from "@food/utils/geo";
  * Custom hook to manage all data fetching and filtering for the Food Module Home Page.
  * Encapsulates banners, categories, settings, and restaurant filtering logic.
  */
-// --- Global Persistence Cache (Outlives Component Lifecycle) ---
 let globalHomeCache = {
   bootstrap: null,
   restaurants: null,
   advertisements: null,
-  lastFetched: 0,
+  lastFetched: Date.now(),
 };
 
 const CACHE_EXPIRY_MS = 5 * 60 * 1000; // 5 minutes
@@ -242,7 +241,7 @@ export const useFoodHomeData = ({
 
       if (response.data?.success && response.data?.data?.restaurants) {
         const transformed = response.data.data.restaurants.map(restaurant => {
-          const profileImageCandidates = buildRestaurantImageCandidates(restaurant.profileImage || restaurant.image);
+          const profileImageCandidates = buildRestaurantImageCandidates(restaurant.profileImage || restaurant.image || restaurant.imageUrl || restaurant.logo);
           const coverImages = extractImages(restaurant.coverImages || restaurant.coverImage);
           const allImages = Array.from(new Set([...profileImageCandidates, ...coverImages].filter(Boolean)));
           
@@ -360,6 +359,36 @@ export const useFoodHomeData = ({
     // If vegMode is 'all' or false, show all restaurants (dish level filtering handles 'all' mode).
     let filtered = [...deferredRestaurants].filter(r => vegMode !== "pure" || r.pureVegRestaurant);
     
+    // Apply local filters (Delivery Time)
+    if (activeFilters?.has("delivery-under-30")) {
+      filtered = filtered.filter(r => {
+        const match = String(r.deliveryTime).match(/\d+/g);
+        const maxMins = match ? Math.max(...match.map(Number)) : 999;
+        return maxMins <= 30;
+      });
+    }
+    if (activeFilters?.has("delivery-under-45")) {
+      filtered = filtered.filter(r => {
+        const match = String(r.deliveryTime).match(/\d+/g);
+        const maxMins = match ? Math.max(...match.map(Number)) : 999;
+        return maxMins <= 45;
+      });
+    }
+    
+    // Apply local filters (Distance)
+    if (activeFilters?.has("distance-under-1km")) {
+      filtered = filtered.filter(r => {
+        const distNum = parseFloat(String(r.distance).replace(/[^\d.]/g, ''));
+        return !isNaN(distNum) && distNum <= 1;
+      });
+    }
+    if (activeFilters?.has("distance-under-2km")) {
+      filtered = filtered.filter(r => {
+        const distNum = parseFloat(String(r.distance).replace(/[^\d.]/g, ''));
+        return !isNaN(distNum) && distNum <= 2;
+      });
+    }
+    
     // Compute availability status for sorting rather than strictly filtering out closed ones
     filtered = filtered.map(r => {
       const status = getRestaurantAvailabilityStatus(r, new Date(availabilityTick), { ignoreOperationalStatus: false });
@@ -374,11 +403,18 @@ export const useFoodHomeData = ({
       if (sortBy === "rating-high") {
         return b.rating - a.rating;
       }
+      if (sortBy === "delivery-time") {
+        const aMatch = String(a.deliveryTime).match(/\d+/g);
+        const bMatch = String(b.deliveryTime).match(/\d+/g);
+        const aMin = aMatch ? Math.min(...aMatch.map(Number)) : 999;
+        const bMin = bMatch ? Math.min(...bMatch.map(Number)) : 999;
+        return aMin - bMin;
+      }
       // Default: Rating
       return b.rating - a.rating;
     });
     return filtered;
-  }, [deferredRestaurants, vegMode, sortBy, availabilityTick]);
+  }, [deferredRestaurants, vegMode, sortBy, availabilityTick, activeFilters]);
 
   const visibleRestaurants = useMemo(() => 
     filteredRestaurants.slice(0, visibleRestaurantCount), [filteredRestaurants, visibleRestaurantCount]);

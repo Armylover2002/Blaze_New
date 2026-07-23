@@ -25,6 +25,7 @@ export default function Wallet() {
   const companyName = useCompanyName()
   const navigate = useNavigate()
   const goBack = useAppBackNavigation()
+  const isPorter = new URLSearchParams(window.location.search).get("from") === "porter"
   const [selectedFilter, setSelectedFilter] = useState(TRANSACTION_TYPES.ALL)
   const [wallet, setWallet] = useState(null)
   const [transactions, setTransactions] = useState([])
@@ -178,12 +179,12 @@ export default function Wallet() {
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6 md:gap-8 lg:gap-10">
               <div className="flex flex-col md:flex-row md:items-center gap-4 md:gap-6 lg:gap-8 flex-1">
                 <div className="relative flex-shrink-0">
-                  <div className="w-20 h-20 md:w-24 md:h-24 lg:w-28 lg:h-28 xl:w-32 xl:h-32 bg-gradient-to-br from-red-500 via-red-600 to-red-700 rounded-xl md:rounded-2xl flex items-center justify-center shadow-lg transform rotate-[-5deg]">
+                  <div className={`w-20 h-20 md:w-24 md:h-24 lg:w-28 lg:h-28 xl:w-32 xl:h-32 bg-gradient-to-br rounded-xl md:rounded-2xl flex items-center justify-center shadow-lg transform rotate-[-5deg] ${isPorter ? "from-[#3B82F6] via-[#2563EB] to-[#1D4ED8]" : "from-red-500 via-red-600 to-red-700"}`}>
                     <div className="w-16 h-16 md:w-20 md:h-20 lg:w-24 lg:h-24 xl:w-28 xl:h-28 bg-white/10 rounded-lg md:rounded-xl flex items-center justify-center backdrop-blur-sm border border-white/20">
                       <IndianRupee className="h-10 w-10 md:h-12 md:w-12 lg:h-14 lg:w-14 xl:h-16 xl:w-16 text-white" strokeWidth={2.5} />
                     </div>
                   </div>
-                  <div className="absolute inset-0 bg-red-800 rounded-xl md:rounded-2xl transform rotate-[-5deg] translate-y-1 -z-10 opacity-25" />
+                  <div className={`absolute inset-0 rounded-xl md:rounded-2xl transform rotate-[-5deg] translate-y-1 -z-10 opacity-25 ${isPorter ? "bg-[#1e40af]" : "bg-red-800"}`} />
                 </div>
 
                 <div className="flex flex-col md:items-start items-center text-center md:text-left">
@@ -213,7 +214,7 @@ export default function Wallet() {
 
               <div className="flex-shrink-0 w-full md:w-auto">
                 <Button
-                  className="w-full md:w-auto md:min-w-[200px] lg:min-w-[240px] h-12 md:h-14 lg:h-16 bg-green-600 hover:bg-green-700 dark:bg-green-600 dark:hover:bg-green-700 text-white font-semibold text-sm md:text-base lg:text-lg rounded-xl transition-all duration-200 flex items-center justify-center gap-2"
+                  className={`w-full md:w-auto md:min-w-[200px] lg:min-w-[240px] h-12 md:h-14 lg:h-16 text-white font-semibold text-sm md:text-base lg:text-lg rounded-xl transition-all duration-200 flex items-center justify-center gap-2 ${isPorter ? "bg-[#2563EB] hover:bg-[#1D4ED8]" : "bg-green-600 hover:bg-green-700 dark:bg-green-600 dark:hover:bg-green-700"}`}
                   onClick={() => setAddMoneyModalOpen(true)}
                 >
                   <Plus className="h-4 w-4 md:h-5 md:w-5 lg:h-6 lg:w-6" />

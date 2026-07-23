@@ -12,6 +12,7 @@ import { responseTimeLogger } from './middleware/responseTimeLogger.js';
 import { requestIdMiddleware } from './middleware/requestId.js';
 import { healthCheck } from './config/health.js';
 import { config } from './config/env.js';
+import { corsOptions } from './config/cors.js';
 
 const app = express();
 
@@ -43,18 +44,8 @@ app.use(helmet({
     referrerPolicy: { policy: 'strict-origin-when-cross-origin' }
 }));
 
-// ✅ CORS — main domain + saari vercel preview URLs + Render
-app.use(cors({
-    origin: [
-        'https://dukaanwallah.vercel.app',
-        /^https:\/\/dukaanwallah.*\.vercel\.app$/,
-        'https://blaze-new-1.onrender.com',
-        /^https:\/\/.*\.onrender\.com$/,
-        'http://localhost:5173',
-        'http://localhost:3000',
-    ],
-    credentials: true
-}));
+// CORS — localhost, production domains, Vercel/Render previews, + CORS_ORIGIN/FRONTEND_URL
+app.use(cors(corsOptions));
 
 app.use(morgan('dev'));
 app.use(express.json({

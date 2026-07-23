@@ -250,7 +250,7 @@ export default function ScheduleWaiting() {
     return (
       <Screen title="Scheduled delivery" subtitle="Waiting for pickup time">
         <div className="flex flex-col items-center py-16 text-center">
-          <Loader2 className="mb-3 h-8 w-8 animate-spin text-[#FF0000]" />
+          <Loader2 className="mb-3 h-8 w-8 animate-spin text-[#2563EB]" />
           <p className="text-sm text-gray-500">Loading your scheduled order…</p>
         </div>
       </Screen>
@@ -265,7 +265,7 @@ export default function ScheduleWaiting() {
       bare
     >
       <div className="min-h-[calc(100vh-56px)] bg-gradient-to-b from-[#FFF5F5] via-white to-white px-4 pb-28 pt-6">
-        <div className="mx-auto mb-4 flex w-fit items-center gap-2 rounded-full bg-[#FF0000] px-4 py-1.5 text-[12px] font-extrabold uppercase tracking-wide text-white shadow-sm">
+        <div className="mx-auto mb-4 flex w-fit items-center gap-2 rounded-full bg-[#2563EB] px-4 py-1.5 text-[12px] font-extrabold uppercase tracking-wide text-white shadow-sm">
           <CalendarClock className="h-3.5 w-3.5" />
           Scheduled
         </div>
@@ -278,19 +278,19 @@ export default function ScheduleWaiting() {
               { label: "Minutes", value: pad2(countdown.minutes) },
               { label: "Seconds", value: pad2(countdown.seconds) },
             ].map((cell) => (
-              <div key={cell.label} className="rounded-2xl bg-[#FFF1F1] px-2 py-3 text-center">
-                <p className="text-[28px] font-black tabular-nums text-[#FF0000]">{cell.value}</p>
+              <div key={cell.label} className="rounded-2xl bg-[#EFF6FF] px-2 py-3 text-center">
+                <p className="text-[28px] font-black tabular-nums text-[#2563EB]">{cell.value}</p>
                 <p className="mt-0.5 text-[11px] font-bold uppercase text-gray-500">{cell.label}</p>
               </div>
             ))}
           </div>
           <div className="mt-4 flex items-center justify-center gap-4 text-[13px] font-semibold text-gray-700">
             <span className="inline-flex items-center gap-1.5">
-              <CalendarClock className="h-4 w-4 text-[#FF0000]" />
+              <CalendarClock className="h-4 w-4 text-[#2563EB]" />
               {formatLocalDate(scheduledAt)}
             </span>
             <span className="inline-flex items-center gap-1.5">
-              <Clock3 className="h-4 w-4 text-[#FF0000]" />
+              <Clock3 className="h-4 w-4 text-[#2563EB]" />
               {formatLocalTime(scheduledAt)}
             </span>
           </div>
@@ -319,7 +319,7 @@ export default function ScheduleWaiting() {
             </div>
           </div>
           <div className="flex gap-3">
-            <Navigation className="mt-0.5 h-4 w-4 shrink-0 text-[#FF0000]" />
+            <Navigation className="mt-0.5 h-4 w-4 shrink-0 text-[#2563EB]" />
             <div className="min-w-0">
               <p className="text-[11px] font-bold uppercase text-gray-400">Drop</p>
               <p className="truncate text-[13px] font-semibold text-gray-900">
@@ -410,7 +410,7 @@ export default function ScheduleWaiting() {
                   type="button"
                   disabled={cancelling}
                   onClick={handleCancel}
-                  className="flex-1 rounded-2xl bg-[#FF0000] py-3.5 text-[14px] font-bold text-white disabled:opacity-60"
+                  className="flex-1 rounded-2xl bg-[#2563EB] py-3.5 text-[14px] font-bold text-white disabled:opacity-60"
                 >
                   {cancelling ? "Cancelling…" : "Cancel booking"}
                 </button>

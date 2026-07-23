@@ -79,8 +79,8 @@ export default function CancelBooking() {
         </p>
       </div>
 
-      <div className="mb-5 rounded-2xl bg-[#FFF1F1] p-4 border border-[#FF0000]/20">
-        <p className="text-[13px] text-[#FF0000] leading-tight">
+      <div className="mb-5 rounded-2xl bg-[#EFF6FF] p-4 border border-[#2563EB]/20">
+        <p className="text-[13px] text-[#2563EB] leading-tight">
           <strong>Note:</strong> If the order was paid, the eligible amount will be refunded automatically to your wallet or original payment method.
         </p>
       </div>
@@ -93,10 +93,10 @@ export default function CancelBooking() {
             type="button"
             onClick={() => setReason(r)}
             className={`flex w-full items-center gap-3 rounded-2xl border p-3 text-left text-[14px] font-medium transition ${
-              reason === r ? "border-[#FF0000] bg-[#FFF1F1] font-bold" : "border-gray-100 bg-white"
+              reason === r ? "border-[#2563EB] bg-[#EFF6FF] font-bold" : "border-gray-100 bg-white"
             }`}
           >
-            <span className={`h-4 w-4 shrink-0 rounded-full border-2 ${reason === r ? "border-[#FF0000] bg-[#FF0000]" : "border-gray-300"}`} />
+            <span className={`h-4 w-4 shrink-0 rounded-full border-2 ${reason === r ? "border-[#2563EB] bg-[#2563EB]" : "border-gray-300"}`} />
             {r}
           </button>
         ))}
@@ -110,7 +110,7 @@ export default function CancelBooking() {
           rows={3}
           autoFocus
           placeholder="Tell us why you're cancelling..."
-          className="mt-3 w-full resize-none rounded-2xl border border-gray-200 p-3 text-[14px] text-gray-900 outline-none focus:border-[#FF0000]"
+          className="mt-3 w-full resize-none rounded-2xl border border-gray-200 p-3 text-[14px] text-gray-900 outline-none focus:border-[#2563EB]"
         />
       )}
 

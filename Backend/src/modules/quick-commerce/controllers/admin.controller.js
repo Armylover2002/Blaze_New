@@ -31,7 +31,17 @@ import {
   updateAdminQuickCoupon,
   deleteAdminQuickCoupon,
   toggleAdminQuickCouponStatus,
+  clearContentCache,
 } from '../services/content.service.js';
+import {
+  generateUniqueSlug,
+  slugify,
+  validateCategoryFields,
+  validateCategoryImageFile,
+  validateCategoryParent,
+  VALID_BUSINESS_TYPES,
+} from '../utils/category.helpers.js';
+import { escapeRegex } from '../utils/productVisibility.helpers.js';
 import {
   getQuickCommerceFinanceLedger,
   getQuickCommerceFinancePayouts,
@@ -140,14 +150,6 @@ const withProductSeller = (product, sellerMap = {}) => {
     sellerBusinessType: sellerInfo?.shopInfo?.businessType || '',
   };
 };
-
-const slugify = (value = '') =>
-  String(value)
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9\s-]/g, '')
-    .replace(/\s+/g, '-')
-    .replace(/-+/g, '-');
 
 const parseNumber = (value, fallback = 0) => {
   const parsed = Number(value);
@@ -272,6 +274,12 @@ const buildQuickAdminOrderResponse = (order, sellerMap = {}, sellerOrderMap = {}
 
 const getCategoryImage = async (req) => {
   if (req.file?.buffer) {
+    const imageError = validateCategoryImageFile(req.file);
+    if (imageError) {
+      const error = new Error(imageError);
+      error.statusCode = 400;
+      throw error;
+    }
     return uploadImageBuffer(req.file.buffer, 'quick-commerce/categories');
   }
   return String(req.body?.image || '').trim();
@@ -280,6 +288,15 @@ const getCategoryImage = async (req) => {
 const getProductImages = async (req) => {
   const mainFile = req.files?.mainImage?.[0];
   const galleryFiles = Array.isArray(req.files?.galleryImages) ? req.files.galleryImages : [];
+
+  for (const file of [mainFile, ...galleryFiles].filter(Boolean)) {
+    const imageError = validateCategoryImageFile(file);
+    if (imageError) {
+      const error = new Error(imageError);
+      error.statusCode = 400;
+      throw error;
+    }
+  }
 
   const mainImage = mainFile?.buffer
     ? await uploadImageBuffer(mainFile.buffer, 'quick-commerce/products/main')
@@ -442,111 +459,198 @@ export const getAdminCategories = async (_req, res) => {
 };
 
 export const createCategory = async (req, res) => {
-  console.log("REQ BODY", req.body);
-  const {
-    name,
-    accentColor,
-    sortOrder,
-    description,
-    type,
-    status,
-    approvalStatus,
-    parentId,
-    iconId,
-    adminCommission,
-    handlingFees,
-    headerColor,
-    businessType,
-  } = req.body || {};
-  const image = await getCategoryImage(req);
+  try {
+    const {
+      name,
+      slug: slugInput,
+      accentColor,
+      sortOrder,
+      description,
+      type,
+      status,
+      approvalStatus,
+      parentId,
+      iconId,
+      adminCommission,
+      handlingFees,
+      headerColor,
+      businessType,
+    } = req.body || {};
 
-  if (!name) {
-    return res.status(400).json({ success: false, message: 'name is required' });
+    const fieldError = validateCategoryFields({
+      name,
+      type,
+      businessType,
+      adminCommission,
+      handlingFees,
+      status,
+    });
+    if (fieldError) {
+      return res.status(400).json({ success: false, message: fieldError });
+    }
+
+    const parentValidation = await validateCategoryParent(type || 'header', parentId);
+    if (parentValidation.error) {
+      return res.status(400).json({ success: false, message: parentValidation.error });
+    }
+
+    const image = await getCategoryImage(req);
+    const slugBase = slugInput ? slugify(slugInput) : slugify(name);
+    const slug = await generateUniqueSlug(slugBase || name);
+    const normalizedType = parentValidation.type || 'header';
+    const normalizedBusinessType = VALID_BUSINESS_TYPES.includes(businessType)
+      ? businessType
+      : 'quick_commerce';
+
+    const category = await QuickCategory.create({
+      name: String(name).trim(),
+      slug,
+      image,
+      description: description || '',
+      type: normalizedType,
+      businessType: normalizedType === 'header' ? normalizedBusinessType : undefined,
+      status: status || 'active',
+      approvalStatus: approvalStatus || 'approved',
+      approvedAt: (approvalStatus || 'approved') === 'approved' ? new Date() : null,
+      parentId: parentValidation.parentId,
+      iconId: iconId || '',
+      adminCommission: parseNumber(adminCommission, 0),
+      handlingFees: parseNumber(handlingFees, 0),
+      headerColor: headerColor || accentColor || '#0c831f',
+      accentColor: accentColor || '#0c831f',
+      sortOrder: Number(sortOrder || 0),
+      isActive: (status || 'active') === 'active',
+    });
+
+    clearContentCache();
+    return res.status(201).json({ success: true, result: toCategory(category) });
+  } catch (error) {
+    if (error?.statusCode === 400) {
+      return res.status(400).json({ success: false, message: error.message });
+    }
+    if (error?.code === 11000) {
+      return res.status(409).json({ success: false, message: 'A category with this slug already exists' });
+    }
+    throw error;
   }
-
-  const baseSlug = slugify(name);
-  const count = await QuickCategory.countDocuments({ slug: { $regex: `^${baseSlug}` } });
-  const slug = count > 0 ? `${baseSlug}-${count + 1}` : baseSlug;
-
-  const category = await QuickCategory.create({
-    name,
-    slug,
-    image,
-    description: description || '',
-    type: type || 'header',
-    businessType: type === 'header' ? (businessType || 'quick_commerce') : undefined,
-    status: status || 'active',
-    approvalStatus: approvalStatus || 'approved',
-    approvedAt: (approvalStatus || 'approved') === 'approved' ? new Date() : null,
-    parentId: mongoose.isValidObjectId(parentId) ? parentId : null,
-    iconId: iconId || '',
-    adminCommission: parseNumber(adminCommission, 0),
-    handlingFees: parseNumber(handlingFees, 0),
-    headerColor: headerColor || accentColor || '#0c831f',
-    accentColor: accentColor || '#0c831f',
-    sortOrder: Number(sortOrder || 0),
-    isActive: (status || 'active') === 'active',
-  });
-
-  return res.status(201).json({ success: true, result: toCategory(category) });
 };
 
 export const updateCategory = async (req, res) => {
-  const category = await QuickCategory.findById(req.params.categoryId);
+  try {
+    const { categoryId } = req.params;
+    if (!mongoose.isValidObjectId(categoryId)) {
+      return res.status(400).json({ success: false, message: 'Invalid category ID' });
+    }
+
+    const category = await QuickCategory.findById(categoryId);
+    if (!category) {
+      return res.status(404).json({ success: false, message: 'Category not found' });
+    }
+
+    const {
+      name,
+      slug,
+      accentColor,
+      sortOrder,
+      description,
+      type,
+      status,
+      approvalStatus,
+      parentId,
+      iconId,
+      adminCommission,
+      handlingFees,
+      headerColor,
+      businessType,
+    } = req.body || {};
+
+    const fieldError = validateCategoryFields({
+      name: name !== undefined ? name : category.name,
+      type: type !== undefined ? type : category.type,
+      businessType: businessType !== undefined ? businessType : category.businessType,
+      adminCommission,
+      handlingFees,
+      status,
+    });
+    if (fieldError) {
+      return res.status(400).json({ success: false, message: fieldError });
+    }
+
+    const nextType = type !== undefined ? type : category.type;
+    if (parentId !== undefined || type !== undefined) {
+      const parentValidation = await validateCategoryParent(
+        nextType,
+        parentId !== undefined ? parentId : category.parentId,
+        category._id,
+      );
+      if (parentValidation.error) {
+        return res.status(400).json({ success: false, message: parentValidation.error });
+      }
+      category.parentId = parentValidation.parentId;
+      category.type = parentValidation.type;
+    }
+
+    const image = await getCategoryImage(req);
+
+    if (name !== undefined) category.name = String(name).trim();
+    if (slug !== undefined || name !== undefined) {
+      const nextSlug = slugify(slug || name || category.name);
+      category.slug = await generateUniqueSlug(nextSlug || category.name, category._id);
+    }
+    if (image) category.image = image;
+    if (description !== undefined) category.description = description;
+    if (category.type === 'header' && businessType !== undefined) {
+      category.businessType = VALID_BUSINESS_TYPES.includes(businessType)
+        ? businessType
+        : 'quick_commerce';
+    }
+    if (status !== undefined) {
+      category.status = status;
+      category.isActive = status === 'active';
+    }
+    if (approvalStatus !== undefined) {
+      category.approvalStatus = approvalStatus || 'pending';
+      category.approvedAt = category.approvalStatus === 'approved' ? new Date() : null;
+    }
+    if (accentColor !== undefined) category.accentColor = accentColor || '#0c831f';
+    if (headerColor !== undefined) category.headerColor = headerColor || category.accentColor;
+    if (sortOrder !== undefined) category.sortOrder = parseNumber(sortOrder, 0);
+    if (iconId !== undefined) category.iconId = iconId || '';
+    if (adminCommission !== undefined) category.adminCommission = parseNumber(adminCommission, 0);
+    if (handlingFees !== undefined) category.handlingFees = parseNumber(handlingFees, 0);
+
+    await category.save();
+    clearContentCache();
+    return res.json({ success: true, result: toCategory(category) });
+  } catch (error) {
+    if (error?.statusCode === 400) {
+      return res.status(400).json({ success: false, message: error.message });
+    }
+    if (error?.code === 11000) {
+      return res.status(409).json({ success: false, message: 'A category with this slug already exists' });
+    }
+    throw error;
+  }
+};
+
+export const removeCategory = async (req, res) => {
+  const { categoryId } = req.params;
+
+  if (!mongoose.isValidObjectId(categoryId)) {
+    return res.status(400).json({ success: false, message: 'Invalid category ID' });
+  }
+
+  const category = await QuickCategory.findById(categoryId).select('_id name').lean();
   if (!category) {
     return res.status(404).json({ success: false, message: 'Category not found' });
   }
 
-  const image = await getCategoryImage(req);
-  const {
-    name,
-    slug,
-    accentColor,
-    sortOrder,
-    description,
-    type,
-    status,
-    approvalStatus,
-    parentId,
-    iconId,
-    adminCommission,
-    handlingFees,
-    headerColor,
-    businessType,
-  } = req.body || {};
-
-  if (name !== undefined) category.name = name;
-  if (slug !== undefined) category.slug = slugify(slug || name || category.name);
-  if (image) category.image = image;
-  if (description !== undefined) category.description = description;
-  if (type !== undefined) category.type = type || 'header';
-  if (category.type === 'header' && businessType !== undefined) category.businessType = businessType || 'quick_commerce';
-  if (status !== undefined) {
-    category.status = status;
-    category.isActive = status === 'active';
-  }
-  if (approvalStatus !== undefined) {
-    category.approvalStatus = approvalStatus || 'pending';
-    category.approvedAt = category.approvalStatus === 'approved' ? new Date() : null;
-  }
-  if (accentColor !== undefined) category.accentColor = accentColor || '#0c831f';
-  if (headerColor !== undefined) category.headerColor = headerColor || category.accentColor;
-  if (sortOrder !== undefined) category.sortOrder = parseNumber(sortOrder, 0);
-  if (parentId !== undefined) category.parentId = mongoose.isValidObjectId(parentId) ? parentId : null;
-  if (iconId !== undefined) category.iconId = iconId || '';
-  if (adminCommission !== undefined) category.adminCommission = parseNumber(adminCommission, 0);
-  if (handlingFees !== undefined) category.handlingFees = parseNumber(handlingFees, 0);
-
-  await category.save();
-  return res.json({ success: true, result: toCategory(category) });
-};
-
-export const removeCategory = async (req, res) => {
-  const categoryId = req.params.categoryId;
-  const childCount = await QuickCategory.countDocuments({ parentId: categoryId });
-  const productCount = await QuickProduct.countDocuments({
-    $or: [{ categoryId }, { subcategoryId: categoryId }, { headerId: categoryId }],
-  });
+  const [childCount, productCount] = await Promise.all([
+    QuickCategory.countDocuments({ parentId: categoryId }),
+    QuickProduct.countDocuments({
+      $or: [{ categoryId }, { subcategoryId: categoryId }, { headerId: categoryId }],
+    }),
+  ]);
 
   if (childCount > 0 || productCount > 0) {
     return res.status(400).json({
@@ -556,6 +660,7 @@ export const removeCategory = async (req, res) => {
   }
 
   await QuickCategory.findByIdAndDelete(categoryId);
+  clearContentCache();
   return res.json({ success: true, result: { deleted: true } });
 };
 
@@ -570,7 +675,10 @@ export const getAdminProducts = async (req, res) => {
     page = 1,
     limit = 50,
   } = req.query || {};
-  const query = {};
+  // Exclude legacy mock/seed products (no seller) that show as shop "Admin".
+  const query = {
+    sellerId: { $ne: null, $exists: true },
+  };
 
   const categoryFilter = categoryId || category;
   if (categoryFilter && mongoose.isValidObjectId(categoryFilter)) {
@@ -601,7 +709,21 @@ export const getAdminProducts = async (req, res) => {
     query.headerId = { $in: headers.map(h => h._id) };
   }
 
-  if (search) query.name = { $regex: String(search).trim(), $options: 'i' };
+  if (search) {
+    const term = escapeRegex(String(search).trim().slice(0, 80));
+    if (term) {
+      query.$and = [
+        ...(query.$and || []),
+        {
+          $or: [
+            { name: { $regex: term, $options: 'i' } },
+            { sku: { $regex: term, $options: 'i' } },
+            { slug: { $regex: term, $options: 'i' } },
+          ],
+        },
+      ];
+    }
+  }
   if (status && status !== 'all') {
     query.status = status;
     query.isActive = status === 'active';
@@ -662,6 +784,7 @@ export const createProduct = async (req, res) => {
     categoryId,
     subcategoryId,
     headerId,
+    sellerId,
     price,
     mrp,
     salePrice,
@@ -680,20 +803,46 @@ export const createProduct = async (req, res) => {
     deliveryTime,
     variants,
   } = req.body || {};
-  const images = await getProductImages(req);
+
+  let images;
+  try {
+    images = await getProductImages(req);
+  } catch (error) {
+    return res.status(error.statusCode || 400).json({
+      success: false,
+      message: error.message || 'Invalid product image',
+    });
+  }
 
   if (!name || !categoryId || !mongoose.isValidObjectId(categoryId)) {
     return res.status(400).json({ success: false, message: 'name and valid categoryId are required' });
   }
 
-  const category = await QuickCategory.findById(categoryId).lean();
+  if (!sellerId || !mongoose.isValidObjectId(sellerId)) {
+    return res.status(400).json({
+      success: false,
+      message: 'Valid sellerId is required — products must belong to a seller',
+    });
+  }
+
+  const [category, seller] = await Promise.all([
+    QuickCategory.findById(categoryId).lean(),
+    Seller.findById(sellerId).select('_id').lean(),
+  ]);
   if (!category) {
     return res.status(404).json({ success: false, message: 'Category not found' });
   }
+  if (!seller) {
+    return res.status(404).json({ success: false, message: 'Seller not found' });
+  }
 
-  const baseSlug = slugify(name);
-  const count = await QuickProduct.countDocuments({ slug: { $regex: `^${baseSlug}` } });
-  const slug = count > 0 ? `${baseSlug}-${count + 1}` : baseSlug;
+  const baseSlug = slugify(name) || `product-${Date.now().toString(36)}`;
+  let slug = baseSlug;
+  for (let counter = 2; counter <= 1000; counter += 1) {
+    const exists = await QuickProduct.findOne({ slug }).select('_id').lean();
+    if (!exists) break;
+    slug = `${baseSlug}-${counter}`;
+  }
 
   const parsedVariants = parseVariants(variants);
   let calculatedStock = parseNumber(stock, 0);
@@ -715,6 +864,7 @@ export const createProduct = async (req, res) => {
     categoryId,
     subcategoryId: mongoose.isValidObjectId(subcategoryId) ? subcategoryId : null,
     headerId: mongoose.isValidObjectId(headerId) ? headerId : null,
+    sellerId: seller._id,
     description: description || '',
     price: Number(price || 0),
     mrp: Number(mrp || salePrice || price || 0),
@@ -753,12 +903,25 @@ const parsePharmacyDetailsBody = (value) => {
 };
 
 export const updateProduct = async (req, res) => {
-  const product = await QuickProduct.findById(req.params.productId);
+  const productId = String(req.params.productId || '').trim();
+  if (!mongoose.isValidObjectId(productId)) {
+    return res.status(400).json({ success: false, message: 'Invalid product id' });
+  }
+
+  const product = await QuickProduct.findById(productId);
   if (!product) {
     return res.status(404).json({ success: false, message: 'Product not found' });
   }
 
-  const images = await getProductImages(req);
+  let images;
+  try {
+    images = await getProductImages(req);
+  } catch (error) {
+    return res.status(error.statusCode || 400).json({
+      success: false,
+      message: error.message || 'Invalid product image',
+    });
+  }
   const body = req.body || {};
 
   if (body.name !== undefined) product.name = body.name;
@@ -827,7 +990,16 @@ export const updateProduct = async (req, res) => {
 };
 
 export const removeProduct = async (req, res) => {
-  await QuickProduct.findByIdAndDelete(req.params.productId);
+  const productId = String(req.params.productId || '').trim();
+  if (!mongoose.isValidObjectId(productId)) {
+    return res.status(400).json({ success: false, message: 'Invalid product id' });
+  }
+
+  const deleted = await QuickProduct.findByIdAndDelete(productId);
+  if (!deleted) {
+    return res.status(404).json({ success: false, message: 'Product not found' });
+  }
+
   return res.json({ success: true, result: { deleted: true } });
 };
 

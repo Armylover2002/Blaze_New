@@ -35,6 +35,21 @@ export default function UnifiedOTPFastLogin() {
   const [logoUrl, setLogoUrl] = useState(() => getAppLogo('user'))
   const [companyName, setCompanyName] = useState(() => getCompanyName())
   const [socialLinks, setSocialLinks] = useState(() => getCachedSettings()?.socialLinks || {})
+  
+  const sliderImages = [
+    "https://images.unsplash.com/photo-1504674900247-0877df9cc836?w=1200&q=80",
+    "https://images.unsplash.com/photo-1542838132-92c53300491e?w=1200&q=80",
+    "https://images.unsplash.com/photo-1555939594-58d7cb561ad1?w=1200&q=80"
+  ];
+  const [currentImageIndex, setCurrentImageIndex] = useState(0);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setCurrentImageIndex((prev) => (prev + 1) % sliderImages.length);
+    }, 4000);
+    return () => clearInterval(interval);
+  }, []);
+
   const location = useLocation()
   const navigate = useNavigate()
 
@@ -345,8 +360,23 @@ export default function UnifiedOTPFastLogin() {
 
   return (
     <div className="min-h-screen bg-white dark:bg-[#0a0a0a] flex flex-col pt-0 sm:pt-0">
-      {/* Top Banner section - Zomato Red */}
-      <div className="w-full bg-primary-orange dark:bg-[#b01c27] rounded-b-[2.5rem] p-6 text-center text-white relative overflow-hidden shadow-2xl">
+      {/* Top Banner section with Image Slider and Curve */}
+      <div className="w-full relative h-[350px] md:h-[400px] flex flex-col items-center justify-center text-center text-white">
+        {/* Background Image Slider */}
+        {sliderImages.map((img, idx) => (
+          <div
+            key={idx}
+            className="absolute inset-0 w-full h-full bg-cover bg-center transition-opacity duration-1000"
+            style={{
+              backgroundImage: `url('${img}')`,
+              opacity: currentImageIndex === idx ? 1 : 0,
+            }}
+          />
+        ))}
+        
+        {/* Dark gradient overlay for text readability */}
+        <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-black/40 to-transparent" />
+
         {/* Back Button */}
         <button 
           type="button"
@@ -364,45 +394,55 @@ export default function UnifiedOTPFastLogin() {
         >
           <ArrowLeft className="w-5 h-5 text-white" strokeWidth={3} />
         </button>
-
-        <div className="absolute inset-0 bg-white/5 opacity-50 blur-3xl rounded-full -top-1/2 -left-1/4 animate-pulse" />
-        <div className="absolute right-0 bottom-0 w-32 h-32 md:w-48 md:h-48 opacity-10 pointer-events-none">
-           <svg viewBox="0 0 200 200" fill="currentColor">
-              <path d="M100 0C44.8 0 0 44.8 0 100s44.8 100 100 100 100-44.8 100-100S155.2 0 100 0zm0 180c-44.1 0-80-35.9-80-80s35.9-80 80-80 80 35.9 80 80-35.9 80-80 80z"/>
-           </svg>
-        </div>
         
-        <div className="relative z-10 flex flex-col items-center">
+        <div className="relative z-10 flex flex-col items-center mt-[-40px]">
           <motion.div 
             initial={{ scale: 0 }}
-            animate={{ scale: 1 }}
-            className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center mb-3 shadow-xl overflow-hidden"
+            animate={{ scale: 1, rotate: currentImageIndex * 360 }}
+            transition={{ duration: 0.8, ease: "easeInOut" }}
+            className="w-16 h-16 bg-white rounded-3xl flex items-center justify-center mb-4 shadow-2xl overflow-hidden"
           >
              {logoUrl ? (
                <img src={logoUrl} alt={companyName} className="w-full h-full object-contain p-2" />
              ) : (
-               <span className="text-primary-orange text-xl font-black italic">{companyName.charAt(0).toUpperCase()}</span>
+               <span className="text-primary-orange text-2xl font-black italic">{companyName.charAt(0).toUpperCase()}</span>
              )}
           </motion.div>
           <motion.h1 
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
-            className="text-2xl md:text-5xl font-black tracking-tight mb-1"
+            className="text-3xl md:text-5xl font-black tracking-tight mb-2 drop-shadow-lg"
           >
             {companyName}
           </motion.h1>
-          <p className="text-xs md:text-base font-bold text-white/90 tracking-[0.2em] uppercase">
+          <p className="text-xs md:text-sm font-bold text-white/90 tracking-[0.2em] uppercase drop-shadow-md">
             Taste the best, forget the rest
           </p>
         </div>
+
+        {/* Curved Bottom SVG */}
+        <div className="absolute bottom-0 left-0 w-full overflow-hidden leading-none z-10">
+          <svg
+            className="relative block w-full h-[60px] md:h-[80px]"
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 1440 320"
+            preserveAspectRatio="none"
+          >
+            <path
+              fill="currentColor"
+              className="text-white dark:text-[#0a0a0a]"
+              d="M0,192L48,202.7C96,213,192,235,288,229.3C384,224,480,192,576,192C672,192,768,224,864,213.3C960,203,1056,149,1152,133.3C1248,117,1344,139,1392,149.3L1440,160L1440,320L1392,320C1344,320,1248,320,1152,320C1056,320,960,320,864,320C768,320,672,320,576,320C480,320,384,320,288,320C192,320,96,320,48,320L0,320Z"
+            ></path>
+          </svg>
+        </div>
       </div>
 
-      <div className="flex-1 max-w-[480px] mx-auto w-full px-6 py-4 flex flex-col justify-center -mt-8 relative z-20">
+      <div className="flex-1 max-w-[480px] mx-auto w-full px-6 py-4 flex flex-col justify-center -mt-20 relative z-20">
         {/* Main Card */}
-        <div className="bg-white dark:bg-[#1a1a1a] rounded-[2rem] p-6 sm:p-8 md:p-12 shadow-[0_25px_60px_-15px_rgba(0,0,0,0.15)] dark:shadow-none border border-gray-50 dark:border-gray-800">
-           <div className="text-center mb-6 space-y-2">
-              <h2 className="text-2xl font-black text-gray-900 dark:text-white">Login or Signup</h2>
-              <div className="h-1 w-12 bg-primary-orange mx-auto rounded-full" />
+        <div className="bg-white dark:bg-[#1a1a1a] rounded-[2rem] p-6 sm:p-8 md:px-12 md:py-8 shadow-[0_10px_40px_-15px_rgba(0,0,0,0.2)] dark:shadow-none border border-gray-50 dark:border-gray-800">
+           <div className="text-center mb-6 mt-[-10px] space-y-2">
+              <h2 className="text-2xl md:text-3xl font-serif font-bold text-gray-900 dark:text-white tracking-wide">Login or Signup</h2>
+              <div className="h-[2px] w-16 bg-[#6b554b] dark:bg-gray-400 mx-auto rounded-full" />
            </div>
 
           <form onSubmit={showNameInput ? handleSubmitName : step === 1 ? handleSendOTP : handleVerifyOTP} className="space-y-5">

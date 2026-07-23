@@ -20,19 +20,28 @@ const PorterBottomNav = () => {
   };
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 z-[500] flex h-[70px] items-center justify-around border-t border-gray-100 bg-white/85 px-4 pb-[env(safe-area-inset-bottom)] shadow-[0_-8px_30px_rgba(0,0,0,0.06)] backdrop-blur-xl md:hidden dark:bg-card/80 dark:border-border">
-      {navItems.map((item) => {
-        const active = isActive(item);
-        return (
-          <Link key={item.id} to={item.path} className="group relative flex h-full flex-1 flex-col items-center justify-center">
-            <motion.div animate={{ y: active ? -2 : 0, scale: active ? 1.1 : 1 }} transition={{ type: "spring", stiffness: 400, damping: 25 }}>
-              <item.icon size={24} strokeWidth={active ? 2.5 : 2} className={cn("transition-colors", active ? "text-[#FF0000]" : "text-gray-400")} />
-            </motion.div>
-            <span className={cn("mt-1 text-[10px] font-bold tracking-tight transition-colors", active ? "text-[#FF0000]" : "text-gray-400")}>{item.label}</span>
-            {active && <motion.div layoutId="porterTopLine" className="absolute -top-[1px] h-[3px] w-8 rounded-full bg-[#FF0000]" transition={{ type: "spring", stiffness: 400, damping: 30 }} />}
-          </Link>
-        );
-      })}
+    <div className="fixed bottom-0 left-0 right-0 z-50">
+      <div className="relative bg-white dark:bg-[#1a1a1a] border-t border-gray-200 dark:border-gray-800 shadow-lg pb-[env(safe-area-inset-bottom)]">
+        <div className="flex items-center justify-around h-auto px-2 sm:px-4">
+          {navItems.map((item, index) => {
+            const active = isActive(item);
+            return (
+              <React.Fragment key={item.id}>
+                <Link to={item.path} className={`flex flex-1 flex-col items-center gap-1.5 px-2 sm:px-3 py-2 transition-all duration-200 relative ${active ? "text-[#2563EB]" : "text-gray-600"}`}>
+                  <item.icon className={`h-5 w-5 ${active ? "text-[#2563EB]" : "text-gray-600"}`} style={{ fill: active ? "#2563EB" : "transparent" }} strokeWidth={2} />
+                  <span className={`text-xs sm:text-sm font-medium ${active ? "text-[#2563EB] font-semibold" : "text-gray-600"}`}>{item.label}</span>
+                  {active && (
+                    <div className="absolute top-0 left-0 right-0 h-0.5 bg-[#2563EB] rounded-b-full" />
+                  )}
+                </Link>
+                {index < navItems.length - 1 && (
+                  <div className="h-8 w-px bg-gray-300 dark:bg-gray-700" />
+                )}
+              </React.Fragment>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 };

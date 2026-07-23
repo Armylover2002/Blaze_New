@@ -26,8 +26,8 @@ export default function SOS() {
 
   return (
     <Screen title="Safety & SOS" subtitle="Emergency assistance for your shipment">
-      <div className="mb-4 flex items-center gap-3 rounded-2xl bg-[#FFF1F1] p-4">
-        <Shield className="h-8 w-8 shrink-0 text-[#FF0000]" />
+      <div className="mb-4 flex items-center gap-3 rounded-2xl bg-[#EFF6FF] p-4">
+        <Shield className="h-8 w-8 shrink-0 text-[#2563EB]" />
         <div>
           <p className="text-[14px] font-bold text-gray-900">Your safety matters</p>
           <p className="text-[12px] text-gray-600">Use SOS only in genuine emergencies during parcel pickup or delivery.</p>
@@ -48,7 +48,7 @@ export default function SOS() {
             onClick={() => handleAction(opt)}
             className={`flex w-full items-center gap-3 rounded-2xl border p-4 text-left transition ${
               opt.id === "call_police" || opt.id === "call_ambulance"
-                ? "border-[#FF0000]/30 bg-[#FFF1F1] hover:bg-[#FFE0E0]"
+                ? "border-[#2563EB]/30 bg-[#EFF6FF] hover:bg-[#DBEAFE]"
                 : "border-gray-100 bg-white hover:border-gray-200"
             }`}
           >
@@ -64,7 +64,7 @@ export default function SOS() {
         className="mb-4 flex w-full items-center justify-between rounded-2xl border border-gray-100 bg-white p-4"
       >
         <div className="flex items-center gap-2">
-          <Phone className="h-4 w-4 text-[#FF0000]" />
+          <Phone className="h-4 w-4 text-[#2563EB]" />
           <span className="text-[14px] font-bold text-gray-900">Manage emergency contacts</span>
         </div>
         <MapPin className="h-4 w-4 text-gray-400" />

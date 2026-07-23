@@ -1,12 +1,19 @@
 import React, { useMemo, useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { Facebook, Twitter, Instagram, Youtube, Mail, MapPin, Phone } from 'lucide-react';
 import Logo from '@/assets/Logo.jpeg';
 import { useSettings } from '@core/context/SettingsContext';
 import { shiftHex } from '../../utils/headerTheme';
+import { customerApi } from '../../services/customerApi';
 
 // Static link lists — defined outside so they're never recreated
-const QUICK_LINKS = ['Home', 'About Us', 'Shop', 'Blogs', 'Contact'];
-const CATEGORIES = ['Fruits & Vegetables', 'Dairy Products', 'Meat & Fish', 'Bakery & Snacks', 'Beverages'];
+const QUICK_LINKS = [
+    { label: 'Home', path: '/' },
+    { label: 'About Us', path: '/food/user/profile/about' },
+    { label: 'Shop', path: '/quick' },
+    { label: 'Safety & Emergency', path: '/food/user/profile/report-safety-emergency' },
+    { label: 'Contact', path: '/food/user/profile/support' }
+];
 
 const SOCIAL_ICONS = [
     { key: 'facebook', Icon: Facebook },
@@ -15,7 +22,7 @@ const SOCIAL_ICONS = [
     { key: 'youtube', Icon: Youtube },
 ];
 
-const Footer = () => {
+const Footer = ({ themeColor: themeColorProp }) => {
     const { settings } = useSettings();
 
     const logoUrl = settings?.logoUrl || Logo;
@@ -28,6 +35,24 @@ const Footer = () => {
         return defaultPrimaryColor;
     });
 
+    const [dynamicCategories, setDynamicCategories] = useState([]);
+
+    useEffect(() => {
+        const fetchCategories = async () => {
+            try {
+                const res = await customerApi.getCategories({ tree: true });
+                const results = res?.data?.results || res?.data?.result || [];
+                const allCategories = Array.isArray(results) ? results : [];
+                if (allCategories.length > 0) {
+                    setDynamicCategories(allCategories.slice(0, 5));
+                }
+            } catch (error) {
+                console.error("Failed to fetch categories for footer", error);
+            }
+        };
+        fetchCategories();
+    }, []);
+
     useEffect(() => {
         const handleThemeChange = () => {
             const color = window.sessionStorage.getItem('food.quick.headerColor');
@@ -37,7 +62,7 @@ const Footer = () => {
         return () => window.removeEventListener('quickThemeChange', handleThemeChange);
     }, []);
 
-    const primaryColor = themeColor;
+    const primaryColor = themeColorProp || themeColor;
     const appName = settings?.appName || 'DukaanWallah';
     console.log("settings?.appName :",);
     const currentYear = useMemo(() => new Date().getFullYear(), []); // year never changes in session
@@ -55,9 +80,9 @@ const Footer = () => {
     console.log("logoUrl :", logoUrl);
     return (
         <footer
-            className="dynamic-footer-bg relative bg-[#1a0f05] pt-20 pb-10 mt-20 text-slate-300 md:pt-32 md:pb-16 md:mt-32 overflow-hidden transition-colors duration-500"
+            className="dynamic-footer-bg relative bg-[#1a0f05] pt-12 pb-8 mt-10 text-slate-300 md:pt-16 md:pb-10 md:mt-12 overflow-hidden transition-colors duration-500"
             style={{
-                '--footer-gradient': `linear-gradient(to bottom right, ${shiftHex(themeColor, -20) || '#ea580c'}, ${themeColor || '#ea580c'}, ${shiftHex(themeColor, -40) || '#ea580c'})`
+                '--footer-gradient': `linear-gradient(to bottom right, ${shiftHex(primaryColor, -20) || '#ea580c'}, ${primaryColor || '#ea580c'}, ${shiftHex(primaryColor, -40) || '#ea580c'})`
             }}
         >
             <style>{`
@@ -96,16 +121,16 @@ const Footer = () => {
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-10 md:gap-16">
 
                     {/* Brand Info */}
-                    <div className="space-y-4 md:space-y-8">
+                    <div className="space-y-3 md:space-y-6">
                         <div className="flex items-center">
                             <img
                                 src={logoUrl}
                                 alt={`${appName} Logo`}
-                                className="h-12 md:h-16 w-auto object-contain"
+                                className="h-10 md:h-14 w-auto object-contain brightness-0 invert drop-shadow-sm opacity-95 hover:opacity-100 transition-opacity"
                                 loading="lazy"
                             />
                         </div>
-                        <p className="text-sm leading-relaxed md:text-base md:leading-loose text-white/90 md:max-w-xs transition-opacity hover:opacity-100 font-medium">
+                        <p className="text-sm leading-relaxed md:text-[15px] md:leading-relaxed text-white/90 md:max-w-xs transition-opacity hover:opacity-100 font-medium">
                             Your daily dose of fresh, organic, and healthy products delivered straight to your door. Freshness guaranteed.
                         </p>
                         <div className="flex gap-4">
@@ -124,86 +149,90 @@ const Footer = () => {
                     </div>
 
                     {/* Quick Links */}
-                    <div className="md:pt-4">
-                        <h3 className="text-white font-bold text-lg mb-4 md:text-xl md:font-black md:uppercase md:tracking-widest md:mb-8 flex items-center gap-2">
+                    <div className="md:pt-2">
+                        <h3 className="text-white font-bold text-lg mb-3 md:text-[17px] md:font-extrabold md:uppercase md:tracking-wide md:mb-5 flex items-center gap-2">
                             <span className="h-1 w-4 hidden md:block" style={{ backgroundColor: primaryColor }} />
                             Quick Links
                         </h3>
-                        <ul className="space-y-2 md:space-y-4">
-                            {QUICK_LINKS.map((label) => (
+                        <ul className="space-y-2 md:space-y-3">
+                            {QUICK_LINKS.map(({ label, path }) => (
                                 <li key={label}>
-                                    <a
-                                        href="#"
-                                        className="hover:text-red-300 transition-colors md:text-base md:font-semibold flex items-center group text-white"
+                                    <Link
+                                        to={path}
+                                        className="text-slate-200 hover:text-white transition-colors md:text-[15px] md:font-medium flex items-center group"
                                     >
                                         <span className="hidden md:block w-0 h-px bg-white group-hover:w-4 group-hover:mr-2 transition-all" />
                                         {label}
-                                    </a>
+                                    </Link>
                                 </li>
                             ))}
                         </ul>
                     </div>
 
                     {/* Categories */}
-                    <div className="md:pt-4">
-                        <h3 className="text-white font-bold text-lg mb-4 md:text-xl md:font-black md:uppercase md:tracking-widest md:mb-8 flex items-center gap-2">
+                    <div className="md:pt-2">
+                        <h3 className="text-white font-bold text-lg mb-3 md:text-[17px] md:font-extrabold md:uppercase md:tracking-wide md:mb-5 flex items-center gap-2">
                             <span className="h-1 w-4 hidden md:block" style={{ backgroundColor: primaryColor }} />
                             Categories
                         </h3>
-                        <ul className="space-y-2 md:space-y-4">
-                            {CATEGORIES.map((cat) => (
-                                <li key={cat}>
-                                    <a
-                                        href="#"
-                                        className="hover:text-red-300 transition-colors md:text-base md:font-semibold flex items-center group text-white"
-                                    >
-                                        <span className="hidden md:block w-0 h-px bg-white group-hover:w-4 group-hover:mr-2 transition-all" />
-                                        {cat}
-                                    </a>
-                                </li>
-                            ))}
+                        <ul className="space-y-2 md:space-y-3">
+                            {dynamicCategories.length > 0 ? (
+                                dynamicCategories.map((cat) => (
+                                    <li key={cat.id || cat._id}>
+                                        <Link
+                                            to={`/quick/category/${cat.slug}`}
+                                            className="text-slate-200 hover:text-white transition-colors md:text-[15px] md:font-medium flex items-center group"
+                                        >
+                                            <span className="hidden md:block w-0 h-px bg-white group-hover:w-4 group-hover:mr-2 transition-all" />
+                                            {cat.name}
+                                        </Link>
+                                    </li>
+                                ))
+                            ) : (
+                                <li className="text-slate-400 italic text-sm">Loading categories...</li>
+                            )}
                         </ul>
                     </div>
 
                     {/* Contact Info */}
-                    <div className="md:pt-4">
-                        <h3 className="text-white font-bold text-lg mb-4 md:text-xl md:font-black md:uppercase md:tracking-widest md:mb-8 flex items-center gap-2">
+                    <div className="md:pt-2">
+                        <h3 className="text-white font-bold text-lg mb-3 md:text-[17px] md:font-extrabold md:uppercase md:tracking-wide md:mb-5 flex items-center gap-2">
                             <span className="h-1 w-4 hidden md:block" style={{ backgroundColor: primaryColor }} />
                             Contact Us
                         </h3>
-                        <ul className="space-y-4 md:space-y-6">
-                            <li className="flex items-start gap-3 md:gap-5 group">
-                                <div className="hidden md:flex h-12 w-12 rounded-xl bg-white/10 items-center justify-center text-white transition-all shrink-0 group-hover:opacity-90">
-                                    <MapPin size={22} />
+                        <ul className="space-y-4 md:space-y-5">
+                            <li className="flex items-start gap-3 md:gap-4 group">
+                                <div className="hidden md:flex h-10 w-10 rounded-xl bg-white/10 items-center justify-center text-white transition-all shrink-0 group-hover:opacity-90">
+                                    <MapPin size={20} />
                                 </div>
                                 <MapPin className="mt-1 shrink-0 md:hidden" size={18} style={{ color: primaryColor }} />
-                                <span className="md:text-base text-white md:pt-1 font-medium">{settings?.address || '—'}</span>
+                                <span className="md:text-[15px] text-slate-200 md:pt-1 font-medium">{settings?.address || '—'}</span>
                             </li>
-                            <li className="flex items-center gap-3 md:gap-5 group">
-                                <div className="hidden md:flex h-12 w-12 rounded-xl bg-white/10 items-center justify-center text-white transition-all shrink-0 group-hover:opacity-90">
-                                    <Phone size={22} />
+                            <li className="flex items-center gap-3 md:gap-4 group">
+                                <div className="hidden md:flex h-10 w-10 rounded-xl bg-white/10 items-center justify-center text-white transition-all shrink-0 group-hover:opacity-90">
+                                    <Phone size={20} />
                                 </div>
                                 <Phone className="shrink-0 md:hidden" size={18} style={{ color: primaryColor }} />
-                                <span className="md:text-base text-white font-medium">{settings?.supportPhone || '—'}</span>
+                                <span className="md:text-[15px] text-slate-200 font-medium">{settings?.supportPhone || '—'}</span>
                             </li>
-                            <li className="flex items-center gap-3 md:gap-5 group">
-                                <div className="hidden md:flex h-12 w-12 rounded-xl bg-white/10 items-center justify-center text-white transition-all shrink-0 group-hover:opacity-90">
-                                    <Mail size={22} />
+                            <li className="flex items-center gap-3 md:gap-4 group">
+                                <div className="hidden md:flex h-10 w-10 rounded-xl bg-white/10 items-center justify-center text-white transition-all shrink-0 group-hover:opacity-90">
+                                    <Mail size={20} />
                                 </div>
                                 <Mail className="shrink-0 md:hidden" size={18} style={{ color: primaryColor }} />
-                                <span className="md:text-base text-white font-medium">{settings?.supportEmail || '—'}</span>
+                                <span className="md:text-[15px] text-slate-200 font-medium">{settings?.supportEmail || '—'}</span>
                             </li>
                         </ul>
                     </div>
                 </div>
 
-                <div className="border-t border-white/10 mt-12 pt-8 text-center text-sm md:flex md:justify-between md:text-left md:mt-24 md:pt-12">
-                    <p className="md:text-base text-white/60">
+                <div className="border-t border-white/10 mt-10 pt-6 text-center text-sm md:flex md:justify-between md:text-left md:mt-16 md:pt-8">
+                    <p className="md:text-[15px] text-white/70">
                         &copy; {currentYear} Blaze. All rights reserved.
                     </p>
-                    <div className="flex gap-6 justify-center md:justify-end mt-4 md:mt-0 md:gap-12">
-                        <a href="#" className="hover:text-red-300 md:text-base text-white/60 transition-all">Privacy Policy</a>
-                        <a href="#" className="hover:text-red-300 md:text-base text-white/60 transition-all">Terms of Service</a>
+                    <div className="flex gap-6 justify-center md:justify-end mt-4 md:mt-0 md:gap-8">
+                        <Link to="/food/user/profile/privacy" className="hover:text-white md:text-[15px] text-white/70 transition-all font-medium">Privacy Policy</Link>
+                        <Link to="/food/user/profile/terms" className="hover:text-white md:text-[15px] text-white/70 transition-all font-medium">Terms of Service</Link>
                     </div>
                 </div>
             </div>

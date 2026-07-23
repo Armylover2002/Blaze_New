@@ -95,7 +95,7 @@ export const processOrderJob = async (job) => {
     // Porter schedule reminder (~15 min before)
     if (action === 'PORTER_SCHEDULE_REMINDER') {
         try {
-            const { processPorterScheduleReminderJob } = await import('../../../modules/porter/orders/services/porter-scheduled-dispatch.service.js');
+            const { processPorterScheduleReminderJob } = await import('../../modules/porter/orders/services/porter-scheduled-dispatch.service.js');
             await processPorterScheduleReminderJob(orderMongoId);
         } catch (err) {
             logger.error(`[BullMQ:order] PORTER_SCHEDULE_REMINDER failed: ${err.message}`);

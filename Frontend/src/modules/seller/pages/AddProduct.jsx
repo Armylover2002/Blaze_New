@@ -241,16 +241,7 @@ const AddProduct = () => {
       // Legacy/free-text fallback kept for backwards compatibility.
       packSize: "",
     },
-    variants: sellerBusinessType === "pharmacy" ? [] : [
-      {
-        id: Date.now(),
-        name: "Default",
-        price: "",
-        salePrice: "",
-        stock: "",
-        sku: "",
-      },
-    ],
+    variants: [],
   });
 
   // ── Handle Product ID lookup & auto-fill ──────────────────────────────
@@ -335,6 +326,50 @@ const AddProduct = () => {
       return !isPharmacyHeader(header);
     });
   }, [dbCategories, sellerBusinessType]);
+
+  // Remove placeholder dropdown options UX by auto-selecting the first valid
+  // Main Group -> Category -> Sub-Category once categories are loaded.
+  React.useEffect(() => {
+    if (isLoadingCats) return;
+    if (!Array.isArray(categories) || categories.length === 0) return;
+
+    const getId = (x) => x?._id || x?.id || "";
+
+    setFormData((prev) => {
+      const currentHeaderId = prev.header;
+      const headerObj =
+        categories.find((h) => getId(h) === currentHeaderId) || categories[0];
+
+      const nextHeaderId = getId(headerObj);
+      const children = headerObj?.children || [];
+
+      const currentCategoryId = prev.category;
+      const categoryObj =
+        children.find((c) => getId(c) === currentCategoryId) || children[0];
+
+      const nextCategoryId = getId(categoryObj);
+      const subList = categoryObj?.children || [];
+
+      const currentSubId = prev.subcategory;
+      const subObj =
+        subList.find((sc) => getId(sc) === currentSubId) || subList[0];
+
+      const nextSubId = getId(subObj);
+
+      const shouldUpdateHeader = !currentHeaderId || getId(headerObj) !== currentHeaderId;
+      const shouldUpdateCategory = !currentCategoryId || getId(categoryObj) !== currentCategoryId;
+      const shouldUpdateSub = !currentSubId || getId(subObj) !== currentSubId;
+
+      if (!shouldUpdateHeader && !shouldUpdateCategory && !shouldUpdateSub) return prev;
+
+      return {
+        ...prev,
+        header: shouldUpdateHeader ? nextHeaderId : prev.header,
+        category: shouldUpdateCategory ? nextCategoryId : prev.category,
+        subcategory: shouldUpdateSub ? nextSubId : prev.subcategory,
+      };
+    });
+  }, [categories, isLoadingCats]);
 
   const handleSave = async () => {
     // Validate required fields
@@ -1629,7 +1664,6 @@ const AddProduct = () => {
                       setFormData({ ...formData, header: e.target.value, category: "", subcategory: "" })
                     }
                     className="w-full px-4 py-2.5 bg-slate-100 border-none rounded-md text-sm font-bold outline-none cursor-pointer focus:ring-2 focus:ring-red-500/5 transition-all">
-                    <option value="">Select Main Group</option>
                     {categories.map((h) => (
                       <option key={h._id || h.id} value={h._id || h.id}>
                         {h.name}
@@ -1648,7 +1682,6 @@ const AddProduct = () => {
                     }
                     disabled={!formData.header}
                     className="w-full px-4 py-2.5 bg-slate-100 border-none rounded-md text-sm font-bold outline-none cursor-pointer focus:ring-2 focus:ring-red-500/5 transition-all disabled:opacity-50 disabled:cursor-not-allowed">
-                    <option value="">Select Category</option>
                     {categories
                       .find((h) => (h._id || h.id) === formData.header)
                       ?.children?.map((c) => (
@@ -1671,7 +1704,6 @@ const AddProduct = () => {
                     }
                     disabled={!formData.category}
                     className="w-full px-4 py-2.5 bg-slate-100 border-none rounded-md text-sm font-bold outline-none cursor-pointer focus:ring-2 focus:ring-red-500/5 transition-all disabled:opacity-50 disabled:cursor-not-allowed">
-                    <option value="">Select Sub-Category</option>
                     {categories
                       .find((h) => (h._id || h.id) === formData.header)
                       ?.children?.find((c) => (c._id || c.id) === formData.category)

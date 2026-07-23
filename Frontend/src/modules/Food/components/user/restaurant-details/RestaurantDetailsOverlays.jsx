@@ -21,6 +21,7 @@ export default function RestaurantDetailsOverlays(props) {
     setFilters,
     vegMode,
     activeFilterCount,
+    onCategoryClick,
     showLocationSheet,
     setShowLocationSheet,
     restaurant,
@@ -73,6 +74,7 @@ export default function RestaurantDetailsOverlays(props) {
         open={showMenuSheet}
         onClose={() => setShowMenuSheet(false)}
         menuCategories={menuCategories}
+        onCategoryClick={onCategoryClick}
       />
       <RestaurantFilterSheet
         open={showFilterSheet}

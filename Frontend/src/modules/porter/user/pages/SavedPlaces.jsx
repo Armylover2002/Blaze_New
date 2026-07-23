@@ -80,7 +80,7 @@ export default function SavedPlaces() {
       title="Saved places"
       subtitle="Quick access for pickup & delivery"
       right={
-        <button type="button" onClick={() => setSheetOpen(true)} className="flex h-9 w-9 items-center justify-center rounded-full bg-[#FFF1F1] text-[#FF0000]">
+        <button type="button" onClick={() => setSheetOpen(true)} className="flex h-9 w-9 items-center justify-center rounded-full bg-[#EFF6FF] text-[#2563EB]">
           <Plus className="h-5 w-5" />
         </button>
       }
@@ -92,13 +92,13 @@ export default function SavedPlaces() {
           return (
             <div key={place.id} className="flex items-center gap-3 rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
               <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gray-50">
-                <Icon className="h-5 w-5 text-[#FF0000]" />
+                <Icon className="h-5 w-5 text-[#2563EB]" />
               </div>
               <div className="min-w-0 flex-1">
                 <p className="text-[14px] font-bold text-gray-900">{place.label}</p>
                 <p className="truncate text-[12px] text-gray-500">{place.address}</p>
               </div>
-              <button type="button" onClick={() => removePlace(place.id)} className="flex h-8 w-8 items-center justify-center rounded-full bg-gray-50 text-gray-400 hover:text-[#FF0000]">
+              <button type="button" onClick={() => removePlace(place.id)} className="flex h-8 w-8 items-center justify-center rounded-full bg-gray-50 text-gray-400 hover:text-[#2563EB]">
                 <Trash2 className="h-4 w-4" />
               </button>
             </div>
@@ -112,20 +112,20 @@ export default function SavedPlaces() {
             value={form.label}
             onChange={(e) => setForm((f) => ({ ...f, label: e.target.value }))}
             placeholder="Label (e.g. Home, Office)"
-            className="w-full rounded-2xl border border-gray-200 px-4 py-3 text-[14px] font-medium outline-none focus:border-[#FF0000]"
+            className="w-full rounded-2xl border border-gray-200 px-4 py-3 text-[14px] font-medium outline-none focus:border-[#2563EB]"
           />
           <input
             value={form.title}
             onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
             placeholder="Place name (optional)"
-            className="w-full rounded-2xl border border-gray-200 px-4 py-3 text-[14px] font-medium outline-none focus:border-[#FF0000]"
+            className="w-full rounded-2xl border border-gray-200 px-4 py-3 text-[14px] font-medium outline-none focus:border-[#2563EB]"
           />
           <textarea
             value={form.address}
             onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))}
             placeholder="Full address"
             rows={3}
-            className="w-full resize-none rounded-2xl border border-gray-200 p-3 text-[14px] font-medium outline-none focus:border-[#FF0000]"
+            className="w-full resize-none rounded-2xl border border-gray-200 p-3 text-[14px] font-medium outline-none focus:border-[#2563EB]"
           />
           <div className="flex gap-2">
             {["home", "work", "other"].map((t) => (
@@ -134,7 +134,7 @@ export default function SavedPlaces() {
                 type="button"
                 onClick={() => setForm((f) => ({ ...f, type: t }))}
                 className={`flex-1 rounded-xl py-2 text-[12px] font-bold capitalize ${
-                  form.type === t ? "bg-[#FF0000] text-white" : "bg-gray-100 text-gray-600"
+                  form.type === t ? "bg-[#2563EB] text-white" : "bg-gray-100 text-gray-600"
                 }`}
               >
                 {t}

@@ -2,6 +2,7 @@ import 'dotenv/config';
 import { Worker } from 'bullmq';
 import { config } from '../../config/env.js';
 import { logger } from '../../utils/logger.js';
+import { connectDB, disconnectDB } from '../../config/db.js';
 import { getBullMQConnection } from '../connection.js';
 import { SUBSCRIPTION_QUEUE } from '../queue.constants.js';
 import { processSubscriptionJob } from '../processors/subscription.processor.js';
@@ -36,13 +37,27 @@ const startSubscriptionWorker = () => {
     return worker;
 };
 
-const worker = startSubscriptionWorker();
-if (worker) {
-    const shutdown = async () => {
-        logger.info('Graceful shutdown: closing subscription worker');
-        await worker.close();
-        process.exit(0);
-    };
-    process.on('SIGTERM', shutdown);
-    process.on('SIGINT', shutdown);
-}
+const bootstrap = async () => {
+    try {
+        // The expiry sweep runs through subscriptionPlan.service, which uses mongoose.
+        await connectDB();
+        const worker = startSubscriptionWorker();
+        if (!worker) {
+            process.exit(0);
+            return;
+        }
+        const shutdown = async () => {
+            logger.info('Graceful shutdown: closing subscription worker');
+            await worker.close();
+            await disconnectDB().catch(() => {});
+            process.exit(0);
+        };
+        process.on('SIGTERM', shutdown);
+        process.on('SIGINT', shutdown);
+    } catch (err) {
+        logger.error(`Subscription worker bootstrap failed: ${err?.message || err}`);
+        process.exit(1);
+    }
+};
+
+bootstrap();

@@ -3,6 +3,7 @@ import { motion } from "framer-motion";
 import { toast } from "sonner";
 import { restaurantAPI } from "@food/api";
 import { useCart } from "@food/context/CartContext";
+import { useProfile } from "@food/context/ProfileContext";
 import RestaurantItemDetailSheet from "@food/components/user/restaurant-details/sheets/RestaurantItemDetailSheet";
 import ItemSlotAvailabilityNote from "@food/components/user/ItemSlotAvailabilityNote";
 import {
@@ -13,10 +14,11 @@ import {
   getFoodVariants,
   hasFoodVariants,
 } from "@food/utils/foodVariants";
+import { Flame, Heart, Plus, ArrowRight } from "lucide-react";
 
 const productsCache = new Map();
 
-const RecommendedSection = memo(({ recommendedForYouRestaurants }) => {
+const RecommendedSection = memo(({ recommendedForYouRestaurants, isFavorite, onFavoriteToggle }) => {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState(null);
@@ -24,6 +26,8 @@ const RecommendedSection = memo(({ recommendedForYouRestaurants }) => {
   const [selectedItemImageIndex, setSelectedItemImageIndex] = useState(0);
   const [selectedVariantId, setSelectedVariantId] = useState("");
   const { addToCart, updateQuantity, removeFromCart, getCartItem, cart } = useCart();
+  const { isDishFavorite, addDishFavorite, removeDishFavorite } = useProfile();
+  const scrollRef = React.useRef(null);
 
   const restaurantIdsKey = useMemo(
     () => (recommendedForYouRestaurants || []).map((r) => r.mongoId || r.id).join(","),
@@ -171,25 +175,29 @@ const RecommendedSection = memo(({ recommendedForYouRestaurants }) => {
 
   if (loading) {
     return (
-      <section className="mt-8 px-4" data-purpose="recommended-section">
-        <div className="flex justify-between items-center mb-4">
-          <h3 className="text-[11px] font-bold text-gray-400 uppercase tracking-widest">
-            Recommended for you
-          </h3>
+      <section className="mt-4 px-4" data-purpose="recommended-section">
+        <div className="flex justify-between items-center mb-4 sm:mb-5 pr-2">
+          <h2 className="text-[15px] font-semibold text-[#1c1c1e] tracking-tight md:text-xl">
+            Recommended For You
+          </h2>
+          <div className="w-16 h-3 bg-gray-200 rounded animate-pulse" />
         </div>
-        <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
-          {[1, 2, 3, 4, 5, 6].map((i) => (
+        <div className="flex overflow-x-auto gap-4 custom-scrollbar pb-2 hide-scrollbar">
+          {[1, 2, 3].map((i) => (
             <div
               key={i}
-              className="bg-white rounded-[12px] border border-gray-100 overflow-hidden shadow-sm h-full flex flex-col animate-pulse"
+              className="w-[40%] sm:w-[30%] md:w-[22%] lg:w-[16%] bg-white rounded-[12px] border border-gray-100 overflow-hidden shadow-sm h-full flex flex-col animate-pulse flex-shrink-0"
             >
-              <div className="h-32 sm:h-36 bg-gray-200 shrink-0" />
-              <div className="p-3 flex flex-col flex-1">
-                <div className="h-4 bg-gray-200 rounded w-3/4 mb-2" />
-                <div className="h-3 bg-gray-200 rounded w-1/2 mt-1 mb-auto" />
-                <div className="flex justify-between items-center mt-3 shrink-0">
-                  <div className="h-4 bg-gray-200 rounded w-1/4" />
-                  <div className="h-6 bg-gray-200 rounded w-1/4" />
+              <div className="h-20 sm:h-24 bg-gray-200 shrink-0" />
+              <div className="p-2.5 flex flex-col flex-1">
+                <div className="h-3 bg-gray-200 rounded w-3/4 mb-1" />
+                <div className="h-2 bg-gray-200 rounded w-1/2 mt-1 mb-auto" />
+                <div className="flex justify-between items-end mt-3 shrink-0">
+                  <div className="flex flex-col gap-1 w-12">
+                     <div className="h-2 bg-gray-200 rounded w-full" />
+                     <div className="h-3 bg-gray-200 rounded w-full" />
+                  </div>
+                  <div className="h-6 w-14 bg-gray-200 rounded-lg" />
                 </div>
               </div>
             </div>
@@ -201,20 +209,29 @@ const RecommendedSection = memo(({ recommendedForYouRestaurants }) => {
 
   if (!products || products.length === 0) return null;
 
+  const scrollRight = () => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollBy({ left: 300, behavior: 'smooth' });
+    }
+  };
+
   return (
     <motion.section
-      className="mt-8 px-4"
+      className="mt-4 px-4"
       data-purpose="recommended-section"
       initial={false}
       animate={{ opacity: 1, y: 0 }}
     >
-      <div className="flex justify-between items-center mb-4">
-        <h3 className="text-[11px] font-bold text-gray-400 uppercase tracking-widest">
-          Recommended for you
-        </h3>
+      <div className="flex justify-between items-center mb-4 sm:mb-5 pr-2">
+        <h2 className="text-[15px] font-semibold text-[#1c1c1e] tracking-tight md:text-xl">
+          Recommended For You
+        </h2>
+        <button onClick={scrollRight} className="h-7 w-7 sm:h-8 sm:w-8 rounded-full bg-gray-100 flex items-center justify-center cursor-pointer hover:bg-gray-200 transition-colors border-0 shrink-0">
+          <ArrowRight className="h-4 w-4 text-gray-700" />
+        </button>
       </div>
 
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4 lg:gap-5">
+      <div ref={scrollRef} className="flex overflow-x-auto gap-4 custom-scrollbar pb-2 hide-scrollbar snap-x scroll-smooth">
         {products.map((product, index) => (
           <motion.div
             key={`recommended-prod-${product._id || product.id || index}`}
@@ -222,13 +239,14 @@ const RecommendedSection = memo(({ recommendedForYouRestaurants }) => {
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true }}
             transition={{ duration: 0.35, delay: index * 0.05 }}
+            className="flex-shrink-0 w-[40%] sm:w-[30%] md:w-[22%] lg:w-[16%] snap-start"
           >
             <div
               onClick={() => openProductDetail(product)}
-              className="bg-white rounded-[12px] border border-gray-100 overflow-hidden shadow-sm block hover:shadow-md transition-shadow cursor-pointer h-full flex flex-col"
+              className="bg-white rounded-[12px] border border-gray-100 overflow-hidden shadow-[0_2px_8px_rgba(0,0,0,0.04)] block hover:shadow-md transition-shadow cursor-pointer h-full flex flex-col"
               data-purpose="product-card"
             >
-              <div className="relative h-32 sm:h-36 bg-gray-100 shrink-0">
+              <div className="relative h-20 sm:h-24 bg-gray-100 shrink-0">
                 <img
                   src={product.image || product.imageUrl || "https://placehold.co/150x150/png?text=No+Image"}
                   alt={product.name}
@@ -236,28 +254,97 @@ const RecommendedSection = memo(({ recommendedForYouRestaurants }) => {
                   loading="lazy"
                 />
                 {product.foodType === "Veg" || product.isVeg ? (
-                  <div className="absolute top-2 right-2 bg-white/90 backdrop-blur-sm border border-gray-200 px-1.5 py-0.5 rounded shadow-sm flex items-center">
-                    <span className="text-[8px] font-bold text-green-700">VEG</span>
+                  <div className="absolute top-2 left-2 bg-green-600 px-1.5 py-0.5 rounded flex items-center shadow-sm">
+                    <span className="text-[7.5px] font-bold text-white uppercase tracking-wider">VEG</span>
                   </div>
                 ) : null}
+                <button
+                  type="button"
+                  className="absolute top-2 right-2 bg-white rounded-full p-1.5 shadow-sm border-0 outline-none z-10 transition-transform active:scale-90"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const dishId = product.id || product._id;
+                    const restId = product.restaurantId || product.restaurantData?.mongoId || product.restaurantData?.id;
+                    if (!dishId || !restId) return;
+                    
+                    const isFav = isDishFavorite(dishId, restId);
+                    if (isFav) {
+                      removeDishFavorite(dishId, restId);
+                      toast.success("Removed from wishlist");
+                    } else {
+                      addDishFavorite(product, restId);
+                      toast.success("Added to wishlist");
+                    }
+                  }}
+                >
+                  <Heart 
+                    className="h-3.5 w-3.5 transition-colors" 
+                    fill={isDishFavorite(product.id || product._id, product.restaurantId || product.restaurantData?.mongoId || product.restaurantData?.id) ? "#FF0000" : "none"} 
+                    stroke={isDishFavorite(product.id || product._id, product.restaurantId || product.restaurantData?.mongoId || product.restaurantData?.id) ? "#FF0000" : "#4B5563"} 
+                  />
+                </button>
               </div>
-              <div className="p-3 flex flex-col flex-1">
-                <h4 className="font-bold text-sm text-[#1c1c1e] line-clamp-2">{product.name}</h4>
-                <p className="text-[10px] text-gray-500 mt-1 line-clamp-1">
+              <div className="p-2.5 flex flex-col flex-1">
+                <h4 className="font-bold text-xs text-[#1c1c1e] line-clamp-1">{product.name}</h4>
+                <p className="text-[9px] text-gray-500 mt-0.5 line-clamp-1 font-medium">
                   {product.restaurant}
                 </p>
                 <ItemSlotAvailabilityNote item={product} className="mt-1 mb-auto" />
                 <div className="flex justify-between items-center mt-3 shrink-0">
-                  <span className="text-sm font-bold text-[#1c1c1e]">
-                    {getFoodPriceLabel(product)}
-                  </span>
-                  <button
-                    type="button"
-                    className="bg-red-50 text-[#FF0000] font-bold text-[10px] px-4 py-1.5 rounded-[6px] transition-colors hover:bg-red-100 border-0 outline-none"
-                    onClick={(e) => handleProductAddClick(product, e)}
-                  >
-                    ADD
-                  </button>
+                  <div className="flex items-center">
+                     <span className="text-[14px] font-bold text-[#FF0000] leading-none">
+                       {getFoodPriceLabel(product).replace(/starting from/i, "").trim()}
+                     </span>
+                  </div>
+                  {(() => {
+                    const quantity = getDishQuantity(product);
+                    
+                    if (quantity > 0) {
+                      return (
+                        <div className="flex items-center bg-[#FF0000] rounded-[8px] overflow-hidden shadow-sm h-7 w-20">
+                          <button
+                            type="button"
+                            className="flex-1 h-full text-white font-bold flex items-center justify-center hover:bg-[#CC0000] transition-colors"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (hasFoodVariants(product)) {
+                                openProductDetail(product);
+                              } else {
+                                updateItemQuantity(product, quantity - 1);
+                              }
+                            }}
+                          >
+                            -
+                          </button>
+                          <span className="text-white font-bold text-[11px] px-1">{quantity}</span>
+                          <button
+                            type="button"
+                            className="flex-1 h-full text-white font-bold flex items-center justify-center hover:bg-[#CC0000] transition-colors"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (hasFoodVariants(product)) {
+                                openProductDetail(product);
+                              } else {
+                                updateItemQuantity(product, quantity + 1);
+                              }
+                            }}
+                          >
+                            +
+                          </button>
+                        </div>
+                      );
+                    }
+                    
+                    return (
+                      <button
+                        type="button"
+                        className="bg-[#FF0000] text-white font-bold text-[10px] pl-3 pr-1.5 py-1.5 rounded-[8px] flex items-center gap-1 shadow-sm transition-colors hover:bg-[#CC0000] border-0 outline-none h-7"
+                        onClick={(e) => handleProductAddClick(product, e)}
+                      >
+                        ADD <Plus className="h-3.5 w-3.5 bg-white text-[#FF0000] rounded-full p-0.5" strokeWidth={3} />
+                      </button>
+                    );
+                  })()}
                 </div>
               </div>
             </div>

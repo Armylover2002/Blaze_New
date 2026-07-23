@@ -5,7 +5,7 @@ import React from "react";
  * The map moves underneath; this pin stays visually centered.
  * `moving` triggers a lift/bounce while the camera is in motion.
  */
-export function CenterPin({ moving = false, label, color = "#FF0000" }) {
+export function CenterPin({ moving = false, label, color = "#2563EB" }) {
   return (
     <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center">
       <div
@@ -54,7 +54,7 @@ export function CenterPin({ moving = false, label, color = "#FF0000" }) {
  * Returns a custom Blaze SVG icon for google.maps.Marker (route map pickup/drop).
  * Must be called only after Google Maps has loaded.
  */
-export function blazeMarkerIcon(color = "#FF0000") {
+export function blazeMarkerIcon(color = "#2563EB") {
   const svg = `
     <svg width="40" height="50" viewBox="0 0 46 56" xmlns="http://www.w3.org/2000/svg">
       <path d="M23 2C12.5 2 4 10.4 4 20.8C4 33.5 19.4 49.3 22 51.9C22.6 52.5 23.4 52.5 24 51.9C26.6 49.3 42 33.5 42 20.8C42 10.4 33.5 2 23 2Z" fill="${color}" stroke="#ffffff" stroke-width="2.5"/>
@@ -69,4 +69,4 @@ export function blazeMarkerIcon(color = "#FF0000") {
 }
 
 export const PICKUP_COLOR = "#2e7d32";
-export const DROP_COLOR = "#FF0000";
+export const DROP_COLOR = "#2563EB";

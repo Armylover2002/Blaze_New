@@ -40,7 +40,7 @@ function AddressFieldCard({
         serviceError
           ? "border-red-400 bg-red-50"
           : isActive
-            ? "border-[#FF0000] bg-[#FFF1F1]"
+            ? "border-[#2563EB] bg-[#EFF6FF]"
             : "border-gray-100 bg-white"
       }`}
     >
@@ -70,7 +70,7 @@ function AddressFieldCard({
       </button>
 
       {isActive && (
-        <div className="space-y-2 border-t border-[#FF0000]/10 px-3 pb-3 pt-2">
+        <div className="space-y-2 border-t border-[#2563EB]/10 px-3 pb-3 pt-2">
           <PorterPlacesAutocomplete
             value={query}
             onChange={onQueryChange}
@@ -82,10 +82,10 @@ function AddressFieldCard({
               type="button"
               onClick={onUseCurrentLocation}
               disabled={usingCurrentLocation}
-              className="flex w-full items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-[13px] font-bold text-[#FF0000] transition active:scale-[0.99] disabled:opacity-60"
+              className="flex w-full items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-[13px] font-bold text-[#2563EB] transition active:scale-[0.99] disabled:opacity-60"
             >
               {usingCurrentLocation ? (
-                <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-[#FF0000] border-t-transparent" />
+                <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-[#2563EB] border-t-transparent" />
               ) : (
                 <Navigation className="h-4 w-4" />
               )}
@@ -312,7 +312,7 @@ export default function SelectAddresses() {
           field="delivery"
           activeField={activeField}
           onActivate={setActiveField}
-          icon={<MapPin className="mt-0.5 h-5 w-5 shrink-0 text-[#FF0000]" />}
+          icon={<MapPin className="mt-0.5 h-5 w-5 shrink-0 text-[#2563EB]" />}
           label="Drop"
           location={delivery}
           locating={false}
@@ -340,7 +340,7 @@ export default function SelectAddresses() {
         <button
           type="button"
           onClick={() => navigate(getPorterSavedPlacesPath())}
-          className="text-[12px] font-bold text-[#FF0000]"
+          className="text-[12px] font-bold text-[#2563EB]"
         >
           Manage
         </button>
@@ -356,9 +356,9 @@ export default function SelectAddresses() {
           >
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gray-50">
               {place.type === "home" ? (
-                <Home className="h-4 w-4 text-[#FF0000]" />
+                <Home className="h-4 w-4 text-[#2563EB]" />
               ) : place.type === "work" ? (
-                <Briefcase className="h-4 w-4 text-[#FF0000]" />
+                <Briefcase className="h-4 w-4 text-[#2563EB]" />
               ) : (
                 <Clock className="h-4 w-4 text-gray-500" />
               )}

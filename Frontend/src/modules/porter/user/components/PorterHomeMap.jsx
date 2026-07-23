@@ -146,7 +146,7 @@ export default function PorterHomeMap({ height = 320, className = "" }) {
         polylineRef.current = new window.google.maps.Polyline({
           map: mapRef.current,
           path,
-          strokeColor: "#FF0000",
+          strokeColor: "#2563EB",
           strokeWeight: 5,
           strokeOpacity: 0.9,
         });
@@ -196,7 +196,7 @@ export default function PorterHomeMap({ height = 320, className = "" }) {
 
       {loading && (
         <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/80">
-          <Loader2 className="h-6 w-6 animate-spin text-[#FF0000]" />
+          <Loader2 className="h-6 w-6 animate-spin text-[#2563EB]" />
         </div>
       )}
       {!loading && error && (
@@ -211,14 +211,14 @@ export default function PorterHomeMap({ height = 320, className = "" }) {
           onClick={handleMyLocation}
           disabled={fetchingLocation}
           aria-label="Use current location"
-          className="absolute bottom-4 left-4 z-20 flex h-11 w-11 items-center justify-center rounded-full bg-white text-[#FF0000] shadow-lg active:scale-95 disabled:opacity-60"
+          className="absolute bottom-4 left-4 z-20 flex h-11 w-11 items-center justify-center rounded-full bg-white text-[#2563EB] shadow-lg active:scale-95 disabled:opacity-60"
         >
           {fetchingLocation ? <Loader2 className="h-5 w-5 animate-spin" /> : <Navigation className="h-5 w-5" />}
         </button>
       )}
 
       {routeQuote?.route?.distanceText && routeQuote?.route?.durationText && (
-        <div className="absolute bottom-3 left-3 z-20 rounded-full bg-[#FF0000] px-3 py-1 text-[11px] font-bold text-white shadow-md">
+        <div className="absolute bottom-3 left-3 z-20 rounded-full bg-[#2563EB] px-3 py-1 text-[11px] font-bold text-white shadow-md">
           {routeQuote.route.distanceText} · {routeQuote.route.durationText}
         </div>
       )}

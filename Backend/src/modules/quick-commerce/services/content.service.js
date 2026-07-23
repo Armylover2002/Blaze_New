@@ -833,6 +833,7 @@ export const getQuickCategories = async (query = {}) => {
     .select(CATEGORY_SELECT_FIELDS)
     .sort({ sortOrder: 1, name: 1 })
     .sort({ order: 1, name: 1 })
+    .sort({ sortOrder: 1, name: 1 })
     .lean();
 
   if (!query.parentId) {

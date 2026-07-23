@@ -4,7 +4,7 @@ import { motion } from "framer-motion";
 export function PrimaryButton({ children, className = "", variant = "primary", ...props }) {
   const styles =
     variant === "primary"
-      ? "bg-[#FF0000] text-white shadow-[0_8px_24px_rgba(255,0,0,0.25)] hover:bg-[#CC0000]"
+      ? "bg-[#2563EB] text-white shadow-[0_8px_24px_rgba(37,99,235,0.25)] hover:bg-[#1D4ED8]"
       : variant === "outline"
       ? "border border-gray-200 bg-white text-gray-900 hover:bg-gray-50"
       : "bg-gray-900 text-white hover:bg-black";
@@ -33,7 +33,7 @@ export function FareRow({ label, value, strong, accent, free }) {
       <span className={strong ? "font-bold text-gray-900" : "text-gray-500"}>{label}</span>
       <span
         className={
-          free ? "font-bold text-[#2e7d32]" : accent ? "font-bold text-[#FF0000]" : strong ? "text-[15px] font-extrabold text-gray-900" : "font-semibold text-gray-800"
+          free ? "font-bold text-[#2e7d32]" : accent ? "font-bold text-[#2563EB]" : strong ? "text-[15px] font-extrabold text-gray-900" : "font-semibold text-gray-800"
         }
       >
         {value}
@@ -43,7 +43,7 @@ export function FareRow({ label, value, strong, accent, free }) {
 }
 
 export function SectionLabel({ children, className = "" }) {
-  return <h2 className={`mb-2 text-[12px] font-bold uppercase tracking-wider text-gray-400 ${className}`}>{children}</h2>;
+  return <h2 className={`mb-2 text-[15px] font-semibold text-[#1c1c1e] dark:text-white md:text-xl tracking-tight ${className}`}>{children}</h2>;
 }
 
 /** Display-only INR formatter — always 2 decimal places; does not alter stored amounts. */

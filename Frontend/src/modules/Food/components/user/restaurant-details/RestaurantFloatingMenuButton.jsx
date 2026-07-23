@@ -1,19 +1,26 @@
-import { Utensils } from "lucide-react";
+import { useState } from "react";
 import { Button } from "@food/components/ui/button";
+import { motion } from "framer-motion";
+import { Utensils } from "lucide-react";
 
 export default function RestaurantFloatingMenuButton({ hidden, onOpen }) {
+  const [isTurning, setIsTurning] = useState(false);
+
   if (hidden) return null;
 
+  const handleClick = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    onOpen(e);
+  };
+
   return (
-    <div className="sticky dark:bg-[#1a1a1a] bottom-4 flex justify-end px-4 z-50 mt-auto">
-      <Button
-        className="bg-[#1a1a1a] dark:bg-[#FF0000] hover:bg-black dark:hover:bg-[#C83C00] text-white flex items-center gap-2 shadow-[0_8px_30px_rgb(0,0,0,0.12)] border border-white/10 dark:border-[#FF0000]/20 px-6 py-6 rounded-full font-bold transform transition-all duration-300 hover:scale-110 active:scale-95 group"
-        size="lg"
-        onClick={onOpen}
-      >
-        <Utensils className="h-5 w-5 text-[#FF0000] dark:text-white group-hover:rotate-12 transition-transform" />
-        <span className="tracking-wide">MENU</span>
-      </Button>
-    </div>
+    <button
+      className="fixed bottom-[80px] right-6 z-[100] bg-[#0a0a0a] hover:bg-black dark:bg-[#0a0a0a] dark:hover:bg-black text-white flex flex-col items-center justify-center gap-1 shadow-[0_10px_25px_rgba(0,0,0,0.3)] h-[70px] w-[70px] rounded-full p-0 transform transition-all duration-200 hover:scale-105 active:scale-95 group border-none cursor-pointer outline-none pointer-events-auto"
+      onClick={handleClick}
+    >
+      <Utensils className="h-[22px] w-[22px] text-white group-hover:-translate-y-0.5 transition-transform stroke-[2.5]" />
+      <span className="text-[11px] font-bold tracking-wider uppercase mt-[2px]">MENU</span>
+    </button>
   );
 }

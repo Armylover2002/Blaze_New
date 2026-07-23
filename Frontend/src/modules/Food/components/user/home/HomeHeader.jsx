@@ -140,12 +140,12 @@ export default function HomeHeader({
   const isPorter = activeTab === "porter";
   const theme =
     activeTab === "quick"
-      ? { accent: FIXED_QUICK_THEME_COLOR }
+      ? foodTheme(vegMode)
       : isPorter
-        ? { accent: "#FF0000" }
+        ? { accent: "#2563EB" } // Keeping Porter theme consistent with its inner pages (Blue)
         : foodTheme(vegMode);
   const isFood = activeTab === "food";
-  const isLightChrome = isFood || isPorter;
+  const isLightChrome = isFood || isPorter || activeTab === "quick";
   const isDarkTheme = !isLightChrome && isColorDark(theme.accent);
   const textColorClass = isLightChrome
     ? "text-gray-900"
@@ -239,64 +239,37 @@ export default function HomeHeader({
     >
       <header
         className={cn(
-          "px-3 py-2.5 outline-none transition-colors duration-300 sm:px-4 sm:py-3",
+          "px-3 py-0 outline-none transition-colors duration-300 sm:px-4",
           isLightChrome
-            ? "border-b border-gray-100 bg-white"
+            ? "bg-white"
             : "border-b-0 border-none",
         )}
         style={!isLightChrome ? { backgroundColor: "transparent" } : undefined}
       >
         <div className="flex items-center justify-between gap-2">
-          <button
-            type="button"
-            onClick={handleLocationClick}
-            className="flex min-w-0 flex-1 items-center gap-2 border-0 bg-transparent p-0 text-left outline-none"
+          <Link
+            to="/food/user"
+            className="flex shrink-0 items-center border-0 bg-transparent p-0 outline-none"
           >
-            <MapPin
-              className="h-4 w-4 shrink-0 sm:h-5 sm:w-5"
-              style={{ color: iconColor }}
-              strokeWidth={2}
-            />
-            <div className="min-w-0 flex-1">
-              <div className="flex min-w-0 items-center">
-                <span
-                  className={cn(
-                    "truncate text-xs font-bold sm:text-sm",
-                    "max-w-[7.5rem] sm:max-w-[12rem]",
-                    textColorClass,
-                  )}
-                >
-                  {embedded ? savedAddressText || locationTitle : locationTitle}
-                </span>
-                {!embedded && (
-                  <ChevronDown
-                    className={cn("ml-1 h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4", textColorClass)}
-                    strokeWidth={2}
-                  />
-                )}
-              </div>
-              {!embedded && (
-                <span
-                  className={cn(
-                    "block truncate text-[9px] uppercase sm:text-[10px]",
-                    "max-w-[8.5rem] sm:max-w-[14rem]",
-                    subtextColorClass,
-                  )}
-                >
-                  {locationSubtitle}
-                </span>
-              )}
-            </div>
-          </button>
+            <img src="/final_logo200-removebg-preview.png" alt="Blaze" className="h-7 sm:h-8 w-auto object-contain" />
+          </Link>
 
           {!embedded && (
             <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+              <div className="flex items-center gap-1 mr-1 bg-gray-50 px-2 py-1 rounded-full border border-gray-100">
+                <span className="text-[9px] font-bold text-green-700 mt-0.5">VEG</span>
+                <Switch
+                  checked={vegMode}
+                  onCheckedChange={onVegModeChange}
+                  className="data-[state=checked]:bg-green-600 scale-[0.7] -mr-1"
+                />
+              </div>
               <Link
                 to="/food/user/cart"
                 className={cn(
-                  "relative rounded-full p-1.5 transition-all hover:scale-105 active:scale-95 sm:p-2",
+                  "relative rounded-full h-9 w-9 sm:h-10 sm:w-10 transition-all hover:scale-105 active:scale-95 flex items-center justify-center shrink-0",
                   isLightChrome
-                    ? "bg-gray-100 text-gray-700"
+                    ? "bg-white text-gray-900 border border-gray-100 shadow-sm"
                     : isDarkTheme
                       ? "bg-white/20 text-white"
                       : "bg-black/5 text-gray-800",
@@ -305,7 +278,7 @@ export default function HomeHeader({
               >
                 <ShoppingCart className="h-4 w-4 sm:h-5 sm:w-5" strokeWidth={2} />
                 {cartItemCount > 0 && (
-                  <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-[#FF0000] text-[10px] font-bold text-white">
+                  <span className="absolute -top-1.5 -right-1.5 flex h-4 w-4 sm:h-5 sm:w-5 items-center justify-center rounded-full bg-[#FF0000] text-[10px] sm:text-[11px] font-bold text-white border-2 border-white shadow-sm">
                     {cartItemCount > 9 ? "9+" : cartItemCount}
                   </span>
                 )}
@@ -314,9 +287,9 @@ export default function HomeHeader({
               <Link
                 to={walletPath}
                 className={cn(
-                  "rounded-full p-1.5 transition-all hover:scale-105 active:scale-95 sm:p-2",
+                  "relative rounded-full h-9 w-9 sm:h-10 sm:w-10 transition-all hover:scale-105 active:scale-95 flex items-center justify-center shrink-0",
                   isLightChrome
-                    ? "bg-gray-100 text-gray-700"
+                    ? "bg-white text-gray-900 border border-gray-100 shadow-sm"
                     : isDarkTheme
                       ? "bg-white/20 text-white"
                       : "bg-black/5 text-gray-800",
@@ -331,9 +304,9 @@ export default function HomeHeader({
                   <button
                     type="button"
                     className={cn(
-                      "relative rounded-full border-0 p-1.5 outline-none transition-all hover:scale-105 active:scale-95 sm:p-2",
+                      "relative rounded-full border-0 h-9 w-9 sm:h-10 sm:w-10 outline-none transition-all hover:scale-105 active:scale-95 flex items-center justify-center shrink-0",
                       isLightChrome
-                        ? "bg-gray-100 text-gray-700"
+                        ? "bg-white text-gray-900 border border-gray-100 shadow-sm"
                         : isDarkTheme
                           ? "bg-white/20 text-white"
                           : "bg-black/5 text-gray-800",
@@ -342,7 +315,9 @@ export default function HomeHeader({
                   >
                     <Bell className="h-4 w-4 sm:h-5 sm:w-5" strokeWidth={2} />
                     {unreadCount > 0 && (
-                      <span className="absolute right-1 top-1 h-2 w-2 rounded-full border border-white bg-[#FF0000]" />
+                      <span className="absolute -top-1.5 -right-1.5 flex h-4 w-4 sm:h-5 sm:w-5 items-center justify-center rounded-full bg-[#FF0000] text-[10px] sm:text-[11px] font-bold text-white border-2 border-white shadow-sm">
+                        {unreadCount > 9 ? "9+" : unreadCount}
+                      </span>
                     )}
                   </button>
                 </PopoverTrigger>
@@ -420,121 +395,7 @@ export default function HomeHeader({
         </div>
       </header>
 
-      {!embedded && (
-        <>
-          <div className="flex gap-1.5 px-3 py-2 sm:gap-2 sm:px-4">
-            {tabs.map((tab) => {
-              const isActive = activeTab === tab.id;
-              const handleTabIntent = () => {
-                if (tab.id === "quick") onQuickTabIntent?.();
-              };
-              const handleTabClick = () => {
-                if (tab.route) {
-                  const redirectTo = `${routerLocation.pathname || "/food/user"}${routerLocation.search || ""}${routerLocation.hash || ""}`;
-                  navigate(tab.route, { state: { redirectTo } });
-                  return;
-                }
-                setActiveTab?.(tab.id);
-              };
 
-              return (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={handleTabClick}
-                  onMouseEnter={handleTabIntent}
-                  onTouchStart={handleTabIntent}
-                  onFocus={handleTabIntent}
-                  className={cn(
-                    "flex min-w-0 flex-1 cursor-pointer flex-col items-center justify-center rounded-[8px] border-0 px-1 py-2 font-bold transition-all duration-300 sm:px-2",
-                    isActive
-                      ? isLightChrome
-                        ? "border-0 text-white shadow-lg"
-                        : isDarkTheme
-                          ? "border border-white/30 text-white shadow-lg"
-                          : "border border-black/20 text-gray-900 shadow-lg"
-                      : isLightChrome
-                        ? "border-0 bg-gray-100 text-gray-500 hover:bg-gray-200"
-                        : isDarkTheme
-                          ? "border-0 bg-white/10 text-white hover:bg-white/20"
-                          : "border-0 bg-black/5 text-gray-700 hover:bg-black/10",
-                  )}
-                  style={
-                    isActive
-                      ? {
-                          backgroundColor: theme.accent,
-                          boxShadow:
-                            tab.id === "quick"
-                              ? "0 10px 15px -3px rgba(0,0,0,0.15)"
-                              : "0 10px 15px -3px rgba(255,0,0,0.2)",
-                        }
-                      : undefined
-                  }
-                >
-                  <div className="mb-0.5 flex h-5 w-5 items-center justify-center text-[18px] leading-none sm:text-[20px]">
-                    {TAB_GLYPHS[tab.id] || "🍔"}
-                  </div>
-                  <span className="w-full truncate text-center text-[9px] font-bold uppercase tracking-wide sm:text-[10px]">
-                    <span className="sm:hidden">{tab.shortName}</span>
-                    <span className="hidden sm:inline">{tab.name}</span>
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-
-          {isFood && (
-            <div className="px-3 py-2 sm:px-4 sm:py-3">
-              <div className="relative flex w-full items-center">
-                <div className="pointer-events-none absolute inset-y-0 left-0 z-10 flex items-center pl-3">
-                  <Search className="h-4 w-4 sm:h-5 sm:w-5" style={{ color: theme.accent }} strokeWidth={2} />
-                </div>
-
-                <button
-                  type="button"
-                  onClick={openSearch}
-                  className="block w-full cursor-pointer rounded-[8px] border border-gray-200 bg-gray-50 py-2.5 pl-9 pr-[5.5rem] text-left text-xs font-normal text-gray-900 placeholder:text-gray-400 focus:border-brand-orange focus:ring-brand-orange sm:py-3 sm:pl-10 sm:pr-28 sm:text-sm"
-                >
-                  <span className="block truncate text-gray-400">
-                    {placeholders?.[placeholderIndex] || "Search for food, groceries..."}
-                  </span>
-                </button>
-
-                <div className="absolute inset-y-0 right-0 z-20 flex items-center gap-1.5 pr-2 sm:gap-2 sm:pr-3">
-                  <button
-                    type="button"
-                    onClick={openSearch}
-                    style={{ color: theme.accent }}
-                    className={cn(
-                      "border-0 bg-transparent p-1 transition-all hover:scale-105 active:scale-95",
-                      isListening && "animate-pulse",
-                    )}
-                    aria-label="Voice search"
-                  >
-                    <Mic className="h-4 w-4 sm:h-5 sm:w-5" strokeWidth={2} />
-                  </button>
-
-                  <div className="hidden h-5 w-px bg-gray-300 sm:block" />
-
-                  <div className="flex items-center gap-1 pl-0.5 sm:pl-1">
-                    <span className="hidden text-[10px] font-bold uppercase text-[#2e7d32] min-[380px]:inline">
-                      Veg
-                    </span>
-                    <div className="flex h-5 scale-[0.78] items-center sm:scale-[0.8]">
-                      <Switch
-                        checked={vegMode}
-                        onCheckedChange={onVegModeChange}
-                        className="border-none data-[state=checked]:bg-[#2e7d32] data-[state=unchecked]:bg-gray-200"
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-        </>
-      )}
     </motion.div>
   );
 }

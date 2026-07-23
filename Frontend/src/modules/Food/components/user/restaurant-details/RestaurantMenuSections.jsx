@@ -42,7 +42,7 @@ export default function RestaurantMenuSections({
                         {/* Section Header */}
                         {isRecommended && (
                           <div className="flex items-center justify-between mb-4 px-1">
-                            <h2 className="text-xl font-black text-gray-900 dark:text-white tracking-tight">
+                            <h2 className="text-xl font-bold capitalize text-gray-900 dark:text-white tracking-tight">
                               Recommended for you
                             </h2>
                             <button
@@ -70,7 +70,7 @@ export default function RestaurantMenuSections({
                         {!isRecommended && (
                           <div className="flex items-center justify-between mb-4 px-1">
                             <div className="space-y-1">
-                              <h2 className="text-xl font-black text-gray-900 dark:text-white tracking-tight">
+                              <h2 className="text-xl font-bold capitalize text-gray-900 dark:text-white tracking-tight">
                                 {(section?.name && typeof section.name === 'string' && section.name.trim())
                                   ? section.name.trim()
                                   : (section?.title && typeof section.title === 'string' && section.title.trim())
@@ -121,7 +121,7 @@ export default function RestaurantMenuSections({
                           </div>
                         )}
                         {isExpanded && sectionItems.length > 0 && (
-                          <div className="space-y-1">
+                          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-4 px-1 pb-2">
                             {sectionItems.map((item) => renderDishCard(item))}
                           </div>
                         )}
@@ -165,7 +165,7 @@ export default function RestaurantMenuSections({
       
                                   {/* Subsection Items */}
                                   {isSubsectionExpanded && subsectionItems.length > 0 && (
-                                    <div className="space-y-1">
+                                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-4 px-1 pb-2">
                                       {subsectionItems.map((item) => renderDishCard(item))}
                                     </div>
                                   )}

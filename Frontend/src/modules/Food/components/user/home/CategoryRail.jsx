@@ -1,6 +1,6 @@
 import React, { memo } from "react";
 import { Link } from "react-router-dom";
-import { ArrowDownUp } from "lucide-react";
+import { ArrowLeft, ArrowRight } from "lucide-react";
 import { CategoryChipRowSkeleton } from "@food/components/ui/loading-skeletons";
 import OptimizedImage from "@food/components/OptimizedImage";
 import foodPattern from "@food/assets/food_pattern_background.png";
@@ -12,11 +12,35 @@ const CategoryRail = memo(({
   backendOrigin = "",
   hasOffers = true
 }) => {
+  const scrollRef = React.useRef(null);
+
+  const scrollLeft = () => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollBy({ left: -300, behavior: 'smooth' });
+    }
+  };
+
+  const scrollRight = () => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollBy({ left: 300, behavior: 'smooth' });
+    }
+  };
+
   return (
-    <section className="mt-6 px-4 md:mt-8" data-purpose="mind-categories">
-      <h3 className="mb-4 text-lg font-bold text-gray-900 dark:text-white md:text-xl">What's on your mind?</h3>
+    <section className="mt-4 px-4 md:mt-6" data-purpose="mind-categories">
+      <div className="flex items-center justify-between mb-2 sm:mb-3">
+        <h3 className="text-[15px] font-semibold text-[#1c1c1e] dark:text-white md:text-xl tracking-tight">What's on your mind?</h3>
+        <div className="flex gap-2">
+          <button onClick={scrollLeft} className="h-7 w-7 sm:h-8 sm:w-8 rounded-full bg-gray-100 flex items-center justify-center cursor-pointer hover:bg-gray-200 transition-colors border-0">
+            <ArrowLeft className="h-4 w-4 text-gray-700" />
+          </button>
+          <button onClick={scrollRight} className="h-7 w-7 sm:h-8 sm:w-8 rounded-full bg-gray-100 flex items-center justify-center cursor-pointer hover:bg-gray-200 transition-colors border-0">
+            <ArrowRight className="h-4 w-4 text-gray-700" />
+          </button>
+        </div>
+      </div>
       
-      <div className="flex gap-4 overflow-x-auto pb-2 custom-scrollbar md:grid md:grid-cols-4 md:overflow-visible lg:grid-cols-6 xl:grid-cols-8 md:gap-5 md:pb-0">
+      <div ref={scrollRef} className="flex gap-4 overflow-x-auto pb-2 custom-scrollbar md:grid md:grid-cols-4 md:overflow-visible lg:grid-cols-6 xl:grid-cols-8 md:gap-5 md:pb-0 scroll-smooth">
         {/* Offers Card */}
         {hasOffers && (
         <div 

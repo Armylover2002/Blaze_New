@@ -18,6 +18,10 @@ import {
   isQuickCouponExpired,
   isQuickCouponNotStarted,
 } from '../utils/coupon.helpers.js';
+import {
+  escapeRegex,
+  publicProductVisibilityFilter,
+} from '../utils/productVisibility.helpers.js';
 
 const setNoCache = (res) => {
   res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
@@ -59,19 +63,7 @@ const publicCategoryFilter = {
   ],
 };
 
-const publicProductFilter = {
-  $and: [
-    approvedOrLegacyFilter,
-    {
-      $or: [
-        { status: 'active' },
-        { status: { $exists: false } },
-        { isActive: true },
-        { isActive: { $exists: false } },
-      ],
-    },
-  ],
-};
+const publicProductFilter = publicProductVisibilityFilter;
 
 const mapCategory = (category) => ({
   id: category._id,
@@ -531,7 +523,10 @@ export const getProducts = async (req, res) => {
       { headerId: categoryId }
     ];
   }
-  if (search) query.name = { $regex: String(search).trim(), $options: 'i' };
+  if (search) {
+    const term = escapeRegex(String(search).trim().slice(0, 80));
+    if (term) query.name = { $regex: term, $options: 'i' };
+  }
 
   // Backward compatible pagination
   const hasPagination = !!req.query.page;

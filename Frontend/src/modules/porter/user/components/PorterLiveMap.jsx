@@ -119,7 +119,7 @@ export default function PorterLiveMap({
       <div ref={mapContainerRef} className="w-full" style={{ height, minHeight: height }} />
       {loading && (
         <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/80">
-          <Loader2 className="h-6 w-6 animate-spin text-[#FF0000]" />
+          <Loader2 className="h-6 w-6 animate-spin text-[#2563EB]" />
         </div>
       )}
       {!loading && error && (
