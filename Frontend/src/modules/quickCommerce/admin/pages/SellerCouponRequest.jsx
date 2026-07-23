@@ -116,7 +116,7 @@ export default function SellerCouponRequest() {
       const query = searchQuery.toLowerCase().trim();
       result = result.filter(r => {
         const sellerName = r.sellerName?.toLowerCase() || "";
-        const code = r.couponCode?.toLowerCase() || "";
+        const code = r.code?.toLowerCase() || "";
         const desc = r.description?.toLowerCase() || "";
         return sellerName.includes(query) || code.includes(query) || desc.includes(query);
       });
@@ -206,27 +206,41 @@ export default function SellerCouponRequest() {
             <div>
               <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider">Coupon Code</p>
               <p className="text-sm font-extrabold text-slate-950 tracking-wider bg-slate-100 px-2.5 py-1 rounded border border-slate-300 inline-block mt-1">
-                {selectedRequest.couponCode}
+                {selectedRequest.code}
               </p>
             </div>
             <div>
               <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider">Discount Value</p>
               <p className="text-sm font-bold text-slate-900 mt-1.5">
-                {selectedRequest.discountType === "percentage" ? `${selectedRequest.discountValue}% OFF` : `₹${selectedRequest.discountValue} FLAT OFF`}
+                {selectedRequest.discountType === "percentage" ? `${selectedRequest.discountValue}% OFF` : selectedRequest.discountType === 'free_delivery' ? 'Free Delivery' : `₹${selectedRequest.discountValue} FLAT OFF`}
               </p>
             </div>
             <div>
-              <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider">Minimum Order Amount</p>
-              <p className="text-sm font-bold text-slate-900 mt-1">₹{selectedRequest.minOrderAmount || 0}</p>
+              <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider">Coupon Strategy</p>
+              <p className="text-sm font-bold text-slate-900 mt-1.5 capitalize">
+                {selectedRequest.couponType?.replace(/_/g, ' ') || 'Generic'}
+              </p>
             </div>
             <div>
-              <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider">Expiry Date</p>
-              <p className="text-sm font-bold text-slate-900 mt-1">{formatDate(selectedRequest.expiryDate)}</p>
+              <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider">Minimum Order Value</p>
+              <p className="text-sm font-bold text-slate-900 mt-1">₹{selectedRequest.minOrderValue || 0}</p>
+            </div>
+            {selectedRequest.maxDiscount && (
+              <div>
+                <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider">Max Discount</p>
+                <p className="text-sm font-bold text-slate-900 mt-1">₹{selectedRequest.maxDiscount}</p>
+              </div>
+            )}
+            <div>
+              <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider">Validity Period</p>
+              <p className="text-sm font-bold text-slate-900 mt-1">
+                {formatDate(selectedRequest.validFrom)} - {formatDate(selectedRequest.validTill)}
+              </p>
             </div>
             <div>
               <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider">Usage Limit</p>
               <p className="text-sm font-bold text-slate-900 mt-1">
-                {selectedRequest.usageLimit ? `${selectedRequest.usageLimit} total uses` : "Unlimited"}
+                {selectedRequest.usageLimit ? `${selectedRequest.usageLimit} total uses (Max ${selectedRequest.perUserLimit || 1} per user)` : `Unlimited (Max ${selectedRequest.perUserLimit || 1} per user)`}
               </p>
             </div>
             {selectedRequest.description && (
@@ -456,11 +470,12 @@ export default function SellerCouponRequest() {
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <span className="text-sm font-extrabold text-slate-900 tracking-wider bg-slate-100 px-2.5 py-0.5 rounded border border-slate-300">
-                            {request.couponCode}
+                            {request.code}
                           </span>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-slate-800">
-                          {request.discountType === "percentage" ? `${request.discountValue}% OFF` : `₹${request.discountValue} FLAT OFF`}
+                          {request.discountType === "percentage" ? `${request.discountValue}% OFF` : request.discountType === 'free_delivery' ? 'Free Delivery' : `₹${request.discountValue} FLAT OFF`}
+                          <p className="text-[10px] font-medium text-slate-400 capitalize mt-0.5">{request.couponType?.replace(/_/g, ' ') || 'Generic'}</p>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <span className={`inline-flex items-center gap-1 text-xs font-bold px-2.5 py-0.5 rounded-full border ${statusBadgeClass(status)}`}>

@@ -62,17 +62,30 @@ export async function getQuickCommerceFinanceSummary() {
   const gstExpr = {
     $ifNull: ["$pricing.tax", { $ifNull: ["$pricing.gst", 0] }],
   };
-  // Admin keeps only platform fee + GST + seller commission (on item subtotal).
+  const adminCouponDiscountExpr = {
+    $cond: [
+      { $eq: ["$pricing.appliedCoupon.source", "admin"] },
+      { $ifNull: ["$pricing.appliedCoupon.discount", { $ifNull: ["$pricing.discount", 0] }] },
+      0
+    ]
+  };
+
+  // Admin keeps only platform fee + GST + seller commission (on item subtotal), minus admin coupon discount
   const adminEarningExpr = {
     $max: [
       0,
       {
-        $add: [
-          { $ifNull: ["$pricing.platformFee", 0] },
-          gstExpr,
-          { $ifNull: ["$pricing.restaurantCommission", 0] },
-        ],
-      },
+        $subtract: [
+          {
+            $add: [
+              { $ifNull: ["$pricing.platformFee", 0] },
+              gstExpr,
+              { $ifNull: ["$pricing.restaurantCommission", 0] },
+            ],
+          },
+          adminCouponDiscountExpr
+        ]
+      }
     ],
   };
   const orderTotalExpr = {

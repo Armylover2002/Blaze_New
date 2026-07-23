@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { computeNotificationExpiresAt } from "../../../../core/notifications/utils/notificationTtl.js";
 
 const sellerNotificationSchema = new mongoose.Schema(
   {
@@ -36,6 +37,12 @@ const sellerNotificationSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    /** Mongo TTL field — documents removed when expiresAt <= now (expireAfterSeconds: 0). */
+    expiresAt: {
+      type: Date,
+      required: true,
+      index: true,
+    },
   },
   {
     collection: 'quick_seller_notifications',
@@ -47,6 +54,14 @@ sellerNotificationSchema.index({ sellerId: 1, key: 1 }, { unique: true });
 sellerNotificationSchema.index({ sellerId: 1, isRead: 1, createdAt: -1 });
 // Supports deleteMany({ key: 'broadcast:…' }) without collection scan.
 sellerNotificationSchema.index({ key: 1 }, { name: 'key_1' });
+sellerNotificationSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0, name: 'expiresAt_1' });
+
+sellerNotificationSchema.pre('validate', function setExpiresAt(next) {
+    if (!this.expiresAt) {
+        this.expiresAt = computeNotificationExpiresAt(this.createdAt || new Date());
+    }
+    next();
+});
 
 export const SellerNotification = mongoose.model(
   "SellerNotification",

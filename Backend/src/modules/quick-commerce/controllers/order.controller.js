@@ -76,6 +76,7 @@ async function resolveServerQuickDiscount({ couponCode, subtotal, items }) {
   let coupon = (Array.isArray(adminCoupons) ? adminCoupons : []).find(
     (entry) => String(entry?.code || '').toUpperCase() === code,
   );
+  let couponSource = 'admin';
 
   if (!coupon) {
     const sellerIdRaw = (Array.isArray(items) ? items : []).find((item) => item?.sellerId)?.sellerId;
@@ -84,16 +85,17 @@ async function resolveServerQuickDiscount({ couponCode, subtotal, items }) {
       const { SellerCoupon } = await import('../models/sellerCoupon.model.js');
       const sellerCoupon = await SellerCoupon.findOne({
         sellerId: new mongoose.Types.ObjectId(sellerId),
-        couponCode: code,
+        code: code,
         status: 'Approved',
-        expiryDate: { $gt: new Date() },
+        validTill: { $gt: new Date() },
       }).lean();
       if (sellerCoupon) {
         coupon = {
           ...sellerCoupon,
-          code: sellerCoupon.couponCode,
-          minOrderValue: sellerCoupon.minOrderAmount,
+          code: sellerCoupon.code,
+          minOrderValue: sellerCoupon.minOrderValue,
         };
+        couponSource = 'restaurant';
       }
     }
   }
@@ -127,6 +129,7 @@ async function resolveServerQuickDiscount({ couponCode, subtotal, items }) {
   return {
     discount: Math.max(0, Math.min(discount, Number(subtotal || 0))),
     couponCode: String(coupon.code || code).toUpperCase(),
+    couponSource,
   };
 }
 
@@ -475,7 +478,7 @@ export const placeOrder = async (req, res) => {
     }
 
     const subtotal = items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-    const { discount, couponCode } = await resolveServerQuickDiscount({
+    const { discount, couponCode, couponSource } = await resolveServerQuickDiscount({
       couponCode: req.body?.couponCode,
       subtotal,
       items,
@@ -673,6 +676,11 @@ export const placeOrder = async (req, res) => {
         subtotal,
         discount,
         couponCode: couponCode || null,
+        appliedCoupon: couponCode ? {
+            code: couponCode,
+            discount: discount,
+            source: couponSource
+        } : undefined,
         total,
         deliveryDistanceKm: distanceKm,
         distanceEstimated,
@@ -797,9 +805,10 @@ export const placeOrder = async (req, res) => {
 
             // Calculate commission for this specific seller
             const { commissionAmount } = await getSellerCommissionSnapshot(sellerId, sellerSubtotal);
+            const sellerDiscount = couponSource === 'restaurant' ? discount : 0;
             const sellerReceivable = Math.max(
               0,
-              Number((sellerSubtotal - commissionAmount).toFixed(2)),
+              Number((sellerSubtotal - commissionAmount - sellerDiscount).toFixed(2)),
             );
 
             return {
@@ -856,13 +865,15 @@ export const placeOrder = async (req, res) => {
     const totalSellerCommission = sellerOrdersResults.reduce((sum, so) => sum + (so.pricing?.commission || 0), 0);
     
     // Update the main order with the total commission
-    if (totalSellerCommission > 0) {
+    if (totalSellerCommission > 0 || couponSource === 'admin') {
+      const adminDiscount = couponSource === 'admin' ? discount : 0;
       const platformProfit = Math.max(
         0,
         deliveryFee +
           Number(pricing.platformFee || 0) +
           totalSellerCommission -
-          (riderEarning || 0),
+          (riderEarning || 0) -
+          adminDiscount
       );
       await QuickOrder.updateOne(
         { _id: order._id },
@@ -1105,7 +1116,31 @@ export const getMyOrders = async (req, res) => {
     return res.status(400).json({ success: false, message: 'sessionId or userId is required' });
   }
 
-  const orders = await QuickOrder.find({ ...accessQuery, orderType: 'quick' }).sort({ createdAt: -1 }).lean();
+  const { page, limit } = req.query;
+  const hasPagination = !!page;
+
+  let orders = [];
+  let total = 0;
+  let totalPages = 0;
+  let hasMore = false;
+  let parsedLimit = 20;
+  let parsedPage = 1;
+  const baseQuery = { ...accessQuery, orderType: 'quick' };
+
+  if (hasPagination) {
+    parsedPage = Math.max(1, parseInt(page, 10) || 1);
+    parsedLimit = Math.max(1, Math.min(parseInt(limit, 10) || 20, 100));
+    const skip = (parsedPage - 1) * parsedLimit;
+    
+    [orders, total] = await Promise.all([
+      QuickOrder.find(baseQuery).sort({ createdAt: -1, _id: -1 }).skip(skip).limit(parsedLimit).lean(),
+      QuickOrder.countDocuments(baseQuery)
+    ]);
+    totalPages = Math.ceil(total / parsedLimit);
+    hasMore = parsedPage < totalPages;
+  } else {
+    orders = await QuickOrder.find(baseQuery).sort({ createdAt: -1, _id: -1 }).lean();
+  }
 
   const sellerIds = [
     ...new Set(
@@ -1145,6 +1180,19 @@ export const getMyOrders = async (req, res) => {
         : null,
     };
   });
+
+  if (hasPagination) {
+    return res.json({
+      success: true,
+      result: mappedOrders,
+      results: mappedOrders,
+      total,
+      page: parsedPage,
+      limit: parsedLimit,
+      totalPages,
+      hasMore
+    });
+  }
 
   return res.json({
     success: true,

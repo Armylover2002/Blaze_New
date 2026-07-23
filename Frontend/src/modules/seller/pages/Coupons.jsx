@@ -16,12 +16,16 @@ import { sellerApi } from "../services/sellerApi"
 import { toast } from "sonner"
 
 const defaultFormData = {
-  couponCode: "",
+  code: "",
+  couponType: "generic",
   discountType: "percentage",
   discountValue: "",
-  minOrderAmount: "",
-  expiryDate: "",
+  minOrderValue: "",
+  maxDiscount: "",
+  validFrom: "",
+  validTill: "",
   usageLimit: "",
+  perUserLimit: "1",
   description: "",
 }
 
@@ -74,19 +78,23 @@ export default function Coupons() {
   const openEditModal = (coupon) => {
     setEditingCoupon(coupon)
     setFormData({
-      couponCode: coupon?.couponCode || "",
+      code: coupon?.code || "",
+      couponType: coupon?.couponType || "generic",
       discountType: coupon?.discountType || "percentage",
       discountValue: coupon?.discountValue || "",
-      minOrderAmount: coupon?.minOrderAmount || "",
-      expiryDate: coupon?.expiryDate ? new Date(coupon.expiryDate).toISOString().split('T')[0] : "",
+      minOrderValue: coupon?.minOrderValue || "",
+      maxDiscount: coupon?.maxDiscount || "",
+      validFrom: coupon?.validFrom ? new Date(coupon.validFrom).toISOString().split('T')[0] : "",
+      validTill: coupon?.validTill ? new Date(coupon.validTill).toISOString().split('T')[0] : "",
       usageLimit: coupon?.usageLimit || "",
+      perUserLimit: coupon?.perUserLimit || "1",
       description: coupon?.description || "",
     })
     setShowModal(true)
   }
 
   const handleSaveCoupon = async () => {
-    if (!formData.couponCode.trim()) {
+    if (!formData.code.trim()) {
       toast.error("Coupon code is required")
       return
     }
@@ -94,19 +102,23 @@ export default function Coupons() {
       toast.error("Discount value must be greater than 0")
       return
     }
-    if (!formData.expiryDate) {
-      toast.error("Expiry date is required")
+    if (!formData.validFrom || !formData.validTill) {
+      toast.error("Valid From and Valid Till dates are required")
       return
     }
 
     try {
       const payload = {
-        couponCode: formData.couponCode.trim().toUpperCase(),
+        code: formData.code.trim().toUpperCase(),
+        couponType: formData.couponType,
         discountType: formData.discountType,
         discountValue: Number(formData.discountValue),
-        minOrderAmount: Number(formData.minOrderAmount) || 0,
-        expiryDate: new Date(formData.expiryDate).toISOString(),
+        minOrderValue: Number(formData.minOrderValue) || 0,
+        maxDiscount: formData.maxDiscount ? Number(formData.maxDiscount) : undefined,
+        validFrom: new Date(formData.validFrom).toISOString(),
+        validTill: new Date(formData.validTill).toISOString(),
         usageLimit: formData.usageLimit ? Number(formData.usageLimit) : null,
+        perUserLimit: formData.perUserLimit ? Number(formData.perUserLimit) : 1,
         description: formData.description.trim()
       }
 
@@ -126,7 +138,7 @@ export default function Coupons() {
   }
 
   const handleDeleteCoupon = async (coupon) => {
-    if (!window.confirm(`Are you sure you want to delete coupon "${coupon.couponCode}"?`)) return
+    if (!window.confirm(`Are you sure you want to delete coupon "${coupon.code}"?`)) return
 
     try {
       await sellerApi.deleteCoupon(coupon._id || coupon.id)
@@ -189,7 +201,8 @@ export default function Coupons() {
           <div className="space-y-3">
             {coupons.map((coupon) => {
               const status = coupon?.status || "Pending"
-              const expiryFormatted = coupon?.expiryDate ? new Date(coupon.expiryDate).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' }) : 'N/A'
+              const validFromFormatted = coupon?.validFrom ? new Date(coupon.validFrom).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' }) : 'N/A'
+              const validTillFormatted = coupon?.validTill ? new Date(coupon.validTill).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' }) : 'N/A'
 
               return (
                 <motion.div
@@ -201,7 +214,7 @@ export default function Coupons() {
                     <div>
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="text-base font-extrabold text-slate-900 tracking-wider bg-slate-100 px-2 py-0.5 rounded border border-slate-300">
-                          {coupon.couponCode}
+                          {coupon.code}
                         </span>
                         <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-bold ${statusBadgeClass(status)}`}>
                           {status === "Approved" ? <BadgeCheck className="mr-1 h-3.5 w-3.5" /> : <Clock3 className="mr-1 h-3.5 w-3.5" />}
@@ -211,17 +224,17 @@ export default function Coupons() {
                       
                       <div className="mt-3 space-y-1">
                         <p className="text-sm font-semibold text-slate-700">
-                          Discount: {coupon.discountType === "percentage" ? `${coupon.discountValue}% OFF` : `₹${coupon.discountValue} FLAT OFF`}
+                          Discount: {coupon.discountType === "percentage" ? `${coupon.discountValue}% OFF` : coupon.discountType === 'free_delivery' ? 'Free Delivery' : `₹${coupon.discountValue} FLAT OFF`}
                         </p>
                         <p className="text-xs text-slate-500">
-                          Min. Order: ₹{coupon.minOrderAmount || 0}
+                          Min. Order: ₹{coupon.minOrderValue || 0} {coupon.maxDiscount ? `| Max Discount: ₹${coupon.maxDiscount}` : ''}
                         </p>
                         <p className="text-xs text-slate-500">
-                          Expires: {expiryFormatted}
+                          Validity: {validFromFormatted} - {validTillFormatted}
                         </p>
                         {coupon.usageLimit && (
                           <p className="text-xs text-slate-500">
-                            Limit: {coupon.usedCount || 0} / {coupon.usageLimit} uses
+                            Limit: {coupon.usedCount || 0} / {coupon.usageLimit} total uses (Max {coupon.perUserLimit || 1} per user)
                           </p>
                         )}
                         {coupon.description && (
@@ -291,8 +304,8 @@ export default function Coupons() {
                   <label className="mb-1 block text-sm font-medium text-slate-700">Coupon Code</label>
                   <input
                     type="text"
-                    value={formData.couponCode}
-                    onChange={(e) => setFormData((prev) => ({ ...prev, couponCode: e.target.value.toUpperCase() }))}
+                    value={formData.code}
+                    onChange={(e) => setFormData((prev) => ({ ...prev, code: e.target.value.toUpperCase() }))}
                     placeholder="E.g. SUMMER50, WELCOME20"
                     className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-red-600 focus:ring-2 focus:ring-red-600/10 font-bold tracking-wider"
                   />
@@ -308,8 +321,28 @@ export default function Coupons() {
                     >
                       <option value="percentage">Percentage (%)</option>
                       <option value="fixed">Fixed Flat (₹)</option>
+                      <option value="free_delivery">Free Delivery</option>
                     </select>
                   </div>
+
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-slate-700">Coupon Strategy</label>
+                    <select
+                      value={formData.couponType}
+                      onChange={(e) => setFormData((prev) => ({ ...prev, couponType: e.target.value }))}
+                      className="w-full rounded-xl border border-slate-300 px-3 py-3 outline-none focus:border-red-600 focus:ring-2 focus:ring-red-600/10 bg-white"
+                    >
+                      <option value="generic">Generic Discount</option>
+                      <option value="bulk_order">Bulk Order Discount</option>
+                      <option value="min_order_value">Minimum Order Value Coupon</option>
+                      <option value="free_delivery">Free Delivery Coupon</option>
+                      <option value="category_based">Category-Based Coupon</option>
+                      <option value="monthly_volume">Monthly Volume Coupon</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
 
                   <div>
                     <label className="mb-1 block text-sm font-medium text-slate-700">Discount Value</label>
@@ -325,36 +358,71 @@ export default function Coupons() {
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="mb-1 block text-sm font-medium text-slate-700">Min. Order Amount (₹)</label>
+                    <label className="mb-1 block text-sm font-medium text-slate-700">Min. Order Value (₹)</label>
                     <input
                       type="number"
-                      value={formData.minOrderAmount}
-                      onChange={(e) => setFormData((prev) => ({ ...prev, minOrderAmount: e.target.value }))}
+                      value={formData.minOrderValue}
+                      onChange={(e) => setFormData((prev) => ({ ...prev, minOrderValue: e.target.value }))}
                       placeholder="E.g. 299"
                       className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-red-600 focus:ring-2 focus:ring-red-600/10"
                     />
                   </div>
 
                   <div>
-                    <label className="mb-1 block text-sm font-medium text-slate-700">Usage Limit (Optional)</label>
+                    <label className="mb-1 block text-sm font-medium text-slate-700">Max Discount (₹) {formData.discountType === "fixed" && "(Ignored for Fixed)"}</label>
                     <input
                       type="number"
-                      value={formData.usageLimit}
-                      onChange={(e) => setFormData((prev) => ({ ...prev, usageLimit: e.target.value }))}
-                      placeholder="E.g. 50"
+                      value={formData.maxDiscount}
+                      onChange={(e) => setFormData((prev) => ({ ...prev, maxDiscount: e.target.value }))}
+                      placeholder="E.g. 150"
                       className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-red-600 focus:ring-2 focus:ring-red-600/10"
                     />
                   </div>
                 </div>
 
-                <div>
-                  <label className="mb-1 block text-sm font-medium text-slate-700">Expiry Date</label>
-                  <input
-                    type="date"
-                    value={formData.expiryDate}
-                    onChange={(e) => setFormData((prev) => ({ ...prev, expiryDate: e.target.value }))}
-                    className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-red-600 focus:ring-2 focus:ring-red-600/10"
-                  />
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-slate-700">Total Usage Limit</label>
+                    <input
+                      type="number"
+                      value={formData.usageLimit}
+                      onChange={(e) => setFormData((prev) => ({ ...prev, usageLimit: e.target.value }))}
+                      placeholder="E.g. 50 (Total users)"
+                      className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-red-600 focus:ring-2 focus:ring-red-600/10"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-slate-700">Per User Limit</label>
+                    <input
+                      type="number"
+                      value={formData.perUserLimit}
+                      onChange={(e) => setFormData((prev) => ({ ...prev, perUserLimit: e.target.value }))}
+                      placeholder="E.g. 1"
+                      className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-red-600 focus:ring-2 focus:ring-red-600/10"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-slate-700">Valid From</label>
+                    <input
+                      type="date"
+                      value={formData.validFrom}
+                      onChange={(e) => setFormData((prev) => ({ ...prev, validFrom: e.target.value }))}
+                      className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-red-600 focus:ring-2 focus:ring-red-600/10"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-slate-700">Valid Till</label>
+                    <input
+                      type="date"
+                      value={formData.validTill}
+                      onChange={(e) => setFormData((prev) => ({ ...prev, validTill: e.target.value }))}
+                      className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-red-600 focus:ring-2 focus:ring-red-600/10"
+                    />
+                  </div>
                 </div>
 
                 <div>

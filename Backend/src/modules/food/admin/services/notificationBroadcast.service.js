@@ -300,7 +300,10 @@ const upsertSellerInboxNotifications = async ({ targets = [], broadcast, title, 
                                 : {})
                         }
                     },
-                    $setOnInsert: { isRead: false }
+                    $setOnInsert: {
+                        isRead: false,
+                        expiresAt: computeNotificationExpiresAt(new Date())
+                    }
                 },
                 upsert: true
             }

@@ -1,5 +1,5 @@
 // Ultimate FAQ Management System - Functional Version
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import Card from '@shared/components/ui/Card';
 import Badge from '@shared/components/ui/Badge';
 import Modal from '@shared/components/ui/Modal';
@@ -114,8 +114,12 @@ const FAQManagement = () => {
         }
     };
 
+    const hasFetchedCategories = useRef(false);
     useEffect(() => {
-        fetchCategories();
+        if (!hasFetchedCategories.current) {
+            fetchCategories();
+            hasFetchedCategories.current = true;
+        }
     }, []);
 
     const [faqs, setFaqs] = useState([]);
@@ -123,8 +127,12 @@ const FAQManagement = () => {
     const [pageSize, setPageSize] = useState(PAGINATION_CONFIG.defaultPageSize);
     const [total, setTotal] = useState(0);
 
+    const hasFetchedFaqs = useRef(false);
     useEffect(() => {
-        fetchFaqs(1);
+        if (!hasFetchedFaqs.current) {
+            fetchFaqs(1);
+            hasFetchedFaqs.current = true;
+        }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [pageSize]);
 

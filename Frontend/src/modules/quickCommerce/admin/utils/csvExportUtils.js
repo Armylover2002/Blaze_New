@@ -115,7 +115,7 @@ export const buildCustomerCsvRows = (customers = []) => {
   const rows = customers.map((customer) => [
     customer.name || 'N/A',
     customer.email || 'N/A',
-    customer.phone || 'N/A',
+    customer.phone ? `\t${customer.phone}` : 'N/A',
     String(customer.totalOrders ?? 0),
     formatInr(customer.totalSpent),
     customer.status || 'N/A',

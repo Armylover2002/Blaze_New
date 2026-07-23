@@ -13,63 +13,18 @@ export const validateOptionalStatusDto = (body) => {
   return result.data;
 };
 
-const deliveryRuleSchema = z.object({
-  name: z.string().optional().or(z.literal('')),
-  minDistance: z.number().min(0, 'Minimum distance must be 0 or greater'),
-  maxDistance: z.number().nullable().optional(),
-  commissionPerKm: z.number().min(0, 'Commission per km must be 0 or greater'),
-  basePayout: z.number().min(0, 'Base payout must be 0 or greater'),
-  status: z.boolean().optional(),
-});
 
-export const validateDeliveryCommissionRuleDto = (body) => {
-  const normalized = {
-    name: body?.name != null ? String(body.name) : '',
-    minDistance: Number(body?.minDistance),
-    maxDistance:
-      body?.maxDistance === null ||
-      body?.maxDistance === undefined ||
-      body?.maxDistance === ''
-        ? null
-        : Number(body.maxDistance),
-    commissionPerKm: Number(body?.commissionPerKm),
-    basePayout: Number(body?.basePayout),
-    status: body?.status,
-  };
-
-  const result = deliveryRuleSchema.safeParse(normalized);
-  if (!result.success) {
-    throw new ValidationError(result.error.errors[0].message);
-  }
-
-  const min = result.data.minDistance;
-  const base = result.data.basePayout;
-  if (min !== 0 && base > 0) {
-    throw new ValidationError('Only base slab can have base payout');
-  }
-
-  return {
-    name: result.data.name ? result.data.name.trim() : '',
-    minDistance: result.data.minDistance,
-    maxDistance: result.data.maxDistance ?? null,
-    commissionPerKm: result.data.commissionPerKm,
-    basePayout: result.data.basePayout,
-    status: typeof result.data.status === 'boolean' ? result.data.status : undefined,
-  };
-};
 
 const rangeSchema = z.object({
   min: z.number().min(0),
   max: z.number().min(0),
   fee: z.number().min(0),
+  deliveryBoyPerKm: z.number().min(0).optional().default(0),
+  deliveryBoyBasePay: z.number().min(0).optional().default(0)
 });
 
 const feeSettingsUpsertSchema = z.object({
-  deliveryFee: z.number().min(0).nullable().optional(),
   deliveryFeeRanges: z.array(rangeSchema).optional(),
-  freeDeliveryThreshold: z.number().min(0).nullable().optional(),
-  platformFee: z.number().min(0).nullable().optional(),
-  gstRate: z.number().min(0).max(100).nullable().optional(),
   returnWindowHours: z.number().int().min(1).max(720).nullable().optional(),
   returnsEnabled: z.boolean().optional(),
   isActive: z.boolean().optional(),
@@ -77,37 +32,15 @@ const feeSettingsUpsertSchema = z.object({
 
 export const validateFeeSettingsUpsertDto = (body) => {
   const normalized = {
-    deliveryFee:
-      body?.deliveryFee === null
-        ? null
-        : body?.deliveryFee !== undefined
-          ? Number(body.deliveryFee)
-          : undefined,
     deliveryFeeRanges: Array.isArray(body?.deliveryFeeRanges)
       ? body.deliveryFeeRanges.map((r) => ({
           min: Number(r?.min),
           max: Number(r?.max),
           fee: Number(r?.fee),
+          deliveryBoyPerKm: Number(r?.deliveryBoyPerKm || 0),
+          deliveryBoyBasePay: Number(r?.deliveryBoyBasePay || 0)
         }))
       : undefined,
-    freeDeliveryThreshold:
-      body?.freeDeliveryThreshold === null
-        ? null
-        : body?.freeDeliveryThreshold !== undefined
-          ? Number(body.freeDeliveryThreshold)
-          : undefined,
-    platformFee:
-      body?.platformFee === null
-        ? null
-        : body?.platformFee !== undefined
-          ? Number(body.platformFee)
-          : undefined,
-    gstRate:
-      body?.gstRate === null
-        ? null
-        : body?.gstRate !== undefined
-          ? Number(body.gstRate)
-          : undefined,
     returnWindowHours:
       body?.returnWindowHours === null
         ? null

@@ -4,7 +4,7 @@ import { logger } from '../../../utils/logger.js';
 import { roadDistanceKm } from '../../food/orders/services/order.helpers.js';
 import { QuickOrder } from '../models/order.model.js';
 import { Seller } from '../seller/models/seller.model.js';
-import { getRiderEarningBreakdown } from '../admin/services/billing.service.js';
+import { getRiderEarning } from '../admin/services/billing.service.js';
 import { getSellerLocation, getOrderAddressPoint } from '../services/quickOrder.service.js';
 import {
   RETURN_OTP_MAX_ATTEMPTS,
@@ -106,16 +106,14 @@ export const computeReturnPickupPricing = async ({ customerCoords, sellerCoords 
     sellerCoords.lng,
   );
   const pickupDistanceKm = normalizeStoredPickupDistanceKm(rawDistanceKm);
-  const breakdown = await getRiderEarningBreakdown(rawDistanceKm);
-  const pickupPricingBreakdown = breakdown
-    ? { ...breakdown, distanceKm: pickupDistanceKm }
-    : null;
+  const earning = await getRiderEarning(rawDistanceKm);
+  const pickupPricingBreakdown = { earning, distanceKm: pickupDistanceKm };
 
   return {
     pickupDistanceKm,
     distanceKm: pickupDistanceKm,
-    calculatedPickupCharge: breakdown.earning,
-    riderEarning: breakdown.earning,
+    calculatedPickupCharge: earning,
+    riderEarning: earning,
     pickupPricingBreakdown,
   };
 };
