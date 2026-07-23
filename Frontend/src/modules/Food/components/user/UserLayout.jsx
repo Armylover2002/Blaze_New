@@ -6,9 +6,9 @@ import LocationPrompt from "./LocationPrompt"
 import { LocationProvider } from "@food/hooks/useLocation"
 import { CartProvider } from "@food/context/CartContext"
 import { OrdersProvider } from "@food/context/OrdersContext"
-const debugLog = (...args) => {}
-const debugWarn = (...args) => {}
-const debugError = (...args) => {}
+const debugLog = (...args) => { }
+const debugWarn = (...args) => { }
+const debugError = (...args) => { }
 
 import SearchOverlay from "./SearchOverlay"
 import BottomNavigation from "./BottomNavigation"
@@ -161,21 +161,23 @@ export default function UserLayout({ children }) {
   const isUnder250 = normalizedPath === "/under-250" || normalizedPath === "/user/under-250"
   const showFoodBottomNav = showBottomNav && !isSharedQuickProfile && !isSharedPorterProfile
 
+  const isPorterRoute = location.pathname === '/porter' || location.pathname.startsWith('/porter/');
+
   const footerColor = location.pathname.startsWith("/porter")
     ? "#2563EB"
     : location.pathname.startsWith("/quick")
-    ? "#ea580c"
-    : "#FF0000"
+      ? "#ea580c"
+      : "#FF0000"
 
   return (
     <div className="min-h-screen bg-[#f5f5f5] dark:bg-[#0a0a0a] transition-colors duration-200">
       <CartProvider>
         <ProfileProvider>
           <OrdersProvider>
-              <ActiveOrderManagerBridge />
-              <SearchOverlayProvider>
-                <LocationSelectorProvider>
-                  <LocationProvider>
+            {!isPorterRoute && <ActiveOrderManagerBridge />}
+            <SearchOverlayProvider>
+              <LocationSelectorProvider>
+                <LocationProvider>
                   {/* <Navbar /> */}
                   <div className="hidden md:block">
                     {(!isSharedQuickProfile && !isSharedPorterProfile) && <DesktopNavbar showLogo={true} />}
@@ -192,9 +194,9 @@ export default function UserLayout({ children }) {
                   </div>
                   {isSharedQuickProfile && <QuickBottomNav />}
                   {isSharedPorterProfile && <PorterBottomNav />}
-                  </LocationProvider>
-                </LocationSelectorProvider>
-              </SearchOverlayProvider>
+                </LocationProvider>
+              </LocationSelectorProvider>
+            </SearchOverlayProvider>
           </OrdersProvider>
         </ProfileProvider>
       </CartProvider>

@@ -1,20 +1,27 @@
-import React from "react";
+import React, { useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Download, Share2, CheckCircle2 } from "lucide-react";
+import { Download, CheckCircle2, Loader2 } from "lucide-react";
 import Screen from "../components/Screen";
-import { PrimaryButton, FareRow, SectionLabel, inr } from "../components/ui";
+import { PrimaryButton, FareBreakdown, SectionLabel } from "../components/ui";
 import { useBooking } from "../context/BookingContext";
 import { getShipmentById } from "../utils/mock/shipments";
 import { PAYMENT_METHODS } from "../utils/mock/payments";
+import { usePorterOrderTracking } from "../hooks/usePorterOrderTracking";
+import { mapActiveShipmentFromOrder } from "../utils/orderMapper";
 
 export default function DeliveryInvoice() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { activeShipment, total, paymentMethodId } = useBooking();
 
-  const shipment = id === "current" && activeShipment
-    ? {
-        trackingId: activeShipment.trackingId,
+  const { order, loading } = usePorterOrderTracking(id !== "current" ? id : null, {
+    enabled: id !== "current",
+  });
+
+  const shipment = useMemo(() => {
+    if (id === "current" && activeShipment) {
+      return {
+        trackingId: activeShipment.trackingId || activeShipment._id,
         vehicle: activeShipment.vehicle,
         pickup: activeShipment.pickup,
         delivery: activeShipment.delivery,
@@ -26,8 +33,30 @@ export default function DeliveryInvoice() {
         paymentMethod: paymentMethodId,
         createdAt: activeShipment.createdAt || new Date().toISOString(),
         deliveredAt: new Date().toISOString(),
-      }
-    : getShipmentById(id);
+      };
+    }
+    if (order) {
+      const mapped = mapActiveShipmentFromOrder(order);
+      return {
+        ...mapped,
+        fare: mapped.pricing?.baseFare ?? mapped.pricing?.basePrice ?? mapped.total ?? 0,
+        serviceTax: mapped.pricing?.serviceTax || 0,
+        discount: mapped.pricing?.discount || 0,
+        paymentMethod: mapped.payment?.method || mapped.paymentMethod || "Wallet",
+      };
+    }
+    return getShipmentById(id); // fallback
+  }, [id, activeShipment, total, paymentMethodId, order]);
+
+  if (loading && !shipment) {
+    return (
+      <Screen title="Delivery invoice">
+        <div className="flex justify-center py-16">
+          <Loader2 className="h-8 w-8 animate-spin text-[#FF0000]" />
+        </div>
+      </Screen>
+    );
+  }
 
   if (!shipment) {
     return (
@@ -73,28 +102,26 @@ export default function DeliveryInvoice() {
 
       <SectionLabel>Payment summary</SectionLabel>
       <div className="mb-4 rounded-2xl border border-gray-100 bg-white p-4">
-        <FareRow label="Delivery fare" value={inr(shipment.fare)} />
-        {(shipment.serviceTax || 0) > 0 && (
-          <FareRow label="Service Tax / GST" value={inr(shipment.serviceTax)} />
-        )}
-        {(shipment.discount || 0) > 0 && <FareRow label="Discount" value={`−${inr(shipment.discount)}`} accent />}
-        <div className="my-2 border-t border-gray-100" />
-        <FareRow label="Total paid" value={inr(shipment.total)} strong />
+        <FareBreakdown
+          baseFare={shipment.fare}
+          serviceTax={shipment.serviceTax}
+          discount={shipment.discount}
+          total={shipment.total}
+          baseLabel="Delivery fare"
+          discountLabel="Discount"
+          totalLabel="Total paid"
+        />
         <p className="mt-2 text-[11px] text-gray-400">Paid via {payment?.label || shipment.paymentMethod}</p>
       </div>
 
-      <div className="flex gap-2">
-        <PrimaryButton variant="outline" className="flex-1">
+      <div className="flex gap-2 print:hidden">
+        <PrimaryButton variant="outline" className="flex-1" onClick={() => window.print()}>
           <Download className="h-4 w-4" />
           Download PDF
         </PrimaryButton>
-        <PrimaryButton variant="outline" className="flex-1">
-          <Share2 className="h-4 w-4" />
-          Share
-        </PrimaryButton>
       </div>
 
-      <PrimaryButton className="mt-3" onClick={() => navigate("/porter")}>
+      <PrimaryButton className="mt-3 print:hidden" onClick={() => navigate("/porter")}>
         Book another parcel
       </PrimaryButton>
     </Screen>

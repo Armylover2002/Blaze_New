@@ -63,6 +63,81 @@ function buildData(order, status) {
     };
 }
 
+function buildRefundCustomerBody(order, refund = {}) {
+    const amount = Number(refund?.amount) || Number(order?.pricing?.total) || 0;
+    const status = String(refund?.status || '').toLowerCase();
+    if (status !== 'processed' || amount <= 0) return '';
+
+    const method = String(refund?.method || order?.payment?.method || '').toLowerCase();
+    if (method === 'wallet') {
+        return ` ₹${amount} has been credited to your Blaze wallet.`;
+    }
+    if (method === 'razorpay') {
+        return ` ₹${amount} will be refunded to your original online payment method within 5–7 business days.`;
+    }
+    return ` ₹${amount} refund has been initiated.`;
+}
+
+function buildCouponForfeitSuffix(order) {
+    if (!order?.couponCode || !order?.couponConsumed) return '';
+    return ` Coupon ${order.couponCode} cannot be reused.`;
+}
+
+function buildCancellationCustomerBody(order, { cancelledBy, refund } = {}) {
+    const base = cancelledBy === 'admin'
+        ? 'Your Porter order was cancelled by support.'
+        : 'Your Porter order was cancelled.';
+    return `${base}${buildRefundCustomerBody(order, refund)}${buildCouponForfeitSuffix(order)}`.trim();
+}
+
+/**
+ * Unified cancel notification — customer gets cancel + refund + coupon policy in one push.
+ * Driver gets assignment-cancelled notice when they were assigned.
+ */
+export async function notifyPorterOrderCancellation(order, { refund = {}, cancelledBy = 'user' } = {}) {
+    if (!order) return;
+
+    const data = buildData(order, order.status);
+    const userId = order.userId?._id || order.userId;
+    const partnerId = order.dispatch?.deliveryPartnerId?._id || order.dispatch?.deliveryPartnerId;
+
+    const customerTitle = 'Order cancelled';
+    const customerBody = buildCancellationCustomerBody(order, { cancelledBy, refund });
+
+    const driverTitle = cancelledBy === 'admin' ? 'Order cancelled' : 'Order cancelled';
+    const driverBody = cancelledBy === 'admin'
+        ? 'This Porter order was cancelled by admin.'
+        : 'The customer cancelled this Porter order.';
+
+    try {
+        if (userId) {
+            await notifyOwnerSafely(
+                { ownerType: 'USER', ownerId: String(userId) },
+                {
+                    title: customerTitle,
+                    body: customerBody,
+                    data: {
+                        ...data,
+                        cancelledBy,
+                        refundStatus: refund?.status || order.payment?.refund?.status || '',
+                        refundAmount: String(refund?.amount || order.payment?.refund?.amount || 0),
+                        refundMethod: refund?.method || order.payment?.refund?.method || '',
+                        couponForfeited: order.couponConsumed ? 'true' : 'false',
+                    },
+                },
+            );
+        }
+        if (partnerId) {
+            await notifyOwnerSafely(
+                { ownerType: 'DELIVERY_PARTNER', ownerId: String(partnerId), platform: 'mobile' },
+                { title: driverTitle, body: driverBody, data },
+            );
+        }
+    } catch (err) {
+        logger.warn(`[PorterFCM] cancellation notify failed: ${err.message}`);
+    }
+}
+
 export async function notifyPorterOrderStatusChange(order, { previousStatus } = {}) {
     if (!order) return;
     const status = order.status;
@@ -135,6 +210,24 @@ export async function notifyPorterDriverAssignmentRemoved(order, partnerId) {
         );
     } catch (err) {
         logger.warn(`[PorterFCM] assignment removed notify failed: ${err.message}`);
+    }
+}
+
+export async function notifyPorterPartnerReleasedForRedispatch(order) {
+    if (!order) return;
+    const userId = order.userId?._id || order.userId;
+    if (!userId) return;
+    try {
+        await notifyOwnerSafely(
+            { ownerType: 'USER', ownerId: String(userId) },
+            {
+                title: 'Finding new partner',
+                body: 'Your delivery partner cancelled. We are matching you with another partner.',
+                data: buildData(order, order.status),
+            },
+        );
+    } catch (err) {
+        logger.warn(`[PorterFCM] partner released notify failed: ${err.message}`);
     }
 }
 

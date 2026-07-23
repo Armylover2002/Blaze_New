@@ -6,6 +6,7 @@ import BottomSheet from "../components/BottomSheet";
 import { PrimaryButton, inr } from "../components/ui";
 import { useBooking } from "../context/BookingContext";
 import { usePorterHomeData } from "../hooks/usePorterHomeData";
+import { formatApplicableVehicleEntry } from "../utils/couponCalculations";
 
 export default function PromoCode() {
   const navigate = useNavigate();
@@ -129,9 +130,12 @@ export default function PromoCode() {
                 <div>
                   <p className="text-[12px] font-bold text-gray-500 uppercase tracking-wider mb-1">Valid On</p>
                   <div className="flex flex-wrap gap-1 mt-1">
-                    {selectedCoupon.applicableVehicles.map(v => (
-                      <span key={v} className="inline-block px-2 py-0.5 text-[11px] font-bold text-gray-700 bg-gray-200 rounded-md border border-gray-300">{v}</span>
-                    ))}
+                    {selectedCoupon.applicableVehicles.map((v, index) => {
+                      const { key, label } = formatApplicableVehicleEntry(v, index);
+                      return (
+                        <span key={key} className="inline-block px-2 py-0.5 text-[11px] font-bold text-gray-700 bg-gray-200 rounded-md border border-gray-300">{label}</span>
+                      );
+                    })}
                   </div>
                 </div>
               )}

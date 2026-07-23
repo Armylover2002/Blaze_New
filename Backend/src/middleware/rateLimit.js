@@ -1,51 +1,172 @@
 import rateLimit from 'express-rate-limit';
 import { config } from '../config/env.js';
+import { logger } from '../utils/logger.js';
 
-const windowMs = config.rateLimitWindowMinutes * 60 * 1000;
+const isProduction = config.nodeEnv === 'production';
 
-export const apiRateLimiter = rateLimit({
-    windowMs,
-    // Dev UX: local UI can generate lots of background API calls (location, polling, etc).
-    // Keep production strict, but avoid blocking local development.
-    max: config.nodeEnv === 'development' ? Math.max(config.rateLimitMaxRequests, 2000) : config.rateLimitMaxRequests,
+/**
+ * Collapse the client address to a stable bucket key.
+ * IPv6 clients are routinely handed a whole /64, so keying on the full address would
+ * let a single client rotate through addresses for a fresh budget each time.
+ */
+const normalizeIp = (raw) => {
+    const ip = String(raw || '').trim();
+    if (!ip) return 'unknown';
+
+    const ipv4Mapped = ip.match(/^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i);
+    if (ipv4Mapped) return ipv4Mapped[1];
+
+    if (!ip.includes(':')) return ip;
+    return `${ip.split(':').slice(0, 4).join(':')}::/64`;
+};
+
+const ipKey = (req) => normalizeIp(req.ip || req.socket?.remoteAddress);
+
+/** Key OTP/login limits by the identity being targeted, so one IP cannot spam many
+ *  numbers and one number cannot be spammed from many IPs. */
+const identityKey = (req) => {
+    const phone = String(req.body?.phone || '').replace(/\D/g, '').slice(-10);
+    if (phone) return `phone:${phone}`;
+
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    if (email) return `email:${email}`;
+
+    return `ip:${ipKey(req)}`;
+};
+
+/**
+ * Machine-to-machine and liveness traffic must never be throttled:
+ * - payment webhooks retry in bursts from a small set of gateway IPs, and a 429 there
+ *   drops a confirmed payment. Signature verification is the control on that path.
+ * - CORS preflights would otherwise double the cost of every write request.
+ * - uptime probes should not consume a user-facing budget.
+ */
+const UNMETERED_PATH_PATTERN = /^\/v\d+\/(payments\/webhook|health)(\/|$)/i;
+
+const skipUnmetered = (req) =>
+    req.method === 'OPTIONS' || UNMETERED_PATH_PATTERN.test(req.path);
+
+/** Surface throttling in logs so a 429 spike can be told apart from a misconfiguration. */
+const buildHandler = (scope, message) => (req, res, _next, options) => {
+    logger.warn(
+        `[rate-limit] ${scope} exceeded key=${options.keyGenerator ? 'custom' : 'ip'} ` +
+        `ip=${ipKey(req)} method=${req.method} path=${req.originalUrl} limit=${options.limit}`
+    );
+    res.status(options.statusCode).json({ success: false, message });
+};
+
+/**
+ * Shared counters across instances. Without this each process keeps its own tally, so
+ * N instances effectively grant N times the limit and every deploy resets everyone.
+ * Optional on purpose: REDIS_ENABLED=false keeps the in-process store with no new
+ * hard dependency, which is the current deployment shape.
+ */
+let createStore = () => undefined;
+
+if (config.redisEnabled && config.redisUrl) {
+    try {
+        const { default: RedisStore } = await import('rate-limit-redis');
+        const { createClient } = await import('redis');
+
+        const client = createClient({ url: config.redisUrl });
+        client.on('error', (err) => logger.error(`[rate-limit] Redis store error: ${err.message}`));
+        await client.connect();
+
+        createStore = (prefix) => new RedisStore({
+            sendCommand: (...args) => client.sendCommand(args),
+            prefix: `rl:${prefix}:`,
+        });
+        logger.info('[rate-limit] Using shared Redis store');
+    } catch (err) {
+        logger.warn(
+            `[rate-limit] Redis store unavailable (${err.message}); ` +
+            'falling back to per-instance memory store'
+        );
+    }
+}
+
+const baseOptions = {
+    // draft-6 style (separate RateLimit-Limit/Remaining/Reset) — matches what
+    // production already emits, so nothing downstream has to change.
     standardHeaders: true,
     legacyHeaders: false,
-    message: {
-        success: false,
-        message: 'Too many requests, please try again later.'
-    }
+    statusCode: 429,
+};
+
+/**
+ * Coarse abuse guard only. It is keyed by IP, and carrier-grade NAT means a single IP
+ * can legitimately represent thousands of users — so this is deliberately generous.
+ * Per-identity protection belongs on the specific endpoints below, not here.
+ */
+export const apiRateLimiter = rateLimit({
+    ...baseOptions,
+    windowMs: config.rateLimitWindowMinutes * 60 * 1000,
+    limit: isProduction ? config.rateLimitMaxRequests : Math.max(config.rateLimitMaxRequests, 5000),
+    store: createStore('api'),
+    keyGenerator: ipKey,
+    skip: skipUnmetered,
+    handler: buildHandler('api', 'Too many requests, please try again later.'),
+    validate: { ip: false },
 });
 
 const authWindowMs = config.authRateLimitWindowMinutes * 60 * 1000;
 
-/** Stricter rate limit for auth routes (OTP, login, refresh, logout). Applied in addition to global limiter. */
+/**
+ * Per-IP guard on auth endpoints. Kept above single-office usage because per-account
+ * lockout (see auth.lockout.js) is what actually stops credential brute force.
+ */
 export const authRateLimiter = rateLimit({
+    ...baseOptions,
     windowMs: authWindowMs,
-    // Dev UX: login/otp testing can be frequent. Keep production strict (e.g. 30), 
-    // but relax local development to avoid 429 when testing flows.
-    max: config.nodeEnv === 'development' ? Math.max(config.authRateLimitMax, 100) : config.authRateLimitMax,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: {
-        success: false,
-        message: 'Too many authentication attempts. Please try again later.'
-    }
+    limit: isProduction ? config.authRateLimitMax : Math.max(config.authRateLimitMax, 200),
+    store: createStore('auth-ip'),
+    keyGenerator: ipKey,
+    skip: (req) => req.method === 'OPTIONS',
+    handler: buildHandler('auth', 'Too many authentication attempts. Please try again later.'),
+    validate: { ip: false },
 });
 
-const mapsWindowMs = config.mapsRateLimitWindowMinutes * 60 * 1000;
+/**
+ * Caps OTP sends per phone number regardless of source IP. This is the limit that
+ * protects SMS spend, since an attacker rotating IPs defeats an IP-keyed limit.
+ */
+export const otpRequestRateLimiter = rateLimit({
+    ...baseOptions,
+    windowMs: config.otpRateWindow * 1000,
+    limit: isProduction ? config.otpRateLimit : Math.max(config.otpRateLimit, 50),
+    store: createStore('otp-request'),
+    keyGenerator: identityKey,
+    skip: (req) => req.method === 'OPTIONS',
+    handler: buildHandler('otp-request', 'Too many OTP requests for this number. Please try again later.'),
+    validate: { ip: false },
+});
+
+/**
+ * Caps failed OTP/password verifications per identity. Successful attempts are not
+ * counted, so a user who logs in normally after a typo is never penalised.
+ */
+export const otpVerifyRateLimiter = rateLimit({
+    ...baseOptions,
+    windowMs: authWindowMs,
+    limit: isProduction ? config.authVerifyRateLimitMax : Math.max(config.authVerifyRateLimitMax, 100),
+    store: createStore('otp-verify'),
+    keyGenerator: identityKey,
+    skipSuccessfulRequests: true,
+    skip: (req) => req.method === 'OPTIONS',
+    handler: buildHandler('otp-verify', 'Too many failed attempts. Please request a new code.'),
+    validate: { ip: false },
+});
 
 /** Stricter rate limit for Google Maps proxy endpoints (Distance Matrix). */
 export const mapsRateLimiter = rateLimit({
-    windowMs: mapsWindowMs,
-    max: config.nodeEnv === 'development'
-        ? Math.max(config.mapsRateLimitMax, 300)
-        : config.mapsRateLimitMax,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: {
-        success: false,
-        message: 'Too many map distance requests. Please try again later.',
-    },
+    ...baseOptions,
+    windowMs: config.mapsRateLimitWindowMinutes * 60 * 1000,
+    limit: isProduction ? config.mapsRateLimitMax : Math.max(config.mapsRateLimitMax, 300),
+    store: createStore('maps'),
+    keyGenerator: ipKey,
+    skip: (req) => req.method === 'OPTIONS',
+    handler: buildHandler('maps', 'Too many map distance requests. Please try again later.'),
+    validate: { ip: false },
 });
 
 const ALLOWED_MAPS_CLIENT_ORIGINS = [
@@ -87,4 +208,3 @@ export const requireMapsApiAccess = (req, res, next) => {
         message: 'Maps distance API is only available to authenticated app clients.',
     });
 };
-

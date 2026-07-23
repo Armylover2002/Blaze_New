@@ -47,7 +47,7 @@ export async function settlePorterOrderEarningsAtomic(order) {
     if (!partnerId) return null;
 
     const earning = Number(order.pricing?.driverEarning) || 0;
-    const fee = Number(order.pricing?.platformFee) || 0;
+    const fee = Number(order.pricing?.commission) || 0;
     const orderIdStr = String(orderId);
 
     const session = await mongoose.startSession();

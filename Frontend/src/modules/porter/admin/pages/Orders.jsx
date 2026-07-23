@@ -152,7 +152,7 @@ const ORDER_STATUS_TABS = [
   { id: "searching_partner", label: "Searching" },
   { id: "partner_accepted", label: "Active" },
   { id: "delivered", label: "Delivered" },
-  { id: "cancelled_by_user", label: "Cancelled" },
+  { id: "cancelled", label: "Cancelled" },
 ];
 
 const Orders = () => {
@@ -458,7 +458,16 @@ const Orders = () => {
     { key: "goodsType", header: "Goods" },
     { key: "distanceKm", header: "Distance", cell: (row) => `${row.distanceKm} km` },
     { key: "amount", header: "Amount", cell: (row) => formatCurrency(row.amount) },
-    { key: "paymentStatus", header: "Payment", cell: (row) => <StatusBadge status={row.paymentStatus === "refunded" ? "danger" : "success"} label={row.paymentStatus} /> },
+    { key: "paymentStatus", header: "Payment", cell: (row) => {
+      let ps = row.paymentStatus?.toLowerCase() || "pending";
+      if (ps === "pending" && ["cancelled_by_user", "cancelled_by_admin", "cancelled_by_driver", "failed"].includes(row.deliveryStatus)) {
+        ps = "cancelled";
+      }
+      let tone = "warning";
+      if (ps === "paid") tone = "success";
+      else if (["refunded", "failed", "cancelled"].includes(ps)) tone = "danger";
+      return <StatusBadge status={tone} label={ps} />;
+    } },
     { key: "deliveryStatus", header: "Status", cell: (row) => <StatusBadge tone={STATUS_TONES[row.deliveryStatus]} label={STATUS_LABELS[row.deliveryStatus]} /> },
     { key: "createdAt", header: "Created", cell: (row) => <span className="text-xs text-muted-foreground">{formatDateTime(row.createdAt)}</span> },
     {

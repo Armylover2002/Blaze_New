@@ -19,35 +19,46 @@ import {
     getPublicRolesController
 } from './auth.controller.js';
 import { authMiddleware, requireAdmin } from './auth.middleware.js';
-import { authRateLimiter } from '../../middleware/rateLimit.js';
+import {
+    authRateLimiter,
+    otpRequestRateLimiter,
+    otpVerifyRateLimiter
+} from '../../middleware/rateLimit.js';
 
 const router = express.Router();
 
 // router.use(authRateLimiter); // Removed global application to avoid rate-limiting /me or /refresh-token too strictly
 
+// OTP routes carry two limiters: a per-IP ceiling and a per-phone one. The per-phone
+// limit is what protects SMS spend, since an attacker can rotate IPs freely.
+const otpRequestGuards = [authRateLimiter, otpRequestRateLimiter];
+const otpVerifyGuards = [authRateLimiter, otpVerifyRateLimiter];
+
 // User OTP login
-router.post('/user/request-otp', authRateLimiter, requestUserOtpController);
-router.post('/user/verify-otp', authRateLimiter, verifyUserOtpController);
+router.post('/user/request-otp', otpRequestGuards, requestUserOtpController);
+router.post('/user/verify-otp', otpVerifyGuards, verifyUserOtpController);
 
 // Restaurant OTP login
-router.post('/restaurant/request-otp', authRateLimiter, requestRestaurantOtpController);
-router.post('/restaurant/verify-otp', authRateLimiter, verifyRestaurantOtpController);
+router.post('/restaurant/request-otp', otpRequestGuards, requestRestaurantOtpController);
+router.post('/restaurant/verify-otp', otpVerifyGuards, verifyRestaurantOtpController);
 
 // Delivery partner OTP login
-router.post('/delivery/request-otp', authRateLimiter, requestDeliveryOtpController);
-router.post('/delivery/verify-otp', authRateLimiter, verifyDeliveryOtpController);
+router.post('/delivery/request-otp', otpRequestGuards, requestDeliveryOtpController);
+router.post('/delivery/verify-otp', otpVerifyGuards, verifyDeliveryOtpController);
 
 
 
 
 
 // Admin login
-router.post('/admin/login', authRateLimiter, adminLoginController);
-router.get('/admin/roles', authRateLimiter, getPublicRolesController);
+router.post('/admin/login', [authRateLimiter, otpVerifyRateLimiter], adminLoginController);
+// Public read used to populate the login form; the auth limiter would lock out the
+// login page itself, so only the global API limiter applies here.
+router.get('/admin/roles', getPublicRolesController);
 
 // Admin forgot password (no auth required)
-router.post('/admin/forgot-password/request-otp', authRateLimiter, requestAdminForgotPasswordOtpController);
-router.post('/admin/forgot-password/reset', authRateLimiter, resetAdminPasswordWithOtpController);
+router.post('/admin/forgot-password/request-otp', otpRequestGuards, requestAdminForgotPasswordOtpController);
+router.post('/admin/forgot-password/reset', otpVerifyGuards, resetAdminPasswordWithOtpController);
 
 // Refresh token
 router.post('/refresh-token', refreshTokenController);

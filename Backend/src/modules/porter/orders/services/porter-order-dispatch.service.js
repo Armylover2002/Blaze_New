@@ -131,12 +131,24 @@ export async function emitPorterOrderCancelled(order, userId, partnerId) {
     const io = getIO();
     if (!io) return;
 
+    const refund = order.payment?.refund;
     const payload = {
         orderId: String(order._id),
         orderNumber: order.orderNumber,
         status: order.status,
         documentType: PORTER_DISPATCH_DOCUMENT_TYPE,
         cancelled: true,
+        couponConsumed: Boolean(order.couponConsumed),
+        couponCode: order.couponCode || undefined,
+        ...(refund?.status === 'processed'
+            ? {
+                refund: {
+                    status: refund.status,
+                    amount: refund.amount || 0,
+                    method: refund.method || order.payment?.method || null,
+                },
+            }
+            : {}),
     };
 
     if (userId) io.to(rooms.user(userId)).emit(PORTER_SOCKET_EVENTS.ORDER_CANCELLED, payload);
@@ -144,7 +156,7 @@ export async function emitPorterOrderCancelled(order, userId, partnerId) {
     io.to(rooms.tracking(String(order._id))).emit(PORTER_SOCKET_EVENTS.ORDER_CANCELLED, payload);
 }
 
-export async function emitPorterOrderStatus(order, userId, partnerId) {
+export async function emitPorterOrderStatus(order, userId, partnerId, meta = {}) {
     const io = getIO();
     if (!io) return;
 
@@ -156,6 +168,7 @@ export async function emitPorterOrderStatus(order, userId, partnerId) {
         deliveryState: order.deliveryState,
         documentType: PORTER_DISPATCH_DOCUMENT_TYPE,
         module: 'parcel',
+        ...(meta.redispatch ? { redispatch: true } : {}),
     };
 
     if (userId) io.to(rooms.user(userId)).emit(PORTER_SOCKET_EVENTS.ORDER_STATUS, payload);

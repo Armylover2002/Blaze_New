@@ -21,16 +21,21 @@ export default function ParcelTracking() {
     }
   }, [orderId, refreshActiveOrder]);
 
-  const { order, loading } = usePorterOrderTracking(orderId, {
+  const { order, loading, error } = usePorterOrderTracking(orderId, {
     enabled: Boolean(orderId),
     pollMs: 5000,
   });
 
   useEffect(() => {
+    if (error?.response?.status === 404) {
+      setActiveShipment(null);
+      navigate("/porter");
+      return;
+    }
     if (!order) return;
     const mapped = mapActiveShipmentFromOrder(order);
     if (mapped) setActiveShipment((prev) => ({ ...(prev || {}), ...mapped }));
-  }, [order, setActiveShipment]);
+  }, [order, error, setActiveShipment, navigate]);
 
   const stage = resolveTrackingStage(order?.status || activeShipment?.status);
   const currentIdx = TRACKING_STAGES.findIndex((s) => s.id === stage);

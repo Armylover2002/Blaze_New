@@ -2,6 +2,7 @@ import 'dotenv/config';
 import { Worker } from 'bullmq';
 import { config } from '../../config/env.js';
 import { logger } from '../../utils/logger.js';
+import { connectDB, disconnectDB } from '../../config/db.js';
 import { getBullMQConnection } from '../connection.js';
 import { PAYMENT_QUEUE } from '../queue.constants.js';
 import { processPaymentJob } from '../processors/payment.processor.js';
@@ -33,12 +34,27 @@ const startPaymentWorker = () => {
     return worker;
 };
 
-const worker = startPaymentWorker();
-if (worker) {
-    const shutdown = async () => {
-        await worker.close();
-        process.exit(0);
-    };
-    process.on('SIGTERM', shutdown);
-    process.on('SIGINT', shutdown);
-}
+const bootstrap = async () => {
+    try {
+        // wallet/payment/refund services all query mongoose models — without this the
+        // worker starts, accepts jobs, and every query buffers until it times out.
+        await connectDB();
+        const worker = startPaymentWorker();
+        if (!worker) {
+            process.exit(0);
+            return;
+        }
+        const shutdown = async () => {
+            await worker.close();
+            await disconnectDB().catch(() => {});
+            process.exit(0);
+        };
+        process.on('SIGTERM', shutdown);
+        process.on('SIGINT', shutdown);
+    } catch (err) {
+        logger.error(`Payment worker bootstrap failed: ${err?.message || err}`);
+        process.exit(1);
+    }
+};
+
+bootstrap();

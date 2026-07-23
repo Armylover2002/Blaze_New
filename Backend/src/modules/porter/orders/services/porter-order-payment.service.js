@@ -10,6 +10,7 @@ import {
     initiateRazorpayRefund,
 } from '../../../food/orders/helpers/razorpay.helper.js';
 import { logger } from '../../../../utils/logger.js';
+import { consumePorterCouponIfPaid } from './porter-coupon-lifecycle.service.js';
 
 const PAID_LINK_STATUSES = ['paid', 'captured', 'authorized'];
 const FAILED_LINK_STATUSES = ['expired', 'cancelled', 'canceled', 'failed'];
@@ -85,6 +86,9 @@ export async function syncPorterCollectQr(order) {
     }
     order.markModified('payment');
     await order.save();
+    if (PAID_LINK_STATUSES.includes(status)) {
+        await consumePorterCouponIfPaid(order);
+    }
     return order.payment;
 }
 
@@ -188,7 +192,14 @@ export async function processPorterRefund(order, reason) {
     // Online payment → try gateway refund first.
     if (method === 'razorpay' && rzpPaymentId && isRazorpayConfigured()) {
         try {
-            const res = await initiateRazorpayRefund(rzpPaymentId, amount);
+            const res = await initiateRazorpayRefund(rzpPaymentId, amount, {
+                idempotencyKey: `porter-refund-${String(order._id)}`,
+                notes: {
+                    orderNumber: order.orderNumber || '',
+                    module: 'porter',
+                    reason: reason || 'order_cancelled',
+                },
+            });
             if (res?.success) {
                 return {
                     status: 'processed',

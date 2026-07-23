@@ -12,6 +12,20 @@ export const CANCEL_REASONS = [
   "Other",
 ];
 
+/** Customer is waiting for a partner — FindingPartner owns /orders/active polling. */
+export const PORTER_SEARCHING_STATUSES = ["created", "searching_partner", "dispatching"];
+
+/** ScheduleWaiting owns /orders/active polling while status is scheduled. */
+export const PORTER_SCHEDULED_STATUS = "scheduled";
+
+/** Single-owner poll intervals (ms) for GET /porter/orders/active. */
+export const PORTER_ACTIVE_ORDER_POLL_MS = {
+  /** @deprecated use getAdaptiveSearchPollDelayMs() */
+  searching: 5000,
+  scheduled: 10000,
+  socketFallback: 20000,
+};
+
 export const PORTER_STATUS_LABELS = {
   created: "Created",
   searching_partner: "Finding partner",

@@ -2,6 +2,11 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
+const parsePositiveNumber = (value, fallback) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
+
 export const config = {
     // Basic server config
     port: process.env.PORT || 5000,
@@ -22,8 +27,8 @@ export const config = {
     otpMaxAttempts: Number(process.env.OTP_MAX_ATTEMPTS || 5),
     otpExpiryMinutes: Number(process.env.OTP_EXPIRY_MINUTES || 10),
     otpExpirySeconds: Number(process.env.OTP_EXPIRY_SECONDS || 300),
-    otpRateLimit: Number(process.env.OTP_RATE_LIMIT || 3),
-    otpRateWindow: Number(process.env.OTP_RATE_WINDOW || 600),
+    otpRateLimit: parsePositiveNumber(process.env.OTP_RATE_LIMIT, 5),
+    otpRateWindow: parsePositiveNumber(process.env.OTP_RATE_WINDOW, 600),
     useDefaultOtp: process.env.USE_DEFAULT_OTP === 'true',
 
     // SMS India Hub
@@ -33,14 +38,20 @@ export const config = {
     smsDltTemplateId: process.env.SMS_INDIA_HUB_DLT_TEMPLATE_ID,
 
     // Rate limiting
-    rateLimitWindowMinutes: Number(process.env.RATE_LIMIT_WINDOW || 15),
-    // Default 500 req/15min per IP — enough for normal multi-tab app usage
-    // (location polling, cart updates, order status pings all count against this)
-    rateLimitMaxRequests: Number(process.env.RATE_LIMIT_MAX || 500),
-    authRateLimitWindowMinutes: Number(process.env.AUTH_RATE_LIMIT_WINDOW || 15),
-    authRateLimitMax: Number(process.env.AUTH_RATE_LIMIT_MAX || 30),
-    mapsRateLimitWindowMinutes: Number(process.env.MAPS_RATE_LIMIT_WINDOW || 15),
-    mapsRateLimitMax: Number(process.env.MAPS_RATE_LIMIT_MAX || 60),
+    rateLimitWindowMinutes: parsePositiveNumber(
+        process.env.RATE_LIMIT_WINDOW,
+        parsePositiveNumber(Number(process.env.RATE_LIMIT_WINDOW_MS) / 60000, 15)
+    ),
+    // Coarse per-IP abuse guard. Sized for carrier-grade NAT, where one mobile IP can
+    // front thousands of real users — tighter limits belong on individual endpoints.
+    rateLimitMaxRequests: parsePositiveNumber(process.env.RATE_LIMIT_MAX, 1000),
+    authRateLimitWindowMinutes: parsePositiveNumber(process.env.AUTH_RATE_LIMIT_WINDOW, 15),
+    // Per-IP ceiling on auth traffic; per-account lockout handles brute force.
+    authRateLimitMax: parsePositiveNumber(process.env.AUTH_RATE_LIMIT_MAX, 50),
+    // Failed verify attempts per phone/email (successes are not counted).
+    authVerifyRateLimitMax: parsePositiveNumber(process.env.AUTH_VERIFY_RATE_LIMIT_MAX, 10),
+    mapsRateLimitWindowMinutes: parsePositiveNumber(process.env.MAPS_RATE_LIMIT_WINDOW, 15),
+    mapsRateLimitMax: parsePositiveNumber(process.env.MAPS_RATE_LIMIT_MAX, 60),
     authLoginMaxAttempts: Number(process.env.AUTH_LOGIN_MAX_ATTEMPTS || 5),
     authLoginLockoutMinutes: Number(process.env.AUTH_LOGIN_LOCKOUT_MINUTES || 15),
 

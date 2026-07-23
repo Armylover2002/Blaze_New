@@ -2,7 +2,7 @@ import React, { useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { MapPin, Phone, Star, FileText, Loader2, CalendarClock } from "lucide-react";
 import Screen from "../components/Screen";
-import { PrimaryButton, FareRow, SectionLabel, inr } from "../components/ui";
+import { PrimaryButton, FareBreakdown, SectionLabel } from "../components/ui";
 import { useBooking } from "../context/BookingContext";
 import { getPorterInvoicePath, getPorterTrackingPath, getPorterScheduledWaitingPath } from "../utils/routes";
 import { usePorterOrderTracking } from "../hooks/usePorterOrderTracking";
@@ -184,16 +184,39 @@ export default function ShipmentDetails() {
         </>
       )}
 
+      {shipment.cancellation && (
+        <>
+          <SectionLabel>Cancellation details</SectionLabel>
+          <div className="mb-4 rounded-2xl border border-red-100 bg-red-50/40 p-4 text-[13px]">
+            <p><span className="text-gray-500">Reason:</span> <span className="font-bold">{shipment.cancellation.reason || "Not specified"}</span></p>
+            {shipment.cancellation.cancelledBy && (
+              <p className="mt-1"><span className="text-gray-500">Cancelled by:</span> <span className="font-bold capitalize">{shipment.cancellation.cancelledBy}</span></p>
+            )}
+            {shipment.cancellation.cancelledAt && (
+              <p className="mt-1"><span className="text-gray-500">Time:</span> <span className="font-bold">{fmt(shipment.cancellation.cancelledAt)}</span></p>
+            )}
+            {shipment.payment?.status === "refunded" && (
+              <p className="mt-2 font-bold text-green-600">Refund has been successfully processed to your {shipment.payment?.method || "account"}.</p>
+            )}
+          </div>
+        </>
+      )}
+
       <SectionLabel>Payment</SectionLabel>
       <div className="mb-4 rounded-2xl border border-gray-100 bg-white p-4">
-        <FareRow label="Delivery fare" value={inr(shipment.pricing?.baseFare || 0)} />
-        {(shipment.pricing?.serviceTax || 0) > 0 && (
-          <FareRow label="Service Tax / GST" value={inr(shipment.pricing?.serviceTax)} />
-        )}
-        {(shipment.pricing?.discount || 0) > 0 && <FareRow label="Discount" value={`−${inr(shipment.pricing?.discount)}`} accent />}
-        <div className="my-2 border-t border-gray-100" />
-        <FareRow label="Total paid" value={inr(shipment.total || 0)} strong />
-        <p className="mt-1 text-[11px] capitalize text-gray-400">Paid via {shipment.payment?.method || shipment.pricing?.paymentMethod || "online"}</p>
+        <FareBreakdown
+          baseFare={shipment.pricing?.baseFare || 0}
+          serviceTax={shipment.pricing?.serviceTax || 0}
+          discount={shipment.pricing?.discount || 0}
+          total={shipment.total || shipment.pricing?.total || 0}
+          baseLabel="Delivery fare"
+          discountLabel="Discount"
+          totalLabel="Total paid"
+        />
+        <p className="mt-1 text-[11px] capitalize text-gray-400">
+          Paid via {shipment.payment?.method || shipment.pricing?.paymentMethod || "online"}
+          {shipment.payment?.status === "refunded" && <span className="ml-1 text-green-600 font-bold border border-green-200 px-1.5 py-0.5 rounded-full">(Refunded)</span>}
+        </p>
       </div>
 
       <div className="flex gap-2">

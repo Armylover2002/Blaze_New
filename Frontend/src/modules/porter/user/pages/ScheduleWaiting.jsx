@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import {
@@ -14,8 +14,13 @@ import {
   getPorterPartnerAssignedPath,
   getPorterSchedulePath,
 } from "../utils/routes";
-import porterUserApi from "../services/userApi";
-import { mapActiveShipmentFromOrder, resolveActiveRouteForStatus } from "../utils/orderMapper";
+import { PORTER_ACTIVE_ORDER_POLL_MS } from "../constants/booking";
+import {
+  getAdaptiveSearchPollDelayMs,
+  isScheduledOrderStatus,
+  shouldStopActiveOrderPolling,
+} from "../utils/activeOrderSync";
+import { resolveActiveRouteForStatus } from "../utils/orderMapper";
 
 const ACCEPTED_STATUSES = ["assigned", "partner_accepted", "en_route_pickup", "at_pickup"];
 const POST_PICKUP_STATUSES = ["picked_up", "in_transit", "at_drop", "delivered", "completed"];
@@ -59,15 +64,17 @@ export default function ScheduleWaiting() {
   const navigate = useNavigate();
   const {
     activeShipment,
-    setActiveShipment,
     resetBooking,
     activeOrderEvent,
+    refreshActiveOrder,
   } = useBooking();
 
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const userCancelRef = React.useRef(false);
+  const pollInFlightRef = React.useRef(false);
+  const waitStartedAtRef = React.useRef(Date.now());
 
   const orderId = activeShipment?.id || null;
   const status = String(activeShipment?.status || "").toLowerCase();
@@ -84,63 +91,83 @@ export default function ScheduleWaiting() {
     return splitCountdown(scheduledMs - now);
   }, [scheduledMs, now]);
 
-  const refreshOrder = useCallback(async () => {
-    try {
-      const active = await porterUserApi.getActiveOrder({ forceRefresh: true });
-      const current = active?.order ?? active;
-      if (!current) return null;
-      const mapped = mapActiveShipmentFromOrder(current);
-      if (mapped) setActiveShipment(mapped);
-      return current;
-    } catch {
-      return null;
-    }
-  }, [setActiveShipment]);
-
-  // Poll while waiting; when status advances, leave this screen.
+  // Poll while scheduled; slower cadence than active search. Stops on status advance.
   useEffect(() => {
     let cancelled = false;
     let timer;
+    waitStartedAtRef.current = Date.now();
+
+    const scheduleNext = (delayMs) => {
+      if (cancelled) return;
+      const delay = delayMs ?? Math.max(
+        PORTER_ACTIVE_ORDER_POLL_MS.scheduled,
+        getAdaptiveSearchPollDelayMs(Date.now() - waitStartedAtRef.current),
+      );
+      timer = setTimeout(tick, delay);
+    };
 
     const tick = async () => {
       if (cancelled || userCancelRef.current) return;
-      const current = await refreshOrder();
-      if (!current || cancelled) {
-        timer = setTimeout(tick, 4000);
+      if (pollInFlightRef.current) {
+        scheduleNext();
         return;
       }
-      const s = String(current.status || "").toLowerCase();
-      if (s === "searching_partner" || s === "created") {
-        navigate(getPorterFindingPartnerPath(), { replace: true });
-        return;
+
+      pollInFlightRef.current = true;
+      try {
+        const mapped = await refreshActiveOrder({ forceRefresh: true });
+        if (cancelled) {
+          scheduleNext();
+          return;
+        }
+
+        if (!mapped) {
+          scheduleNext();
+          return;
+        }
+
+        const s = String(mapped.status || "").toLowerCase();
+        if (s === "searching_partner" || s === "created") {
+          navigate(getPorterFindingPartnerPath(), { replace: true });
+          return;
+        }
+        if (ACCEPTED_STATUSES.includes(s)) {
+          navigate(getPorterPartnerAssignedPath(), { replace: true });
+          return;
+        }
+        if (POST_PICKUP_STATUSES.includes(s)) {
+          navigate(resolveActiveRouteForStatus(s), { replace: true });
+          return;
+        }
+        if (CANCELLED_STATUSES.includes(s)) {
+          toast.error(
+            s === "cancelled_by_admin"
+              ? "This booking was cancelled by support."
+              : "This scheduled booking was cancelled.",
+          );
+          resetBooking();
+          navigate(getPorterHomePath(), { replace: true });
+          return;
+        }
+        if (!isScheduledOrderStatus(s) || shouldStopActiveOrderPolling(s)) {
+          return;
+        }
+
+        scheduleNext();
+      } catch {
+        scheduleNext();
+      } finally {
+        pollInFlightRef.current = false;
       }
-      if (ACCEPTED_STATUSES.includes(s)) {
-        navigate(getPorterPartnerAssignedPath(), { replace: true });
-        return;
-      }
-      if (POST_PICKUP_STATUSES.includes(s)) {
-        navigate(resolveActiveRouteForStatus(s), { replace: true });
-        return;
-      }
-      if (CANCELLED_STATUSES.includes(s)) {
-        toast.error(
-          s === "cancelled_by_admin"
-            ? "This booking was cancelled by support."
-            : "This scheduled booking was cancelled.",
-        );
-        resetBooking();
-        navigate(getPorterHomePath(), { replace: true });
-        return;
-      }
-      timer = setTimeout(tick, 4000);
     };
 
     tick();
     return () => {
       cancelled = true;
+      pollInFlightRef.current = false;
       if (timer) clearTimeout(timer);
     };
-  }, [navigate, refreshOrder]);
+  }, [navigate, refreshActiveOrder, resetBooking]);
 
   // Countdown hit zero → soft hand-off (backend/poller still owns real dispatch).
   useEffect(() => {

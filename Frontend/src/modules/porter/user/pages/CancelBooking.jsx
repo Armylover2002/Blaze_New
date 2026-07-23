@@ -10,11 +10,12 @@ import porterUserApi from "../services/userApi";
 
 export default function CancelBooking() {
   const navigate = useNavigate();
-  const { resetBooking, activeShipment } = useBooking();
+  const { resetBooking, activeShipment, paymentMethodId } = useBooking();
   const [reason, setReason] = useState("");
   const [customReason, setCustomReason] = useState("");
   const [confirmed, setConfirmed] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [cancelSummary, setCancelSummary] = useState(null);
 
   const isOther = reason === "Other";
   const finalReason = isOther ? customReason.trim() : reason;
@@ -33,6 +34,10 @@ export default function CancelBooking() {
     setSubmitting(true);
     try {
       await porterUserApi.cancelOrder(orderId, finalReason);
+      setCancelSummary({
+        paidOnline: activeShipment?.payment?.method === "razorpay" || paymentMethodId === "razorpay",
+        couponCode: activeShipment?.couponCode || null,
+      });
       setConfirmed(true);
       resetBooking();
       setTimeout(() => navigate("/porter", { replace: true }), 1500);
@@ -51,7 +56,16 @@ export default function CancelBooking() {
             <AlertCircle className="h-8 w-8 text-gray-500" />
           </div>
           <h2 className="text-[18px] font-extrabold text-gray-900">Shipment cancelled</h2>
-          <p className="mt-2 text-[13px] text-gray-500">Refund will be credited to your wallet if payment was made.</p>
+          <p className="mt-2 text-[13px] text-gray-500">
+            {cancelSummary?.paidOnline
+              ? "If payment was completed online, the refund will be processed to your original payment method within 5–7 business days."
+              : "If payment was made, the eligible amount will be refunded to your wallet automatically."}
+          </p>
+          {cancelSummary?.couponCode && (
+            <p className="mt-2 text-[12px] font-semibold text-gray-500">
+              Coupon {cancelSummary.couponCode} cannot be reused on future bookings.
+            </p>
+          )}
         </div>
       </Screen>
     );

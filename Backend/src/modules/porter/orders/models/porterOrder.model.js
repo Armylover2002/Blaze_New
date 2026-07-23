@@ -61,6 +61,8 @@ const porterOrderSchema = new mongoose.Schema(
         },
         couponId: { type: mongoose.Schema.Types.ObjectId, ref: 'PorterCoupon' },
         couponCode: { type: String, trim: true },
+        /** Set true once usedCount is incremented — drives per-user coupon limits. */
+        couponConsumed: { type: Boolean, default: false, index: true },
         payment: {
             method: { type: String, enum: PORTER_PAYMENT_METHODS, default: 'wallet' },
             status: { type: String, enum: Object.values(PORTER_PAYMENT_STATUS), default: PORTER_PAYMENT_STATUS.PENDING },
@@ -142,6 +144,7 @@ const porterOrderSchema = new mongoose.Schema(
             note: { type: String },
             refundStatus: { type: String },
             refundAmount: { type: Number },
+            couponForfeited: { type: Boolean, default: false },
         },
         isDeleted: { type: Boolean, default: false, index: true },
         deletedAt: { type: Date, default: null },

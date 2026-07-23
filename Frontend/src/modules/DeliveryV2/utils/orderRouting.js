@@ -89,7 +89,8 @@ export const isPorterParcelTrip = (order) => {
   return (
     moduleType === "parcel" ||
     moduleType === "porter" ||
-    String(order?.documentType || "").trim() === "porter_order"
+    String(order?.documentType || "").trim() === "porter_order" ||
+    (Boolean(order?.orderNumber) && String(order.orderNumber).toUpperCase().startsWith("PRT"))
   );
 };
 
@@ -267,10 +268,44 @@ export const isReturnPickupTrip = (order) =>
   String(order?.tripType || "").trim() === "return_pickup" ||
   String(order?.documentType || "").trim() === "seller_return";
 
+const normalizePorterStopLocation = (...candidates) => {
+  for (const src of candidates) {
+    if (!src || typeof src !== "object") continue;
+    const lat = Number(src.lat ?? src.latitude);
+    const lng = Number(src.lng ?? src.longitude);
+    const address = String(
+      src.address || src.formattedAddress || src.completeAddress || "",
+    ).trim();
+    const title = String(src.title || src.name || "").trim();
+    if (address || title || (Number.isFinite(lat) && Number.isFinite(lng))) {
+      return {
+        title,
+        address: address || title || formatCoordinateAddress({ lat, lng }),
+        lat: Number.isFinite(lat) ? lat : undefined,
+        lng: Number.isFinite(lng) ? lng : undefined,
+        phone: src.phone ? String(src.phone).trim() : undefined,
+      };
+    }
+  }
+  return null;
+};
+
 export const enrichPorterDeliveryOrder = (order = {}) => {
   if (!isPorterParcelTrip(order)) return order;
-  const pickupLoc = normalizeLocationPoint(order.pickup || order.pickupLocation || order.restaurantLocation);
-  const dropLoc = normalizeLocationPoint(order.delivery || order.dropLocation || order.customerLocation);
+
+  const pickup = normalizePorterStopLocation(
+    order.pickup,
+    order.pickupLocation,
+    order.restaurantLocation,
+  );
+  const delivery = normalizePorterStopLocation(
+    order.delivery,
+    order.dropLocation,
+    order.customerLocation,
+    order.deliveryLocation,
+  );
+  const pickupLoc = normalizeLocationPoint(pickup || order.pickup || order.pickupLocation || order.restaurantLocation);
+  const dropLoc = normalizeLocationPoint(delivery || order.delivery || order.dropLocation || order.customerLocation);
   const pickupDistanceKm = (() => {
     const candidates = [order.pickupDistanceKm, order.distanceKm];
     for (const c of candidates) {
@@ -286,6 +321,8 @@ export const enrichPorterDeliveryOrder = (order = {}) => {
     documentType: order.documentType || "porter_order",
     orderId: order.orderId || order.id || order.orderMongoId,
     orderMongoId: order.orderMongoId || order.id || order.orderId,
+    pickup: pickup || order.pickup || null,
+    delivery: delivery || order.delivery || null,
     restaurantLocation: pickupLoc,
     customerLocation: dropLoc,
     pickupLocation: pickupLoc,
@@ -294,21 +331,24 @@ export const enrichPorterDeliveryOrder = (order = {}) => {
     pickupDistanceKm,
     distanceKm: pickupDistanceKm ?? order.distanceKm,
     tripDistanceKm: order.tripDistanceKm ?? order.route?.distanceKm ?? null,
+    deliveryDistanceKm: order.tripDistanceKm ?? order.route?.distanceKm ?? order.deliveryDistanceKm ?? null,
     earnings: order.earnings ?? order.pricing?.driverEarning ?? 0,
     riderEarning: order.riderEarning ?? order.pricing?.driverEarning ?? order.earnings ?? 0,
-    senderName: order.senderName || order.pickup?.title || order.userName || "Sender",
-    senderPhone: order.senderPhone || order.pickup?.phone || order.userPhone || "",
+    senderName: order.senderName || pickup?.title || order.pickup?.title || order.userName || "Sender",
+    senderPhone: order.senderPhone || pickup?.phone || order.pickup?.phone || order.userPhone || "",
     receiverName: order.receiverName || order.parcel?.receiverName || "Receiver",
     receiverPhone: order.receiverPhone || order.parcel?.receiverPhone || "",
-    pickupAddress: order.pickupAddress || order.pickup?.address || "",
-    dropAddress: order.dropAddress || order.delivery?.address || "",
+    pickupAddress: order.pickupAddress || pickup?.address || order.pickup?.address || "",
+    dropAddress: order.dropAddress || delivery?.address || order.delivery?.address || "",
     vehicleName: order.vehicleName || order.vehicle?.category || "",
     parcelWeight: order.parcel?.weightKg != null
       ? Number(order.parcel.weightKg) * Math.max(1, Number(order.parcel?.quantity || 1))
       : order.parcelWeight,
     parcelName: order.parcel?.parcelName || order.parcelName || "",
     instructions: order.parcel?.instructions || order.instructions || "",
-    deliveryState: order.deliveryState,
+    deliveryState: {
+      ...(order.deliveryState || {}),
+    },
     deliveryPhotoUrl: order.deliveryState?.deliveryPhotoUrl,
   };
 };

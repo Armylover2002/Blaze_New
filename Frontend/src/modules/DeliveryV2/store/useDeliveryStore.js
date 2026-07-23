@@ -69,9 +69,12 @@ export const useDeliveryStore = create(
         settings: { ...state.settings, ...newSettings },
       })),
 
-      setActiveOrder: (order) => set({
-        activeOrder: order,
-        tripStatus: order ? 'PICKING_UP' : 'IDLE',
+      setActiveOrder: (orderOrUpdater) => set((state) => {
+        const order = typeof orderOrUpdater === 'function' ? orderOrUpdater(state.activeOrder) : orderOrUpdater;
+        return {
+          activeOrder: order,
+          tripStatus: order && !state.activeOrder ? 'PICKING_UP' : (order ? state.tripStatus : 'IDLE'),
+        };
       }),
 
       updateTripStatus: (status) => set({ tripStatus: status }),
