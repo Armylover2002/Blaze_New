@@ -65,7 +65,7 @@ import { FoodSupportTicket } from '../../user/models/supportTicket.model.js';
 import { Seller } from '../../../quick-commerce/seller/models/seller.model.js';
 import { SellerOrder } from '../../../quick-commerce/seller/models/sellerOrder.model.js';
 import { PorterOrder } from '../../../porter/orders/models/porterOrder.model.js';
-import { getSellerCommissionSnapshot } from '../../../quick-commerce/admin/services/commission.service.js';
+import { getHeaderCommissionSnapshot } from '../../../quick-commerce/admin/services/commission.service.js';
 import { QuickFeeSettings } from '../../../quick-commerce/admin/models/feeSettings.model.js';
 import { calculateQuickPricing, calculateCustomerDeliveryFee } from '../../../quick-commerce/admin/services/billing.service.js';
 import {
@@ -2251,7 +2251,13 @@ function buildSellerOrdersFromParent(orderDoc, { customerName = "", customerPhon
       let receivable = sellerSubtotal;
 
       try {
-        const snapshot = await getSellerCommissionSnapshot(sellerId, sellerSubtotal);
+        const snapshot = await getHeaderCommissionSnapshot(
+          sellerItems.map((item) => ({
+            productId: item?.itemId || item?.productId,
+            price: item?.price,
+            quantity: item?.quantity,
+          })),
+        );
         commissionAmount = Number(snapshot?.commissionAmount || 0);
         receivable = Math.max(0, Number((sellerSubtotal - commissionAmount).toFixed(2)));
       } catch (err) {

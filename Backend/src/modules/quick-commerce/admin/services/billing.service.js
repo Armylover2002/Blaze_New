@@ -2,13 +2,13 @@ import mongoose from 'mongoose';
 import { ValidationError } from '../../../../core/auth/errors.js';
 import { QuickFeeSettings } from '../models/feeSettings.model.js';
 import { QuickCategory } from '../../models/category.model.js';
+import { calculateHeaderGstAmount } from './commission.service.js';
 
 const DEFAULT_QUICK_FEE_SETTINGS = {
   deliveryFee: 25,
   deliveryFeeRanges: [],
   freeDeliveryThreshold: 0,
   platformFee: 0,
-  gstRate: 0,
   returnWindowHours: 72,
   returnsEnabled: true,
   isActive: true,
@@ -37,9 +37,6 @@ export async function upsertFeeSettings(body) {
     if (body.platformFee === null) $unset.platformFee = 1;
     else if (body.platformFee !== undefined) $set.platformFee = body.platformFee;
 
-    if (body.gstRate === null) $unset.gstRate = 1;
-    else if (body.gstRate !== undefined) $set.gstRate = body.gstRate;
-
     if (body.returnWindowHours === null) $unset.returnWindowHours = 1;
     else if (body.returnWindowHours !== undefined) {
       $set.returnWindowHours = body.returnWindowHours;
@@ -65,7 +62,6 @@ export async function upsertFeeSettings(body) {
     returnsEnabled: body.returnsEnabled ?? true,
   };
   if (body.platformFee !== undefined && body.platformFee !== null) payload.platformFee = body.platformFee;
-  if (body.gstRate !== undefined && body.gstRate !== null) payload.gstRate = body.gstRate;
 
   const created = await QuickFeeSettings.create(payload);
   return sanitizeFeeSettingsForApi(created.toObject());
@@ -151,7 +147,14 @@ export function calculateRiderEarning(feeSettings = {}, distanceKm) {
   return 0;
 }
 
-export async function calculateQuickPricing({ subtotal = 0, discount = 0, products = [], distanceKm = 0 } = {}) {
+export async function calculateQuickPricing({
+  subtotal = 0,
+  discount = 0,
+  products = [],
+  items = [],
+  distanceKm = 0,
+  couponType = '',
+} = {}) {
   const feeSettings = await getActiveFeeSettings();
   const safeSubtotal = Number(subtotal || 0);
   const safeDiscount = Math.max(0, Number(discount || 0));
@@ -159,13 +162,17 @@ export async function calculateQuickPricing({ subtotal = 0, discount = 0, produc
 
   const handlingFee = await calculateHandlingFeeFromProducts(products);
 
-  const deliveryFee = calculateCustomerDeliveryFee(feeSettings, distanceKm);
+  const deliveryFee =
+    String(couponType || '').trim().toLowerCase() === 'free_delivery'
+      ? 0
+      : calculateCustomerDeliveryFee(feeSettings, distanceKm);
 
-  const gstRate = Number(feeSettings.gstRate || 0);
-  const gst =
-    Number.isFinite(gstRate) && gstRate > 0
-      ? Math.round(safeSubtotal * (gstRate / 100))
-      : 0;
+  // GST % comes from Header Category only (not fee settings).
+  const gst = await calculateHeaderGstAmount({
+    products,
+    items,
+    subtotal: safeSubtotal,
+  });
 
   const total = Math.max(0, safeSubtotal + deliveryFee + platformFee + gst - safeDiscount);
 

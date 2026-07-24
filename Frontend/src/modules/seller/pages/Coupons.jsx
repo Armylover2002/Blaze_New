@@ -31,6 +31,7 @@ const defaultFormData = {
 
 const statusBadgeClass = (status) => {
   const value = String(status || "Pending").toLowerCase()
+  if (value === "inactive") return "bg-slate-50 text-slate-700 border-slate-200"
   if (value === "approved") return "bg-emerald-50 text-emerald-700 border-emerald-200"
   if (value === "rejected") return "bg-rose-50 text-rose-700 border-rose-200"
   return "bg-amber-50 text-amber-700 border-amber-200"
@@ -141,8 +142,9 @@ export default function Coupons() {
     if (!window.confirm(`Are you sure you want to delete coupon "${coupon.code}"?`)) return
 
     try {
-      await sellerApi.deleteCoupon(coupon._id || coupon.id)
-      toast.success("Coupon deleted successfully")
+      const response = await sellerApi.deleteCoupon(coupon._id || coupon.id)
+      const deactivated = response?.data?.data?.deactivated || response?.data?.result?.deactivated
+      toast.success(deactivated ? "Coupon deactivated successfully" : "Coupon deleted successfully")
       fetchCoupons()
     } catch (error) {
       toast.error(error?.response?.data?.message || "Failed to delete coupon")
@@ -200,7 +202,7 @@ export default function Coupons() {
         ) : (
           <div className="space-y-3">
             {coupons.map((coupon) => {
-              const status = coupon?.status || "Pending"
+              const status = !coupon?.isActive ? "Inactive" : (coupon?.status || "Pending")
               const validFromFormatted = coupon?.validFrom ? new Date(coupon.validFrom).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' }) : 'N/A'
               const validTillFormatted = coupon?.validTill ? new Date(coupon.validTill).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' }) : 'N/A'
 
@@ -333,11 +335,8 @@ export default function Coupons() {
                       className="w-full rounded-xl border border-slate-300 px-3 py-3 outline-none focus:border-red-600 focus:ring-2 focus:ring-red-600/10 bg-white"
                     >
                       <option value="generic">Generic Discount</option>
-                      <option value="bulk_order">Bulk Order Discount</option>
                       <option value="min_order_value">Minimum Order Value Coupon</option>
                       <option value="free_delivery">Free Delivery Coupon</option>
-                      <option value="category_based">Category-Based Coupon</option>
-                      <option value="monthly_volume">Monthly Volume Coupon</option>
                     </select>
                   </div>
                 </div>

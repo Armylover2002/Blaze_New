@@ -3,7 +3,7 @@ import {
   Search, Eye, Check, X, ArrowUpDown, Loader2, 
   Clock, Store, ShieldAlert, BadgeCheck, FileText, CheckCircle2, XCircle, RefreshCw, Tag, AlertTriangle
 } from "lucide-react";
-import { adminAPI } from "@food/api";
+import { adminApi } from "../services/adminApi";
 import { useToast } from "@shared/components/ui/Toast";
 import { useAuth } from "@core/context/AuthContext";
 import { getCurrentUser } from "@food/utils/auth";
@@ -69,10 +69,9 @@ export default function SellerCouponRequest() {
   const fetchData = async () => {
     try {
       setLoading(true);
-      const response = await adminAPI.getRestaurantCoupons();
-      const list = response?.data?.data || response?.data || [];
-      // Show ONLY seller coupon requests
-      const sellerOnly = (Array.isArray(list) ? list : []).filter(r => r.type === "seller");
+      const response = await adminApi.getSellerCouponRequests();
+      const list = response?.data?.data || response?.data?.results || response?.data || [];
+      const sellerOnly = (Array.isArray(list) ? list : []).filter((r) => !r.type || r.type === "seller");
       setRequests(sellerOnly);
     } catch (error) {
       console.error("Error loading seller coupon requests:", error);
@@ -148,7 +147,7 @@ export default function SellerCouponRequest() {
     }
     try {
       setProcessingId(requestId);
-      const response = await adminAPI.updateRestaurantCouponStatus(requestId, newStatus);
+      const response = await adminApi.updateSellerCouponRequestStatus(requestId, newStatus);
       
       if (response?.data?.success || response?.success) {
         showToast(`Coupon request successfully ${newStatus === "Approved" ? "approved & activated" : "rejected / deactivated"}!`, "success");

@@ -102,6 +102,8 @@ import {
   getAdminSellerWithdrawals,
   getAdminSellerTransactions,
   updateAdminWithdrawalStatus,
+  getAdminSellerCouponRequests,
+  updateAdminSellerCouponRequestStatus,
   getAdminCoupons,
   createCoupon,
   updateCoupon,
@@ -112,15 +114,6 @@ import {
   getAdminSellerCODVerificationsController,
   settleSellerCODVerificationController,
 } from "../controllers/admin.controller.js";
-import {
-  getSellerCommissionBootstrap,
-  getSellerCommissions,
-  getSellerCommissionById,
-  createSellerCommission,
-  updateSellerCommission,
-  deleteSellerCommission,
-  toggleSellerCommissionStatus,
-} from "../controllers/adminCommission.controller.js";
 import {
   createOrUpdateFeeSettings,
   getFeeSettings,
@@ -480,49 +473,20 @@ router.delete(
   notificationBroadcastController.deleteBroadcastNotificationController
 );
 
-// Seller Commission Management
-router.get(
-  "/admin/seller-commissions/bootstrap",
-  ...adminOrEmployee,
-  checkPermission("quick::core_management::sellers::commission", "view"),
-  getSellerCommissionBootstrap,
-);
-router.get("/admin/seller-commissions", ...adminOrEmployee, checkPermission("quick::core_management::sellers::commission", "view"), getSellerCommissions);
-router.get(
-  "/admin/seller-commissions/:id",
-  ...adminOrEmployee,
-  checkPermission("quick::core_management::sellers::commission", "view"),
-  getSellerCommissionById,
-);
-router.post("/admin/seller-commissions", ...adminOrEmployee, checkPermission("quick::core_management::sellers::commission", "create"), createSellerCommission);
-router.put(
-  "/admin/seller-commissions/:id",
-  ...adminOrEmployee,
-  checkPermission("quick::core_management::sellers::commission", "edit"),
-  updateSellerCommission,
-);
-router.delete(
-  "/admin/seller-commissions/:id",
-  ...adminOrEmployee,
-  checkPermission("quick::core_management::sellers::commission", "delete"),
-  deleteSellerCommission,
-);
-router.patch(
-  "/admin/seller-commissions/:id/toggle-status",
-  ...adminOrEmployee,
-  checkPermission("quick::core_management::sellers::commission", "edit"),
-  toggleSellerCommissionStatus,
-);
 router.get("/admin/fee-settings", ...adminOrEmployee, checkPermission("quick::core_management::billing", "view"), getFeeSettings);
 router.put("/admin/fee-settings", ...adminOrEmployee, checkPermission("quick::core_management::billing", "edit"), createOrUpdateFeeSettings);
 
 
+// Admin Seller Coupon Requests (QC marketing tools)
+router.get('/admin/seller-coupon-requests', ...adminOrEmployee, checkPermission('quick::core_management::marketing_tools::seller_coupon_request', 'view'), getAdminSellerCouponRequests);
+router.patch('/admin/seller-coupon-requests/:id/status', ...adminOrEmployee, checkPermission('quick::core_management::marketing_tools::seller_coupon_request', 'edit'), updateAdminSellerCouponRequestStatus);
+
 // Admin Coupon Management
-router.get('/admin/coupons', ...adminOrEmployee, checkPermission('quick::core_management::promotions_management::coupons', 'view'), getAdminCoupons);
-router.post('/admin/coupons', ...adminOrEmployee, checkPermission('quick::core_management::promotions_management::coupons', 'create'), createCoupon);
-router.put('/admin/coupons/:couponId', ...adminOrEmployee, checkPermission('quick::core_management::promotions_management::coupons', 'edit'), updateCoupon);
-router.delete('/admin/coupons/:couponId', ...adminOrEmployee, checkPermission('quick::core_management::promotions_management::coupons', 'delete'), deleteCoupon);
-router.patch('/admin/coupons/:couponId/toggle-status', ...adminOrEmployee, checkPermission('quick::core_management::promotions_management::coupons', 'edit'), toggleCouponStatus);
+router.get('/admin/coupons', ...adminOrEmployee, checkPermission('quick::core_management::marketing_tools::coupons', 'view'), getAdminCoupons);
+router.post('/admin/coupons', ...adminOrEmployee, checkPermission('quick::core_management::marketing_tools::coupons', 'create'), createCoupon);
+router.put('/admin/coupons/:couponId', ...adminOrEmployee, checkPermission('quick::core_management::marketing_tools::coupons', 'edit'), updateCoupon);
+router.delete('/admin/coupons/:couponId', ...adminOrEmployee, checkPermission('quick::core_management::marketing_tools::coupons', 'delete'), deleteCoupon);
+router.patch('/admin/coupons/:couponId/toggle-status', ...adminOrEmployee, checkPermission('quick::core_management::marketing_tools::coupons', 'edit'), toggleCouponStatus);
 router.use(faqRoutes);
 
 export default router;

@@ -58,6 +58,7 @@ function sanitizeCategory(doc) {
   next.description = next.description || '';
   next.iconId = next.iconId || '';
   next.adminCommission = Number(next.adminCommission || 0);
+  next.gst = Number(next.gst || 0);
   next.handlingFees = Number(next.handlingFees || 0);
   next.sortOrder = Number(next.sortOrder || 0);
   return next;

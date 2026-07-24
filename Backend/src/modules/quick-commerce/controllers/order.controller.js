@@ -6,8 +6,10 @@ import { QuickOrder } from '../models/order.model.js';
 import { QuickCart } from '../models/cart.model.js';
 import { QuickProduct } from '../models/product.model.js';
 import { Seller } from '../seller/models/seller.model.js';
+import { SellerCoupon } from '../models/sellerCoupon.model.js';
+import { SellerCouponUsage } from '../models/sellerCouponUsage.model.js';
 import { SellerOrder } from '../seller/models/sellerOrder.model.js';
-import { getSellerCommissionSnapshot } from '../admin/services/commission.service.js';
+import { getHeaderCommissionSnapshot } from '../admin/services/commission.service.js';
 import {
   calculateQuickPricing,
   getRiderEarning as getQuickRiderEarning,
@@ -54,6 +56,11 @@ import {
   isQuickCouponExpired,
   isQuickCouponNotStarted,
 } from '../utils/coupon.helpers.js';
+import {
+  getQuickSellerCouponUsageConsumer,
+  consumeQuickSellerCouponUsage,
+  isQuickSellerCouponUsageAvailable,
+} from '../utils/sellerCouponUsage.helpers.js';
 
 import { publicProductVisibilityFilter } from '../utils/productVisibility.helpers.js';
 
@@ -68,17 +75,15 @@ const resolveId = (req) => {
   return sessionId ? { sessionId } : null;
 };
 
-async function resolveServerQuickDiscount({ couponCode, subtotal, items }) {
+async function resolveServerQuickDiscount({ couponCode, couponSource: explicitSource, subtotal, items, userId = null, sessionId = null }) {
   const code = String(couponCode || '').trim().toUpperCase();
   if (!code) return { discount: 0, couponCode: null };
 
-  const adminCoupons = await getQuickCoupons();
-  let coupon = (Array.isArray(adminCoupons) ? adminCoupons : []).find(
-    (entry) => String(entry?.code || '').toUpperCase() === code,
-  );
-  let couponSource = 'admin';
+  let coupon = null;
+  let couponSource = '';
+  const expectedSource = String(explicitSource || '').toLowerCase();
 
-  if (!coupon) {
+  if (expectedSource !== 'admin') {
     const sellerIdRaw = (Array.isArray(items) ? items : []).find((item) => item?.sellerId)?.sellerId;
     const sellerId = String(sellerIdRaw || '').trim();
     if (sellerId && mongoose.isValidObjectId(sellerId)) {
@@ -100,6 +105,17 @@ async function resolveServerQuickDiscount({ couponCode, subtotal, items }) {
     }
   }
 
+  if (!coupon && expectedSource !== 'restaurant' && expectedSource !== 'seller') {
+    const adminCoupons = await getQuickCoupons();
+    const adminCoupon = (Array.isArray(adminCoupons) ? adminCoupons : []).find(
+      (entry) => String(entry?.code || '').toUpperCase() === code,
+    );
+    if (adminCoupon) {
+      coupon = adminCoupon;
+      couponSource = 'admin';
+    }
+  }
+
   if (!coupon) {
     throw new ValidationError('Coupon not found or expired');
   }
@@ -117,9 +133,19 @@ async function resolveServerQuickDiscount({ couponCode, subtotal, items }) {
   const discountType = String(coupon.discountType || 'flat').toLowerCase();
   const discountValue = Number(coupon.discountValue || coupon.discount || 0);
   const maxDiscount = Number(coupon.maxDiscount || coupon.maxDiscountValue || 0);
+  const isFreeDelivery = discountType === 'free_delivery';
+
+  if (couponSource === 'restaurant') {
+    const usageAvailable = await isQuickSellerCouponUsageAvailable(coupon, { userId, sessionId });
+    if (!usageAvailable) {
+      throw new ValidationError('This coupon has reached its usage limit');
+    }
+  }
 
   let discount = 0;
-  if (discountType === 'percent' || discountType === 'percentage') {
+  if (isFreeDelivery) {
+    discount = 0;
+  } else if (discountType === 'percent' || discountType === 'percentage') {
     discount = Math.round((Number(subtotal || 0) * discountValue) / 100);
     if (maxDiscount > 0) discount = Math.min(discount, maxDiscount);
   } else {
@@ -130,6 +156,10 @@ async function resolveServerQuickDiscount({ couponCode, subtotal, items }) {
     discount: Math.max(0, Math.min(discount, Number(subtotal || 0))),
     couponCode: String(coupon.code || code).toUpperCase(),
     couponSource,
+    couponType: isFreeDelivery
+      ? 'free_delivery'
+      : String(coupon.couponType || '').toLowerCase(),
+    discountType,
   };
 }
 
@@ -354,6 +384,7 @@ export const placeOrder = async (req, res) => {
     }
 
     const cart = await QuickCart.findOne(idQuery).lean();
+    const quickSessionId = getQuickSessionIdFromRequest(req);
     const requestedItems = normalizeRequestedItems(req.body?.items);
     const requestedMetaMap = buildRequestedItemMetaMap(requestedItems);
     const sourceItems =
@@ -480,8 +511,11 @@ export const placeOrder = async (req, res) => {
     const subtotal = items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
     const { discount, couponCode, couponSource } = await resolveServerQuickDiscount({
       couponCode: req.body?.couponCode,
+      couponSource: req.body?.couponSource || req.body?.source,
       subtotal,
       items,
+      userId: idQuery.userId || null,
+      sessionId: quickSessionId || idQuery.sessionId || null,
     });
     let deliveryAddress = normalizeDeliveryAddress(req.body?.address);
     if (!deliveryAddress) {
@@ -571,6 +605,12 @@ export const placeOrder = async (req, res) => {
       discount,
       products,
       distanceKm,
+      couponType,
+      items: items.map((item) => ({
+        productId: item.productId,
+        price: item.price,
+        quantity: item.quantity,
+      })),
     });
 
     // Mongoose pricingSchema only has 'tax', not 'gst'. Map gst to tax so it gets saved.
@@ -651,7 +691,32 @@ export const placeOrder = async (req, res) => {
       return acc;
     }, {});
 
-    const quickSessionId = getQuickSessionIdFromRequest(req);
+    const consumerContext = getQuickSellerCouponUsageConsumer({
+      userId: idQuery.userId || null,
+      sessionId: quickSessionId || idQuery.sessionId || null,
+    });
+    let sellerCouponForUsage = null;
+    let sellerCouponUsageConsumed = false;
+    const rollbackSellerCouponUsage = async () => {
+      if (!sellerCouponUsageConsumed || !sellerCouponForUsage) return;
+      await Promise.allSettled([
+        SellerCoupon.updateOne(
+          { _id: sellerCouponForUsage._id, usedCount: { $gte: 1 } },
+          { $inc: { usedCount: -1 } },
+        ),
+        SellerCouponUsage.updateOne(
+          {
+            couponId: sellerCouponForUsage._id,
+            consumerKey: consumerContext.consumerKey,
+          },
+          {
+            $inc: { count: -1 },
+            $set: { lastUsedAt: new Date() },
+          },
+        ),
+      ]);
+      sellerCouponUsageConsumed = false;
+    };
 
     const order = await QuickOrder.create({
       orderType: 'quick',
@@ -679,7 +744,8 @@ export const placeOrder = async (req, res) => {
         appliedCoupon: couponCode ? {
             code: couponCode,
             discount: discount,
-            source: couponSource
+            source: couponSource,
+            couponType,
         } : undefined,
         total,
         deliveryDistanceKm: distanceKm,
@@ -707,6 +773,25 @@ export const placeOrder = async (req, res) => {
         },
       ],
     });
+
+    if (couponCode && couponSource === 'restaurant') {
+      sellerCouponForUsage = await SellerCoupon.findOne({
+        sellerId: firstProduct?.sellerId ? new mongoose.Types.ObjectId(String(firstProduct.sellerId)) : null,
+        code: String(couponCode).trim().toUpperCase(),
+        status: 'Approved',
+        validTill: { $gt: new Date() },
+      }).lean();
+
+      if (sellerCouponForUsage) {
+        try {
+          await consumeQuickSellerCouponUsage(sellerCouponForUsage, consumerContext);
+          sellerCouponUsageConsumed = true;
+        } catch (usageErr) {
+          await QuickOrder.deleteOne({ _id: order._id });
+          throw usageErr;
+        }
+      }
+    }
 
     let razorpayPayload = null;
 
@@ -747,6 +832,7 @@ export const placeOrder = async (req, res) => {
           },
         );
       } catch (walletErr) {
+        await rollbackSellerCouponUsage();
         await QuickOrder.deleteOne({ _id: order._id });
         return res.status(400).json({
           success: false,
@@ -785,6 +871,8 @@ export const placeOrder = async (req, res) => {
         }
       }
 
+      await rollbackSellerCouponUsage();
+
       await QuickOrder.deleteOne({ _id: order._id });
 
       return res.status(409).json({
@@ -803,8 +891,15 @@ export const placeOrder = async (req, res) => {
               ((deliveryFee * sellerSubtotal) / Math.max(subtotal, 1)).toFixed(2),
             );
 
-            // Calculate commission for this specific seller
-            const { commissionAmount } = await getSellerCommissionSnapshot(sellerId, sellerSubtotal);
+            // Commission from Header Category rates on this seller's line items
+            const { commissionAmount } = await getHeaderCommissionSnapshot(
+              sellerItems.map((item) => ({
+                productId: item.productId,
+                price: item.price,
+                quantity: item.quantity,
+              })),
+              products,
+            );
             const sellerDiscount = couponSource === 'restaurant' ? discount : 0;
             const sellerReceivable = Math.max(
               0,
@@ -931,6 +1026,7 @@ export const placeOrder = async (req, res) => {
           );
         }
       }
+      await rollbackSellerCouponUsage();
       await QuickOrder.deleteOne({ _id: order._id });
       return res.status(500).json({
         success: false,
@@ -1487,4 +1583,3 @@ export async function submitOrderRatingsController(req, res, next) {
     next(err);
   }
 };
-

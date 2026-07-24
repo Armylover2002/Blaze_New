@@ -440,20 +440,16 @@ export const adminApi = {
   updateOfferSection: (id, payload) => axiosInstance.put(`/quick-commerce/admin/offer-sections/${id}`, payload),
   deleteOfferSection: (id) => axiosInstance.delete(`/quick-commerce/admin/offer-sections/${id}`),
   reorderOfferSections: (items) => axiosInstance.post('/quick-commerce/admin/offer-sections/reorder', items),
+  getSellerCouponRequests: () => axiosInstance.get('/quick-commerce/admin/seller-coupon-requests'),
+  updateSellerCouponRequestStatus: (id, status) =>
+    axiosInstance.patch(`/quick-commerce/admin/seller-coupon-requests/${id}/status`, { status }),
+
   getCoupons: (params) => axiosInstance.get('/quick-commerce/admin/coupons', { params }),
   createCoupon: (payload) => axiosInstance.post('/quick-commerce/admin/coupons', payload),
   updateCoupon: (id, payload) => axiosInstance.put(`/quick-commerce/admin/coupons/${id}`, payload),
   deleteCoupon: (id) => axiosInstance.delete(`/quick-commerce/admin/coupons/${id}`),
   toggleCouponStatus: (id) => axiosInstance.patch(`/quick-commerce/admin/coupons/${id}/toggle-status`),
 
-  // Seller Commission Management
-  getSellerCommissionBootstrap: () => axiosInstance.get('/quick-commerce/admin/seller-commissions/bootstrap'),
-  getSellerCommissions: (params) => axiosInstance.get('/quick-commerce/admin/seller-commissions', { params }),
-  getSellerCommissionById: (id) => axiosInstance.get(`/quick-commerce/admin/seller-commissions/${id}`),
-  createSellerCommission: (payload) => axiosInstance.post('/quick-commerce/admin/seller-commissions', payload),
-  updateSellerCommission: (id, payload) => axiosInstance.put(`/quick-commerce/admin/seller-commissions/${id}`, payload),
-  deleteSellerCommission: (id) => axiosInstance.delete(`/quick-commerce/admin/seller-commissions/${id}`),
-  toggleSellerCommissionStatus: (id) => axiosInstance.patch(`/quick-commerce/admin/seller-commissions/${id}/toggle-status`),
   getQuickZoneSellers: (zoneId) => axiosInstance.get(`/quick-commerce/admin/quick-zone-hubs/sellers/${zoneId}`),
   assignQuickZoneHubs: (body) => axiosInstance.post('/quick-commerce/admin/quick-zone-hubs', body),
   getSellerCODVerifications: () => axiosInstance.get('/quick-commerce/admin/sellers/cod-verification'),

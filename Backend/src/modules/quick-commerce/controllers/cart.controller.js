@@ -118,6 +118,12 @@ const mapCart = async (idQuery) => {
   const { pricing } = await calculateQuickPricing({
     subtotal,
     products,
+    items: items.map((item) => ({
+      productId: item.productId,
+      price: item.price,
+      quantity: item.quantity,
+      lineTotal: item.lineTotal,
+    })),
   });
 
   return {

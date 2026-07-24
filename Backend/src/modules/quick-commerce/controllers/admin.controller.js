@@ -21,6 +21,7 @@ import {
   setQuickHeroConfig,
   getQuickHeroConfig,
   getAllQuickHeroConfigs,
+  pullCategoryIdFromHeroConfigs,
   getQuickOfferSections,
   createQuickOfferSection,
   updateQuickOfferSection,
@@ -65,6 +66,8 @@ const toCategory = (category) => ({
   parentId: category.parentId || null,
   iconId: category.iconId || '',
   adminCommission: Number(category.adminCommission || 0),
+  commission: Number(category.adminCommission || 0),
+  gst: Number(category.gst || 0),
   handlingFees: Number(category.handlingFees || 0),
   headerColor: category.headerColor || category.accentColor,
   sortOrder: category.sortOrder,
@@ -472,6 +475,8 @@ export const createCategory = async (req, res) => {
       parentId,
       iconId,
       adminCommission,
+      commission,
+      gst,
       handlingFees,
       headerColor,
       businessType,
@@ -482,8 +487,11 @@ export const createCategory = async (req, res) => {
       type,
       businessType,
       adminCommission,
+      commission,
+      gst,
       handlingFees,
       status,
+      requireHeaderRates: String(type || 'header').toLowerCase() === 'header',
     });
     if (fieldError) {
       return res.status(400).json({ success: false, message: fieldError });
@@ -502,6 +510,11 @@ export const createCategory = async (req, res) => {
       ? businessType
       : 'quick_commerce';
 
+    const commissionSource =
+      commission !== undefined && commission !== null && commission !== ''
+        ? commission
+        : adminCommission;
+
     const category = await QuickCategory.create({
       name: String(name).trim(),
       slug,
@@ -514,7 +527,8 @@ export const createCategory = async (req, res) => {
       approvedAt: (approvalStatus || 'approved') === 'approved' ? new Date() : null,
       parentId: parentValidation.parentId,
       iconId: iconId || '',
-      adminCommission: parseNumber(adminCommission, 0),
+      adminCommission: parseNumber(commissionSource, 0),
+      gst: parseNumber(gst, 0),
       handlingFees: parseNumber(handlingFees, 0),
       headerColor: headerColor || accentColor || '#0c831f',
       accentColor: accentColor || '#0c831f',
@@ -559,6 +573,8 @@ export const updateCategory = async (req, res) => {
       parentId,
       iconId,
       adminCommission,
+      commission,
+      gst,
       handlingFees,
       headerColor,
       businessType,
@@ -569,8 +585,11 @@ export const updateCategory = async (req, res) => {
       type: type !== undefined ? type : category.type,
       businessType: businessType !== undefined ? businessType : category.businessType,
       adminCommission,
+      commission,
+      gst,
       handlingFees,
       status,
+      requireHeaderRates: false,
     });
     if (fieldError) {
       return res.status(400).json({ success: false, message: fieldError });
@@ -616,7 +635,15 @@ export const updateCategory = async (req, res) => {
     if (headerColor !== undefined) category.headerColor = headerColor || category.accentColor;
     if (sortOrder !== undefined) category.sortOrder = parseNumber(sortOrder, 0);
     if (iconId !== undefined) category.iconId = iconId || '';
-    if (adminCommission !== undefined) category.adminCommission = parseNumber(adminCommission, 0);
+
+    const commissionSource =
+      commission !== undefined && commission !== null && commission !== ''
+        ? commission
+        : adminCommission;
+    if (commissionSource !== undefined) {
+      category.adminCommission = parseNumber(commissionSource, category.adminCommission || 0);
+    }
+    if (gst !== undefined) category.gst = parseNumber(gst, category.gst || 0);
     if (handlingFees !== undefined) category.handlingFees = parseNumber(handlingFees, 0);
 
     await category.save();
@@ -660,6 +687,7 @@ export const removeCategory = async (req, res) => {
   }
 
   await QuickCategory.findByIdAndDelete(categoryId);
+  await pullCategoryIdFromHeroConfigs(categoryId);
   clearContentCache();
   return res.json({ success: true, result: { deleted: true } });
 };
@@ -1575,8 +1603,8 @@ export const deleteAdminZone = async (req, res) => {
 };
 
 export const getAdminExperienceSections = async (req, res) => {
-  const { pageType = 'home', headerId = null } = req.query || {};
-  const sections = await getQuickExperienceSections({ pageType, headerId });
+  const { pageType = 'home', headerId = null, status = 'all' } = req.query || {};
+  const sections = await getQuickExperienceSections({ pageType, headerId, status });
   return res.json({ success: true, results: sections });
 };
 
@@ -1623,7 +1651,7 @@ export const setAdminHeroConfig = async (req, res) => {
 };
 
 export const getAdminOfferSections = async (req, res) => {
-  const sections = await getQuickOfferSections(req.query);
+  const sections = await getQuickOfferSections({ ...req.query, status: req.query?.status || 'all' });
   return res.json({ success: true, results: sections });
 };
 
@@ -1726,6 +1754,61 @@ export const updateAdminWithdrawalStatus = async (req, res) => {
 };
 
 
+
+// ─── Seller Coupon Requests (QC marketing tools) ─────────────────────────────
+
+export const getAdminSellerCouponRequests = async (req, res) => {
+  try {
+    const { SellerCoupon } = await import('../models/sellerCoupon.model.js');
+    const sellerCoupons = await SellerCoupon.find({}).sort({ createdAt: -1 }).lean();
+    const data = sellerCoupons.map((c) => ({ ...c, type: 'seller' }));
+    return res.json({ success: true, data, results: data });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message || 'Failed to fetch seller coupon requests' });
+  }
+};
+
+export const updateAdminSellerCouponRequestStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const status = req.body?.status;
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid coupon request ID' });
+    }
+    if (!status || !['Approved', 'Rejected'].includes(status)) {
+      return res.status(400).json({ success: false, message: 'Status must be Approved or Rejected' });
+    }
+
+    const { SellerCoupon } = await import('../models/sellerCoupon.model.js');
+    const updated = await SellerCoupon.findByIdAndUpdate(
+      id,
+      { $set: { status } },
+      { new: true }
+    ).lean();
+
+    if (!updated) {
+      return res.status(404).json({ success: false, message: 'Seller coupon request not found' });
+    }
+
+    clearContentCache();
+    try {
+      const { invalidateCache } = await import('../../../middleware/cache.js');
+      await invalidateCache('quick_coupons*');
+      await invalidateCache('quick_offers*');
+    } catch (err) {
+      console.error('Failed to invalidate cache on seller coupon status update:', err);
+    }
+
+    return res.json({
+      success: true,
+      message: `Seller coupon status updated to ${status} successfully`,
+      data: { ...updated, type: 'seller' },
+      result: { ...updated, type: 'seller' },
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message || 'Failed to update seller coupon status' });
+  }
+};
 
 // ─── Coupon Management ───────────────────────────────────────────────────────
 

@@ -207,13 +207,34 @@ const ALL_CATEGORY = {
 
 const QUICK_HEADER_RETURN_STORAGE_KEY = "food.quick.headerReturn";
 const CACHE_EXPIRY_MS = 10 * 60 * 1000; // 10 minutes (content rarely changes this fast)
+const HEADER_HERO_CACHE_TTL_MS = 60 * 1000; // 1 minute — admin hero edits should show quickly
 
 let globalQuickHomeCache = {
   data: null,
   headerSections: new Map(),    // headerId -> sections
   categoryProducts: new Map(),  // headerId -> products
-  heroConfigs: new Map(),       // headerId -> heroConfig
+  heroConfigs: new Map(),       // headerId -> { config, fetchedAt }
   lastFetched: 0,
+};
+
+const clearPerHeaderCaches = () => {
+  globalQuickHomeCache.headerSections.clear();
+  globalQuickHomeCache.categoryProducts.clear();
+  globalQuickHomeCache.heroConfigs.clear();
+};
+
+const getCachedHeaderHero = (headerId) => {
+  const entry = globalQuickHomeCache.heroConfigs.get(headerId);
+  if (!entry) return null;
+  if (Date.now() - entry.fetchedAt >= HEADER_HERO_CACHE_TTL_MS) {
+    globalQuickHomeCache.heroConfigs.delete(headerId);
+    return null;
+  }
+  return entry.config;
+};
+
+const setCachedHeaderHero = (headerId, config) => {
+  globalQuickHomeCache.heroConfigs.set(headerId, { config, fetchedAt: Date.now() });
 };
 
 // ---------------------------------------------------------------------------
@@ -436,9 +457,10 @@ export const useQuickHomeData = ({ currentLocation }) => {
       setHeroConfig(config);
       newCache.heroConfig = config;
 
-      // Save complete cache
+      // Save complete cache — drop per-header caches so tabs refetch fresh hero/sections
       globalQuickHomeCache.data = newCache;
       globalQuickHomeCache.lastFetched = Date.now();
+      clearPerHeaderCaches();
     } catch (err) {
       // Surface errors only in dev
       if (import.meta.env?.DEV) console.error("Quick home bootstrap error:", err);
@@ -502,32 +524,39 @@ export const useQuickHomeData = ({ currentLocation }) => {
       }
     };
 
+    const resolveHomeHeroFallback = () =>
+      globalQuickHomeCache.data?.heroConfig || { banners: { items: [] }, categoryIds: [] };
+
+    const isHeroConfigEmpty = (config) =>
+      !(config?.banners?.items?.length > 0 || config?.categoryIds?.length > 0);
+
+    const withHomeHeroFallback = (config) =>
+      (isHeroConfigEmpty(config) ? resolveHomeHeroFallback() : config);
+
     const fetchHeaderHeroConfig = async () => {
-      if (globalQuickHomeCache.heroConfigs.has(headerId)) {
-        setHeroConfig(globalQuickHomeCache.heroConfigs.get(headerId));
+      const cached = getCachedHeaderHero(headerId);
+      if (cached) {
+        setHeroConfig(withHomeHeroFallback(cached));
         return;
       }
-      
-      // Clear old banners immediately so we don't accidentally render them while fetching
-      setHeroConfig({ banners: { items: [] }, categoryIds: [] });
+
+      // While fetching, keep home hero visible (matches admin "fallback to home" behavior)
+      setHeroConfig(resolveHomeHeroFallback());
 
       try {
         const res = await customerApi.getHeroConfig({ pageType: "header", headerId });
         const heroPayload = res.data?.result || res.data?.results || res.data || {};
-        
-        // Ensure we CLEAR banners if none are returned, DO NOT fallback to global Home config!
-        const config =
-          heroPayload?.banners?.items?.length > 0 || heroPayload?.categoryIds?.length > 0
-            ? { banners: heroPayload.banners || { items: [] }, categoryIds: heroPayload.categoryIds || [] }
-            : { banners: { items: [] }, categoryIds: [] };
+        const headerConfig = {
+          banners: heroPayload.banners || { items: [] },
+          categoryIds: Array.isArray(heroPayload.categoryIds) ? heroPayload.categoryIds : [],
+        };
 
-        globalQuickHomeCache.heroConfigs.set(headerId, config);
-        setHeroConfig(config);
+        setCachedHeaderHero(headerId, headerConfig);
+        setHeroConfig(withHomeHeroFallback(headerConfig));
       } catch {
-        // Clear if error occurs
         const emptyConfig = { banners: { items: [] }, categoryIds: [] };
-        globalQuickHomeCache.heroConfigs.set(headerId, emptyConfig);
-        setHeroConfig(emptyConfig);
+        setCachedHeaderHero(headerId, emptyConfig);
+        setHeroConfig(resolveHomeHeroFallback());
       }
     };
 
@@ -555,6 +584,8 @@ export const useQuickHomeData = ({ currentLocation }) => {
     actions: {
       refresh: () => {
         globalQuickHomeCache.data = null;
+        globalQuickHomeCache.lastFetched = 0;
+        clearPerHeaderCaches();
         fetchData();
       },
     },

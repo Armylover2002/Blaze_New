@@ -39,7 +39,6 @@ const DEFAULT_QUICK_BILLING_SETTINGS = {
   deliveryCommissionRules: [],
   freeDeliveryThreshold: 0,
   platformFee: 0,
-  gstRate: 0,
 };
 
 const FALLBACK_IMAGE =
@@ -73,7 +72,30 @@ const calculateFrontendRiderEarning = (distanceKm, rules = []) => {
   return Number.isFinite(earning) && earning > 0 ? Math.round(earning) : 0;
 };
 
-const calculateQuickCartPricing = ({ subtotal = 0, cartItems = [], feeSettings = DEFAULT_QUICK_BILLING_SETTINGS, categoryFeeMap = {}, distanceKm = 0 }) => {
+const resolveCategoryId = (rawId) =>
+  rawId && typeof rawId === 'object' && rawId._id
+    ? String(rawId._id)
+    : String(rawId || '').trim();
+
+const resolveInheritedRate = (item, rateMap = {}) => {
+  const candidateIds = [item?.headerId, item?.categoryId, item?.subcategoryId];
+  for (const rawId of candidateIds) {
+    const id = resolveCategoryId(rawId);
+    if (id && rateMap[id] != null) {
+      return Number(rateMap[id] || 0);
+    }
+  }
+  return 0;
+};
+
+const calculateQuickCartPricing = ({
+  subtotal = 0,
+  cartItems = [],
+  feeSettings = DEFAULT_QUICK_BILLING_SETTINGS,
+  categoryFeeMap = {},
+  categoryGstMap = {},
+  distanceKm = 0,
+}) => {
   const safeSubtotal = Number(subtotal || 0);
   const freeThreshold = Number(feeSettings?.freeDeliveryThreshold || 0);
 
@@ -89,23 +111,17 @@ const calculateQuickCartPricing = ({ subtotal = 0, cartItems = [], feeSettings =
   }
 
   const handlingFee = cartItems.reduce((maxFee, item) => {
-    const candidateIds = [item?.headerId, item?.categoryId, item?.subcategoryId];
-    const itemFee = candidateIds.reduce((cur, rawId) => {
-      const id =
-        rawId && typeof rawId === 'object' && rawId._id
-          ? String(rawId._id)
-          : String(rawId || '').trim();
-      return Math.max(cur, Number(categoryFeeMap[id] || 0));
-    }, 0);
-    return Math.max(maxFee, itemFee);
+    return Math.max(maxFee, resolveInheritedRate(item, categoryFeeMap));
   }, 0);
 
   const platformFee = Number(feeSettings?.platformFee || 0);
-  const gstRate = Number(feeSettings?.gstRate || 0);
-  const gstAmount =
-    Number.isFinite(gstRate) && gstRate > 0
-      ? Math.round(safeSubtotal * (gstRate / 100))
-      : 0;
+  const gstAmount = Math.round(
+    cartItems.reduce((sum, item) => {
+      const lineTotal = Number(item?.price || 0) * Number(item?.quantity || 0);
+      const gstRate = resolveInheritedRate(item, categoryGstMap);
+      return sum + lineTotal * (gstRate / 100);
+    }, 0),
+  );
 
   return {
     deliveryFee,
@@ -228,6 +244,7 @@ const CartPage = () => {
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [quickBillingSettings, setQuickBillingSettings] = useState(DEFAULT_QUICK_BILLING_SETTINGS);
   const [categoryFeeMap, setCategoryFeeMap] = useState({});
+  const [categoryGstMap, setCategoryGstMap] = useState({});
   const [isUserCodAllowed, setIsUserCodAllowed] = useState(true);
   const [storeLocation, setStoreLocation] = useState(null);
   const [distanceKm, setDistanceKm] = useState(0);
@@ -252,9 +269,10 @@ const CartPage = () => {
         cartItems: cart,
         feeSettings: quickBillingSettings,
         categoryFeeMap,
+        categoryGstMap,
         distanceKm,
       }),
-    [cartTotal, cart, quickBillingSettings, categoryFeeMap, distanceKm],
+    [cartTotal, cart, quickBillingSettings, categoryFeeMap, categoryGstMap, distanceKm],
   );
 
   const paymentMethods = useMemo(
@@ -373,15 +391,26 @@ const CartPage = () => {
       const results = categoriesResponse?.data?.results || categoriesResponse?.data?.result || [];
       if (Array.isArray(results)) {
         const nextFeeMap = {};
-        const visit = (items = []) => {
+        const nextGstMap = {};
+        const visit = (items = [], inheritedGst = 0) => {
           items.forEach((item) => {
             const id = String(item?._id || item?.id || '').trim();
-            if (id) nextFeeMap[id] = Number(item?.handlingFees || 0);
-            if (Array.isArray(item?.children) && item.children.length > 0) visit(item.children);
+            const nodeGst =
+              String(item?.type || '').toLowerCase() === 'header'
+                ? Number(item?.gst || 0)
+                : inheritedGst;
+            if (id) {
+              nextFeeMap[id] = Number(item?.handlingFees || 0);
+              nextGstMap[id] = nodeGst;
+            }
+            if (Array.isArray(item?.children) && item.children.length > 0) {
+              visit(item.children, nodeGst);
+            }
           });
         };
         visit(results);
         setCategoryFeeMap(nextFeeMap);
+        setCategoryGstMap(nextGstMap);
       }
     }).catch((err) => console.error('Failed to load quick cart billing settings:', err));
 
