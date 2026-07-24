@@ -102,6 +102,8 @@ import {
   getAdminSellerWithdrawals,
   getAdminSellerTransactions,
   updateAdminWithdrawalStatus,
+  getAdminSellerCouponRequests,
+  updateAdminSellerCouponRequestStatus,
   getAdminCoupons,
   createCoupon,
   updateCoupon,
@@ -474,6 +476,10 @@ router.delete(
 router.get("/admin/fee-settings", ...adminOrEmployee, checkPermission("quick::core_management::billing", "view"), getFeeSettings);
 router.put("/admin/fee-settings", ...adminOrEmployee, checkPermission("quick::core_management::billing", "edit"), createOrUpdateFeeSettings);
 
+
+// Admin Seller Coupon Requests (QC marketing tools)
+router.get('/admin/seller-coupon-requests', ...adminOrEmployee, checkPermission('quick::core_management::marketing_tools::seller_coupon_request', 'view'), getAdminSellerCouponRequests);
+router.patch('/admin/seller-coupon-requests/:id/status', ...adminOrEmployee, checkPermission('quick::core_management::marketing_tools::seller_coupon_request', 'edit'), updateAdminSellerCouponRequestStatus);
 
 // Admin Coupon Management
 router.get('/admin/coupons', ...adminOrEmployee, checkPermission('quick::core_management::marketing_tools::coupons', 'view'), getAdminCoupons);

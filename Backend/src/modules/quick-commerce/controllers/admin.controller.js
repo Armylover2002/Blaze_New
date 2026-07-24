@@ -1753,6 +1753,61 @@ export const updateAdminWithdrawalStatus = async (req, res) => {
 
 
 
+// ─── Seller Coupon Requests (QC marketing tools) ─────────────────────────────
+
+export const getAdminSellerCouponRequests = async (req, res) => {
+  try {
+    const { SellerCoupon } = await import('../models/sellerCoupon.model.js');
+    const sellerCoupons = await SellerCoupon.find({}).sort({ createdAt: -1 }).lean();
+    const data = sellerCoupons.map((c) => ({ ...c, type: 'seller' }));
+    return res.json({ success: true, data, results: data });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message || 'Failed to fetch seller coupon requests' });
+  }
+};
+
+export const updateAdminSellerCouponRequestStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const status = req.body?.status;
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid coupon request ID' });
+    }
+    if (!status || !['Approved', 'Rejected'].includes(status)) {
+      return res.status(400).json({ success: false, message: 'Status must be Approved or Rejected' });
+    }
+
+    const { SellerCoupon } = await import('../models/sellerCoupon.model.js');
+    const updated = await SellerCoupon.findByIdAndUpdate(
+      id,
+      { $set: { status } },
+      { new: true }
+    ).lean();
+
+    if (!updated) {
+      return res.status(404).json({ success: false, message: 'Seller coupon request not found' });
+    }
+
+    clearContentCache();
+    try {
+      const { invalidateCache } = await import('../../../middleware/cache.js');
+      await invalidateCache('quick_coupons*');
+      await invalidateCache('quick_offers*');
+    } catch (err) {
+      console.error('Failed to invalidate cache on seller coupon status update:', err);
+    }
+
+    return res.json({
+      success: true,
+      message: `Seller coupon status updated to ${status} successfully`,
+      data: { ...updated, type: 'seller' },
+      result: { ...updated, type: 'seller' },
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message || 'Failed to update seller coupon status' });
+  }
+};
+
 // ─── Coupon Management ───────────────────────────────────────────────────────
 
 export const getAdminCoupons = async (req, res) => {
