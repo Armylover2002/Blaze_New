@@ -316,7 +316,7 @@ export const getExperienceSectionsLean = async (req, res) => {
 
 // ─── Lean hero endpoint — bina poora getHomeData chalaye ──────────────────────
 export const getHeroConfigLean = async (req, res) => {
-  setPublicCache(res, 300);
+  setPublicCache(res, 60); // short TTL so admin hero edits appear quickly
   try {
     const pageType = req.query?.pageType || 'home';
     const headerId = req.query?.headerId || null;

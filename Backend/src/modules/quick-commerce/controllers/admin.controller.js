@@ -21,6 +21,7 @@ import {
   setQuickHeroConfig,
   getQuickHeroConfig,
   getAllQuickHeroConfigs,
+  pullCategoryIdFromHeroConfigs,
   getQuickOfferSections,
   createQuickOfferSection,
   updateQuickOfferSection,
@@ -686,6 +687,7 @@ export const removeCategory = async (req, res) => {
   }
 
   await QuickCategory.findByIdAndDelete(categoryId);
+  await pullCategoryIdFromHeroConfigs(categoryId);
   clearContentCache();
   return res.json({ success: true, result: { deleted: true } });
 };
@@ -1601,8 +1603,8 @@ export const deleteAdminZone = async (req, res) => {
 };
 
 export const getAdminExperienceSections = async (req, res) => {
-  const { pageType = 'home', headerId = null } = req.query || {};
-  const sections = await getQuickExperienceSections({ pageType, headerId });
+  const { pageType = 'home', headerId = null, status = 'all' } = req.query || {};
+  const sections = await getQuickExperienceSections({ pageType, headerId, status });
   return res.json({ success: true, results: sections });
 };
 
@@ -1649,7 +1651,7 @@ export const setAdminHeroConfig = async (req, res) => {
 };
 
 export const getAdminOfferSections = async (req, res) => {
-  const sections = await getQuickOfferSections(req.query);
+  const sections = await getQuickOfferSections({ ...req.query, status: req.query?.status || 'all' });
   return res.json({ success: true, results: sections });
 };
 
