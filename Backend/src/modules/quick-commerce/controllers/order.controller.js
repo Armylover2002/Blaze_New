@@ -509,7 +509,7 @@ export const placeOrder = async (req, res) => {
     }
 
     const subtotal = items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-    const { discount, couponCode, couponSource } = await resolveServerQuickDiscount({
+    const { discount, couponCode, couponSource, couponType } = await resolveServerQuickDiscount({
       couponCode: req.body?.couponCode,
       couponSource: req.body?.couponSource || req.body?.source,
       subtotal,
@@ -763,7 +763,7 @@ export const placeOrder = async (req, res) => {
       platformProfit: Math.max(
         0,
         deliveryFee + Number(pricing.platformFee || 0) - (riderEarning || 0),
-      ), // Initial guess, will be updated with commission
+      ),
       statusHistory: [
         {
           byRole: 'SYSTEM',
@@ -957,16 +957,12 @@ export const placeOrder = async (req, res) => {
           }))
         : [];
 
-    const totalSellerCommission = sellerOrdersResults.reduce((sum, so) => sum + (so.pricing?.commission || 0), 0);
-    
-    // Update the main order with the total commission
-    if (totalSellerCommission > 0 || couponSource === 'admin') {
+    if (couponSource === 'admin') {
       const adminDiscount = couponSource === 'admin' ? discount : 0;
       const platformProfit = Math.max(
         0,
         deliveryFee +
           Number(pricing.platformFee || 0) +
-          totalSellerCommission -
           (riderEarning || 0) -
           adminDiscount
       );
@@ -974,12 +970,10 @@ export const placeOrder = async (req, res) => {
         { _id: order._id },
         { 
           $set: { 
-            'pricing.restaurantCommission': totalSellerCommission,
             platformProfit: platformProfit
           } 
         }
       );
-      order.pricing.restaurantCommission = totalSellerCommission;
       order.platformProfit = platformProfit;
     }
 

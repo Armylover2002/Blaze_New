@@ -153,11 +153,13 @@ export async function calculateQuickPricing({
   products = [],
   items = [],
   distanceKm = 0,
+  packagingFee = 0,
   couponType = '',
 } = {}) {
   const feeSettings = await getActiveFeeSettings();
   const safeSubtotal = Number(subtotal || 0);
   const safeDiscount = Math.max(0, Number(discount || 0));
+  const safePackagingFee = Number(packagingFee || 0);
   const platformFee = Number(feeSettings.platformFee || 0);
 
   const handlingFee = await calculateHandlingFeeFromProducts(products);
@@ -174,18 +176,17 @@ export async function calculateQuickPricing({
     subtotal: safeSubtotal,
   });
 
-  const total = Math.max(0, safeSubtotal + deliveryFee + platformFee + gst - safeDiscount);
+  const total = Math.max(0, safeSubtotal + deliveryFee + platformFee + gst + safePackagingFee - safeDiscount);
 
   return {
     pricing: {
       subtotal: safeSubtotal,
       gst,
       tax: 0,
-      packagingFee: 0,
+      packagingFee: safePackagingFee,
       deliveryFee,
       platformFee,
       handlingFee,
-      restaurantCommission: 0,
       discount: safeDiscount,
       total,
       currency: 'INR',

@@ -225,11 +225,12 @@ const ActiveSellers = () => {
                     <td className="px-6 py-4 text-right">
                       <button
                         type="button"
+                        title="View seller"
+                        aria-label={`View ${seller.shopName || 'seller'}`}
                         onClick={() => navigate(`/admin/quick-commerce/sellers/active/${seller._id || seller.id}`)}
-                        className="inline-flex items-center gap-2 rounded-xl bg-red-600 px-4 py-2 text-[10px] font-bold text-white shadow-lg"
+                        className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100 text-slate-700 ring-1 ring-slate-200 transition hover:bg-red-50 hover:text-red-600 hover:ring-red-100"
                       >
-                        <HiOutlineEye className="h-3.5 w-3.5" />
-                        View
+                        <HiOutlineEye className="h-5 w-5" />
                       </button>
                     </td>
                   </tr>

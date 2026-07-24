@@ -87,15 +87,21 @@ const PendingSellers = () => {
   const [pendingSellers, setPendingSellers] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [typeFilter, setTypeFilter] = useState('All');
+  const [statusFilter, setStatusFilter] = useState('All');
   const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
   const [viewingSeller, setViewingSeller] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false);
 
+  const [showRejectModal, setShowRejectModal] = useState(false);
+  const [showApproveModal, setShowApproveModal] = useState(false);
+  const [rejectionReason, setRejectionReason] = useState("");
+  const [actionSellerId, setActionSellerId] = useState(null);
+
   const loadPendingSellers = async (search = '') => {
     setIsLoading(true);
     try {
-      const response = await adminApi.getSellerRequests({ status: 'pending', limit: 100, search });
+      const response = await adminApi.getSellerRequests({ status: 'review_queue', limit: 100, search });
       const items = response?.data?.result?.items || [];
       setPendingSellers(items);
     } catch (error) {
@@ -131,6 +137,19 @@ const PendingSellers = () => {
       });
     }
 
+    if (statusFilter !== 'All') {
+      result = result.filter(seller => {
+        const isRejected = seller.approvalStatus === 'rejected';
+        const isReapplied = seller.approvalStatus === 'pending' && seller.approvalNotes;
+        const isFresh = seller.approvalStatus === 'pending' && !seller.approvalNotes;
+
+        if (statusFilter === 'Pending') return isFresh;
+        if (statusFilter === 'Re-applied') return isReapplied;
+        if (statusFilter === 'Rejected') return isRejected;
+        return true;
+      });
+    }
+
     const query = searchTerm.trim().toLowerCase();
     if (query) {
       result = result.filter((seller) =>
@@ -140,35 +159,56 @@ const PendingSellers = () => {
       );
     }
     return result;
-  }, [pendingSellers, searchTerm, typeFilter]);
+  }, [pendingSellers, searchTerm, typeFilter, statusFilter]);
 
-  const handleApprove = async (sellerId) => {
+  const openApproveModal = (sellerId) => {
+    setActionSellerId(sellerId);
+    setShowApproveModal(true);
+  };
+
+  const openRejectModal = (sellerId) => {
+    setActionSellerId(sellerId);
+    setRejectionReason("");
+    setShowRejectModal(true);
+  };
+
+  const handleApprove = async () => {
+    if (!actionSellerId) return;
     setIsProcessing(true);
     try {
-      await adminApi.approveSeller(sellerId);
+      await adminApi.approveSeller(actionSellerId);
       toast.success('Seller approved successfully');
-      setPendingSellers((prev) => prev.filter((seller) => seller._id !== sellerId));
+      setPendingSellers((prev) => prev.filter((seller) => seller._id !== actionSellerId));
+      setShowApproveModal(false);
       setIsReviewModalOpen(false);
       setViewingSeller(null);
     } catch (error) {
       toast.error(error?.response?.data?.message || 'Failed to approve seller');
     } finally {
       setIsProcessing(false);
+      setActionSellerId(null);
     }
   };
 
-  const handleReject = async (sellerId) => {
+  const handleReject = async () => {
+    if (!actionSellerId) return;
+    if (!rejectionReason.trim()) {
+      toast.error("Please enter a rejection reason");
+      return;
+    }
     setIsProcessing(true);
     try {
-      await adminApi.rejectSeller(sellerId, { reason: 'Please update onboarding details and resubmit.' });
+      await adminApi.rejectSeller(actionSellerId, { reason: rejectionReason });
       toast.success('Seller request rejected');
-      setPendingSellers((prev) => prev.filter((seller) => seller._id !== sellerId));
+      setPendingSellers((prev) => prev.filter((seller) => seller._id !== actionSellerId));
+      setShowRejectModal(false);
       setIsReviewModalOpen(false);
       setViewingSeller(null);
     } catch (error) {
       toast.error(error?.response?.data?.message || 'Failed to reject seller');
     } finally {
       setIsProcessing(false);
+      setActionSellerId(null);
     }
   };
 
@@ -234,6 +274,16 @@ const PendingSellers = () => {
               <option value="Pharmacy">Pharmacy</option>
               <option value="Quick Commerce">Quick Commerce</option>
             </select>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="px-4 py-2.5 bg-slate-50 border-none rounded-xl text-xs font-semibold outline-none focus:ring-2 focus:ring-primary/10 cursor-pointer text-slate-600 appearance-none min-w-[140px]"
+            >
+              <option value="All">All Statuses</option>
+              <option value="Pending">Pending</option>
+              <option value="Re-applied">Re-applied</option>
+              <option value="Rejected">Rejected</option>
+            </select>
           </div>
           <div className="flex items-center gap-2 rounded-xl bg-amber-50 px-4 py-2 ring-1 ring-amber-100">
             <HiOutlineClock className="h-4 w-4 text-amber-600" />
@@ -248,6 +298,7 @@ const PendingSellers = () => {
                 <th className="ds-table-header-cell px-6">Seller</th>
                 <th className="ds-table-header-cell px-6">Business Type</th>
                 <th className="ds-table-header-cell px-6">Documents</th>
+                <th className="ds-table-header-cell px-6">Status</th>
                 <th className="ds-table-header-cell px-6">Applied on</th>
                 <th className="ds-table-header-cell px-6">Actions</th>
               </tr>
@@ -284,20 +335,56 @@ const PendingSellers = () => {
                       </div>
                     </td>
                     <td className="px-6 py-4">
+                      {seller.approvalStatus === 'rejected' ? (
+                        <span className="text-[10px] font-bold px-2 py-1 rounded-md bg-rose-50 text-rose-600 uppercase tracking-widest">Rejected</span>
+                      ) : seller.approvalNotes ? (
+                        <span className="text-[10px] font-bold px-2 py-1 rounded-md bg-amber-50 text-amber-600 uppercase tracking-widest">Re-applied</span>
+                      ) : (
+                        <span className="text-[10px] font-bold px-2 py-1 rounded-md bg-blue-50 text-blue-600 uppercase tracking-widest">Pending</span>
+                      )}
+                    </td>
+                    <td className="px-6 py-4">
                       <div className="flex flex-col">
                         <span className="text-xs font-bold text-slate-700">{formatDate(seller.applicationDate)}</span>
                         <span className="text-[9px] font-medium text-slate-400">{seller.category || 'General'} partner</span>
                       </div>
                     </td>
                     <td className="px-6 py-4">
-                      <button
-                        type="button"
-                        onClick={() => { setViewingSeller(seller); setIsReviewModalOpen(true); }}
-                        className="inline-flex items-center gap-2 rounded-xl bg-red-600 px-4 py-2 text-[10px] font-bold text-white shadow-lg"
-                      >
-                        <HiOutlineEye className="h-3.5 w-3.5" />
-                        View Application
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          title="View application"
+                          aria-label={`View ${seller.shopName || 'seller'} application`}
+                          onClick={() => { setViewingSeller(seller); setIsReviewModalOpen(true); }}
+                          className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100 text-slate-700 ring-1 ring-slate-200 transition hover:bg-red-50 hover:text-red-600 hover:ring-red-100"
+                        >
+                          <HiOutlineEye className="h-5 w-5" />
+                        </button>
+                        {canEdit && seller.approvalStatus !== 'rejected' && (
+                          <>
+                            <button
+                              type="button"
+                              title="Approve seller"
+                              aria-label={`Approve ${seller.shopName || 'seller'}`}
+                              disabled={isProcessing}
+                              onClick={() => openApproveModal(seller._id)}
+                              className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600 ring-1 ring-emerald-100 transition hover:bg-emerald-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              <HiOutlineCheckCircle className="h-5 w-5" />
+                            </button>
+                            <button
+                              type="button"
+                              title="Reject seller"
+                              aria-label={`Reject ${seller.shopName || 'seller'}`}
+                              disabled={isProcessing}
+                              onClick={() => openRejectModal(seller._id)}
+                              className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-rose-50 text-rose-600 ring-1 ring-rose-100 transition hover:bg-rose-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              <HiOutlineXCircle className="h-5 w-5" />
+                            </button>
+                          </>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );
@@ -529,18 +616,67 @@ const PendingSellers = () => {
                         </div>
                       )}
 
-                      {canEdit && (
+                      {canEdit && viewingSeller.approvalStatus !== 'rejected' && (
                         <div className="flex flex-col gap-3 pt-4 md:flex-row">
-                          <button type="button" disabled={isProcessing} onClick={() => handleReject(viewingSeller._id)} className="flex-1 rounded-2xl bg-slate-100 py-4 text-[11px] font-black uppercase tracking-[0.2em] text-slate-700 transition hover:bg-rose-50 hover:text-rose-600 disabled:opacity-60">
+                          <button type="button" disabled={isProcessing} onClick={() => openRejectModal(viewingSeller._id)} className="flex-1 rounded-2xl bg-slate-100 py-4 text-[11px] font-black uppercase tracking-[0.2em] text-slate-700 transition hover:bg-rose-50 hover:text-rose-600 disabled:opacity-60">
                             <span className="inline-flex items-center gap-2"><HiOutlineXCircle className="h-4 w-4" />Reject request</span>
                           </button>
-                          <button type="button" disabled={isProcessing} onClick={() => handleApprove(viewingSeller._id)} className="flex-[1.35] rounded-2xl bg-red-600 py-4 text-[11px] font-black uppercase tracking-[0.2em] text-white transition hover:bg-black disabled:opacity-60">
+                          <button type="button" disabled={isProcessing} onClick={() => openApproveModal(viewingSeller._id)} className="flex-[1.35] rounded-2xl bg-red-600 py-4 text-[11px] font-black uppercase tracking-[0.2em] text-white transition hover:bg-black disabled:opacity-60">
                             <span className="inline-flex items-center gap-2 justify-center">{isProcessing ? <HiOutlineArrowPath className="h-4 w-4 animate-spin" /> : <HiOutlineCheckCircle className="h-4 w-4" />}Approve seller</span>
                           </button>
                         </div>
                       )}
                     </div>
                   </div>
+                </div>
+              </motion.div>
+            </div>
+          </div>
+        )}
+
+        {showApproveModal && (
+          <div className="fixed inset-0 z-[110] overflow-y-auto">
+            <div className="min-h-full flex items-center justify-center p-4">
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-slate-900/80 backdrop-blur-md" onClick={() => !isProcessing && setShowApproveModal(false)} />
+              <motion.div initial={{ opacity: 0, scale: 0.94, y: 24 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.94, y: 24 }} className="relative z-10 w-full max-w-md overflow-hidden rounded-3xl bg-white shadow-2xl p-6">
+                <h3 className="text-xl font-black text-slate-900">Approve Seller?</h3>
+                <p className="mt-2 text-sm font-medium text-slate-500">
+                  Are you sure you want to approve this seller? They will be granted access to the seller dashboard.
+                </p>
+                <div className="mt-6 flex items-center justify-end gap-3">
+                  <button type="button" disabled={isProcessing} onClick={() => setShowApproveModal(false)} className="rounded-2xl px-5 py-3 text-sm font-bold text-slate-600 hover:bg-slate-100 disabled:opacity-60">Cancel</button>
+                  <button type="button" disabled={isProcessing} onClick={handleApprove} className="inline-flex items-center gap-2 rounded-2xl bg-emerald-600 px-5 py-3 text-sm font-bold text-white hover:bg-emerald-700 disabled:opacity-60">
+                    {isProcessing ? <HiOutlineArrowPath className="h-4 w-4 animate-spin" /> : <HiOutlineCheckCircle className="h-4 w-4" />}
+                    Confirm Approve
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          </div>
+        )}
+
+        {showRejectModal && (
+          <div className="fixed inset-0 z-[110] overflow-y-auto">
+            <div className="min-h-full flex items-center justify-center p-4">
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-slate-900/80 backdrop-blur-md" onClick={() => !isProcessing && setShowRejectModal(false)} />
+              <motion.div initial={{ opacity: 0, scale: 0.94, y: 24 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.94, y: 24 }} className="relative z-10 w-full max-w-md overflow-hidden rounded-3xl bg-white shadow-2xl p-6">
+                <h3 className="text-xl font-black text-slate-900">Reject Seller</h3>
+                <p className="mt-2 text-sm font-medium text-slate-500 mb-4">
+                  Please provide a reason for rejecting this application. This will be shown to the seller so they can correct it.
+                </p>
+                <textarea
+                  className="w-full rounded-2xl border-none bg-slate-50 p-4 text-sm font-semibold text-slate-900 outline-none focus:ring-2 focus:ring-primary/20 resize-none min-h-[100px]"
+                  placeholder="E.g., Please upload a clearer image of your Medical License."
+                  value={rejectionReason}
+                  onChange={(e) => setRejectionReason(e.target.value)}
+                  disabled={isProcessing}
+                ></textarea>
+                <div className="mt-6 flex items-center justify-end gap-3">
+                  <button type="button" disabled={isProcessing} onClick={() => setShowRejectModal(false)} className="rounded-2xl px-5 py-3 text-sm font-bold text-slate-600 hover:bg-slate-100 disabled:opacity-60">Cancel</button>
+                  <button type="button" disabled={isProcessing} onClick={handleReject} className="inline-flex items-center gap-2 rounded-2xl bg-rose-600 px-5 py-3 text-sm font-bold text-white hover:bg-rose-700 disabled:opacity-60">
+                    {isProcessing ? <HiOutlineArrowPath className="h-4 w-4 animate-spin" /> : <HiOutlineXCircle className="h-4 w-4" />}
+                    Confirm Reject
+                  </button>
                 </div>
               </motion.div>
             </div>

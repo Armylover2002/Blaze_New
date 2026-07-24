@@ -18,6 +18,7 @@ import { toast } from 'sonner';
 import Card from '@shared/components/ui/Card';
 import Badge from '@shared/components/ui/Badge';
 import { adminApi } from '../services/adminApi';
+import { formatOpeningHoursAMPM } from '@shared/utils/timeFormat';
 
 const formatDate = (value) => {
   if (!value) return 'N/A';
@@ -101,8 +102,8 @@ const SellerDetail = () => {
         icon: HiOutlineMapPin,
       },
       {
-        label: 'Opening hours',
-        value: seller?.shopInfo?.openingHours,
+        label: 'Opening Hours',
+        value: seller?.shopInfo?.openingHours ? formatOpeningHoursAMPM(seller.shopInfo.openingHours) : 'Not set',
         icon: HiOutlineClock,
       },
     ];

@@ -8,6 +8,7 @@ import { initSocket } from './src/config/socket.js';
 import { initializeQueues, closeBullMQConnection, initSubscriptionSchedules, initOrderSchedules } from './src/queues/index.js';
 import { expireExpiredOffers } from './src/modules/food/admin/services/admin.service.js';
 import { syncExpiredFssaiNotifications } from './src/modules/food/restaurant/services/fssaiExpiry.service.js';
+import { syncExpiredSellerLicenseNotifications } from './src/modules/quick-commerce/seller/services/sellerLicenseExpiry.service.js';
 import { bulkUpdateCouponStatuses } from './src/modules/porter/services/coupon-lifecycle.service.js';
 
 import { logger } from './src/utils/logger.js';
@@ -145,6 +146,16 @@ const startServer = async () => {
         };
         runFssaiExpirySync();
         fssaiExpiryInterval = setInterval(runFssaiExpirySync, 60 * 60 * 1000);
+
+        const runSellerLicenseExpirySync = async () => {
+            try {
+                await syncExpiredSellerLicenseNotifications();
+            } catch (err) {
+                logger.error(`Seller License expiry sync error: ${err.message}`);
+            }
+        };
+        runSellerLicenseExpirySync();
+        const sellerLicenseExpiryInterval = setInterval(runSellerLicenseExpirySync, 60 * 60 * 1000);
 
         const runPorterCouponLifecycle = async () => {
             try {

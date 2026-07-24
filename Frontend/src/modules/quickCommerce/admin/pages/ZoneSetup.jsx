@@ -1,11 +1,10 @@
 import { useState, useEffect, useMemo } from "react"
 import { useNavigate } from "react-router-dom"
-import { MapPin, Plus, Search, Edit, Trash2, Eye } from "lucide-react"
+import { MapPin, Plus, Search, Edit, Trash2, Eye, Map, Bike } from "lucide-react"
+import { adminApi } from "../services/adminApi"
 import { useAuth } from "@core/context/AuthContext"
 import { getCurrentUser } from "@food/utils/auth"
 import { canPerformAdminPermissionAction, extractAdminPermissions, extractAdminRoleId, fetchAdminRolePermissions } from "@food/utils/adminPermissions"
-
-import { adminApi } from "../services/adminApi"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -47,15 +46,23 @@ export default function ZoneSetup() {
     }
 
     resolvePermissions()
+
     return () => {
       isMounted = false
     }
   }, [currentUser])
 
-  const permissionKey = "quick::core_management::zone_setup"
-  const canCreate = canPerformAdminPermissionAction(currentUser, resolvedPermissions, permissionKey, "create")
-  const canEdit = canPerformAdminPermissionAction(currentUser, resolvedPermissions, permissionKey, "edit")
-  const canDelete = canPerformAdminPermissionAction(currentUser, resolvedPermissions, permissionKey, "delete")
+  const canCreate = useMemo(() => {
+    return canPerformAdminPermissionAction(currentUser, resolvedPermissions, "quick::core_management::zone_setup", "create")
+  }, [currentUser, resolvedPermissions])
+
+  const canEdit = useMemo(() => {
+    return canPerformAdminPermissionAction(currentUser, resolvedPermissions, "quick::core_management::zone_setup", "edit")
+  }, [currentUser, resolvedPermissions])
+
+  const canDelete = useMemo(() => {
+    return canPerformAdminPermissionAction(currentUser, resolvedPermissions, "quick::core_management::zone_setup", "delete")
+  }, [currentUser, resolvedPermissions])
 
   const [zones, setZones] = useState([])
   const [loading, setLoading] = useState(true)
@@ -68,7 +75,7 @@ export default function ZoneSetup() {
   const fetchZones = async () => {
     try {
       setLoading(true)
-      const response = await adminApi.getZones()
+      const response = await adminApi.getZones({ view: "summary" })
       if (response.data?.success && response.data.data?.zones) {
         setZones(response.data.data.zones)
       }
@@ -82,6 +89,10 @@ export default function ZoneSetup() {
 
 
   const handleDeleteZone = async (zoneId) => {
+    if (!canDelete) {
+      alert("Permission denied")
+      return
+    }
     if (!window.confirm("Are you sure you want to delete this zone?")) {
       return
     }
@@ -106,25 +117,39 @@ export default function ZoneSetup() {
         {/* Header */}
         <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-6">
           <div className="flex items-center gap-3 mb-4 md:mb-0">
-            <div className="w-10 h-10 rounded-lg bg-primary flex items-center justify-center">
+            <div className="w-10 h-10 rounded-lg bg-red-500 flex items-center justify-center">
               <MapPin className="w-5 h-5 text-white" />
             </div>
             <div>
               <h1 className="text-2xl font-bold text-slate-900">Zone Setup Quick Commerce</h1>
-              <p className="text-sm text-slate-600">Manage delivery zones for quick commerce</p>
+              <p className="text-sm text-slate-600">Manage delivery zones for quick commerces</p>
             </div>
           </div>
-          {canCreate && (
-            <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => navigate("/admin/quick-commerce/zone-setup/delivery-boy-view")}
+              className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+            >
+              <Bike className="w-5 h-5" />
+              <span>Delivery Boy View</span>
+            </button>
+            <button
+              onClick={() => navigate("/admin/quick-commerce/zone-setup/map")}
+              className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+            >
+              <Map className="w-5 h-5" />
+              <span>View Map</span>
+            </button>
+            {canCreate && (
               <button
                 onClick={() => navigate("/admin/quick-commerce/zone-setup/add")}
-                className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors"
+                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
               >
                 <Plus className="w-5 h-5" />
                 <span>Add Zone</span>
               </button>
-            </div>
-          )}
+            )}
+          </div>
         </div>
 
         {/* Search Bar */}
@@ -136,7 +161,7 @@ export default function ZoneSetup() {
               placeholder="Search zones by name or location..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+              className="w-full pl-10 pr-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
         </div>
@@ -144,7 +169,7 @@ export default function ZoneSetup() {
         {/* Zones List */}
         {loading ? (
           <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-8 text-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
             <p className="text-slate-600">Loading zones...</p>
           </div>
         ) : filteredZones.length === 0 ? (
@@ -152,12 +177,12 @@ export default function ZoneSetup() {
             <MapPin className="w-16 h-16 text-slate-400 mx-auto mb-4" />
             <h3 className="text-lg font-semibold text-slate-900 mb-2">No zones found</h3>
             <p className="text-slate-600 mb-6">
-              {searchQuery ? "Try adjusting your search query" : "Create your first quick-commerce delivery zone to get started"}
+              {searchQuery ? "Try adjusting your search query" : "Create your first delivery zone to get started"}
             </p>
             {!searchQuery && canCreate && (
               <button
                 onClick={() => navigate("/admin/quick-commerce/zone-setup/add")}
-                className="inline-flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors"
+                className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
               >
                 <Plus className="w-5 h-5" />
                 <span>Add Zone</span>
@@ -179,7 +204,7 @@ export default function ZoneSetup() {
                   <div className="flex items-center gap-2">
                     <button
                       onClick={() => navigate(`/admin/quick-commerce/zone-setup/view/${zone._id || zone.id}`)}
-                      className="p-2 text-slate-600 hover:text-primary hover:bg-red-50 rounded-lg transition-colors"
+                      className="p-2 text-slate-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
                       title="View"
                     >
                       <Eye className="w-4 h-4" />
@@ -187,7 +212,7 @@ export default function ZoneSetup() {
                     {canEdit && (
                       <button
                         onClick={() => navigate(`/admin/quick-commerce/zone-setup/edit/${zone._id || zone.id}`)}
-                        className="p-2 text-slate-600 hover:text-primary hover:bg-red-50 rounded-lg transition-colors"
+                        className="p-2 text-slate-600 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors"
                         title="Edit"
                       >
                         <Edit className="w-4 h-4" />
@@ -196,7 +221,7 @@ export default function ZoneSetup() {
                     {canDelete && (
                       <button
                         onClick={() => handleDeleteZone(zone._id || zone.id)}
-                        className="p-2 text-slate-600 hover:text-slate-900 hover:bg-red-50 rounded-lg transition-colors"
+                        className="p-2 text-slate-600 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                         title="Delete"
                       >
                         <Trash2 className="w-4 h-4" />
@@ -217,10 +242,13 @@ export default function ZoneSetup() {
                       {zone.isActive ? "Active" : "Inactive"}
                     </span>
                   </div>
-                  {zone.coordinates && zone.coordinates.length > 0 && (
+
+                  {(zone.coordinatesCount ?? zone.coordinates?.length ?? 0) > 0 && (
                     <div className="flex items-center justify-between">
                       <span className="text-slate-600">Points:</span>
-                      <span className="font-medium text-slate-900">{zone.coordinates.length}</span>
+                      <span className="font-medium text-slate-900">
+                        {zone.coordinatesCount ?? zone.coordinates.length}
+                      </span>
                     </div>
                   )}
                 </div>
@@ -232,3 +260,4 @@ export default function ZoneSetup() {
     </div>
   )
 }
+

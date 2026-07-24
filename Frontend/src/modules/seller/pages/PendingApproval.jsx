@@ -138,7 +138,9 @@ export default function SellerPendingApproval() {
 
           <div className="flex flex-col gap-3 border-t border-slate-100 px-8 py-6 md:flex-row md:items-center md:justify-between">
             <p className="text-sm font-medium text-slate-500">
-              Use refresh to check if approval has been granted.
+              {isRejected
+                ? "Your saved application can be edited and submitted again for admin review."
+                : "Use refresh to check if approval has been granted."}
             </p>
             <div className="flex flex-col gap-3 md:flex-row">
               {isRejected && (
@@ -148,16 +150,20 @@ export default function SellerPendingApproval() {
                     sessionStorage.setItem("sellerReonboard", "true");
                     navigate("/seller/onboarding");
                   }}
-                  className="rounded-2xl border border-slate-300 px-5 py-3 text-sm font-black uppercase tracking-[0.18em] text-slate-700 transition hover:border-slate-900 hover:text-slate-900"
+                  className="rounded-2xl bg-red-500 px-5 py-3 text-sm font-black uppercase tracking-[0.18em] text-white transition hover:bg-red-600 shadow-xl hover:shadow-red-500/30"
                 >
-                  Edit application
+                  Edit & re-apply
                 </button>
               )}
               <button
                 type="button"
                 onClick={() => loadProfile(true)}
                 disabled={isRefreshing}
-                className="inline-flex items-center justify-center gap-2 rounded-2xl bg-red-500 px-5 py-3 text-sm font-black uppercase tracking-[0.18em] text-white transition hover:bg-red-600 disabled:opacity-70 shadow-xl hover:shadow-red-500/30"
+                className={`inline-flex items-center justify-center gap-2 rounded-2xl px-5 py-3 text-sm font-black uppercase tracking-[0.18em] transition disabled:opacity-70 ${
+                  isRejected
+                    ? "border border-slate-300 bg-white text-slate-700 hover:border-slate-900 hover:text-slate-900"
+                    : "bg-red-500 text-white hover:bg-red-600 shadow-xl hover:shadow-red-500/30"
+                }`}
               >
                 <RefreshCw className={`h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`} />
                 {isRefreshing ? "Checking..." : "Refresh status"}

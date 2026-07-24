@@ -70,7 +70,7 @@ export async function getQuickCommerceFinanceSummary() {
     ]
   };
 
-  // Admin keeps only platform fee + GST + seller commission (on item subtotal), minus admin coupon discount
+  // Admin keeps only platform fee + GST, minus admin coupon discount.
   const adminEarningExpr = {
     $max: [
       0,
@@ -80,7 +80,6 @@ export async function getQuickCommerceFinanceSummary() {
             $add: [
               { $ifNull: ["$pricing.platformFee", 0] },
               gstExpr,
-              { $ifNull: ["$pricing.restaurantCommission", 0] },
             ],
           },
           adminCouponDiscountExpr
@@ -95,12 +94,7 @@ export async function getQuickCommerceFinanceSummary() {
     $max: [
       0,
       { $ifNull: ["$pricing.receivable", 0] },
-      {
-        $subtract: [
-          { $ifNull: ["$pricing.subtotal", 0] },
-          { $ifNull: ["$pricing.commission", 0] },
-        ],
-      },
+      { $ifNull: ["$pricing.subtotal", 0] },
     ],
   };
 
@@ -511,10 +505,7 @@ export async function getQuickCommerceSellerTransactions({
     .map((order) => {
       const receivable =
         Number(order?.pricing?.receivable) ||
-        Math.max(
-          0,
-          num(order?.pricing?.subtotal) - num(order?.pricing?.commission),
-        );
+        Math.max(0, num(order?.pricing?.subtotal));
 
       return {
         _id: order._id,
@@ -592,10 +583,7 @@ export async function getQuickCommerceSellerTransactions({
         orderMap.get(`${sellerKey}::${String(item.orderId || "")}`) ||
         orderMap.get(String(item.orderId || "")) ||
         null;
-      const commission = num(linkedOrder?.pricing?.commission);
       const subtotal = num(linkedOrder?.pricing?.subtotal);
-      const commissionRate =
-        subtotal > 0 ? Number(((commission / subtotal) * 100).toFixed(2)) : 0;
 
       return {
         ...item,
@@ -614,9 +602,9 @@ export async function getQuickCommerceSellerTransactions({
               orderId: linkedOrder.orderId,
               pricing: {
                 subtotal,
-                commission,
-                platformFee: commission,
-                platformFeeRate: commissionRate,
+                commission: 0,
+                platformFee: 0,
+                platformFeeRate: 0,
                 tax: 0,
                 receivable: num(linkedOrder.pricing?.receivable),
                 total: num(linkedOrder.pricing?.total),

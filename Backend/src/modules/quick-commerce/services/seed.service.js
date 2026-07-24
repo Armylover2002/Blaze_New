@@ -1,5 +1,6 @@
 import { QuickCategory } from '../models/category.model.js';
 import { QuickProduct } from '../models/product.model.js';
+import { FaqCategory } from '../models/faqCategory.model.js';
 
 const categoriesSeed = [
   {
@@ -52,6 +53,14 @@ const categoriesSeed = [
   },
 ];
 
+const faqCategoriesSeed = [
+  { name: 'Orders', color: 'sky' },
+  { name: 'Payments', color: 'emerald' },
+  { name: 'Returns', color: 'amber' },
+  { name: 'Delivery', color: 'indigo' },
+  { name: 'Account', color: 'rose' },
+];
+
 let isSeedingVerified = false;
 let seedingPromise = null;
 
@@ -64,6 +73,18 @@ const removeMockProducts = async () => {
   if (result.deletedCount > 0) {
     console.log(`Removed ${result.deletedCount} mock/seller-less quick-commerce products`);
   }
+};
+
+const ensureFaqCategoriesSeeded = async () => {
+  await FaqCategory.bulkWrite(
+    faqCategoriesSeed.map((category) => ({
+      updateOne: {
+        filter: { name: category.name },
+        update: { $setOnInsert: category },
+        upsert: true,
+      },
+    }))
+  );
 };
 
 export const ensureQuickCommerceSeedData = async () => {
@@ -80,6 +101,7 @@ export const ensureQuickCommerceSeedData = async () => {
 
       // Never re-seed catalog products; purge legacy mock rows that show as shop "Admin".
       await removeMockProducts();
+      await ensureFaqCategoriesSeeded();
 
       isSeedingVerified = true;
     } catch (err) {

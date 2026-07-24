@@ -732,10 +732,7 @@ const reconcileSellerDeliveredOrders = async (sellerId) => {
       .map((o) => {
         const receivable =
           Number(o?.pricing?.receivable) ||
-          Math.max(
-            0,
-            num(o?.pricing?.subtotal) - num(o?.pricing?.commission),
-          );
+          Math.max(0, num(o?.pricing?.subtotal));
         if (!Number.isFinite(receivable) || receivable <= 0) return null;
 
         return {
@@ -917,6 +914,7 @@ const parseProductPayload = async (req, existingProduct = null) => {
         : null,
     variants,
     pharmacyDetails,
+    packingFee: num(req.body?.packingFee, existingProduct?.packingFee ?? 0),
   };
 };
 
@@ -1007,10 +1005,7 @@ const monthlyRevenueChartFromOrders = (orders) => {
 
     const receivable =
       Number(order?.pricing?.receivable) ||
-      Math.max(
-        0,
-        num(order?.pricing?.subtotal) - num(order?.pricing?.commission),
-      );
+      Math.max(0, num(order?.pricing?.subtotal));
     bucket.revenue += num(receivable);
   });
 
@@ -2045,7 +2040,6 @@ export const updateSellerProfileController = async (req, res) => {
       seller.onboardingSubmitted = true;
       seller.approved = false;
       seller.approvalStatus = "pending";
-      seller.approvalNotes = "";
       seller.approvedAt = null;
       seller.rejectedAt = null;
     }
@@ -2292,9 +2286,8 @@ export const getSellerOrdersController = async (req, res) => {
         : null;
 
       const subtotal = num(item.pricing?.subtotal);
-      const commission = num(item.pricing?.commission);
       const receivable =
-        num(item.pricing?.receivable) || Math.max(0, subtotal - commission);
+        num(item.pricing?.receivable) || Math.max(0, subtotal);
 
       let riderPhone = "";
       if (acceptedPartner) {
@@ -2732,7 +2725,7 @@ export const getSellerEarningsController = async (req, res) => {
     const orderNetEarnings = orders.reduce((sum, o) => {
       const receivable =
         Number(o?.pricing?.receivable) ||
-        Math.max(0, num(o?.pricing?.subtotal) - num(o?.pricing?.commission));
+        Math.max(0, num(o?.pricing?.subtotal));
       return sum + num(receivable);
     }, 0);
 
@@ -2745,10 +2738,6 @@ export const getSellerEarningsController = async (req, res) => {
 
     const grossSales = orders.reduce(
       (sum, o) => sum + num(o.pricing?.subtotal),
-      0,
-    );
-    const totalCommission = orders.reduce(
-      (sum, o) => sum + num(o.pricing?.commission),
       0,
     );
     const deliveryFees = orders.reduce(
@@ -2790,7 +2779,7 @@ export const getSellerEarningsController = async (req, res) => {
         type: "Order Payment",
         amount:
           Number(o?.pricing?.receivable) ||
-          Math.max(0, num(o?.pricing?.subtotal) - num(o?.pricing?.commission)),
+          Math.max(0, num(o?.pricing?.subtotal)),
         status: "Settled",
         customer: o?.customer?.name || "Customer",
         createdAt: o?.deliveredAt || o?.updatedAt || o?.createdAt,
@@ -2808,7 +2797,6 @@ export const getSellerEarningsController = async (req, res) => {
       totalRevenue: totalNetEarnings, // Keeping field name for backward compatibility
       totalNetEarnings,
       grossSales,
-      totalCommission,
       deliveryFees,
       totalWithdrawn,
       settledBalance,
@@ -2877,7 +2865,7 @@ export const requestSellerWithdrawalController = async (req, res) => {
     const orderNetEarnings = (deliveredOrders || []).reduce((sum, o) => {
       const receivable =
         Number(o?.pricing?.receivable) ||
-        Math.max(0, num(o?.pricing?.subtotal) - num(o?.pricing?.commission));
+        Math.max(0, num(o?.pricing?.subtotal));
       return sum + num(receivable);
     }, 0);
 
@@ -2956,10 +2944,7 @@ export const getSellerStatsController = async (req, res) => {
       (sum, order) =>
         sum +
         (num(order?.pricing?.receivable) ||
-          Math.max(
-            0,
-            num(order?.pricing?.subtotal) - num(order?.pricing?.commission),
-          )),
+          Math.max(0, num(order?.pricing?.subtotal))),
       0,
     );
     const totalOrders = deliveredOrders.length;
@@ -3023,10 +3008,7 @@ export const getSellerStatsController = async (req, res) => {
       if (order.status === "delivered") {
         const receivable =
           num(order?.pricing?.receivable) ||
-          Math.max(
-            0,
-            num(order?.pricing?.subtotal) - num(order?.pricing?.commission),
-          );
+          Math.max(0, num(order?.pricing?.subtotal));
         bucket.sales += receivable;
       }
       bucket.traffic += 1;

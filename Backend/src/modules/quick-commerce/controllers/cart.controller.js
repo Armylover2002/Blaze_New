@@ -1,7 +1,9 @@
 import mongoose from 'mongoose';
 import { QuickCart } from '../models/cart.model.js';
 import { QuickProduct } from '../models/product.model.js';
+import { Seller } from '../seller/models/seller.model.js';
 import { calculateQuickPricing } from '../admin/services/billing.service.js';
+import { isStoreCurrentlyOpen } from '../utils/timeFormat.helpers.js';
 import {
   buildCartLineKey,
   matchProductVariant,
@@ -110,14 +112,17 @@ const mapCart = async (idQuery) => {
               stock: resolveVariantStock(product, variantMeta),
             }
           : null,
+        packingFee: Number(product.packingFee || 0),
       };
     })
     .filter(Boolean);
 
   const subtotal = items.reduce((acc, item) => acc + item.lineTotal, 0);
+  const totalPackingFee = items.reduce((acc, item) => acc + (item.packingFee * item.quantity), 0);
   const { pricing } = await calculateQuickPricing({
     subtotal,
     products,
+    packagingFee: totalPackingFee,
     items: items.map((item) => ({
       productId: item.productId,
       price: item.price,
@@ -131,6 +136,7 @@ const mapCart = async (idQuery) => {
     subtotal,
     deliveryFee: Number(pricing?.deliveryFee || 0),
     handlingFee: Number(pricing?.platformFee || 0),
+    packagingFee: Number(pricing?.packagingFee || 0),
     tax: Number(pricing?.tax || 0),
     gst: Number(pricing?.gst || 0),
     total: Number(pricing?.total || subtotal),
@@ -169,6 +175,18 @@ export const addToCart = async (req, res) => {
   const product = await QuickProduct.findOne({ _id: productId, ...approvedProductFilter }).lean();
   if (!product) {
     return res.status(404).json({ success: false, message: 'Product not found' });
+  }
+
+  // Check seller opening hours
+  const sellerId = product.sellerId;
+  if (sellerId && mongoose.isValidObjectId(sellerId)) {
+    const seller = await Seller.findById(sellerId).lean();
+    if (seller) {
+      const openingHours = seller.shopInfo?.openingHours || seller.openingHours || '';
+      if (!isStoreCurrentlyOpen(openingHours)) {
+        return res.status(400).json({ success: false, message: 'SELLER SHOP OFF' });
+      }
+    }
   }
 
   const variantMeta = { variantName, variantKey, variantSku, price: unitPrice };

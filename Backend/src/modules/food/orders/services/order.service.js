@@ -2286,8 +2286,8 @@ function buildSellerOrdersFromParent(orderDoc, { customerName = "", customerPhon
         })),
         pricing: {
           subtotal: sellerSubtotal,
-          deliveryFee: allocatedDeliveryFee,
           commission: commissionAmount,
+          deliveryFee: allocatedDeliveryFee,
           receivable: receivable,
           total: Number((sellerSubtotal + allocatedDeliveryFee).toFixed(2)),
         },

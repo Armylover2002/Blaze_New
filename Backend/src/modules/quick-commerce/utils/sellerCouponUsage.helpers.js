@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import { ValidationError } from '../../../../core/auth/errors.js';
+import { ValidationError } from '../../../core/auth/errors.js';
 import { SellerCoupon } from '../models/sellerCoupon.model.js';
 import { SellerCouponUsage } from '../models/sellerCouponUsage.model.js';
 
@@ -26,6 +26,8 @@ const getConsumerIdentity = ({ userId = null, sessionId = null } = {}) => {
 
   return null;
 };
+
+export const getQuickSellerCouponUsageConsumer = (context = {}) => getConsumerIdentity(context);
 
 export const getQuickSellerCouponEffectivePerUserLimit = (coupon) => {
   const configured = Number(coupon?.perUserLimit);

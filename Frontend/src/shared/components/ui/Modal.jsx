@@ -34,7 +34,15 @@ const Modal = ({ isOpen, onClose, title, children, footer, size = 'md' }) => {
     }, [isOpen]);
     return (
         <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-            <DialogContent className={cn("overflow-hidden p-0", sizes[size])}>
+            <DialogContent 
+                className={cn("overflow-hidden p-0", sizes[size])}
+                onInteractOutside={(e) => {
+                    const target = e.target;
+                    if (target && typeof target.closest === 'function' && target.closest('.pac-container')) {
+                        e.preventDefault();
+                    }
+                }}
+            >
                 <DialogHeader className="px-6 pt-3 pb-2 border-b border-gray-100/50 bg-gray-50/10">
                     <DialogTitle className="text-2xl font-semibold text-gray-900">{title}</DialogTitle>
                     <DialogDescription className="sr-only">Modal content</DialogDescription>

@@ -864,6 +864,7 @@ const ProductManagement = () => {
     description: "",
     price: "",
     salePrice: "",
+    packingFee: "",
     stock: "",
     lowStockAlert: 5,
     category: "",
@@ -958,8 +959,9 @@ const ProductManagement = () => {
       data.append("slug", formData.slug);
       data.append("sku", formData.sku);
       data.append("description", formData.description);
-      data.append("price", Number(formData.price));
+      data.append("price", Number(formData.price) || 0);
       data.append("salePrice", Number(formData.salePrice) || 0);
+      data.append("packingFee", Number(formData.packingFee) || 0);
       data.append("stock", Number(formData.stock));
       data.append("lowStockAlert", Number(formData.lowStockAlert) || 0);
       data.append("headerId", formData.header);
@@ -1072,6 +1074,7 @@ const ProductManagement = () => {
         description: product.description || "",
         price: product.price || "",
         salePrice: product.salePrice || "",
+        packingFee: product.packingFee || "",
         stock: product.stock || "",
         lowStockAlert: product.lowStockAlert || 5,
         header: product.headerId?._id || product.headerId || "",
@@ -1100,6 +1103,7 @@ const ProductManagement = () => {
         description: "",
         price: "",
         salePrice: "",
+        packingFee: "",
         stock: "",
         lowStockAlert: 5,
         category: "",
@@ -1958,6 +1962,27 @@ const ProductManagement = () => {
                             }
                             className="w-full px-4 py-3 bg-emerald-50/50 shadow-sm ring-1 ring-emerald-100 border-none rounded-xl text-lg font-bold text-emerald-700 outline-none focus:ring-2 focus:ring-emerald-200"
                             disabled={isViewMode}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div className="space-y-1.5 flex flex-col">
+                          <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">
+                            Packing Fee (₹)
+                          </label>
+                          <input
+                            type="number"
+                            min="0"
+                            value={formData.packingFee}
+                            onChange={(e) =>
+                              setFormData({
+                                ...formData,
+                                packingFee: e.target.value,
+                              })
+                            }
+                            className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 outline-none focus:bg-white focus:border-red-500 focus:ring-2 focus:ring-red-500/20 transition-all hover:border-slate-300 placeholder-slate-400"
+                            placeholder="e.g. 10"
                           />
                         </div>
                       </div>

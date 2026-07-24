@@ -44,6 +44,7 @@ const quickProductSchema = new mongoose.Schema({
   pharmacyDetails: { type: mongoose.Schema.Types.Mixed, default: {} },
   sellerId: { type: mongoose.Schema.Types.ObjectId, ref: 'Seller', default: null, index: true },
   isActive: { type: Boolean, default: true },
+  packingFee: { type: Number, default: 0 },
 }, { timestamps: true });
 
 quickProductSchema.index({ name: 'text' });

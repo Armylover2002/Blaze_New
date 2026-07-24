@@ -83,7 +83,6 @@ export const quickAdminSidebarMenu = [
         ],
       },
       { type: "link", label: "Fees & Charges", permissionKey: "billing", path: "/admin/quick-commerce/billing", icon: "IndianRupee " },
-      { type: "link", label: "My Profile", permissionKey: "profile", path: "/admin/quick-commerce/profile", icon: "User" },
     ],
   },
 ]

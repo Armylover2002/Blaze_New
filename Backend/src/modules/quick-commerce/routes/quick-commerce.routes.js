@@ -113,6 +113,7 @@ import {
   assignAdminQuickZoneHubsController,
   getAdminSellerCODVerificationsController,
   settleSellerCODVerificationController,
+  getExpiredSellerLicenses,
 } from "../controllers/admin.controller.js";
 import {
   createOrUpdateFeeSettings,
@@ -473,6 +474,13 @@ router.delete(
   notificationBroadcastController.deleteBroadcastNotificationController
 );
 
+router.get(
+  "/admin/notifications/license-expired",
+  ...adminOrEmployee,
+  checkPermission("quick::core_management::sellers", "view"),
+  getExpiredSellerLicenses
+);
+
 router.get("/admin/fee-settings", ...adminOrEmployee, checkPermission("quick::core_management::billing", "view"), getFeeSettings);
 router.put("/admin/fee-settings", ...adminOrEmployee, checkPermission("quick::core_management::billing", "edit"), createOrUpdateFeeSettings);
 
@@ -480,7 +488,6 @@ router.put("/admin/fee-settings", ...adminOrEmployee, checkPermission("quick::co
 // Admin Seller Coupon Requests (QC marketing tools)
 router.get('/admin/seller-coupon-requests', ...adminOrEmployee, checkPermission('quick::core_management::marketing_tools::seller_coupon_request', 'view'), getAdminSellerCouponRequests);
 router.patch('/admin/seller-coupon-requests/:id/status', ...adminOrEmployee, checkPermission('quick::core_management::marketing_tools::seller_coupon_request', 'edit'), updateAdminSellerCouponRequestStatus);
-
 // Admin Coupon Management
 router.get('/admin/coupons', ...adminOrEmployee, checkPermission('quick::core_management::marketing_tools::coupons', 'view'), getAdminCoupons);
 router.post('/admin/coupons', ...adminOrEmployee, checkPermission('quick::core_management::marketing_tools::coupons', 'create'), createCoupon);
