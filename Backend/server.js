@@ -190,34 +190,18 @@ const startServer = async () => {
         process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
         process.on('SIGUSR2', () => gracefulShutdown('SIGUSR2')); // Handle nodemon restart
 
-        // Handle server errors (like EADDRINUSE)
-        server.on('error', async (err) => {
+        // Handle server errors (like EADDRINUSE).
+        // Do NOT auto-kill other processes — multiple nodemon instances fighting
+        // over the port causes a restart death spiral and hung connections that
+        // browsers report as cryptic CORS failures (status null).
+        server.on('error', (err) => {
             if (err.code === 'EADDRINUSE') {
                 logger.error(`Port ${config.port} is already in use.`);
-                if (config.nodeEnv === 'development') {
-                    logger.info('Attempting to clear the port automatically...');
-                    try {
-                        const { execSync } = await import('child_process');
-                        if (process.platform === 'win32') {
-                            const stdout = execSync(`netstat -ano | findstr :${config.port}`).toString();
-                            const lines = stdout.split('\n');
-                            const listeningLine = lines.find(line => line.includes('LISTENING'));
-                            if (listeningLine) {
-                                const pid = listeningLine.trim().split(/\s+/).pop();
-                                if (pid && pid !== process.pid.toString()) {
-                                    execSync(`taskkill /F /PID ${pid}`);
-                                    logger.info(`Successfully killed process ${pid} on port ${config.port}. Restarting...`);
-                                    // Give it a moment then restart or exit and let nodemon handle it
-                                    setTimeout(() => process.exit(0), 1000);
-                                    return;
-                                }
-                            }
-                        }
-                    } catch (killErr) {
-                        logger.error(`Failed to auto-kill process: ${killErr.message}`);
-                    }
-                }
-                logger.info(`Try running: netstat -ano | findstr :${config.port} then taskkill /F /PID <PID>`);
+                logger.info(
+                    process.platform === 'win32'
+                        ? `Stop the other process: netstat -ano | findstr :${config.port} then taskkill /F /PID <PID>`
+                        : `Stop the other process: lsof -i :${config.port} then kill <PID>`
+                );
             } else {
                 logger.error(`Server Error: ${err.message}`);
             }
