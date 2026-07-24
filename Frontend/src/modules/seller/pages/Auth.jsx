@@ -25,6 +25,7 @@ export default function SellerAuth() {
   const companyName = useCompanyName();
   const { settings } = useSettings();
   const [step, setStep] = useState("phone");
+
   const [isLoading, setIsLoading] = useState(false);
   const [phone, setPhone] = useState("");
   const [otp, setOtp] = useState(["", "", "", ""]);
@@ -36,6 +37,14 @@ export default function SellerAuth() {
     reason: "",
     userPayload: null
   });
+  
+  const [termsModal, setTermsModal] = useState({
+    isOpen: false,
+    isLoading: false,
+    content: "",
+    title: "Terms & Conditions"
+  });
+
   const nextSellerPath =
     typeof location.state?.from === "string" &&
       location.state.from.startsWith("/seller")
@@ -81,6 +90,21 @@ export default function SellerAuth() {
     return subscribeBusinessSettings(apply)
   }, [])
 
+  const handleOpenTerms = async () => {
+    setTermsModal(prev => ({ ...prev, isOpen: true, isLoading: true }));
+    try {
+      const res = await sellerApi.getTerms();
+      const payload = res?.data?.result || res?.data?.data || res?.data || {};
+      setTermsModal(prev => ({ 
+        ...prev, 
+        content: payload?.content || "<p>No terms and conditions found for sellers.</p>", 
+        title: payload?.title || "Terms & Conditions",
+        isLoading: false 
+      }));
+    } catch (err) {
+      setTermsModal(prev => ({ ...prev, content: "<p>Unable to load terms and conditions at this time.</p>", isLoading: false }));
+    }
+  };
 
 
   const validatePhone = (value) => {
@@ -425,7 +449,7 @@ export default function SellerAuth() {
                 By logging in, you agree to our <br />
                 <button
                   type="button"
-                  onClick={() => navigate("/seller/terms")}
+                  onClick={handleOpenTerms}
                   className="bg-transparent border-0 p-0 text-[#FF0000] font-bold hover:underline cursor-pointer"
                 >
                   Terms & Conditions
@@ -466,7 +490,7 @@ export default function SellerAuth() {
 
               <div className="bg-amber-50/50 border border-amber-100 rounded-2xl p-4 flex gap-3">
                 <div className="flex-1 text-xs text-amber-800 leading-relaxed font-medium">
-                  <strong>Please note:</strong> Re-onboarding will clear your previous draft. You must fill out the form entirely from scratch.
+                  <strong>Please note:</strong> Your previous application details are saved. You can edit the required fields and submit again for review.
                 </div>
               </div>
             </div>
@@ -485,7 +509,7 @@ export default function SellerAuth() {
                 }}
                 className="w-full h-14 bg-gradient-to-r from-rose-600 to-red-500 hover:from-rose-700 hover:to-red-600 text-white rounded-2xl font-black text-sm tracking-widest uppercase shadow-lg shadow-red-500/20 active:scale-[0.98] transition-all"
               >
-                Re-apply / Start Fresh
+                Edit & Re-apply
               </button>
               <button
                 type="button"
@@ -494,6 +518,40 @@ export default function SellerAuth() {
               >
                 Cancel / Go Back
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {termsModal.isOpen && (
+        <div className="fixed inset-0 bg-slate-950/65 backdrop-blur-md z-50 flex items-center justify-center p-4 animate-in fade-in duration-300">
+          <div className="bg-white rounded-3xl max-w-2xl w-full max-h-[85vh] overflow-hidden shadow-2xl border border-slate-100 transform transition-all duration-300 flex flex-col font-sans relative">
+            <div className="flex items-center justify-between p-6 border-b border-slate-100">
+              <h3 className="text-xl font-black text-slate-900">{termsModal.title || "Terms & Conditions"}</h3>
+              <button
+                onClick={() => setTermsModal(prev => ({ ...prev, isOpen: false }))}
+                className="w-10 h-10 rounded-full bg-slate-50 flex items-center justify-center text-slate-500 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-6 overflow-y-auto flex-1 text-slate-700 text-sm leading-relaxed prose prose-slate max-w-none">
+              {termsModal.isLoading ? (
+                <div className="flex flex-col items-center justify-center py-12 gap-3 text-slate-400">
+                  <div className="w-8 h-8 border-2 border-slate-200 border-t-[#FF0000] rounded-full animate-spin" />
+                  <p className="font-medium">Loading terms...</p>
+                </div>
+              ) : (
+                <div dangerouslySetInnerHTML={{ __html: termsModal.content }} />
+              )}
+            </div>
+            <div className="p-6 border-t border-slate-100 flex justify-end">
+              <Button
+                onClick={() => setTermsModal(prev => ({ ...prev, isOpen: false }))}
+                className="bg-slate-900 text-white font-bold px-8 h-12 rounded-xl hover:bg-black transition-colors"
+              >
+                I Understand
+              </Button>
             </div>
           </div>
         </div>

@@ -122,6 +122,13 @@ const FAQManagement = () => {
         }
     }, []);
 
+    useEffect(() => {
+        if (categories.length === 0) return;
+        if (newFaq.category && categories.some((category) => category.name === newFaq.category)) return;
+
+        setNewFaq((prev) => ({ ...prev, category: categories[0].name }));
+    }, [categories, newFaq.category]);
+
     const [faqs, setFaqs] = useState([]);
     const [page, setPage] = useState(1);
     const [pageSize, setPageSize] = useState(PAGINATION_CONFIG.defaultPageSize);
@@ -294,7 +301,15 @@ const FAQManagement = () => {
                         </div>
                     ) : (
                         <button
-                            onClick={() => setIsAddModalOpen(true)}
+                            onClick={() => {
+                                setNewFaq((prev) => ({
+                                    ...prev,
+                                    category: categories.some((category) => category.name === prev.category)
+                                        ? prev.category
+                                        : categories[0]?.name || ''
+                                }));
+                                setIsAddModalOpen(true);
+                            }}
                             className="flex items-center gap-2 px-5 py-3 bg-red-600 text-white rounded-2xl text-xs font-bold hover:bg-red-700 transition-all shadow-lg active:scale-95 shadow-red-200"
                         >
                             <Plus className="h-4 w-4" />

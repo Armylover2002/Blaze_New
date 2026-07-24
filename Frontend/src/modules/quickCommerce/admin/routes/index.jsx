@@ -31,12 +31,12 @@ const HeroCategoriesPerPage = React.lazy(() => import("../pages/HeroCategoriesPe
 const NotificationComposer = React.lazy(() => import("../pages/NotificationComposer"))
 const OfferSectionsManagement = React.lazy(() => import("../pages/OfferSectionsManagement"))
 const ShopByStoreManagement = React.lazy(() => import("../pages/ShopByStoreManagement"))
-const AdminProfile = React.lazy(() => import("../pages/AdminProfile"))
 const BillingCharges = React.lazy(() => import("../pages/BillingCharges"))
 const QuickZoneSetup = React.lazy(() => import("../pages/ZoneSetup"))
 const QuickAddZone = React.lazy(() => import("../pages/AddZone"))
 const QuickViewZone = React.lazy(() => import("../pages/ViewZone"))
-const SellerCommission = React.lazy(() => import("../pages/SellerCommission"))
+const AllZonesMap = React.lazy(() => import("../pages/AllZonesMap"))
+const DeliveryBoyViewMap = React.lazy(() => import("../pages/DeliveryBoyViewMap"))
 const SellerCouponRequest = React.lazy(() => import("../pages/SellerCouponRequest"))
 const QuickZoneHubs = React.lazy(() => import("../pages/QuickZoneHubs"))
 const CODDepositVerification = React.lazy(() => import("../pages/CODDepositVerification"))
@@ -46,7 +46,6 @@ function QuickCommerceAdminRoutesInner() {
   return (
     <Routes>
       <Route path="/" element={<Dashboard />} />
-      <Route path="/profile" element={<AdminProfile />} />
       <Route path="/categories" element={<Navigate to="/admin/quick-commerce/categories/header" replace />} />
       <Route path="/categories/header" element={<HeaderCategories />} />
       <Route path="/categories/level2" element={<Level2Categories />} />
@@ -57,13 +56,13 @@ function QuickCommerceAdminRoutesInner() {
       <Route path="/zone-setup/add" element={<QuickAddZone />} />
       <Route path="/zone-setup/edit/:id" element={<QuickAddZone />} />
       <Route path="/zone-setup/view/:id" element={<QuickViewZone />} />
+      <Route path="/zone-setup/map" element={<AllZonesMap />} />
+      <Route path="/zone-setup/delivery-boy-view" element={<DeliveryBoyViewMap />} />
       <Route path="/quick-zone-hubs" element={<QuickZoneHubs />} />
 
       <Route path="/sellers/active" element={<ActiveSellers />} />
       <Route path="/sellers/active/:id" element={<SellerDetail />} />
-      <Route path="/sellers/commission" element={<SellerCommission />} />
       <Route path="/sellers/cod-deposit-verification" element={<CODDepositVerification />} />
-      <Route path="/support-tickets" element={<SupportTickets />} />
       <Route path="/moderation" element={<ReviewModeration />} />
       <Route path="/experience-studio" element={<ContentManager />} />
       <Route path="/hero-categories" element={<HeroCategoriesPerPage />} />

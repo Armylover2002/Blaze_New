@@ -58,7 +58,6 @@ export const quickAdminSidebarMenu = [
         subItems: [
           { label: "Active Sellers", path: "/admin/quick-commerce/sellers/active", permissionKey: "active" },
           { label: "Waiting for Review", path: "/admin/quick-commerce/sellers/pending", permissionKey: "pending" },
-          { label: "Seller Commission", path: "/admin/quick-commerce/sellers/commission", permissionKey: "commission" },
           { label: "COD Deposit Verification", path: "/admin/quick-commerce/sellers/cod-deposit-verification", permissionKey: "commission" },
         ],
       },
@@ -84,7 +83,6 @@ export const quickAdminSidebarMenu = [
         ],
       },
       { type: "link", label: "Fees & Charges", permissionKey: "billing", path: "/admin/quick-commerce/billing", icon: "IndianRupee " },
-      { type: "link", label: "My Profile", permissionKey: "profile", path: "/admin/quick-commerce/profile", icon: "User" },
     ],
   },
 ]

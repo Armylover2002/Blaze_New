@@ -152,6 +152,11 @@ const sellerProductSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.Mixed,
       default: () => ({}),
     },
+    packingFee: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
   },
   {
     collection: 'quick_products',

@@ -150,6 +150,10 @@ const calculateQuickCheckoutPricing = ({
     return Math.max(maxFee, itemFee);
   }, 0);
 
+  const packagingFeeCharged = cartItems.reduce((acc, item) => {
+    return acc + (Number(item?.packingFee || 0) * Number(item?.quantity || 1));
+  }, 0);
+
   const platformFeeCharged = Number(feeSettings?.platformFee || 0);
   const gstRate = Number(feeSettings?.gstRate || 0);
   const gstAmount =
@@ -158,11 +162,11 @@ const calculateQuickCheckoutPricing = ({
       : 0;
 
   return {
-    deliveryFeeCharged, handlingFeeCharged, platformFeeCharged, gstAmount,
+    deliveryFeeCharged, handlingFeeCharged, platformFeeCharged, gstAmount, packagingFeeCharged,
     grandTotal: Math.max(
       0,
       safeSubtotal + deliveryFeeCharged +
-      platformFeeCharged + gstAmount - safeDiscount + safeTip,
+      platformFeeCharged + gstAmount + packagingFeeCharged - safeDiscount + safeTip,
     ),
     distanceKmActual: distanceKm,
     distanceKmRounded: distanceKm,
@@ -474,6 +478,7 @@ const CheckoutPage = () => {
 
   const deliveryFee = pricingPreview?.deliveryFeeCharged || 0;
   const handlingFee = pricingPreview?.handlingFeeCharged || 0;
+  const packagingFee = pricingPreview?.packagingFeeCharged || 0;
   const platformFee = pricingPreview?.platformFeeCharged || 0;
   const gstAmount = pricingPreview?.gstAmount || 0;
   const totalAmount = pricingPreview?.grandTotal || 0;
@@ -1467,6 +1472,12 @@ const CheckoutPage = () => {
                   <span className="text-slate-500 font-bold text-[13px] uppercase tracking-wider">Platform fee</span>
                   <span className="font-black text-slate-800">₹{platformFee}</span>
                 </div>
+                {packagingFee > 0 && (
+                  <div className="flex justify-between items-center px-2">
+                    <span className="text-slate-500 font-bold text-[13px] uppercase tracking-wider">Packing Fee</span>
+                    <span className="font-black text-slate-800">₹{packagingFee}</span>
+                  </div>
+                )}
                 <div className="flex justify-between items-center px-2">
                   <span className="text-slate-500 font-bold text-[13px] uppercase tracking-wider">GST</span>
                   <span className="font-black text-slate-800">₹{gstAmount}</span>

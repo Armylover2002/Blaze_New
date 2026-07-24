@@ -2,6 +2,7 @@ import React, { useEffect, useState, useMemo } from "react";
 import { Tag, Sparkles, ChevronRight } from "lucide-react";
 import { customerApi } from "../services/customerApi";
 import ProductCard from "../components/shared/ProductCard";
+import { isStoreCurrentlyOpen } from "@shared/utils/timeFormat";
 import { useLocation as useAppLocation } from "../context/LocationContext";
 import {
   getSideImageByKey,
@@ -20,6 +21,7 @@ const mapProduct = (p) => ({
   originalPrice: p.price,
   weight: p.weight || "1 unit",
   deliveryTime: "8-15 mins",
+  openingHours: p.seller?.shopInfo?.openingHours || p.sellerId?.shopInfo?.openingHours || p.seller?.openingHours || p.sellerId?.openingHours || "",
 });
 
 const ShopByStorePage = () => {
@@ -248,17 +250,29 @@ const ShopByStorePage = () => {
 
         <div className="flex overflow-x-auto gap-4 pb-2 no-scrollbar scroll-smooth snap-x snap-mandatory">
           {isLoading && (
-            <div className="w-full py-8 text-center text-slate-400 text-sm font-bold">
+            <div className="text-slate-400 text-sm font-medium pl-2">
               Loading products...
             </div>
           )}
-          {!isLoading && activeStore && activeProducts.length === 0 && (
-            <div className="w-full py-8 text-center text-slate-400 text-sm font-bold">
-              No products linked to this store yet.
+          {!isLoading && activeProducts.length === 0 && (
+            <div className="text-slate-400 text-sm font-medium pl-2">
+              No products available.
             </div>
           )}
-          {!isLoading &&
-            activeProducts.map((product) => (
+          {(() => {
+             const storeOpeningHours = (activeProducts[0]?.openingHours) || activeStore?.openingHours;
+             const isOpen = isStoreCurrentlyOpen(storeOpeningHours);
+             
+             if (!isLoading && activeStore && !isOpen) {
+               return (
+                 <div className="w-full text-center py-6 text-red-500 font-bold bg-red-50 rounded-lg border border-red-100">
+                   SELLER SHOP OFF
+                 </div>
+               );
+             }
+             
+             if (!isLoading && (!activeStore || isOpen)) {
+               return activeProducts.map((product) => (
               <div
                 key={product.id}
                 className="w-[180px] md:w-[200px] flex-shrink-0 snap-start"
@@ -269,7 +283,9 @@ const ShopByStorePage = () => {
                   compact
                 />
               </div>
-            ))}
+            ));
+          }
+          })()}
         </div>
       </section>
     </div>

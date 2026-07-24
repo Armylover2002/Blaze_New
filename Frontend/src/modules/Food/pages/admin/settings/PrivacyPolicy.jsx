@@ -95,7 +95,8 @@ export default function PrivacyPolicy() {
               {[
                 { id: "user", label: "Customer" },
                 { id: "restaurant", label: "Restaurant" },
-                { id: "delivery", label: "Delivery Boy" }
+                { id: "delivery", label: "Delivery Boy" },
+                { id: "seller", label: "Seller" }
               ].map((r) => (
                 <button
                   key={r.id}

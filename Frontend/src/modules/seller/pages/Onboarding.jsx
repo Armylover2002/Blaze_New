@@ -16,6 +16,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { sellerApi } from "../services/sellerApi";
+import { formatTimeAMPM } from "../../../shared/utils/timeFormat";
+const envGoogleMapsApiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
 import { onboardingFeeAPI } from "../../../services/api";
 import { initRazorpayPayment } from "@food/utils/razorpay";
 import MapPicker from "@shared/components/MapPicker";
@@ -55,6 +57,10 @@ const initialState = {
   medicalLicenseExpiry: "",
   shopLicenseNumber: "",
   shopLicenseExpiry: "",
+  fssaiImage: "",
+  medicalLicenseImage: "",
+  shopLicenseImage: "",
+  upiQrImage: "",
 };
 
 const parseOpeningHours = (value) => {
@@ -76,12 +82,13 @@ const parseOpeningHours = (value) => {
 
 const buildOpeningHoursLabel = (openingTime, closingTime) => {
   if (!openingTime || !closingTime) return "";
-  return `${openingTime} - ${closingTime}`;
+  return `${formatTimeAMPM(openingTime)} - ${formatTimeAMPM(closingTime)}`;
 };
 const timeOptions = Array.from({ length: 48 }, (_, index) => {
   const hours = String(Math.floor(index / 2)).padStart(2, "0");
   const minutes = index % 2 === 0 ? "00" : "30";
-  return `${hours}:${minutes}`;
+  const value = `${hours}:${minutes}`;
+  return { value, label: formatTimeAMPM(value) };
 });
 
 const normalizeTimeValue = (value) => {
@@ -97,7 +104,10 @@ const getSellerPhone = (seller = {}) => seller.phone || "";
 export default function SellerOnboarding() {
   const navigate = useNavigate();
   const { user, refreshUser, logout } = useAuth();
-  const [form, setForm] = useState(initialState);
+  const [form, setForm] = useState(() => {
+    const saved = sessionStorage.getItem("sellerOnboardingForm");
+    return saved ? JSON.parse(saved) : initialState;
+  });
   const [qrFile, setQrFile] = useState(null);
   const [licenseFile, setLicenseFile] = useState(null);
   const [isMapOpen, setIsMapOpen] = useState(false);
@@ -111,7 +121,10 @@ export default function SellerOnboarding() {
   const [fetchingFees, setFetchingFees] = useState(false);
   const [rejectionReason, setRejectionReason] = useState(null);
   const [isReonboardBypass, setIsReonboardBypass] = useState(false);
-  const [currentStep, setCurrentStep] = useState(1);
+  const [currentStep, setCurrentStep] = useState(() => {
+    const saved = sessionStorage.getItem("sellerOnboardingStep");
+    return saved ? parseInt(saved, 10) : 1;
+  });
   const [medicalLicenseFile, setMedicalLicenseFile] = useState(null);
   const [fssaiFile, setFssaiFile] = useState(null);
 
@@ -135,10 +148,17 @@ export default function SellerOnboarding() {
 
   useEffect(() => {
     if (user) {
-      setForm((prev) => ({ ...initialState, phone: getSellerPhone(user) || prev.phone }));
-      setHoursDraft({ openingTime: "", closingTime: "" });
+      setForm((prev) => ({ ...prev, phone: getSellerPhone(user) || prev.phone }));
     }
   }, [user]);
+
+  useEffect(() => {
+    sessionStorage.setItem("sellerOnboardingStep", currentStep.toString());
+  }, [currentStep]);
+
+  useEffect(() => {
+    sessionStorage.setItem("sellerOnboardingForm", JSON.stringify(form));
+  }, [form]);
 
   useEffect(() => {
     const loadProfile = async () => {
@@ -154,12 +174,11 @@ export default function SellerOnboarding() {
         const data = response?.data?.result || {};
         
         if (sessionStorage.getItem("sellerReonboard") === "true") {
-          setForm((prev) => ({ ...initialState, phone: getSellerPhone(data) || prev.phone }));
-          setHoursDraft({ openingTime: "", closingTime: "" });
+          setForm((prev) => ({ ...prev, ...data.documents, ...data.shopInfo, phone: getSellerPhone(data) || prev.phone }));
           setRejectionReason(data.approvalNotes || data.rejectionReason || "Your previous application was rejected. Please update your details.");
           setIsReonboardBypass(true); // bypass payment for re-applying
         } else {
-          setForm((prev) => ({ ...initialState, phone: getSellerPhone(data) || prev.phone }));
+          setForm((prev) => ({ ...prev, ...data.documents, ...data.shopInfo, phone: getSellerPhone(data) || prev.phone }));
           setHoursDraft(parseOpeningHours(data?.shopInfo?.openingHours || data?.openingHours || ""));
 
           // If rejected, show reason and bypass onboarding fee
@@ -794,8 +813,8 @@ export default function SellerOnboarding() {
                       >
                         <option value="">Select opening time</option>
                         {timeOptions.map((time) => (
-                          <option key={time} value={time}>
-                            {time}
+                          <option key={time.value} value={time.value}>
+                            {time.label}
                           </option>
                         ))}
                       </select>
@@ -809,8 +828,8 @@ export default function SellerOnboarding() {
                       >
                         <option value="">Select closing time</option>
                         {timeOptions.map((time) => (
-                          <option key={time} value={time}>
-                            {time}
+                          <option key={time.value} value={time.value}>
+                            {time.label}
                           </option>
                         ))}
                       </select>
@@ -943,7 +962,7 @@ export default function SellerOnboarding() {
                 <div className="flex flex-col gap-1 md:col-span-2">
                   <label className="text-xs font-bold text-slate-900">UPI QR image <span className="text-red-500">*</span></label>
                   <label className="flex cursor-pointer flex-wrap items-center justify-between gap-3 rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-3 text-sm font-bold text-slate-700">
-                    <span className="truncate max-w-[200px]">{qrFile?.name || "Upload UPI QR image"}</span>
+                    <span className="truncate max-w-[200px]">{qrFile?.name || (form.upiQrImage ? "Previously uploaded image" : "Upload UPI QR image")}</span>
                     <span className="inline-flex shrink-0 items-center gap-2 rounded-full bg-red-500 px-3 py-1.5 text-[10px] uppercase tracking-[0.2em] text-white">
                       <Upload className="h-3.5 w-3.5" />
                       Choose
@@ -1030,7 +1049,7 @@ export default function SellerOnboarding() {
                     <div className="flex flex-col gap-1 md:col-span-2">
                       <label className="text-xs font-bold text-slate-900">FSSAI Image <span className="text-red-500">*</span></label>
                       <label className="flex cursor-pointer flex-wrap items-center justify-between gap-3 rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-3 text-sm font-bold text-slate-700">
-                        <span className="truncate max-w-[200px]">{fssaiFile?.name || "Upload FSSAI image"}</span>
+                        <span className="truncate max-w-[200px]">{fssaiFile?.name || (form.fssaiImage ? "Previously uploaded image" : "Upload FSSAI image")}</span>
                         <span className="inline-flex shrink-0 items-center gap-2 rounded-full bg-red-500 px-3 py-1.5 text-[10px] uppercase tracking-[0.2em] text-white">
                           <Upload className="h-3.5 w-3.5" />
                           Choose
@@ -1069,7 +1088,7 @@ export default function SellerOnboarding() {
                     <div className="flex flex-col gap-1 md:col-span-2">
                       <label className="text-xs font-bold text-slate-900">Medical License Image <span className="text-red-500">*</span></label>
                       <label className="flex cursor-pointer flex-wrap items-center justify-between gap-3 rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-3 text-sm font-bold text-slate-700">
-                        <span className="truncate max-w-[200px]">{medicalLicenseFile?.name || "Upload medical license image"}</span>
+                        <span className="truncate max-w-[200px]">{medicalLicenseFile?.name || (form.medicalLicenseImage ? "Previously uploaded image" : "Upload medical license image")}</span>
                         <span className="inline-flex shrink-0 items-center gap-2 rounded-full bg-red-500 px-3 py-1.5 text-[10px] uppercase tracking-[0.2em] text-white">
                           <Upload className="h-3.5 w-3.5" />
                           Choose
@@ -1110,7 +1129,7 @@ export default function SellerOnboarding() {
                 <div className="flex flex-col gap-1 md:col-span-2">
                   <label className="text-xs font-bold text-slate-900">Shop license image <span className="text-red-500">*</span></label>
                   <label className="flex cursor-pointer flex-wrap items-center justify-between gap-3 rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-3 text-sm font-bold text-slate-700">
-                    <span className="truncate max-w-[200px]">{licenseFile?.name || "Upload shop license image"}</span>
+                    <span className="truncate max-w-[200px]">{licenseFile?.name || (form.shopLicenseImage ? "Previously uploaded image" : "Upload shop license image")}</span>
                     <span className="inline-flex shrink-0 items-center gap-2 rounded-full bg-red-500 px-3 py-1.5 text-[10px] uppercase tracking-[0.2em] text-white">
                       <Upload className="h-3.5 w-3.5" />
                       Choose

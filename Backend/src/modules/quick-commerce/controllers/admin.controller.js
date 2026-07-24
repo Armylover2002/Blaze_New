@@ -354,6 +354,9 @@ const toSellerRequest = (seller) => ({
   status:
     seller.approvalStatus ||
     (seller.approved === false ? 'pending' : 'approved'),
+  approvalStatus:
+    seller.approvalStatus ||
+    (seller.approved === false ? 'pending' : 'approved'),
   approved: seller.approved !== false,
   onboardingSubmitted: seller.onboardingSubmitted === true,
   bankInfo: seller.bankInfo || {},
@@ -1351,6 +1354,7 @@ export const getAdminSellerRequests = async (req, res) => {
   else if (status === 'approved') query.approvalStatus = 'approved';
   else if (status === 'rejected') query.approvalStatus = 'rejected';
   else if (status === 'draft') query.approvalStatus = 'draft';
+  else if (status === 'review_queue') query.approvalStatus = { $in: ['pending', 'rejected'] };
 
   const searchText = String(search || '').trim();
   if (searchText) {
@@ -1967,6 +1971,21 @@ export const settleSellerCODVerificationController = async (req, res, next) => {
 
     await deposit.save();
     return res.json({ success: true, message: `COD verification settled successfully with action: ${action}`, result: deposit });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getExpiredSellerLicenses = async (req, res, next) => {
+  try {
+    const sellers = await Seller.find({
+      $or: [
+        { "documents.fssaiExpiry": { $lt: new Date() } },
+        { "documents.medicalLicenseExpiry": { $lt: new Date() } },
+        { "documents.shopLicenseExpiry": { $lt: new Date() } }
+      ]
+    }).lean();
+    return res.json({ success: true, result: sellers, results: sellers });
   } catch (error) {
     next(error);
   }

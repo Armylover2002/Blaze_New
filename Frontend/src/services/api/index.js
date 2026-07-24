@@ -3,6 +3,7 @@
  */
 
 import apiClient from "./axios.js";
+import { getWithDedupe } from "@core/api/dedupe";
 import { API_ENDPOINTS } from "./config.js";
 import * as authService from "./auth.js";
 
@@ -3156,7 +3157,7 @@ export const heroBannerAPI = createStubAPI();
 export const publicAPI = createStubAPI();
 
 export const onboardingFeeAPI = {
-  getPublicFees: () => apiClient.get("/common/onboarding-fees/public"),
+  getPublicFees: () => getWithDedupe("/common/onboarding-fees/public"),
   createOrder: (body) => apiClient.post("/common/onboarding-fees/public/create-order", body ?? {}),
   getConfig: () => apiClient.get("/common/onboarding-fees/config", { contextModule: "admin" }),
   updateConfig: (role, body) => apiClient.put(`/common/onboarding-fees/config/${role}`, body ?? {}, { contextModule: "admin" }),

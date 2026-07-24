@@ -1,6 +1,17 @@
 import { FaqCategory } from '../models/faqCategory.model.js';
 import { Faq } from '../models/faq.model.js';
 
+const escapeRegex = (value = '') => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const findFaqCategoryByName = (name) => {
+  const normalizedName = String(name || '').trim();
+  if (!normalizedName) return null;
+
+  return FaqCategory.findOne({
+    name: new RegExp(`^${escapeRegex(normalizedName)}$`, 'i')
+  });
+};
+
 // --- Categories ---
 
 export const getFaqCategories = async (req, res) => {
@@ -15,9 +26,10 @@ export const getFaqCategories = async (req, res) => {
 export const createFaqCategory = async (req, res) => {
   try {
     const { name, color } = req.body;
-    if (!name) return res.status(400).json({ success: false, message: 'Name is required' });
+    const normalizedName = String(name || '').trim();
+    if (!normalizedName) return res.status(400).json({ success: false, message: 'Name is required' });
     
-    const category = await FaqCategory.create({ name, color });
+    const category = await FaqCategory.create({ name: normalizedName, color });
     res.status(201).json({ success: true, result: category });
   } catch (error) {
     if (error.code === 11000) {
@@ -72,7 +84,7 @@ export const createFaq = async (req, res) => {
     const { category, audience, question, answer, status } = req.body;
     
     // Find category by name (since frontend sends category name)
-    const categoryDoc = await FaqCategory.findOne({ name: category });
+    const categoryDoc = await findFaqCategoryByName(category);
     if (!categoryDoc) {
       return res.status(400).json({ success: false, message: 'Category not found' });
     }
@@ -99,7 +111,7 @@ export const updateFaq = async (req, res) => {
     const updateData = { audience, question, answer, status };
 
     if (category) {
-      const categoryDoc = await FaqCategory.findOne({ name: category });
+      const categoryDoc = await findFaqCategoryByName(category);
       if (categoryDoc) updateData.categoryId = categoryDoc._id;
     }
 

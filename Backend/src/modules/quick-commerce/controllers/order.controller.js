@@ -7,7 +7,6 @@ import { QuickCart } from '../models/cart.model.js';
 import { QuickProduct } from '../models/product.model.js';
 import { Seller } from '../seller/models/seller.model.js';
 import { SellerOrder } from '../seller/models/sellerOrder.model.js';
-import { getSellerCommissionSnapshot } from '../admin/services/commission.service.js';
 import {
   calculateQuickPricing,
   getRiderEarning as getQuickRiderEarning,
@@ -697,7 +696,7 @@ export const placeOrder = async (req, res) => {
       platformProfit: Math.max(
         0,
         deliveryFee + Number(pricing.platformFee || 0) - (riderEarning || 0),
-      ), // Initial guess, will be updated with commission
+      ),
       statusHistory: [
         {
           byRole: 'SYSTEM',
@@ -803,12 +802,10 @@ export const placeOrder = async (req, res) => {
               ((deliveryFee * sellerSubtotal) / Math.max(subtotal, 1)).toFixed(2),
             );
 
-            // Calculate commission for this specific seller
-            const { commissionAmount } = await getSellerCommissionSnapshot(sellerId, sellerSubtotal);
             const sellerDiscount = couponSource === 'restaurant' ? discount : 0;
             const sellerReceivable = Math.max(
               0,
-              Number((sellerSubtotal - commissionAmount - sellerDiscount).toFixed(2)),
+              Number((sellerSubtotal - sellerDiscount).toFixed(2)),
             );
 
             return {
@@ -830,7 +827,6 @@ export const placeOrder = async (req, res) => {
               })),
               pricing: {
                 subtotal: sellerSubtotal,
-                commission: commissionAmount,
                 total: sellerSubtotal + allocatedDeliveryFee,
                 receivable: sellerReceivable,
               },
@@ -862,16 +858,12 @@ export const placeOrder = async (req, res) => {
           }))
         : [];
 
-    const totalSellerCommission = sellerOrdersResults.reduce((sum, so) => sum + (so.pricing?.commission || 0), 0);
-    
-    // Update the main order with the total commission
-    if (totalSellerCommission > 0 || couponSource === 'admin') {
+    if (couponSource === 'admin') {
       const adminDiscount = couponSource === 'admin' ? discount : 0;
       const platformProfit = Math.max(
         0,
         deliveryFee +
           Number(pricing.platformFee || 0) +
-          totalSellerCommission -
           (riderEarning || 0) -
           adminDiscount
       );
@@ -879,12 +871,10 @@ export const placeOrder = async (req, res) => {
         { _id: order._id },
         { 
           $set: { 
-            'pricing.restaurantCommission': totalSellerCommission,
             platformProfit: platformProfit
           } 
         }
       );
-      order.pricing.restaurantCommission = totalSellerCommission;
       order.platformProfit = platformProfit;
     }
 

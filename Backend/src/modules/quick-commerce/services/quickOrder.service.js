@@ -91,10 +91,7 @@ export const updateSellerOrderStatus = async (sellerOrderId, sellerId, nextStatu
   if (nextStatus === 'delivered') {
     const receivableRaw =
       Number(sellerOrder?.pricing?.receivable) ||
-      Math.max(
-        0,
-        Number(sellerOrder?.pricing?.subtotal || 0) - Number(sellerOrder?.pricing?.commission || 0),
-      );
+      Math.max(0, Number(sellerOrder?.pricing?.subtotal || 0));
     const receivable = Number.isFinite(receivableRaw) ? Math.max(0, receivableRaw) : 0;
 
     if (receivable > 0) {
@@ -290,10 +287,7 @@ export const syncSellerOrderFromDelivery = async (parentOrderId, deliveryStatus)
     for (const so of affectedSellerOrders) {
       const receivableRaw =
         Number(so?.pricing?.receivable) ||
-        Math.max(
-          0,
-          Number(so?.pricing?.subtotal || 0) - Number(so?.pricing?.commission || 0),
-        );
+        Math.max(0, Number(so?.pricing?.subtotal || 0));
       const receivable = Number.isFinite(receivableRaw) ? Math.max(0, receivableRaw) : 0;
 
       if (receivable > 0) {

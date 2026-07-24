@@ -40,6 +40,7 @@ import { useWishlist } from "../context/WishlistContext";
 import { useToast } from "@shared/components/ui/Toast";
 import { customerApi } from "../services/customerApi";
 import { resolveQuickImageUrl } from "../utils/image";
+import { isStoreCurrentlyOpen } from "@shared/utils/timeFormat";
 import PharmacyProductDetailsView from "../components/pharmacy/PharmacyProductDetailsView";
 import {
   resolvePharmacyHeaderForProduct,
@@ -120,6 +121,7 @@ const normalizeProduct = (product = {}, fallback = {}) => {
     storeName:
       source.storeName || source.restaurantName || source.seller?.name ||
       source.sellerId?.name || source.store?.name || source.storeId?.name || "Fresh Mart",
+    openingHours: source.seller?.shopInfo?.openingHours || source.sellerId?.shopInfo?.openingHours || source.seller?.openingHours || source.sellerId?.openingHours || "",
     deliveryTime: source.deliveryTime || "8-12 mins",
   };
 };
@@ -429,7 +431,11 @@ const ProductDetailPage = () => {
 
           <div className="flex flex-col items-center gap-6 rounded-[2.5rem] border border-border bg-card dark:bg-slate-900/50 p-6 sm:flex-row transition-colors">
             <div className="w-full sm:w-72">
-              {quantity > 0 ? (
+              {!isStoreCurrentlyOpen(product.openingHours) ? (
+                <div className="flex h-16 w-full items-center justify-center rounded-2xl bg-slate-200 text-slate-500 font-black shadow-none cursor-not-allowed">
+                  SELLER SHOP OFF
+                </div>
+              ) : quantity > 0 ? (
                 <div className="flex h-16 w-full items-center rounded-2xl bg-red-600 px-2 text-white shadow-xl shadow-red-100">
                   <button onClick={handleDecrement} className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl transition-all hover:bg-white/20">
                     <Minus size={24} strokeWidth={3} />

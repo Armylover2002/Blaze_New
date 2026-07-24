@@ -56,7 +56,7 @@ const pageContentSchema = new mongoose.Schema(
             type: String,
             required: true,
             default: 'user',
-            enum: ['user', 'restaurant', 'delivery', 'all'],
+            enum: ['user', 'restaurant', 'delivery', 'seller', 'all'],
             index: true
         },
         legal: { type: legalPageSchema, default: undefined },

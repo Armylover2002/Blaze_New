@@ -210,6 +210,7 @@ const AddProduct = () => {
     description: "",
     price: "",
     salePrice: "",
+    packingFee: "",
     stock: "",
     lowStockAlert: 5,
     category: "",
@@ -471,6 +472,7 @@ const AddProduct = () => {
       // Map top-level price/stock — prefer pricing tab values, fallback to first variant
       data.append("price", formData.price || firstVariant.price);
       data.append("salePrice", formData.salePrice || firstVariant.salePrice || 0);
+      data.append("packingFee", formData.packingFee || 0);
       data.append("stock", formData.stock || firstVariant.stock);
       data.append("lowStockAlert", formData.lowStockAlert || 5);
 
@@ -1323,6 +1325,22 @@ const AddProduct = () => {
                     onChange={(e) => setFormData({ ...formData, salePrice: e.target.value })}
                     placeholder="e.g. 450"
                     className="w-full px-4 py-3 bg-emerald-50/50 shadow-sm ring-1 ring-emerald-100 border-none rounded-xl text-lg font-bold text-emerald-700 outline-none focus:ring-2 focus:ring-emerald-200"
+                  />
+                </div>
+              </div>
+
+              <div className="p-6 bg-slate-50 rounded-3xl border border-slate-100 grid grid-cols-1 md:grid-cols-2 gap-8">
+                <div className="space-y-1.5 flex flex-col">
+                  <label className="text-[10px] sm:text-xs font-bold text-slate-600 uppercase tracking-widest ml-1">
+                    Packing Fee (₹)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={formData.packingFee}
+                    onChange={(e) => setFormData({ ...formData, packingFee: e.target.value })}
+                    placeholder="e.g. 10"
+                    className="w-full px-4 py-3 bg-white shadow-sm ring-1 ring-slate-200 border-none rounded-xl text-lg font-bold outline-none focus:ring-2 focus:ring-red-500/10"
                   />
                 </div>
               </div>

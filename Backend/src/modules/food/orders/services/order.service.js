@@ -65,7 +65,6 @@ import { FoodSupportTicket } from '../../user/models/supportTicket.model.js';
 import { Seller } from '../../../quick-commerce/seller/models/seller.model.js';
 import { SellerOrder } from '../../../quick-commerce/seller/models/sellerOrder.model.js';
 import { PorterOrder } from '../../../porter/orders/models/porterOrder.model.js';
-import { getSellerCommissionSnapshot } from '../../../quick-commerce/admin/services/commission.service.js';
 import { QuickFeeSettings } from '../../../quick-commerce/admin/models/feeSettings.model.js';
 import { calculateQuickPricing, calculateCustomerDeliveryFee } from '../../../quick-commerce/admin/services/billing.service.js';
 import {
@@ -2246,17 +2245,7 @@ function buildSellerOrdersFromParent(orderDoc, { customerName = "", customerPhon
           ? Number(((totalDeliveryFee * sellerSubtotal) / quickSubtotal).toFixed(2))
           : 0;
 
-      // Phase 2: Calculate commission and receivable for sellers
-      let commissionAmount = 0;
-      let receivable = sellerSubtotal;
-
-      try {
-        const snapshot = await getSellerCommissionSnapshot(sellerId, sellerSubtotal);
-        commissionAmount = Number(snapshot?.commissionAmount || 0);
-        receivable = Math.max(0, Number((sellerSubtotal - commissionAmount).toFixed(2)));
-      } catch (err) {
-        logger.warn(`Failed to get commission snapshot for seller ${sellerId}: ${err.message}`);
-      }
+      const receivable = Math.max(0, Number(sellerSubtotal.toFixed(2)));
 
       return {
         orderType: order.orderType === "mixed" ? "mixed" : "quick",
@@ -2281,7 +2270,6 @@ function buildSellerOrdersFromParent(orderDoc, { customerName = "", customerPhon
         pricing: {
           subtotal: sellerSubtotal,
           deliveryFee: allocatedDeliveryFee,
-          commission: commissionAmount,
           receivable: receivable,
           total: Number((sellerSubtotal + allocatedDeliveryFee).toFixed(2)),
         },
