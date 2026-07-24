@@ -123,6 +123,12 @@ const mapCart = async (idQuery) => {
     subtotal,
     products,
     packagingFee: totalPackingFee,
+    items: items.map((item) => ({
+      productId: item.productId,
+      price: item.price,
+      quantity: item.quantity,
+      lineTotal: item.lineTotal,
+    })),
   });
 
   return {

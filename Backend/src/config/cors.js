@@ -14,6 +14,9 @@ const DEFAULT_ORIGINS = [
 ];
 
 const ORIGIN_PATTERNS = [
+    // Local Vite / alternate ports (5173, 4173, 3000, etc.)
+    /^http:\/\/localhost:\d+$/,
+    /^http:\/\/127\.0\.0\.1:\d+$/,
     /^https:\/\/dukaanwallah.*\.vercel\.app$/,
     /^https:\/\/.*\.onrender\.com$/,
 ];

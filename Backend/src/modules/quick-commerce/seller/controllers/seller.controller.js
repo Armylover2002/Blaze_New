@@ -36,6 +36,7 @@ import {
   notifyOwnerSafely,
 } from "../../../food/orders/services/order.helpers.js";
 import { scorePointsByRoadDistance } from "../../../../services/roadDistance.service.js";
+import { getHeaderCommissionSnapshot } from "../../admin/services/commission.service.js";
 import * as quickOrderService from "../../services/quickOrder.service.js";
 import {
   buildSellerCategoryTree,
@@ -280,7 +281,17 @@ const buildSellerOrderFromParentOrder = async (order, sellerId) => {
         ).toFixed(2),
       )
       : 0;
-  const sellerReceivable = Math.max(0, Number(sellerSubtotal.toFixed(2)));
+  const { commissionAmount } = await getHeaderCommissionSnapshot(
+    quickItems.map((item) => ({
+      productId: item?.itemId || item?.productId || item?._id,
+      price: item?.price,
+      quantity: item?.quantity,
+    })),
+  );
+  const sellerReceivable = Math.max(
+    0,
+    Number((sellerSubtotal - commissionAmount).toFixed(2)),
+  );
 
   const parentStatus = String(order?.orderStatus || "pending").toLowerCase();
   let sellerStatus = "pending";
@@ -324,6 +335,7 @@ const buildSellerOrderFromParentOrder = async (order, sellerId) => {
     })),
     pricing: {
       subtotal: sellerSubtotal,
+      commission: commissionAmount,
       total: sellerSubtotal + allocatedDeliveryFee,
       receivable: sellerReceivable,
     },

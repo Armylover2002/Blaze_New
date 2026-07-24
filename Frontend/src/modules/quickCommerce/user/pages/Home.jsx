@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback, startTransition } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from 'react';
 import { useNavigate, useLocation as useRouterLocation } from 'react-router-dom';
 import {
   Star,
@@ -54,7 +54,6 @@ import MobileFooterMessage from '../components/layout/MobileFooterMessage';
 import { useProductDetail } from '../context/ProductDetailContext';
 import { cn } from '@/lib/utils';
 import { Skeleton } from '@food/components/ui/skeleton';
-import CardBanner from '@/assets/CardBanner.jpg';
 import SectionRenderer from '../components/experience/SectionRenderer';
 import ExperienceBannerCarousel from '../components/experience/ExperienceBannerCarousel';
 import { useLocation } from '../context/LocationContext';
@@ -297,8 +296,6 @@ const Home = ({ embedded = false, onThemeChange, embeddedHeaderColor = null }) =
     isBootstrapped,
   } = useQuickHomeData({ currentLocation });
 
-  const [mobileBannerIndex, setMobileBannerIndex] = useState(0);
-  const [isInstantBannerJump, setIsInstantBannerJump] = useState(false);
   const [pendingReturn, setPendingReturn] = useState(null);
 
   useLayoutEffect(() => {
@@ -387,30 +384,6 @@ const Home = ({ embedded = false, onThemeChange, embeddedHeaderColor = null }) =
   // Products/sections load in background — don't block the whole page for them.
   const isInitialPageLoading = !isBootstrapped;
   const hasHeroBanners = (heroConfig.banners?.items || []).length > 0;
-  const shouldShowHeroFallback = !isInitialPageLoading && !hasHeroBanners;
-
-  // ── Mobile banner autoplay ─────────────────────────────────────────────────
-  useEffect(() => {
-    const id = setInterval(() => {
-      startTransition(() => {
-        setMobileBannerIndex((prev) => (prev >= 2 ? prev : prev + 1));
-      });
-    }, 3500);
-    return () => clearInterval(id);
-  }, []);
-
-  useEffect(() => {
-    if (!isInstantBannerJump) return;
-    const id = requestAnimationFrame(() => setIsInstantBannerJump(false));
-    return () => cancelAnimationFrame(id);
-  }, [isInstantBannerJump]);
-
-  const handleBannerTransitionEnd = useCallback(() => {
-    if (mobileBannerIndex === 2) {
-      setIsInstantBannerJump(true);
-      setMobileBannerIndex(0);
-    }
-  }, [mobileBannerIndex]);
 
   // ── Derived lists (heavy computation, memoized) ────────────────────────────
   const productsById = useMemo(() => {
@@ -420,23 +393,62 @@ const Home = ({ embedded = false, onThemeChange, embeddedHeaderColor = null }) =
   }, [products]);
 
   const effectiveQuickCategories = useMemo(() => {
-    const ids = heroConfig.categoryIds || [];
-    let cats = quickCategories;
+    const normalizeCatId = (id) => {
+      if (id == null) return '';
+      if (typeof id === 'object') return String(id._id || id.id || '');
+      return String(id);
+    };
+
+    const toStripItem = (c) => ({
+      id: c._id,
+      name: c.name,
+      image: getQuickCategoryImage(c),
+    });
+
+    const belongsToActiveHeader = (cat) => {
+      const mappedCat = categoryMap[normalizeCatId(cat.id || cat._id)] || cat;
+      if (!mappedCat) return false;
+      const parentHeaderId =
+        mappedCat.parentId || mappedCat.headerId || mappedCat.parent?._id || mappedCat.header?._id;
+      return (
+        String(parentHeaderId) === String(activeCategory?._id) ||
+        String(mappedCat._id) === String(activeCategory?._id)
+      );
+    };
+
+    const headerScopedQuickCategories = () => {
+      const activeCatId = activeCategory?._id || activeCategory?.id;
+      if (!activeCatId || activeCatId === 'all') return quickCategories;
+      return quickCategories.filter((cat) => {
+        const mappedCat = categoryMap[normalizeCatId(cat.id || cat._id)];
+        if (!mappedCat) return false;
+        const parentHeaderId =
+          mappedCat.parentId || mappedCat.headerId || mappedCat.parent?._id || mappedCat.header?._id;
+        return String(parentHeaderId) === String(activeCatId);
+      });
+    };
+
+    const ids = Array.isArray(heroConfig.categoryIds) ? heroConfig.categoryIds : [];
+    let cats = headerScopedQuickCategories();
+
     if (ids.length > 0) {
       const resolved = ids
-        .map((id) => categoryMap[id])
+        .map((id) => categoryMap[normalizeCatId(id)] || categoryMap[id])
         .filter(Boolean)
-        .map((c) => ({ id: c._id, name: c.name, image: getQuickCategoryImage(c) }));
-      if (resolved.length > 0) cats = resolved;
+        .map(toStripItem);
+      if (resolved.length > 0) {
+        cats = resolved;
+        // On a header tab, keep only categories that belong to that header
+        const activeCatId = activeCategory?._id || activeCategory?.id;
+        if (activeCatId && activeCatId !== 'all') {
+          cats = cats.filter(belongsToActiveHeader);
+        }
+      }
     }
+
     const isPharmacyModeTemp = String(activeCategory?.slug || '').toLowerCase() === 'pharmacy';
     if (isPharmacyModeTemp) {
-      return cats.filter(cat => {
-        const mappedCat = categoryMap[cat.id || cat._id];
-        if (!mappedCat) return false;
-        const parentHeaderId = mappedCat.parentId || mappedCat.headerId || mappedCat.parent?._id || mappedCat.header?._id;
-        return String(parentHeaderId) === String(activeCategory?._id) || String(mappedCat._id) === String(activeCategory?._id);
-      });
+      return cats.filter(belongsToActiveHeader);
     }
     return cats;
   }, [heroConfig.categoryIds, categoryMap, quickCategories, activeCategory]);
@@ -589,119 +601,19 @@ const Home = ({ embedded = false, onThemeChange, embeddedHeaderColor = null }) =
       ) : (
         <div className={cn('pt-0', embedded && 'pt-0')}>
 
-          {/* Hero Banners (mobile) */}
-          <div className={cn('block md:hidden', embedded ? '-mt-[1px]' : 'mt-0')}>
-            <div className="relative w-full overflow-hidden bg-transparent">
-              {hasHeroBanners ? (
-                <div className="px-3 py-2">
+          {/* Admin hero banners only — no hardcoded fallback when empty */}
+          {hasHeroBanners ? (
+            <div className={cn(embedded ? '-mt-[1px]' : 'mt-0')}>
+              <div className="relative w-full overflow-hidden bg-transparent">
+                <div className="px-3 py-2 md:px-8 lg:px-[50px] md:py-4">
                   <ExperienceBannerCarousel
                     section={{ title: '' }}
                     items={heroConfig.banners.items}
                   />
                 </div>
-              ) : isPharmacyMode ? (
-                <div className="px-3 py-2">
-                  <div className="w-full h-[174px] bg-gradient-to-r from-teal-50 to-emerald-50 p-6 relative overflow-hidden flex items-center shadow-md rounded-[20px] border border-teal-100">
-                    <div className="relative z-10 w-[60%] flex flex-col items-start justify-center gap-1">
-                      <h4 className="text-[28px] sm:text-[32px] font-[900] text-teal-900 tracking-tight leading-none">Your Health</h4>
-                      <h4 className="text-[28px] sm:text-[32px] font-[900] text-teal-700 tracking-tighter italic leading-none">Delivered</h4>
-                      <p className="text-[12px] sm:text-[13px] font-medium text-teal-800 mt-2 mb-2 leading-tight">Get essential medicines and healthcare products.</p>
-                    </div>
-                  </div>
-                </div>
-              ) : shouldShowHeroFallback ? (
-                <>
-                <div
-                  className={cn('flex', !isInstantBannerJump && 'transition-transform duration-500 ease-out')}
-                  style={{ transform: `translateX(-${mobileBannerIndex * 100}%)` }}
-                  onTransitionEnd={handleBannerTransitionEnd}
-                >
-                  {/* Slide 1 */}
-                  <motion.div onClick={navigateToCategories} whileTap={{ scale: 0.96 }} className="min-w-full px-3 py-2">
-                    <div className="w-full h-[174px] bg-[#B05212] p-4 relative overflow-hidden flex items-center shadow-md rounded-[20px]">
-                      {/* Faint dashed lines background */}
-                      <svg className="absolute inset-0 w-full h-full pointer-events-none opacity-20" preserveAspectRatio="none" viewBox="0 0 100 100">
-                        <path d="M -10 40 Q 30 -20 60 40 T 130 40" fill="none" stroke="white" strokeWidth="1" strokeDasharray="3 3" />
-                        <path d="M -20 70 Q 20 120 70 60 T 140 70" fill="none" stroke="white" strokeWidth="1" strokeDasharray="3 3" />
-                      </svg>
-                      
-                      <div className="relative z-10 w-[55%] flex flex-col items-start justify-center gap-1 pl-2">
-                        <div className="flex flex-col leading-[1.05]">
-                          <h4 className="text-[32px] sm:text-[36px] font-[1000] text-white tracking-tight">Fastest</h4>
-                          <h4 className="text-[32px] sm:text-[36px] font-[1000] text-[#FFD6B3] tracking-tighter italic">Groceries</h4>
-                        </div>
-                        <p className="text-[12px] sm:text-[13px] font-medium text-white/95 mt-1 mb-2">Get it all in 10 minutes or less.</p>
-                        <button className="bg-white text-[#B05212] px-5 py-2 rounded-full font-bold text-[13px] tracking-wide shadow-md hover:bg-gray-50 active:scale-95 transition-all">
-                          Shop Now
-                        </button>
-                      </div>
-                      
-                      <div className="absolute right-0 bottom-0 top-0 w-[45%] flex items-center justify-end overflow-hidden">
-                        <div className="h-full w-full bg-red-100 rounded-l-[16px] overflow-hidden shadow-[-4px_0_15px_rgba(0,0,0,0.15)] relative">
-                          <img src={CardBanner} alt="Promo" className="w-full h-full object-cover object-left" loading="lazy" />
-                          <div className="absolute inset-0 bg-gradient-to-r from-[#B05212]/20 to-transparent pointer-events-none" />
-                        </div>
-                      </div>
-                    </div>
-                  </motion.div>
-
-                  {/* Slide 2 */}
-                  <motion.div onClick={() => navigate('/categories')} whileTap={{ scale: 0.96 }} className="min-w-full px-3 py-2">
-                    <div className="w-full h-[174px] bg-white dark:bg-card relative overflow-hidden flex shadow-md rounded-[20px] group">
-                      <img src={CardBanner} alt="Promotion" className="w-full h-full object-cover" loading="lazy" />
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/5 to-transparent pointer-events-none" />
-                    </div>
-                  </motion.div>
-
-                  {/* Slide 3 — reuses slide 1 content */}
-                  <motion.div onClick={navigateToCategories} whileTap={{ scale: 0.96 }} className="min-w-full px-3 py-2">
-                    <div className="w-full h-[174px] bg-[#B05212] p-4 relative overflow-hidden flex items-center shadow-md rounded-[20px]">
-                      {/* Faint dashed lines background */}
-                      <svg className="absolute inset-0 w-full h-full pointer-events-none opacity-20" preserveAspectRatio="none" viewBox="0 0 100 100">
-                        <path d="M -10 40 Q 30 -20 60 40 T 130 40" fill="none" stroke="white" strokeWidth="1" strokeDasharray="3 3" />
-                        <path d="M -20 70 Q 20 120 70 60 T 140 70" fill="none" stroke="white" strokeWidth="1" strokeDasharray="3 3" />
-                      </svg>
-                      
-                      <div className="relative z-10 w-[55%] flex flex-col items-start justify-center gap-1 pl-2">
-                        <div className="flex flex-col leading-[1.05]">
-                          <h4 className="text-[32px] sm:text-[36px] font-[1000] text-white tracking-tight">Fastest</h4>
-                          <h4 className="text-[32px] sm:text-[36px] font-[1000] text-[#FFD6B3] tracking-tighter italic">Groceries</h4>
-                        </div>
-                        <p className="text-[12px] sm:text-[13px] font-medium text-white/95 mt-1 mb-2">Get it all in 10 minutes or less.</p>
-                        <button className="bg-white text-[#B05212] px-5 py-2 rounded-full font-bold text-[13px] tracking-wide shadow-md hover:bg-gray-50 active:scale-95 transition-all">
-                          Shop Now
-                        </button>
-                      </div>
-                      
-                      <div className="absolute right-0 bottom-0 top-0 w-[45%] flex items-center justify-end overflow-hidden">
-                        <div className="h-full w-full bg-red-100 rounded-l-[16px] overflow-hidden shadow-[-4px_0_15px_rgba(0,0,0,0.15)] relative">
-                          <img src={CardBanner} alt="Promo" className="w-full h-full object-cover object-left" loading="lazy" />
-                          <div className="absolute inset-0 bg-gradient-to-r from-[#B05212]/20 to-transparent pointer-events-none" />
-                        </div>
-                      </div>
-                    </div>
-                  </motion.div>
-                </div>
-                {/* Fallback Pagination Dots */}
-                <div className="flex justify-center items-center gap-1.5 mt-3 pb-1">
-                  {[0, 1].map((idx) => {
-                    const realActiveIndex = mobileBannerIndex % 2;
-                    const isActive = idx === realActiveIndex;
-                    return (
-                      <div
-                        key={idx}
-                        className={cn(
-                          "h-[4px] rounded-full transition-all duration-300",
-                          isActive ? "w-4 bg-black" : "w-[6px] bg-gray-200"
-                        )}
-                      />
-                    );
-                  })}
-                </div>
-              </>
-              ) : null}
+              </div>
             </div>
-          </div>
+          ) : null}
 
           {isPharmacyMode && !hasAnyPharmacyData ? (
             <div className="w-full mt-8 mb-12 px-4 md:px-8">

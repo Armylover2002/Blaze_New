@@ -440,6 +440,10 @@ export const adminApi = {
   updateOfferSection: (id, payload) => axiosInstance.put(`/quick-commerce/admin/offer-sections/${id}`, payload),
   deleteOfferSection: (id) => axiosInstance.delete(`/quick-commerce/admin/offer-sections/${id}`),
   reorderOfferSections: (items) => axiosInstance.post('/quick-commerce/admin/offer-sections/reorder', items),
+  getSellerCouponRequests: () => axiosInstance.get('/quick-commerce/admin/seller-coupon-requests'),
+  updateSellerCouponRequestStatus: (id, status) =>
+    axiosInstance.patch(`/quick-commerce/admin/seller-coupon-requests/${id}/status`, { status }),
+
   getCoupons: (params) => axiosInstance.get('/quick-commerce/admin/coupons', { params }),
   createCoupon: (payload) => axiosInstance.post('/quick-commerce/admin/coupons', payload),
   updateCoupon: (id, payload) => axiosInstance.put(`/quick-commerce/admin/coupons/${id}`, payload),

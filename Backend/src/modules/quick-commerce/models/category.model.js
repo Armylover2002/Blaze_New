@@ -12,7 +12,10 @@ const quickCategorySchema = new mongoose.Schema({
   approvedAt: { type: Date, default: null },
   parentId: { type: mongoose.Schema.Types.ObjectId, ref: 'quick_category', default: null, index: true },
   iconId: { type: String, default: '' },
-  adminCommission: { type: Number, default: 0 },
+  /** Commission % — authoritative only on type: 'header' (Header Category = source of truth). */
+  adminCommission: { type: Number, default: 0, min: 0, max: 100 },
+  /** GST % — authoritative only on type: 'header'. Existing records default to 0. */
+  gst: { type: Number, default: 0, min: 0, max: 100 },
   handlingFees: { type: Number, default: 0 },
   headerColor: { type: String, default: '#0c831f' },
   accentColor: { type: String, default: '#0c831f' },

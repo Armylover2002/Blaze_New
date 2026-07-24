@@ -360,7 +360,7 @@ const PendingSellers = () => {
                         >
                           <HiOutlineEye className="h-5 w-5" />
                         </button>
-                        {canEdit && (
+                        {canEdit && seller.approvalStatus !== 'rejected' && (
                           <>
                             <button
                               type="button"
@@ -616,7 +616,7 @@ const PendingSellers = () => {
                         </div>
                       )}
 
-                      {canEdit && (
+                      {canEdit && viewingSeller.approvalStatus !== 'rejected' && (
                         <div className="flex flex-col gap-3 pt-4 md:flex-row">
                           <button type="button" disabled={isProcessing} onClick={() => openRejectModal(viewingSeller._id)} className="flex-1 rounded-2xl bg-slate-100 py-4 text-[11px] font-black uppercase tracking-[0.2em] text-slate-700 transition hover:bg-rose-50 hover:text-rose-600 disabled:opacity-60">
                             <span className="inline-flex items-center gap-2"><HiOutlineXCircle className="h-4 w-4" />Reject request</span>

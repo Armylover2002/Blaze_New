@@ -4,6 +4,12 @@ import { QuickCategory } from '../models/category.model.js';
 export const VALID_BUSINESS_TYPES = ['quick_commerce', 'pharmacy', 'food', 'default'];
 export const VALID_CATEGORY_TYPES = ['header', 'category', 'subcategory'];
 
+/** Configurable bounds for Header Category Commission (%) and GST (%). */
+export const COMMISSION_PERCENT_MIN = 0;
+export const COMMISSION_PERCENT_MAX = 100;
+export const GST_PERCENT_MIN = 0;
+export const GST_PERCENT_MAX = 100;
+
 const PARENT_TYPE_BY_CHILD = {
   category: 'header',
   subcategory: 'category',
@@ -109,13 +115,22 @@ export const validateCategoryParent = async (type, parentId, categoryId = null) 
   return { parentId, type: normalizedType };
 };
 
+const parseOptionalPercent = (value) => {
+  if (value === undefined || value === null || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : NaN;
+};
+
 export const validateCategoryFields = ({
   name,
   type,
   businessType,
   adminCommission,
+  commission,
+  gst,
   handlingFees,
   status,
+  requireHeaderRates = false,
 }) => {
   if (!name || !String(name).trim()) {
     return 'name is required';
@@ -130,9 +145,40 @@ export const validateCategoryFields = ({
     return 'Invalid business type';
   }
 
-  const commission = Number(adminCommission);
-  if (adminCommission !== undefined && adminCommission !== '' && (!Number.isFinite(commission) || commission < 0)) {
-    return 'adminCommission must be a non-negative number';
+  // Prefer explicit `commission` alias when provided; otherwise use adminCommission.
+  const commissionRaw =
+    commission !== undefined && commission !== null && commission !== ''
+      ? commission
+      : adminCommission;
+  const commissionValue = parseOptionalPercent(commissionRaw);
+  if (commissionRaw !== undefined && commissionRaw !== null && commissionRaw !== '') {
+    if (
+      !Number.isFinite(commissionValue) ||
+      commissionValue < COMMISSION_PERCENT_MIN ||
+      commissionValue > COMMISSION_PERCENT_MAX
+    ) {
+      return `Commission (%) must be a number between ${COMMISSION_PERCENT_MIN} and ${COMMISSION_PERCENT_MAX}`;
+    }
+  }
+
+  const gstValue = parseOptionalPercent(gst);
+  if (gst !== undefined && gst !== null && gst !== '') {
+    if (
+      !Number.isFinite(gstValue) ||
+      gstValue < GST_PERCENT_MIN ||
+      gstValue > GST_PERCENT_MAX
+    ) {
+      return `GST (%) must be a number between ${GST_PERCENT_MIN} and ${GST_PERCENT_MAX}`;
+    }
+  }
+
+  if (normalizedType === 'header' && requireHeaderRates) {
+    if (commissionRaw === undefined || commissionRaw === null || commissionRaw === '') {
+      return 'Commission (%) is required for header categories';
+    }
+    if (gst === undefined || gst === null || gst === '') {
+      return 'GST (%) is required for header categories';
+    }
   }
 
   const fees = Number(handlingFees);

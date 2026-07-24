@@ -3,6 +3,7 @@ import { getIO, rooms } from '../../../config/socket.js';
 import { logger } from '../../../utils/logger.js';
 import { QuickOrder } from '../models/order.model.js';
 import { SellerOrder } from '../seller/models/sellerOrder.model.js';
+import { getHeaderCommissionSnapshot } from '../admin/services/commission.service.js';
 import { isQuickOrderVisibleToSeller } from '../utils/sellerOrderVisibility.helpers.js';
 import { resolveQuickOrderCustomer, isGenericCustomerLabel } from '../utils/customer.helpers.js';
 
@@ -62,11 +63,18 @@ export const buildQuickSellerOrderDocsFromParent = async (parentOrder) => {
       const allocatedDeliveryFee = Number(
         ((deliveryFee * sellerSubtotal) / Math.max(subtotal, 1)).toFixed(2),
       );
+      const { commissionAmount } = await getHeaderCommissionSnapshot(
+        sellerItems.map((item) => ({
+          productId: item.itemId || item.productId,
+          price: item.price,
+          quantity: item.quantity,
+        })),
+      );
       const appliedCoupon = parentOrder?.pricing?.appliedCoupon;
       const sellerDiscount = appliedCoupon?.source === 'restaurant' ? Number(appliedCoupon.discount || 0) : 0;
       const sellerReceivable = Math.max(
         0,
-        Number((sellerSubtotal - sellerDiscount).toFixed(2)),
+        Number((sellerSubtotal - commissionAmount - sellerDiscount).toFixed(2)),
       );
 
       return {
@@ -88,6 +96,7 @@ export const buildQuickSellerOrderDocsFromParent = async (parentOrder) => {
         })),
         pricing: {
           subtotal: sellerSubtotal,
+          commission: commissionAmount,
           total: sellerSubtotal + allocatedDeliveryFee,
           receivable: sellerReceivable,
         },

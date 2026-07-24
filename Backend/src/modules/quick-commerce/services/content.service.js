@@ -14,7 +14,7 @@ import {
   startOfDay,
 } from '../utils/coupon.helpers.js';
 
-const CATEGORY_SELECT_FIELDS = '_id name slug image status isActive type parentId iconId headerColor accentColor handlingFees adminCommission approvalStatus sortOrder';
+const CATEGORY_SELECT_FIELDS = '_id name slug image status isActive type parentId iconId headerColor accentColor handlingFees adminCommission gst approvalStatus sortOrder';
 const PRODUCT_SELECT_FIELDS = '_id name slug mainImage image galleryImages categoryId subcategoryId headerId price salePrice mrp unit stock status isActive brand description tags variants pharmacyDetails deliveryTime rating badge approvalStatus sellerId';
 
 
@@ -153,17 +153,46 @@ export const setQuickHeroConfig = async (data) => {
     query.headerId = data.headerId ? String(data.headerId) : null;
   }
 
+  const payload = { ...data };
+  if (Array.isArray(data.categoryIds)) {
+    const uniqueIds = [...new Set(data.categoryIds.map((id) => String(id)).filter(Boolean))];
+    const validObjectIds = uniqueIds.filter((id) => mongoose.Types.ObjectId.isValid(id));
+    if (validObjectIds.length) {
+      const existing = await QuickCategory.find({
+        _id: { $in: validObjectIds },
+        type: 'category',
+        ...normalizeStatusQuery(),
+      })
+        .select('_id')
+        .lean();
+      const existingSet = new Set(existing.map((c) => String(c._id)));
+      payload.categoryIds = validObjectIds.filter((id) => existingSet.has(id));
+    } else {
+      payload.categoryIds = [];
+    }
+  }
+
   const result = await QuickHeroConfig.findOneAndUpdate(
     query,
-    { $set: data },
+    { $set: payload },
     { upsert: true, new: true }
   ).lean();
   clearContentCache();
   return result;
 };
 
-export const getQuickExperienceSections = async ({ pageType = 'home', headerId = null } = {}) => {
-  const cacheKey = `${pageType}:${headerId}`;
+export const pullCategoryIdFromHeroConfigs = async (categoryId) => {
+  if (!categoryId) return;
+  await QuickHeroConfig.updateMany(
+    { categoryIds: categoryId },
+    { $pull: { categoryIds: categoryId } }
+  );
+  clearContentCache();
+};
+
+export const getQuickExperienceSections = async ({ pageType = 'home', headerId = null, status = 'active' } = {}) => {
+  const includeInactive = status === 'all' || status === 'inactive';
+  const cacheKey = `${pageType}:${headerId}:${status || 'active'}`;
   if (cache.experience.data.has(cacheKey) && !isExpired(cache.experience.expiry)) {
     if (process.env.DEBUG_QUICK_EXPERIENCE === 'true') {
       const cached = cache.experience.data.get(cacheKey) || [];
@@ -183,10 +212,14 @@ export const getQuickExperienceSections = async ({ pageType = 'home', headerId =
   const collection = getCollection('quick_experience_sections');
   if (!collection) return [];
 
-  const query = {
-    pageType,
-    ...normalizeStatusQuery(),
-  };
+  const query = { pageType };
+  if (status === 'all') {
+    // Admin list: no status filter
+  } else if (status === 'inactive') {
+    query.status = 'inactive';
+  } else {
+    Object.assign(query, normalizeStatusQuery());
+  }
 
   if (pageType === 'header') {
     query.headerId = headerId ? String(headerId) : null;
@@ -199,6 +232,7 @@ export const getQuickExperienceSections = async ({ pageType = 'home', headerId =
       headerId,
       headerIdType: typeof headerId,
       mongoQuery: query,
+      includeInactive,
     });
   }
 
@@ -680,18 +714,23 @@ export const getQuickOffers = async () => {
 };
 
 export const getQuickOfferSections = async (query = {}) => {
-  if (cache.offerSections.data && !isExpired(cache.offerSections.expiry)) {
+  const status = query.status || 'active';
+  const useSharedCache = status === 'active';
+
+  if (useSharedCache && cache.offerSections.data && !isExpired(cache.offerSections.expiry)) {
     return cache.offerSections.data;
   }
 
   const collection = getCollection('quick_offer_sections');
   if (!collection) return [];
 
-  const filter = normalizeStatusQuery();
-  if (query.status && query.status !== 'all') {
-    // Override normalizeStatusQuery if explicit status is provided
-    filter.$and = filter.$and.filter(f => !f.status);
-    filter.$and.push({ status: query.status });
+  let filter = {};
+  if (status === 'all') {
+    filter = {};
+  } else if (status === 'inactive') {
+    filter = { status: 'inactive' };
+  } else {
+    filter = normalizeStatusQuery();
   }
 
   const sections = await collection
@@ -699,7 +738,13 @@ export const getQuickOfferSections = async (query = {}) => {
     .sort({ order: 1, createdAt: 1 })
     .toArray();
 
-  if (!sections.length) return [];
+  if (!sections.length) {
+    if (useSharedCache) {
+      cache.offerSections.data = [];
+      cache.offerSections.expiry = Date.now() + CACHE_TTL;
+    }
+    return [];
+  }
 
   const productIds = new Set();
   const categoryIds = new Set();
@@ -753,8 +798,10 @@ export const getQuickOfferSections = async (query = {}) => {
     };
   });
 
-  cache.offerSections.data = finalOfferSections;
-  cache.offerSections.expiry = Date.now() + CACHE_TTL;
+  if (useSharedCache) {
+    cache.offerSections.data = finalOfferSections;
+    cache.offerSections.expiry = Date.now() + CACHE_TTL;
+  }
   return finalOfferSections;
 };
 
@@ -771,6 +818,7 @@ export const createQuickOfferSection = async (data) => {
   };
 
   const result = await collection.insertOne(section);
+  clearContentCache();
   return { ...section, _id: result.insertedId };
 };
 
@@ -790,6 +838,7 @@ export const updateQuickOfferSection = async (id, data) => {
     { returnDocument: 'after' }
   );
 
+  clearContentCache();
   return result;
 };
 
@@ -798,6 +847,7 @@ export const deleteQuickOfferSection = async (id) => {
   if (!collection) throw new Error('Collection not found');
 
   await collection.deleteOne({ _id: toId(id) });
+  clearContentCache();
   return true;
 };
 
@@ -815,6 +865,7 @@ export const reorderQuickOfferSections = async (items = []) => {
   if (ops.length > 0) {
     await collection.bulkWrite(ops);
   }
+  clearContentCache();
   return true;
 };
 

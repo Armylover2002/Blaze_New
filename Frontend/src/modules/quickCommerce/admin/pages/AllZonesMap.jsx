@@ -15,13 +15,13 @@ export default function AllZonesMap() {
   const mapInstanceRef = useRef(null)
   const zonesPolygonsRef = useRef([])
   const infoWindowsRef = useRef([])
-  const quick commerceMarkersRef = useRef([])
+  const quickCommerceMarkersRef = useRef([])
   
   const [googleMapsApiKey, setGoogleMapsApiKey] = useState("")
   const [mapLoading, setMapLoading] = useState(true)
   const [mapError, setMapError] = useState("")
   const [zones, setZones] = useState([])
-  const [quick commerces, setquick commerces] = useState([])
+  const [quickCommerces, setQuickCommerces] = useState([])
   const [loading, setLoading] = useState(true)
   const [locationSearch, setLocationSearch] = useState("")
   const autocompleteInputRef = useRef(null)
@@ -29,7 +29,7 @@ export default function AllZonesMap() {
 
   useEffect(() => {
     fetchZones()
-    fetchquick commerces()
+    fetchQuickCommerces()
     loadGoogleMaps()
   }, [])
 
@@ -59,14 +59,14 @@ export default function AllZonesMap() {
   // Draw zones and quick commerce markers when map and data are ready
   useEffect(() => {
     if (!mapLoading && mapInstanceRef.current && window.google) {
-      if (zones.length > 0 && quick commerces.length > 0) {
+      if (zones.length > 0 && quickCommerces.length > 0) {
         drawAllZonesOnMap(window.google, mapInstanceRef.current)
       }
-      if (quick commerces.length > 0) {
-        drawquick commerceMarkers(window.google, mapInstanceRef.current)
+      if (quickCommerces.length > 0) {
+        drawQuickCommerceMarkers(window.google, mapInstanceRef.current)
       }
     }
-  }, [zones, mapLoading, quick commerces])
+  }, [zones, mapLoading, quickCommerces])
 
   const fetchZones = async () => {
     try {
@@ -83,14 +83,19 @@ export default function AllZonesMap() {
     }
   }
 
-  const fetchquick commerces = async () => {
+  const fetchQuickCommerces = async () => {
     try {
-      const response = await adminApi.getquick commerces({ limit: 1000 })
-      if (response.data?.success && response.data.data?.quick commerces) {
-        setquick commerces(response.data.data.quick commerces)
-      }
+      const response = await adminApi.getSellers({ limit: 1000 })
+      const sellers =
+        response.data?.data?.sellers ||
+        response.data?.data?.items ||
+        response.data?.sellers ||
+        response.data?.result ||
+        []
+      setQuickCommerces(Array.isArray(sellers) ? sellers : [])
     } catch (error) {
       debugError("Error fetching quick commerces:", error)
+      setQuickCommerces([])
     }
   }
 
@@ -285,28 +290,28 @@ export default function AllZonesMap() {
   }
 
   // Draw quick commerce markers on the map
-  const drawquick commerceMarkers = (google, map) => {
-    if (!quick commerces || quick commerces.length === 0) return
+  const drawQuickCommerceMarkers = (google, map) => {
+    if (!quickCommerces || quickCommerces.length === 0) return
 
     // Clear previous markers
-    quick commerceMarkersRef.current.forEach(marker => {
+    quickCommerceMarkersRef.current.forEach(marker => {
       if (marker) marker.setMap(null)
     })
-    quick commerceMarkersRef.current = []
+    quickCommerceMarkersRef.current = []
 
-    quick commerces.forEach(quick commerce => {
-      if (!quick commerce.location) return
+    quickCommerces.forEach((quickCommerce) => {
+      if (!quickCommerce.location) return
 
       // Get coordinates from quick commerce location
       let lat = null
       let lng = null
 
-      if (quick commerce.location.coordinates && Array.isArray(quick commerce.location.coordinates) && quick commerce.location.coordinates.length >= 2) {
-        lng = quick commerce.location.coordinates[0]
-        lat = quick commerce.location.coordinates[1]
-      } else if (quick commerce.location.latitude && quick commerce.location.longitude) {
-        lat = parseFloat(quick commerce.location.latitude)
-        lng = parseFloat(quick commerce.location.longitude)
+      if (quickCommerce.location.coordinates && Array.isArray(quickCommerce.location.coordinates) && quickCommerce.location.coordinates.length >= 2) {
+        lng = quickCommerce.location.coordinates[0]
+        lat = quickCommerce.location.coordinates[1]
+      } else if (quickCommerce.location.latitude && quickCommerce.location.longitude) {
+        lat = parseFloat(quickCommerce.location.latitude)
+        lng = parseFloat(quickCommerce.location.longitude)
       }
 
       // Skip if no valid coordinates
@@ -320,7 +325,7 @@ export default function AllZonesMap() {
       }
 
       // Create custom icon for quick commerce
-      const quick commerceIcon = {
+      const quickCommerceIcon = {
         path: google.maps.SymbolPath.CIRCLE,
         scale: 8,
         fillColor: "#ef4444", // Red color
@@ -333,8 +338,8 @@ export default function AllZonesMap() {
       const marker = new google.maps.Marker({
         position: { lat, lng },
         map: map,
-        icon: quick commerceIcon,
-        title: quick commerce.name || "quick commerce",
+        icon: quickCommerceIcon,
+        title: quickCommerce.name || quickCommerce.shopName || "quick commerce",
         zIndex: 1000, // Show above zones
       })
 
@@ -343,14 +348,14 @@ export default function AllZonesMap() {
         content: `
           <div style="padding: 12px; min-width: 200px;">
             <h3 style="margin: 0 0 8px 0; font-size: 16px; font-weight: 600; color: #1e293b;">
-              ${quick commerce.name || 'Unnamed quick commerce'}
+              ${quickCommerce.name || quickCommerce.shopName || 'Unnamed quick commerce'}
             </h3>
             <div style="font-size: 13px; color: #64748b; line-height: 1.6;">
-              ${quick commerce.location?.formattedAddress || quick commerce.location?.address || quick commerce.location?.area || 'Location not specified'}
+              ${quickCommerce.location?.formattedAddress || quickCommerce.location?.address || quickCommerce.location?.area || 'Location not specified'}
             </div>
-            ${quick commerce.ownerName ? `
+            ${quickCommerce.ownerName ? `
               <div style="margin-top: 8px; font-size: 12px; color: #94a3b8;">
-                <strong>Owner:</strong> ${quick commerce.ownerName}
+                <strong>Owner:</strong> ${quickCommerce.ownerName}
               </div>
             ` : ''}
           </div>
@@ -368,7 +373,7 @@ export default function AllZonesMap() {
         infoWindowsRef.current.push(infoWindow)
       })
 
-      quick commerceMarkersRef.current.push(marker)
+      quickCommerceMarkersRef.current.push(marker)
     })
   }
 
@@ -470,9 +475,9 @@ export default function AllZonesMap() {
                     Click on any <span className="font-semibold text-blue-600">zone</span> on the map to view details. Total zones: <strong>{zones.length}</strong>
                   </p>
                 )}
-                {quick commerces.length > 0 && (
+                {quickCommerces.length > 0 && (
                   <p>
-                    Click on any <span className="font-semibold text-red-600">red marker</span> to view quick commerce name and details. Total quick commerces: <strong>{quick commerces.length}</strong>
+                    Click on any <span className="font-semibold text-red-600">red marker</span> to view quick commerce name and details. Total quick commerces: <strong>{quickCommerces.length}</strong>
                   </p>
                 )}
               </div>
