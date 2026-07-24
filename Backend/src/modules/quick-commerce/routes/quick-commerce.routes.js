@@ -113,15 +113,6 @@ import {
   settleSellerCODVerificationController,
 } from "../controllers/admin.controller.js";
 import {
-  getSellerCommissionBootstrap,
-  getSellerCommissions,
-  getSellerCommissionById,
-  createSellerCommission,
-  updateSellerCommission,
-  deleteSellerCommission,
-  toggleSellerCommissionStatus,
-} from "../controllers/adminCommission.controller.js";
-import {
   createOrUpdateFeeSettings,
   getFeeSettings,
   getPublicBillingSettings,
@@ -480,39 +471,6 @@ router.delete(
   notificationBroadcastController.deleteBroadcastNotificationController
 );
 
-// Seller Commission Management
-router.get(
-  "/admin/seller-commissions/bootstrap",
-  ...adminOrEmployee,
-  checkPermission("quick::core_management::sellers::commission", "view"),
-  getSellerCommissionBootstrap,
-);
-router.get("/admin/seller-commissions", ...adminOrEmployee, checkPermission("quick::core_management::sellers::commission", "view"), getSellerCommissions);
-router.get(
-  "/admin/seller-commissions/:id",
-  ...adminOrEmployee,
-  checkPermission("quick::core_management::sellers::commission", "view"),
-  getSellerCommissionById,
-);
-router.post("/admin/seller-commissions", ...adminOrEmployee, checkPermission("quick::core_management::sellers::commission", "create"), createSellerCommission);
-router.put(
-  "/admin/seller-commissions/:id",
-  ...adminOrEmployee,
-  checkPermission("quick::core_management::sellers::commission", "edit"),
-  updateSellerCommission,
-);
-router.delete(
-  "/admin/seller-commissions/:id",
-  ...adminOrEmployee,
-  checkPermission("quick::core_management::sellers::commission", "delete"),
-  deleteSellerCommission,
-);
-router.patch(
-  "/admin/seller-commissions/:id/toggle-status",
-  ...adminOrEmployee,
-  checkPermission("quick::core_management::sellers::commission", "edit"),
-  toggleSellerCommissionStatus,
-);
 router.get("/admin/fee-settings", ...adminOrEmployee, checkPermission("quick::core_management::billing", "view"), getFeeSettings);
 router.put("/admin/fee-settings", ...adminOrEmployee, checkPermission("quick::core_management::billing", "edit"), createOrUpdateFeeSettings);
 

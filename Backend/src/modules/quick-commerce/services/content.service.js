@@ -14,7 +14,7 @@ import {
   startOfDay,
 } from '../utils/coupon.helpers.js';
 
-const CATEGORY_SELECT_FIELDS = '_id name slug image status isActive type parentId iconId headerColor accentColor handlingFees adminCommission approvalStatus sortOrder';
+const CATEGORY_SELECT_FIELDS = '_id name slug image status isActive type parentId iconId headerColor accentColor handlingFees adminCommission gst approvalStatus sortOrder';
 const PRODUCT_SELECT_FIELDS = '_id name slug mainImage image galleryImages categoryId subcategoryId headerId price salePrice mrp unit stock status isActive brand description tags variants pharmacyDetails deliveryTime rating badge approvalStatus sellerId';
 
 

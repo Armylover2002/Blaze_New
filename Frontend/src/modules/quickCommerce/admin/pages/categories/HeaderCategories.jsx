@@ -123,6 +123,7 @@ const HeaderCategories = () => {
     parentId: null,
     iconId: "",
     adminCommission: 0,
+    gst: 0,
     handlingFees: 0,
     headerColor: "#FF1E1E",
     businessType: "quick_commerce",
@@ -251,9 +252,28 @@ const HeaderCategories = () => {
       return;
     }
 
+    const commission = Number(formData.adminCommission);
+    const gst = Number(formData.gst);
+    if (!Number.isFinite(commission) || commission < 0 || commission > 100) {
+      toast.error("Commission (%) must be between 0 and 100");
+      return;
+    }
+    if (!Number.isFinite(gst) || gst < 0 || gst > 100) {
+      toast.error("GST (%) must be between 0 and 100");
+      return;
+    }
+
     setIsSaving(true);
     try {
-      const data = buildCategoryFormData(formData, "header", imageFile);
+      const data = buildCategoryFormData(
+        {
+          ...formData,
+          adminCommission: commission,
+          gst,
+        },
+        "header",
+        imageFile,
+      );
 
       if (editingItem) {
         await adminApi.updateCategory(editingItem._id || editingItem.id, data);
@@ -301,6 +321,7 @@ const HeaderCategories = () => {
       parentId: null,
       iconId: "",
       adminCommission: 0,
+      gst: 0,
       handlingFees: 0,
       headerColor: "#FF1E1E",
       businessType: "quick_commerce",
@@ -320,7 +341,8 @@ const HeaderCategories = () => {
       type: "header",
       parentId: null,
       iconId: item.iconId || "",
-      adminCommission: item.adminCommission || 0,
+      adminCommission: item.adminCommission ?? item.commission ?? 0,
+      gst: item.gst ?? 0,
       handlingFees: item.handlingFees || 0,
       headerColor: item.headerColor || "#FF1E1E",
       businessType: item.businessType || "quick_commerce",
@@ -399,6 +421,12 @@ const HeaderCategories = () => {
                   Status
                 </th>
                 <th className="text-left py-3 px-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  Commission %
+                </th>
+                <th className="text-left py-3 px-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  GST %
+                </th>
+                <th className="text-left py-3 px-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">
                   Type
                 </th>
                 <th className="text-right py-3 px-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">
@@ -409,13 +437,13 @@ const HeaderCategories = () => {
             <tbody className="divide-y divide-gray-100">
               {isLoading ? (
                 <tr>
-                  <td colSpan="6" className="text-center py-8 text-gray-500">
+                  <td colSpan="9" className="text-center py-8 text-gray-500">
                     Loading...
                   </td>
                 </tr>
               ) : categories.length === 0 ? (
                 <tr>
-                  <td colSpan="6" className="text-center py-8 text-gray-500">
+                  <td colSpan="9" className="text-center py-8 text-gray-500">
                     No header categories found
                   </td>
                 </tr>
@@ -470,6 +498,12 @@ const HeaderCategories = () => {
                         }>
                         {cat.status}
                       </Badge>
+                    </td>
+                    <td className="py-3 px-4 text-gray-700 text-sm">
+                      {Number(cat.adminCommission ?? cat.commission ?? 0)}%
+                    </td>
+                    <td className="py-3 px-4 text-gray-700 text-sm">
+                      {Number(cat.gst ?? 0)}%
                     </td>
                     <td className="py-3 px-4 text-gray-500 text-sm">
                       {cat.businessType === 'pharmacy' ? 'Pharmacy' : cat.businessType === 'food' ? 'Food' : 'Quick Commerce'}
@@ -702,6 +736,51 @@ const HeaderCategories = () => {
                   </select>
                 </div>
 
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-gray-700">
+                      Commission (%)
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      step="0.01"
+                      value={formData.adminCommission}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          adminCommission: e.target.value,
+                        })
+                      }
+                      className="w-full px-3 py-2 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                      placeholder="e.g., 10"
+                    />
+                    <p className="text-xs text-gray-400">0 – 100</p>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-gray-700">
+                      GST (%)
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      step="0.01"
+                      value={formData.gst}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          gst: e.target.value,
+                        })
+                      }
+                      className="w-full px-3 py-2 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                      placeholder="e.g., 18"
+                    />
+                    <p className="text-xs text-gray-400">0 – 100</p>
+                  </div>
+                </div>
+
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-gray-700">
                     Business Type
@@ -714,7 +793,6 @@ const HeaderCategories = () => {
                     className="w-full px-3 py-2 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
                     <option value="quick_commerce">Quick Commerce (Products)</option>
                     <option value="pharmacy">Pharmacy (Medicines)</option>
-                    <option value="food">Food Delivery</option>
                   </select>
                 </div>
               </div>

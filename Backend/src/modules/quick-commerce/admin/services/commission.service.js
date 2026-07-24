@@ -1,71 +1,214 @@
-import { QuickSellerCommission } from '../models/sellerCommission.model.js';
+import mongoose from 'mongoose';
+import { QuickCategory } from '../../models/category.model.js';
+import { QuickProduct } from '../../models/product.model.js';
 
-const SELLER_COMMISSION_CACHE_MS = 60 * 1000;
-let sellerCommissionRulesCache = null;
-let sellerCommissionRulesLoadedAt = 0;
+/** Configurable percent bounds for Header Category Commission & GST. */
+export const RATE_PERCENT_MIN = 0;
+export const RATE_PERCENT_MAX = 100;
 
-async function getActiveSellerCommissionRules() {
-  const now = Date.now();
-  if (
-    sellerCommissionRulesCache &&
-    now - sellerCommissionRulesLoadedAt < SELLER_COMMISSION_CACHE_MS
-  ) {
-    return sellerCommissionRulesCache;
-  }
-
-  const list = await QuickSellerCommission.find({
-    status: { $ne: false },
-  }).lean();
-  sellerCommissionRulesCache = list || [];
-  sellerCommissionRulesLoadedAt = now;
-  return sellerCommissionRulesCache;
+export function normalizePercent(value, fallback = 0) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(RATE_PERCENT_MIN, Math.min(RATE_PERCENT_MAX, n));
 }
 
-export function computeSellerCommissionAmount(baseAmount, rule) {
+export function computePercentAmount(baseAmount, ratePercent) {
   const safeBase = Math.max(0, Number(baseAmount) || 0);
-  if (!Number.isFinite(safeBase) || safeBase < 0) return 0;
+  const rate = normalizePercent(ratePercent, 0);
+  let amount = Math.round(safeBase * (rate / 100) * 100) / 100;
+  return Math.max(0, Math.min(amount, safeBase));
+}
 
-  const commissionType = rule?.defaultCommission?.type || 'percentage';
-  const commissionValue = Math.max(
+const normalizeId = (value) => {
+  if (!value) return '';
+  if (typeof value === 'object' && value._id) return String(value._id);
+  const id = String(value).trim();
+  return mongoose.Types.ObjectId.isValid(id) ? id : '';
+};
+
+const collectCategoryIdsFromProducts = (products = []) => {
+  const ids = new Set();
+  for (const product of products) {
+    [product?.headerId, product?.categoryId, product?.subcategoryId].forEach((value) => {
+      const id = normalizeId(value);
+      if (id) ids.add(id);
+    });
+  }
+  return [...ids];
+};
+
+/**
+ * Load categories + ancestors needed to resolve Header Category rates.
+ */
+async function loadCategoryAncestryMap(seedIds = []) {
+  const categoryMap = new Map();
+  let pending = seedIds.filter(Boolean);
+
+  while (pending.length) {
+    const missing = pending.filter((id) => !categoryMap.has(id));
+    if (!missing.length) break;
+
+    const categories = await QuickCategory.find({ _id: { $in: missing } })
+      .select('_id type parentId adminCommission gst handlingFees')
+      .lean();
+
+    const nextParents = [];
+    for (const category of categories) {
+      categoryMap.set(String(category._id), category);
+      const parentId = normalizeId(category.parentId);
+      if (parentId && !categoryMap.has(parentId)) {
+        nextParents.push(parentId);
+      }
+    }
+    pending = nextParents;
+  }
+
+  return categoryMap;
+}
+
+/**
+ * Walk category ancestry until a header is found.
+ * Commission & GST are only authoritative on header categories.
+ */
+export function resolveHeaderFromCategoryMap(startId, categoryMap) {
+  let currentId = normalizeId(startId);
+  const visited = new Set();
+
+  while (currentId && !visited.has(currentId)) {
+    visited.add(currentId);
+    const category = categoryMap.get(currentId);
+    if (!category) break;
+    if (String(category.type || '').toLowerCase() === 'header') {
+      return category;
+    }
+    currentId = normalizeId(category.parentId);
+  }
+
+  return null;
+}
+
+export function getProductHeaderRates(product, categoryMap) {
+  const header =
+    resolveHeaderFromCategoryMap(product?.headerId, categoryMap) ||
+    resolveHeaderFromCategoryMap(product?.categoryId, categoryMap) ||
+    resolveHeaderFromCategoryMap(product?.subcategoryId, categoryMap);
+
+  return {
+    headerId: header ? String(header._id) : null,
+    commission: normalizePercent(header?.adminCommission, 0),
+    gst: normalizePercent(header?.gst, 0),
+    handlingFees: Math.max(0, Number(header?.handlingFees || 0) || 0),
+  };
+}
+
+/**
+ * Resolve Header Category commission/GST rates for a list of products.
+ * @returns {Map<string, { headerId, commission, gst, handlingFees }>}
+ */
+export async function resolveHeaderRatesByProduct(products = []) {
+  const ids = collectCategoryIdsFromProducts(products);
+  const categoryMap = await loadCategoryAncestryMap(ids);
+  const byProduct = new Map();
+
+  for (const product of products) {
+    const productId = normalizeId(product?._id || product?.id || product?.productId);
+    if (!productId) continue;
+    byProduct.set(productId, getProductHeaderRates(product, categoryMap));
+  }
+
+  return byProduct;
+}
+
+async function ensureProductDocs(lineItems = [], products = []) {
+  let productDocs = Array.isArray(products) ? products.filter(Boolean) : [];
+  if (productDocs.length) return productDocs;
+
+  const productIds = [
+    ...new Set(
+      (Array.isArray(lineItems) ? lineItems : [])
+        .map((item) => normalizeId(item?.productId || item?.itemId || item?._id))
+        .filter(Boolean),
+    ),
+  ];
+  if (!productIds.length) return [];
+
+  return QuickProduct.find({ _id: { $in: productIds } })
+    .select('_id headerId categoryId subcategoryId')
+    .lean();
+}
+
+/**
+ * Line-item GST from Header Category GST % (single source of truth).
+ */
+export async function calculateHeaderGstAmount({
+  products = [],
+  items = [],
+  subtotal = 0,
+} = {}) {
+  const productDocs = await ensureProductDocs(items, products);
+  const rateByProduct = await resolveHeaderRatesByProduct(productDocs);
+
+  if (Array.isArray(items) && items.length > 0) {
+    const gst = items.reduce((sum, item) => {
+      const productId = normalizeId(item?.productId || item?.itemId || item?._id);
+      const rates = rateByProduct.get(productId) || { gst: 0 };
+      const lineTotal =
+        Number(item?.lineTotal) ||
+        Math.max(0, Number(item?.price || 0) * Number(item?.quantity || 0));
+      return sum + lineTotal * (rates.gst / 100);
+    }, 0);
+    return Math.round(gst);
+  }
+
+  // Fallback when only products + subtotal are available: use shared header GST if uniform.
+  const rates = [...rateByProduct.values()];
+  if (!rates.length) return 0;
+  const uniqueGst = [...new Set(rates.map((r) => r.gst))];
+  if (uniqueGst.length === 1) {
+    return Math.round(Math.max(0, Number(subtotal) || 0) * (uniqueGst[0] / 100));
+  }
+  return 0;
+}
+
+/**
+ * Line-item commission from Header Category Commission % (single source of truth).
+ */
+export async function getHeaderCommissionSnapshot(lineItems = [], products = []) {
+  const safeItems = Array.isArray(lineItems) ? lineItems : [];
+  const baseAmount = safeItems.reduce(
+    (sum, item) =>
+      sum +
+      (Number(item?.lineTotal) ||
+        Math.max(0, Number(item?.price || 0) * Number(item?.quantity || 0))),
     0,
-    Number(rule?.defaultCommission?.value ?? 0) || 0
   );
 
+  const productDocs = await ensureProductDocs(safeItems, products);
+  const rateByProduct = await resolveHeaderRatesByProduct(productDocs);
+
   let commissionAmount = 0;
-  if (commissionType === 'percentage') {
-    commissionAmount = safeBase * (commissionValue / 100);
-  } else if (commissionType === 'amount') {
-    commissionAmount = commissionValue;
+  let weightedRateSum = 0;
+
+  for (const item of safeItems) {
+    const productId = normalizeId(item?.productId || item?.itemId || item?._id);
+    const rates = rateByProduct.get(productId) || { commission: 0 };
+    const lineTotal =
+      Number(item?.lineTotal) ||
+      Math.max(0, Number(item?.price || 0) * Number(item?.quantity || 0));
+    commissionAmount += computePercentAmount(lineTotal, rates.commission);
+    weightedRateSum += lineTotal * rates.commission;
   }
 
-  // Round to 2 decimals and clamp to [0, base]
-  commissionAmount = Math.round((commissionAmount || 0) * 100) / 100;
-  commissionAmount = Math.max(0, Math.min(commissionAmount, safeBase));
+  commissionAmount = Math.round(commissionAmount * 100) / 100;
+  commissionAmount = Math.max(0, Math.min(commissionAmount, baseAmount));
 
-  return { commissionAmount, commissionType, commissionValue, baseAmount: safeBase };
-}
+  const commissionValue =
+    baseAmount > 0 ? Math.round((weightedRateSum / baseAmount) * 100) / 100 : 0;
 
-export async function getSellerCommissionSnapshot(sellerId, baseAmount) {
-  if (!sellerId) {
-    return {
-      commissionAmount: 0,
-      commissionType: 'percentage',
-      commissionValue: 0,
-      baseAmount,
-    };
-  }
-
-  const rules = await getActiveSellerCommissionRules();
-  const rule = rules.find((r) => String(r.sellerId) === String(sellerId)) || null;
-
-  if (!rule) {
-    return {
-      commissionAmount: 0,
-      commissionType: 'percentage',
-      commissionValue: 0,
-      baseAmount,
-    };
-  }
-
-  return computeSellerCommissionAmount(baseAmount, rule);
+  return {
+    commissionAmount,
+    commissionType: 'percentage',
+    commissionValue,
+    baseAmount,
+  };
 }

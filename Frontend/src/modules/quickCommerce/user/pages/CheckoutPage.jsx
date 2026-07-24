@@ -81,7 +81,7 @@ const DEFAULT_RECIPIENT_DATA = {
 
 const DEFAULT_QUICK_BILLING_SETTINGS = {
   deliveryFee: 25, deliveryFeeRanges: [], deliveryCommissionRules: [],
-  freeDeliveryThreshold: 0, platformFee: 0, gstRate: 0,
+  freeDeliveryThreshold: 0, platformFee: 0,
 };
 
 // Static — never changes, no reason to be inside component
@@ -119,10 +119,24 @@ const calculateFrontendRiderEarning = (distanceKm, rules = []) => {
   return Math.round(earning);
 };
 
+const resolveCategoryId = (rawId) =>
+  rawId && typeof rawId === "object" && rawId._id
+    ? String(rawId._id)
+    : String(rawId || "").trim();
+
+const resolveInheritedRate = (item, rateMap = {}) => {
+  const candidateIds = [item?.headerId, item?.categoryId, item?.subcategoryId];
+  for (const rawId of candidateIds) {
+    const id = resolveCategoryId(rawId);
+    if (id && rateMap[id] != null) return Number(rateMap[id] || 0);
+  }
+  return 0;
+};
+
 const calculateQuickCheckoutPricing = ({
   subtotal = 0, discountAmount = 0, selectedTip = 0,
   feeSettings = DEFAULT_QUICK_BILLING_SETTINGS, cartItems = [],
-  categoryFeeMap = {}, distanceKm = 0,
+  categoryFeeMap = {}, categoryGstMap = {}, distanceKm = 0,
 }) => {
   const safeSubtotal = Number(subtotal || 0);
   const safeDiscount = Math.max(0, Number(discountAmount || 0));
@@ -138,24 +152,19 @@ const calculateQuickCheckoutPricing = ({
     deliveryFeeCharged = Number(feeSettings?.deliveryFee || 0);
   }
 
-  const handlingFeeCharged = cartItems.reduce((maxFee, item) => {
-    const candidateIds = [item?.headerId, item?.categoryId, item?.subcategoryId];
-    const itemFee = candidateIds.reduce((currentMax, rawId) => {
-      const normalizedId =
-        rawId && typeof rawId === "object" && rawId._id
-          ? String(rawId._id)
-          : String(rawId || "").trim();
-      return Math.max(currentMax, Number(categoryFeeMap[normalizedId] || 0));
-    }, 0);
-    return Math.max(maxFee, itemFee);
-  }, 0);
+  const handlingFeeCharged = cartItems.reduce(
+    (maxFee, item) => Math.max(maxFee, resolveInheritedRate(item, categoryFeeMap)),
+    0,
+  );
 
   const platformFeeCharged = Number(feeSettings?.platformFee || 0);
-  const gstRate = Number(feeSettings?.gstRate || 0);
-  const gstAmount =
-    Number.isFinite(gstRate) && gstRate > 0
-      ? Math.round(safeSubtotal * (gstRate / 100))
-      : 0;
+  const gstAmount = Math.round(
+    cartItems.reduce((sum, item) => {
+      const lineTotal = Number(item?.price || 0) * Number(item?.quantity || 0);
+      const gstRate = resolveInheritedRate(item, categoryGstMap);
+      return sum + lineTotal * (gstRate / 100);
+    }, 0),
+  );
 
   return {
     deliveryFeeCharged, handlingFeeCharged, platformFeeCharged, gstAmount,
@@ -418,6 +427,7 @@ const CheckoutPage = () => {
   const [distanceKm, setDistanceKm] = useState(0);
   const [distanceEstimated, setDistanceEstimated] = useState(false);
   const [categoryFeeMap, setCategoryFeeMap] = useState({});
+  const [categoryGstMap, setCategoryGstMap] = useState({});
   const postOrderNavigateRef = useRef(null);
   const [currentAddress, setCurrentAddress] = useState(storedCheckoutState.currentAddress || DEFAULT_CURRENT_ADDRESS);
   const [isEditAddressOpen, setIsEditAddressOpen] = useState(false);
@@ -1051,23 +1061,38 @@ const CheckoutPage = () => {
           customerApi.getCategories({ tree: true }),
         ]);
         const fetchedSettings = response?.data?.data?.feeSettings || response?.data?.result || null;
-        if (!mounted || !fetchedSettings) return;
-        setQuickBillingSettings((prev) => ({
-          ...prev, ...fetchedSettings,
-          deliveryFeeRanges: Array.isArray(fetchedSettings.deliveryFeeRanges) ? fetchedSettings.deliveryFeeRanges : prev.deliveryFeeRanges,
-          deliveryCommissionRules: Array.isArray(fetchedSettings.deliveryCommissionRules) ? fetchedSettings.deliveryCommissionRules : prev.deliveryCommissionRules,
-        }));
+        if (!mounted) return;
+        if (fetchedSettings) {
+          setQuickBillingSettings((prev) => ({
+            ...prev, ...fetchedSettings,
+            deliveryFeeRanges: Array.isArray(fetchedSettings.deliveryFeeRanges) ? fetchedSettings.deliveryFeeRanges : prev.deliveryFeeRanges,
+            deliveryCommissionRules: Array.isArray(fetchedSettings.deliveryCommissionRules) ? fetchedSettings.deliveryCommissionRules : prev.deliveryCommissionRules,
+          }));
+        }
         const results = categoriesResponse?.data?.results || categoriesResponse?.data?.result || [];
         const nextFeeMap = {};
-        const visit = (items = []) => {
+        const nextGstMap = {};
+        const visit = (items = [], inheritedGst = 0) => {
           items.forEach((item) => {
             const id = String(item?._id || item?.id || "").trim();
-            if (id) nextFeeMap[id] = Number(item?.handlingFees || 0);
-            if (Array.isArray(item?.children) && item.children.length > 0) visit(item.children);
+            const nodeGst =
+              String(item?.type || "").toLowerCase() === "header"
+                ? Number(item?.gst || 0)
+                : inheritedGst;
+            if (id) {
+              nextFeeMap[id] = Number(item?.handlingFees || 0);
+              nextGstMap[id] = nodeGst;
+            }
+            if (Array.isArray(item?.children) && item.children.length > 0) {
+              visit(item.children, nodeGst);
+            }
           });
         };
         if (Array.isArray(results)) visit(results);
-        if (mounted) setCategoryFeeMap(nextFeeMap);
+        if (mounted) {
+          setCategoryFeeMap(nextFeeMap);
+          setCategoryGstMap(nextGstMap);
+        }
       } catch (error) {
         console.error("Failed to load quick billing settings:", error);
       }
@@ -1205,10 +1230,19 @@ const CheckoutPage = () => {
   useEffect(() => {
     if (cart.length === 0) { setPricingPreview(null); return; }
     setIsPreviewLoading(true);
-    const result = calculateQuickCheckoutPricing({ subtotal: cartTotal, discountAmount, selectedTip: 0, feeSettings: quickBillingSettings, cartItems: cart, categoryFeeMap, distanceKm });
+    const result = calculateQuickCheckoutPricing({
+      subtotal: cartTotal,
+      discountAmount,
+      selectedTip: 0,
+      feeSettings: quickBillingSettings,
+      cartItems: cart,
+      categoryFeeMap,
+      categoryGstMap,
+      distanceKm,
+    });
     setPricingPreview({ subtotal: cartTotal, ...result });
     setIsPreviewLoading(false);
-  }, [cart, cartTotal, categoryFeeMap, discountAmount, quickBillingSettings, distanceKm]);
+  }, [cart, cartTotal, categoryFeeMap, categoryGstMap, discountAmount, quickBillingSettings, distanceKm]);
 
   useEffect(() => {
     if (!orderId || !showSuccess) return undefined;

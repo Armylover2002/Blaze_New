@@ -7,7 +7,7 @@ import { QuickCart } from '../models/cart.model.js';
 import { QuickProduct } from '../models/product.model.js';
 import { Seller } from '../seller/models/seller.model.js';
 import { SellerOrder } from '../seller/models/sellerOrder.model.js';
-import { getSellerCommissionSnapshot } from '../admin/services/commission.service.js';
+import { getHeaderCommissionSnapshot } from '../admin/services/commission.service.js';
 import {
   calculateQuickPricing,
   getRiderEarning as getQuickRiderEarning,
@@ -571,6 +571,11 @@ export const placeOrder = async (req, res) => {
       discount,
       products,
       distanceKm,
+      items: items.map((item) => ({
+        productId: item.productId,
+        price: item.price,
+        quantity: item.quantity,
+      })),
     });
 
     // Mongoose pricingSchema only has 'tax', not 'gst'. Map gst to tax so it gets saved.
@@ -803,8 +808,15 @@ export const placeOrder = async (req, res) => {
               ((deliveryFee * sellerSubtotal) / Math.max(subtotal, 1)).toFixed(2),
             );
 
-            // Calculate commission for this specific seller
-            const { commissionAmount } = await getSellerCommissionSnapshot(sellerId, sellerSubtotal);
+            // Commission from Header Category rates on this seller's line items
+            const { commissionAmount } = await getHeaderCommissionSnapshot(
+              sellerItems.map((item) => ({
+                productId: item.productId,
+                price: item.price,
+                quantity: item.quantity,
+              })),
+              products,
+            );
             const sellerDiscount = couponSource === 'restaurant' ? discount : 0;
             const sellerReceivable = Math.max(
               0,

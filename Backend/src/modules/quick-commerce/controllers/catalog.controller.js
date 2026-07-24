@@ -78,6 +78,8 @@ const mapCategory = (category) => ({
   headerColor: category.headerColor || category.accentColor,
   handlingFees: Number(category.handlingFees || 0),
   adminCommission: Number(category.adminCommission || 0),
+  commission: Number(category.adminCommission || 0),
+  gst: Number(category.gst || 0),
   color: category.accentColor,
   approvalStatus: category.approvalStatus || 'approved',
 });

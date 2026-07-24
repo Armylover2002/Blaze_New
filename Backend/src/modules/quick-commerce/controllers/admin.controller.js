@@ -65,6 +65,8 @@ const toCategory = (category) => ({
   parentId: category.parentId || null,
   iconId: category.iconId || '',
   adminCommission: Number(category.adminCommission || 0),
+  commission: Number(category.adminCommission || 0),
+  gst: Number(category.gst || 0),
   handlingFees: Number(category.handlingFees || 0),
   headerColor: category.headerColor || category.accentColor,
   sortOrder: category.sortOrder,
@@ -472,6 +474,8 @@ export const createCategory = async (req, res) => {
       parentId,
       iconId,
       adminCommission,
+      commission,
+      gst,
       handlingFees,
       headerColor,
       businessType,
@@ -482,8 +486,11 @@ export const createCategory = async (req, res) => {
       type,
       businessType,
       adminCommission,
+      commission,
+      gst,
       handlingFees,
       status,
+      requireHeaderRates: String(type || 'header').toLowerCase() === 'header',
     });
     if (fieldError) {
       return res.status(400).json({ success: false, message: fieldError });
@@ -502,6 +509,11 @@ export const createCategory = async (req, res) => {
       ? businessType
       : 'quick_commerce';
 
+    const commissionSource =
+      commission !== undefined && commission !== null && commission !== ''
+        ? commission
+        : adminCommission;
+
     const category = await QuickCategory.create({
       name: String(name).trim(),
       slug,
@@ -514,7 +526,8 @@ export const createCategory = async (req, res) => {
       approvedAt: (approvalStatus || 'approved') === 'approved' ? new Date() : null,
       parentId: parentValidation.parentId,
       iconId: iconId || '',
-      adminCommission: parseNumber(adminCommission, 0),
+      adminCommission: parseNumber(commissionSource, 0),
+      gst: parseNumber(gst, 0),
       handlingFees: parseNumber(handlingFees, 0),
       headerColor: headerColor || accentColor || '#0c831f',
       accentColor: accentColor || '#0c831f',
@@ -559,6 +572,8 @@ export const updateCategory = async (req, res) => {
       parentId,
       iconId,
       adminCommission,
+      commission,
+      gst,
       handlingFees,
       headerColor,
       businessType,
@@ -569,8 +584,11 @@ export const updateCategory = async (req, res) => {
       type: type !== undefined ? type : category.type,
       businessType: businessType !== undefined ? businessType : category.businessType,
       adminCommission,
+      commission,
+      gst,
       handlingFees,
       status,
+      requireHeaderRates: false,
     });
     if (fieldError) {
       return res.status(400).json({ success: false, message: fieldError });
@@ -616,7 +634,15 @@ export const updateCategory = async (req, res) => {
     if (headerColor !== undefined) category.headerColor = headerColor || category.accentColor;
     if (sortOrder !== undefined) category.sortOrder = parseNumber(sortOrder, 0);
     if (iconId !== undefined) category.iconId = iconId || '';
-    if (adminCommission !== undefined) category.adminCommission = parseNumber(adminCommission, 0);
+
+    const commissionSource =
+      commission !== undefined && commission !== null && commission !== ''
+        ? commission
+        : adminCommission;
+    if (commissionSource !== undefined) {
+      category.adminCommission = parseNumber(commissionSource, category.adminCommission || 0);
+    }
+    if (gst !== undefined) category.gst = parseNumber(gst, category.gst || 0);
     if (handlingFees !== undefined) category.handlingFees = parseNumber(handlingFees, 0);
 
     await category.save();
