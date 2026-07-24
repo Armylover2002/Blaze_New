@@ -6,7 +6,7 @@ const sellerCouponSchema = new mongoose.Schema(
         sellerName: { type: String, required: true },
         code: { type: String, required: true, trim: true, uppercase: true, index: true },
         discountType: { type: String, enum: ['percentage', 'fixed', 'free_delivery'], required: true },
-        couponType: { type: String, enum: ['generic', 'bulk_order', 'min_order_value', 'free_delivery', 'category_based', 'monthly_volume'], default: 'generic' },
+        couponType: { type: String, enum: ['generic', 'min_order_value', 'free_delivery'], default: 'generic' },
         discountValue: { type: Number, required: true, min: 0 },
         minOrderValue: { type: Number, default: 0, min: 0 },
         maxDiscount: { type: Number, min: 0 },
@@ -23,7 +23,7 @@ const sellerCouponSchema = new mongoose.Schema(
 );
 
 // Coupon apply / duplicate-check look up by sellerId + code.
-sellerCouponSchema.index({ sellerId: 1, code: 1 });
+sellerCouponSchema.index({ sellerId: 1, code: 1 }, { unique: true });
 // Public coupon listing filters by sellerId + status + active expiry window.
 sellerCouponSchema.index({ sellerId: 1, status: 1, validTill: 1 });
 

@@ -153,6 +153,7 @@ export async function calculateQuickPricing({
   products = [],
   items = [],
   distanceKm = 0,
+  couponType = '',
 } = {}) {
   const feeSettings = await getActiveFeeSettings();
   const safeSubtotal = Number(subtotal || 0);
@@ -161,7 +162,10 @@ export async function calculateQuickPricing({
 
   const handlingFee = await calculateHandlingFeeFromProducts(products);
 
-  const deliveryFee = calculateCustomerDeliveryFee(feeSettings, distanceKm);
+  const deliveryFee =
+    String(couponType || '').trim().toLowerCase() === 'free_delivery'
+      ? 0
+      : calculateCustomerDeliveryFee(feeSettings, distanceKm);
 
   // GST % comes from Header Category only (not fee settings).
   const gst = await calculateHeaderGstAmount({

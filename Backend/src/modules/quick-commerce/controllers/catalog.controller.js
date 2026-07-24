@@ -19,6 +19,9 @@ import {
   isQuickCouponNotStarted,
 } from '../utils/coupon.helpers.js';
 import {
+  isQuickSellerCouponUsageAvailable,
+} from '../utils/sellerCouponUsage.helpers.js';
+import {
   escapeRegex,
   publicProductVisibilityFilter,
 } from '../utils/productVisibility.helpers.js';
@@ -383,19 +386,21 @@ export const getCoupons = async (req, res) => {
 export const applyCoupon = async (req, res) => {
   setNoCache(res);
   const { code, cartTotal, items } = req.body;
+  const consumerContext = {
+    userId: req.user?.userId || req.body?.customerId || req.body?.userId || null,
+    sessionId: String(req.headers['x-quick-session'] || req.body?.sessionId || '').trim(),
+  };
 
   if (!code) {
     return res.status(400).json({ success: false, message: 'Coupon code is required' });
   }
 
-  // Look up in admin coupons first
-  const adminCoupons = await getQuickCoupons();
-  let coupon = adminCoupons.find(
-    (c) => String(c.code || '').toUpperCase() === String(code).toUpperCase()
-  );
+  const explicitSource = String(req.body?.couponSource || req.body?.source || '').toLowerCase();
 
-  // If not found in admin coupons, check seller coupons
-  if (!coupon) {
+  let coupon = null;
+
+  // 1. Check seller coupon first if not explicitly admin
+  if (explicitSource !== 'admin') {
     let sellerId = null;
     if (Array.isArray(items) && items.length > 0) {
       const firstItem = items.find(item => item.sellerId || item.seller?._id || item.sellerId?._id);
@@ -424,8 +429,26 @@ export const applyCoupon = async (req, res) => {
     }
   }
 
+  // 2. Check admin coupon if not found and not explicitly restaurant/seller
+  if (!coupon && explicitSource !== 'restaurant' && explicitSource !== 'seller') {
+    const adminCoupons = await getQuickCoupons();
+    coupon = adminCoupons.find(
+      (c) => String(c.code || '').toUpperCase() === String(code).toUpperCase()
+    );
+  }
+
   if (!coupon) {
     return res.status(404).json({ success: false, message: 'Coupon not found or expired' });
+  }
+
+  if (coupon.isSellerCoupon) {
+    const usageAvailable = await isQuickSellerCouponUsageAvailable(coupon, consumerContext);
+    if (!usageAvailable) {
+      return res.status(400).json({
+        success: false,
+        message: 'This coupon has reached its usage limit',
+      });
+    }
   }
 
   if (!isQuickCouponCurrentlyValid(coupon)) {
@@ -453,7 +476,9 @@ export const applyCoupon = async (req, res) => {
   const discountValue = Number(coupon.discountValue || coupon.discount || 0);
   const maxDiscount = Number(coupon.maxDiscount || coupon.maxDiscountValue || 0);
 
-  if (discountType === 'percent' || discountType === 'percentage') {
+  if (discountType === 'free_delivery') {
+    discountAmount = 0;
+  } else if (discountType === 'percent' || discountType === 'percentage') {
     discountAmount = Math.round((total * discountValue) / 100);
     if (maxDiscount > 0) discountAmount = Math.min(discountAmount, maxDiscount);
   } else {
@@ -470,6 +495,7 @@ export const applyCoupon = async (req, res) => {
       description: coupon.description,
       discountAmount,
       discountType,
+      couponType: String(coupon.couponType || '').toLowerCase(),
       discountValue,
     },
   });
@@ -692,5 +718,3 @@ export const getStoreDetails = async (req, res) => {
     return res.status(500).json({ success: false, message: error.message || 'Failed to fetch store details' });
   }
 };
-
-

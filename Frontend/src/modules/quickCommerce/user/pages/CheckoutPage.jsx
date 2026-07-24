@@ -137,6 +137,7 @@ const calculateQuickCheckoutPricing = ({
   subtotal = 0, discountAmount = 0, selectedTip = 0,
   feeSettings = DEFAULT_QUICK_BILLING_SETTINGS, cartItems = [],
   categoryFeeMap = {}, categoryGstMap = {}, distanceKm = 0,
+  couponType = "",
 }) => {
   const safeSubtotal = Number(subtotal || 0);
   const safeDiscount = Math.max(0, Number(discountAmount || 0));
@@ -144,7 +145,9 @@ const calculateQuickCheckoutPricing = ({
   const freeThreshold = Number(feeSettings?.freeDeliveryThreshold || 0);
 
   let deliveryFeeCharged = 0;
-  if (Number.isFinite(freeThreshold) && freeThreshold > 0 && safeSubtotal >= freeThreshold) {
+  if (String(couponType || "").toLowerCase() === "free_delivery") {
+    deliveryFeeCharged = 0;
+  } else if (Number.isFinite(freeThreshold) && freeThreshold > 0 && safeSubtotal >= freeThreshold) {
     deliveryFeeCharged = 0;
   } else if (Array.isArray(feeSettings?.deliveryCommissionRules) && feeSettings.deliveryCommissionRules.length > 0) {
     deliveryFeeCharged = calculateFrontendRiderEarning(distanceKm, feeSettings.deliveryCommissionRules);
@@ -888,6 +891,7 @@ const CheckoutPage = () => {
       const orderData = {
         items: cartItemsForSync,
         address: addressForOrder,           // reuse — no second buildAddressForOrder call
+        couponCode: selectedCoupon?.code || null,
         paymentMode:
           selectedPayment === "online"
             ? "ONLINE"
@@ -1230,7 +1234,7 @@ const CheckoutPage = () => {
   useEffect(() => {
     if (cart.length === 0) { setPricingPreview(null); return; }
     setIsPreviewLoading(true);
-    const result = calculateQuickCheckoutPricing({
+  const result = calculateQuickCheckoutPricing({
       subtotal: cartTotal,
       discountAmount,
       selectedTip: 0,
@@ -1239,6 +1243,7 @@ const CheckoutPage = () => {
       categoryFeeMap,
       categoryGstMap,
       distanceKm,
+      couponType: selectedCoupon?.couponType || selectedCoupon?.discountType || "",
     });
     setPricingPreview({ subtotal: cartTotal, ...result });
     setIsPreviewLoading(false);
@@ -1508,7 +1513,11 @@ const CheckoutPage = () => {
                 {selectedCoupon && (
                   <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} className="flex justify-between items-center px-3 py-2 bg-[#FFF2EB] rounded-xl border border-red-100">
                     <span className="text-[#FF0000] font-black text-xs flex items-center gap-2 uppercase tracking-wider"><Tag size={14} />Coupon Reserved</span>
-                    <span className="font-black text-[#FF0000]">-₹{discountAmount}</span>
+                    <span className="font-black text-[#FF0000]">
+                      {String(selectedCoupon?.discountType || selectedCoupon?.couponType || "").toLowerCase() === "free_delivery"
+                        ? "Free Delivery"
+                        : `-₹${discountAmount}`}
+                    </span>
                   </motion.div>
                 )}
                 <div className="mt-4 pt-6 border-t-2 border-dashed border-slate-100">
