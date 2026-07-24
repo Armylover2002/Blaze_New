@@ -589,17 +589,23 @@ const Home = ({ embedded = false, onThemeChange, embeddedHeaderColor = null }) =
       ) : (
         <div className={cn('pt-0', embedded && 'pt-0')}>
 
-          {/* Hero Banners (mobile) */}
-          <div className={cn('block md:hidden', embedded ? '-mt-[1px]' : 'mt-0')}>
-            <div className="relative w-full overflow-hidden bg-transparent">
-              {hasHeroBanners ? (
-                <div className="px-3 py-2">
+          {/* Admin hero banners — visible on all viewports */}
+          {hasHeroBanners ? (
+            <div className={cn(embedded ? '-mt-[1px]' : 'mt-0')}>
+              <div className="relative w-full overflow-hidden bg-transparent">
+                <div className="px-3 py-2 md:px-8 lg:px-[50px] md:py-4">
                   <ExperienceBannerCarousel
                     section={{ title: '' }}
                     items={heroConfig.banners.items}
                   />
                 </div>
-              ) : isPharmacyMode ? (
+              </div>
+            </div>
+          ) : (
+          /* Pharmacy / hardcoded fallbacks remain mobile-only when no admin banners */
+          <div className={cn('block md:hidden', embedded ? '-mt-[1px]' : 'mt-0')}>
+            <div className="relative w-full overflow-hidden bg-transparent">
+              {isPharmacyMode ? (
                 <div className="px-3 py-2">
                   <div className="w-full h-[174px] bg-gradient-to-r from-teal-50 to-emerald-50 p-6 relative overflow-hidden flex items-center shadow-md rounded-[20px] border border-teal-100">
                     <div className="relative z-10 w-[60%] flex flex-col items-start justify-center gap-1">
@@ -702,6 +708,7 @@ const Home = ({ embedded = false, onThemeChange, embeddedHeaderColor = null }) =
               ) : null}
             </div>
           </div>
+          )}
 
           {isPharmacyMode && !hasAnyPharmacyData ? (
             <div className="w-full mt-8 mb-12 px-4 md:px-8">
